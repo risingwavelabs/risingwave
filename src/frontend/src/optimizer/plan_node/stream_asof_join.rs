@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,32 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::bail;
-use risingwave_pb::expr::expr_node::PbType;
-use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType, PbAsOfJoinInequalityType};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
 use risingwave_pb::stream_plan::AsOfJoinNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, plan_node_name, watermark_pretty, Distill, TableCatalogBuilder,
+    Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
 };
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
+    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon,
+    StreamNode, generic,
 };
-use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::TableCatalog;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// [`StreamAsOfJoin`] implements [`super::LogicalJoin`] with hash tables.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -78,7 +74,7 @@ impl StreamAsOfJoin {
         );
 
         // TODO: derive watermarks
-        let watermark_columns = FixedBitSet::with_capacity(core.schema().len());
+        let watermark_columns = WatermarkColumns::new();
 
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
@@ -96,44 +92,6 @@ impl StreamAsOfJoin {
             eq_join_predicate,
             is_append_only: append_only,
             inequality_desc,
-        }
-    }
-
-    pub fn get_inequality_desc_from_predicate(
-        predicate: EqJoinPredicate,
-        left_input_len: usize,
-    ) -> Result<AsOfJoinDesc> {
-        let expr: ExprImpl = predicate.other_cond().clone().into();
-        if let Some((left_input_ref, expr_type, right_input_ref)) = expr.as_comparison_cond() {
-            if left_input_ref.index() < left_input_len && right_input_ref.index() >= left_input_len
-            {
-                Ok(AsOfJoinDesc {
-                    left_idx: left_input_ref.index() as u32,
-                    right_idx: (right_input_ref.index() - left_input_len) as u32,
-                    inequality_type: Self::expr_type_to_comparison_type(expr_type)?.into(),
-                })
-            } else {
-                bail!("inequal condition from the same side should be push down in optimizer");
-            }
-        } else {
-            Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires exactly 1 ineuquality condition".to_owned(),
-            )
-            .into())
-        }
-    }
-
-    fn expr_type_to_comparison_type(expr_type: PbType) -> Result<PbAsOfJoinInequalityType> {
-        match expr_type {
-            PbType::LessThan => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeLt),
-            PbType::LessThanOrEqual => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeLe),
-            PbType::GreaterThan => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeGt),
-            PbType::GreaterThanOrEqual => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeGe),
-            _ => Err(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid comparison type: {}",
-                expr_type.as_str_name()
-            ))
-            .into()),
         }
     }
 
@@ -334,8 +292,8 @@ impl ExprRewritable for StreamAsOfJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         let eq_join_predicate = self.eq_join_predicate.rewrite_exprs(r);
-        let desc = Self::get_inequality_desc_from_predicate(
-            eq_join_predicate.clone(),
+        let desc = LogicalJoin::get_inequality_desc_from_predicate(
+            eq_join_predicate.other_cond().clone(),
             core.left.schema().len(),
         )
         .unwrap();

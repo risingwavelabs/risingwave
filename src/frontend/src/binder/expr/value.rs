@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, align_types};
 
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {

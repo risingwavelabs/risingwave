@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use fixedbitset::FixedBitSet;
 
 use crate::binder::BoundQuery;
 use crate::error::Result;
+use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{LogicalLimit, LogicalTopN};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
 pub const LIMIT_ALL_COUNT: u64 = u64::MAX / 2;

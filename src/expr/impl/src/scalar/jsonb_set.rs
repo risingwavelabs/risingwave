@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use jsonbb::ValueRef;
 use risingwave_common::types::{JsonbRef, JsonbVal, ListRef};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Returns `target` with the item designated by `path` replaced by `new_value`, or with `new_value`
 /// added if `create_if_missing` is true (which is the default) and the item designated by path does

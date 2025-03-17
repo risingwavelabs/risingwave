@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 use crate::PlanRef;
+use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 
 /// Merge chaining `LogicalOverWindow`s with same `PARTITION BY` and `ORDER BY`.
 /// Should be applied after `OverWindowSplitRule`.

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use risingwave_pb::meta::PbThrottleTarget;
 
-use crate::common::CtlContext;
 use crate::ThrottleCommandArgs;
+use crate::common::CtlContext;
 
 pub async fn apply_throttle(
     context: &CtlContext,

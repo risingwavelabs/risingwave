@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{Field, Schema, RW_INTERNAL_TABLE_FUNCTION_NAME};
+use risingwave_common::catalog::{Field, RW_INTERNAL_TABLE_FUNCTION_NAME, Schema};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgList, ObjectName, TableAlias};
 

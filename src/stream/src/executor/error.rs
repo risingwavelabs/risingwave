@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 use strum_macros::AsRefStr;
 
-use super::exchange::error::ExchangeChannelClosed;
 use super::Barrier;
+use super::exchange::error::ExchangeChannelClosed;
 
 /// A specialized Result type for streaming executors.
 pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;

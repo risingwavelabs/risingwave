@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceClient;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::Endpoint;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Response;
+use tonic::transport::Endpoint;
 
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::Result;

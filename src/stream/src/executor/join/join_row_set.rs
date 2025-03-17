@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::btree_map::OccupiedError as BTreeMapOccupiedError;
 use std::collections::BTreeMap;
+use std::collections::btree_map::OccupiedError as BTreeMapOccupiedError;
 use std::fmt::Debug;
 use std::mem;
 use std::ops::{Bound, RangeBounds};

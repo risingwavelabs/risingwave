@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -121,20 +121,19 @@ impl<S: StateStore> SortExecutor<S> {
                     this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    this.buffer_table.commit(barrier.epoch).await?;
+                    let post_commit = this.buffer_table.commit(barrier.epoch).await?;
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let (_, cache_may_stale) =
-                            this.buffer_table.update_vnode_bitmap(vnode_bitmap);
-
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         // Manipulate the cache if necessary.
                         if cache_may_stale {
                             vars.buffer.refill_cache(None, &this.buffer_table).await?;
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }
@@ -323,7 +322,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(test_epoch(3), false);
+        recovered_tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 pub mod utils;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_batch::task::ShutdownToken;
 use risingwave_batch_executors::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
 use risingwave_common::enable_jemalloc;

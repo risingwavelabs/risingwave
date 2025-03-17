@@ -17,9 +17,7 @@ EOF
 statement ok
 ALTER SYSTEM SET license_key TO '';
 
-sleep 1s
-
-statement error
+statement error retry 3 backoff 5s
 create source t with (
   connector = 'kafka',
   properties.bootstrap.server='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
@@ -43,7 +41,7 @@ Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '..
 statement ok
 ALTER SYSTEM SET license_key TO DEFAULT;
 
-statement ok
+statement ok retry 3 backoff 5s
 create source t with (
   connector = 'kafka',
   properties.bootstrap.server='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
@@ -145,6 +143,76 @@ select * from t order by 2;
 ----
 foo 2006-01-02 22:04:05.123456+00:00 NULL
 AB  2022-04-08 00:00:00.123456+00:00 \xdeadbeef
+
+statement ok
+create sink sk as select
+  'bar' as f1,
+  to_timestamp(1735689600) as f2,
+  'a0A'::bytea as f3
+with (
+  connector = 'kafka',
+  properties.bootstrap.server='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+  topic = 'glue-sample-my-event')
+format plain encode avro (
+  aws.glue.schema_arn = 'arn:aws:glue:ap-southeast-1:123456123456:schema/default-registry/MyEvent',
+  aws.glue.mock_config = '{
+    "by_id":{
+      "5af405ef-11b5-4442-81a2-e0563e5a7346": {
+        "type": "record",
+        "name": "MyEvent",
+        "fields": [
+          {
+            "name": "f1",
+            "type": "string"
+          },
+          {
+            "name": "f2",
+            "type": {
+              "type": "long",
+              "logicalType": "timestamp-micros"
+            }
+          }
+        ]
+      },
+      "4516411b-b1e7-4e67-839f-3ef1b8c29280": {
+        "type": "record",
+        "name": "MyEvent",
+        "fields": [
+          {
+            "name": "f1",
+            "type": "string"
+          },
+          {
+            "name": "f2",
+            "type": {
+              "type": "long",
+              "logicalType": "timestamp-micros"
+            }
+          },
+          {
+            "name": "f3",
+            "type": ["null", "bytes"],
+            "default": null
+          }
+        ]
+      }
+    },
+    "arn_to_latest_id":{
+      "arn:aws:glue:ap-southeast-1:123456123456:schema/default-registry/MyEvent": "4516411b-b1e7-4e67-839f-3ef1b8c29280"
+    }
+  }');
+
+sleep 1s
+
+query TTT
+select * from t order by 2;
+----
+foo 2006-01-02 22:04:05.123456+00:00 NULL
+AB  2022-04-08 00:00:00.123456+00:00 \xdeadbeef
+bar 2025-01-01 00:00:00+00:00        \x613041
+
+statement ok
+drop sink sk;
 
 statement ok
 drop source t;

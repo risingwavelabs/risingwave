@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 use risingwave_sqlparser::keywords::Keyword;
 
-use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 

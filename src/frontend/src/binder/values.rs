@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use super::bind_context::Clause;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
+use crate::expr::{CorrelatedId, Depth, ExprImpl, align_types};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {

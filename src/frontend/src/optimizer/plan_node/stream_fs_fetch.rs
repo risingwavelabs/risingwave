@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -24,9 +23,9 @@ use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
-use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::plan_node::utils::{Distill, childless_record};
+use crate::optimizer::plan_node::{ExprRewritable, StreamNode, generic};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,9 +51,9 @@ impl StreamFsFetch {
         let base = PlanBase::new_stream_with_core(
             &source,
             Distribution::SomeShard,
-            source.catalog.as_ref().map_or(true, |s| s.append_only),
+            source.catalog.as_ref().is_none_or(|s| s.append_only),
             false,
-            FixedBitSet::with_capacity(source.column_catalog.len()),
+            WatermarkColumns::new(),
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 

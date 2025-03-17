@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ use risingwave_common::acl::AclMode;
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use risingwave_sqlparser::ast::ObjectName;
 
+use crate::Binder;
 use crate::error::Result;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::{HandlerArgs, RwPgResponse};
-use crate::Binder;
 
 pub fn handle_use_db(handler_args: HandlerArgs, database_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;

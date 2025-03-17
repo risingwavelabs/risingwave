@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use postgres_types::{ToSql, Type};
 use rw_iter_util::ZipEqFast;
 
 use super::{
-    DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, F32,
-    F64,
+    DataType, Date, Decimal, F32, F64, Interval, ScalarRefImpl, Serial, Time, Timestamp,
+    Timestamptz,
 };
 use crate::array::{ListRef, StructRef};
 use crate::error::NotImplemented;

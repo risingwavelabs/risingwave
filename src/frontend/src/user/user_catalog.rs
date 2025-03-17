@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
@@ -164,9 +164,9 @@ impl UserCatalog {
         self.refresh_acl_modes();
     }
 
-    pub fn check_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
+    pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
         self.get_acl(object)
-            .map_or(false, |acl_set| acl_set.has_mode(mode))
+            .is_some_and(|acl_set| acl_set.has_mode(mode))
     }
 
     pub fn check_privilege_with_grant_option(
@@ -196,5 +196,17 @@ impl UserCatalog {
             }
         }
         action_map.values().all(|&found| found)
+    }
+
+    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+        if self.is_super {
+            return true;
+        }
+
+        // `Select` and `Execute` are the minimum required privileges for object visibility.
+        // `Execute` is required for functions.
+        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
+            acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
+        })
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -107,6 +107,14 @@ pub enum ExprError {
 
     #[error("too few arguments for format()")]
     TooFewArguments,
+
+    #[error(
+        "null value in column \"{col_name}\" of relation \"{table_name}\" violates not-null constraint"
+    )]
+    NotNullViolation {
+        col_name: Box<str>,
+        table_name: Box<str>,
+    },
 
     #[error("invalid state: {0}")]
     InvalidState(String),

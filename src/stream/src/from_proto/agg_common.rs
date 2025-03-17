@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::AggStateStorage;
 
 /// Parse from stream proto plan agg call states, generate state tables and column mappings.

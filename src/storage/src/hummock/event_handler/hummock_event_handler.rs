@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,17 +28,19 @@ use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::version::{HummockVersionCommon, LocalHummockVersionDelta};
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
-use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
+use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
@@ -508,7 +510,7 @@ impl HummockEventHandler {
 
         let mut sst_delta_infos = vec![];
         if let Some(new_pinned_version) = Self::resolve_version_update_info(
-            pinned_version.clone(),
+            &pinned_version,
             version_payload,
             Some(&mut sst_delta_infos),
         ) {
@@ -518,31 +520,57 @@ impl HummockEventHandler {
     }
 
     fn resolve_version_update_info(
-        pinned_version: PinnedVersion,
+        pinned_version: &PinnedVersion,
         version_payload: HummockVersionUpdate,
         mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
     ) -> Option<PinnedVersion> {
-        let newly_pinned_version = match version_payload {
+        match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = (*pinned_version).clone();
-                for version_delta in &version_deltas {
-                    assert_eq!(version_to_apply.id, version_delta.prev_id);
-                    if let Some(sst_delta_infos) = &mut sst_delta_infos {
-                        sst_delta_infos.extend(
-                            version_to_apply
-                                .build_sst_delta_infos(version_delta)
-                                .into_iter(),
-                        );
+                let mut version_to_apply = (**pinned_version).clone();
+                {
+                    let mut table_change_log_to_apply_guard =
+                        pinned_version.table_change_log_write_lock();
+                    for version_delta in version_deltas {
+                        assert_eq!(version_to_apply.id, version_delta.prev_id);
+
+                        // apply change-log-delta
+                        {
+                            let mut state_table_info = version_to_apply.state_table_info.clone();
+                            let (changed_table_info, _is_commit_epoch) = state_table_info
+                                .apply_delta(
+                                    &version_delta.state_table_info_delta,
+                                    &version_delta.removed_table_ids,
+                                );
+
+                            HummockVersionCommon::<SstableInfo>::apply_change_log_delta(
+                                &mut *table_change_log_to_apply_guard,
+                                &version_delta.change_log_delta,
+                                &version_delta.removed_table_ids,
+                                &version_delta.state_table_info_delta,
+                                &changed_table_info,
+                            );
+                        }
+
+                        let local_hummock_version_delta =
+                            LocalHummockVersionDelta::from(version_delta);
+                        if let Some(sst_delta_infos) = &mut sst_delta_infos {
+                            sst_delta_infos.extend(
+                                version_to_apply
+                                    .build_sst_delta_infos(&local_hummock_version_delta)
+                                    .into_iter(),
+                            );
+                        }
+
+                        version_to_apply.apply_version_delta(&local_hummock_version_delta);
                     }
-                    version_to_apply.apply_version_delta(version_delta);
                 }
 
-                version_to_apply
+                pinned_version.new_with_local_version(version_to_apply)
             }
-            HummockVersionUpdate::PinnedVersion(version) => *version,
-        };
-
-        pinned_version.new_pin_version(newly_pinned_version)
+            HummockVersionUpdate::PinnedVersion(version) => {
+                pinned_version.new_pin_version(*version)
+            }
+        }
     }
 
     fn apply_version_update(
@@ -843,7 +871,7 @@ mod tests {
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
@@ -851,12 +879,13 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
 
+    use crate::hummock::HummockError;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
     use crate::hummock::event_handler::refiller::{CacheRefillConfig, CacheRefiller};
-    use crate::hummock::event_handler::uploader::test_utils::{
-        gen_imm, gen_imm_inner, prepare_uploader_order_test_spawn_task_fn, TEST_TABLE_ID,
-    };
     use crate::hummock::event_handler::uploader::UploadTaskOutput;
+    use crate::hummock::event_handler::uploader::test_utils::{
+        TEST_TABLE_ID, gen_imm, gen_imm_inner, prepare_uploader_order_test_spawn_task_fn,
+    };
     use crate::hummock::event_handler::{
         HummockEvent, HummockEventHandler, HummockReadVersionRef, LocalInstanceGuard,
     };
@@ -865,7 +894,6 @@ mod tests {
     use crate::hummock::local_version::recent_versions::RecentVersions;
     use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
-    use crate::hummock::HummockError;
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
     use crate::store::SealCurrentEpochOptions;

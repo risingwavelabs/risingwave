@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
 
 use std::ops::Range;
 
+use super::RowRef;
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
-use super::RowRef;
 use crate::array::{Op, StreamChunk};
 
 impl StreamChunk {

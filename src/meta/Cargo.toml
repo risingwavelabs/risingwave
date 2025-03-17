@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-arc-swap = "1"
+arc-swap = { workspace = true }
 assert_matches = "1"
 async-trait = "0.1"
 base64-url = { version = "3.0.0" }
@@ -29,7 +29,7 @@ http = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
-notify = { version = "7", default-features = false, features = [
+notify = { version = "8", default-features = false, features = [
     "macos_fsevent",
 ] }
 num-integer = "0.1"

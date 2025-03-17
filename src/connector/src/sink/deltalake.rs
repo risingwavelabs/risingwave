@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use deltalake::DeltaTable;
 use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
@@ -26,29 +27,28 @@ use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveTyp
 use deltalake::operations::transaction::CommitBuilder;
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
-use deltalake::DeltaTable;
-use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 
 use super::coordinate::CoordinatedSinkWriter;
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
 };
 use super::writer::SinkWriter;
 use super::{
-    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
+    SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::connector_common::AwsAuthProps;
 
@@ -260,10 +260,8 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         DataType::Struct(rw_struct) => {
             if let DeltaLakeDataType::Struct(dl_struct) = dl_data_type {
                 let mut result = true;
-                for ((rw_name, rw_type), dl_field) in rw_struct
-                    .names()
-                    .zip_eq_fast(rw_struct.types())
-                    .zip_eq_debug(dl_struct.fields())
+                for ((rw_name, rw_type), dl_field) in
+                    rw_struct.iter().zip_eq_debug(dl_struct.fields())
                 {
                     result = check_field_type(rw_type, dl_field.data_type())?
                         && result
@@ -285,7 +283,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
             return Err(SinkError::DeltaLake(anyhow!(
                 "deltalake cannot support type {:?}",
                 rw_data_type.to_owned()
-            )))
+            )));
         }
     };
     Ok(result)
@@ -380,6 +378,10 @@ impl Sink for DeltaLakeSink {
             )));
         }
         Ok(())
+    }
+
+    fn is_coordinated_sink(&self) -> bool {
+        true
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
@@ -579,12 +581,12 @@ mod test {
     use maplit::btreemap;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
+    use crate::sink::SinkCommitCoordinator;
     use crate::sink::deltalake::DeltaLakeSinkCommitter;
     use crate::sink::writer::SinkWriter;
-    use crate::sink::SinkCommitCoordinator;
-    use crate::source::DataType;
 
     #[tokio::test]
     async fn test_deltalake() {
@@ -618,14 +620,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
         ]);
 

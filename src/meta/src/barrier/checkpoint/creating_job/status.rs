@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
+use std::time::Duration;
 
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
@@ -29,35 +28,37 @@ use tracing::warn;
 
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
+use crate::model::StreamJobActorsToCreate;
 
 #[derive(Debug)]
 pub(super) struct CreateMviewLogStoreProgressTracker {
-    /// `actor_id` -> `pending_barrier_count`
-    ongoing_actors: HashMap<ActorId, usize>,
+    /// `actor_id` -> `pending_epoch_lag`
+    ongoing_actors: HashMap<ActorId, u64>,
     finished_actors: HashSet<ActorId>,
 }
 
 impl CreateMviewLogStoreProgressTracker {
-    fn new(actors: impl Iterator<Item = ActorId>, initial_pending_count: usize) -> Self {
+    fn new(actors: impl Iterator<Item = ActorId>, pending_barrier_lag: u64) -> Self {
         Self {
-            ongoing_actors: HashMap::from_iter(actors.map(|actor| (actor, initial_pending_count))),
+            ongoing_actors: HashMap::from_iter(actors.map(|actor| (actor, pending_barrier_lag))),
             finished_actors: HashSet::new(),
         }
     }
 
     pub(super) fn gen_ddl_progress(&self) -> String {
-        let sum = self.ongoing_actors.values().sum::<usize>() as f64;
+        let sum = self.ongoing_actors.values().sum::<u64>() as f64;
         let count = if self.ongoing_actors.is_empty() {
             1
         } else {
             self.ongoing_actors.len()
         } as f64;
         let avg = sum / count;
+        let avg_lag_time = Duration::from_millis(Epoch(avg as _).physical_time());
         format!(
-            "finished: {}/{}, avg epoch count {}",
+            "actor: {}/{}, avg epoch lag {:?}",
             self.finished_actors.len(),
             self.ongoing_actors.len() + self.finished_actors.len(),
-            avg
+            avg_lag_time
         )
     }
 
@@ -72,7 +73,7 @@ impl CreateMviewLogStoreProgressTracker {
                             "non-duplicate"
                         );
                     } else {
-                        *entry.get_mut() = progress.pending_barrier_num as _;
+                        *entry.get_mut() = progress.pending_epoch_lag as _;
                     }
                 }
                 Entry::Vacant(_) => {
@@ -110,7 +111,7 @@ pub(super) enum CreatingStreamingJobStatus {
         pending_non_checkpoint_barriers: Vec<u64>,
         /// Info of the first barrier: (`actors_to_create`, `mutation`)
         /// Take the mutation out when injecting the first barrier
-        initial_barrier_info: Option<(HashMap<WorkerId, Vec<StreamActor>>, Mutation)>,
+        initial_barrier_info: Option<(StreamJobActorsToCreate, Mutation)>,
     },
     /// The creating job is consuming log store.
     ///
@@ -126,7 +127,7 @@ pub(super) enum CreatingStreamingJobStatus {
 
 pub(super) struct CreatingJobInjectBarrierInfo {
     pub barrier_info: BarrierInfo,
-    pub new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
+    pub new_actors: Option<StreamJobActorsToCreate>,
     pub mutation: Option<Mutation>,
 }
 
@@ -183,7 +184,14 @@ impl CreatingStreamingJobStatus {
                     *self = CreatingStreamingJobStatus::ConsumingLogStore {
                         log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
                             snapshot_backfill_actors.iter().cloned(),
-                            barriers_to_inject.len(),
+                            barriers_to_inject
+                                .last()
+                                .map(|info| {
+                                    info.barrier_info
+                                        .prev_epoch()
+                                        .saturating_sub(*backfill_epoch)
+                                })
+                                .unwrap_or(0),
                         ),
                     };
                     Some(barriers_to_inject)
@@ -252,7 +260,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn new_fake_barrier(
         prev_epoch_fake_physical_time: &mut u64,
         pending_non_checkpoint_barriers: &mut Vec<u64>,
-        initial_barrier_info: &mut Option<(HashMap<WorkerId, Vec<StreamActor>>, Mutation)>,
+        initial_barrier_info: &mut Option<(StreamJobActorsToCreate, Mutation)>,
         is_checkpoint: bool,
     ) -> CreatingJobInjectBarrierInfo {
         {

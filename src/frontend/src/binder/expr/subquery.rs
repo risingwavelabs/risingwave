@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_sqlparser::ast::Query;
 
 use crate::binder::Binder;
-use crate::error::{bail_bind_error, Result};
+use crate::error::{Result, bail_bind_error};
 use crate::expr::{ExprImpl, Subquery, SubqueryKind};
 
 impl Binder {

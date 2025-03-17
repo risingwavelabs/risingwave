@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::collections::HashSet;
 
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use thiserror_ext::AsReport;
 
@@ -171,7 +171,7 @@ fn parse_privilege(
                 return Err(ExprError::InvalidParam {
                     name: "privilege",
                     reason: format!("unrecognized privilege type: \"{}\"", part).into(),
-                })
+                });
             }
             Some(action) => {
                 if allowed_actions.is_empty() || allowed_actions.contains(&action) {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ use core::time::Duration;
 use std::collections::HashMap;
 use std::convert::Infallible;
 
-use anyhow::{anyhow, Context};
-use base64::engine::general_purpose;
+use anyhow::{Context, anyhow};
 use base64::Engine;
+use base64::engine::general_purpose;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::StreamExt;
 use reqwest::header::{HeaderName, HeaderValue};
-use reqwest::{redirect, Body, Client, Method, Request, RequestBuilder, Response, StatusCode};
+use reqwest::{Body, Client, Method, Request, RequestBuilder, Response, StatusCode, redirect};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use url::Url;

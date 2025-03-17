@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
-use crate::Binder;
 
 pub async fn handle_drop_subscription(
     handler_args: HandlerArgs,
@@ -50,7 +50,7 @@ pub async fn handle_drop_subscription(
                             .into())
                     } else {
                         Err(e.into())
-                    }
+                    };
                 }
             };
 

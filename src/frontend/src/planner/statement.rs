@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ impl Planner {
             BoundStatement::Update(u) => self.plan_update(*u),
             BoundStatement::Query(q) => self.plan_query(*q),
             BoundStatement::DeclareCursor(d) => self.plan_query(*d.query),
+            BoundStatement::DeclareSubscriptionCursor(_) => unimplemented!(),
             BoundStatement::FetchCursor(_) => unimplemented!(),
             BoundStatement::CreateView(c) => self.plan_query(*c.query),
         }

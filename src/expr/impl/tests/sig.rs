@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 risingwave_expr_impl::enable!();
 
 use itertools::Itertools;
-use risingwave_expr::sig::{FuncName, FuncSign, SigDataType, FUNCTION_REGISTRY};
+use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncName, FuncSign, SigDataType};
 #[test]
 fn test_func_sig_map() {
     // convert FUNC_SIG_MAP to a more convenient map for testing

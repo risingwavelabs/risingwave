@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::error::{ErrorCode, Result};
-use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::handler::privilege::ObjectCheckItem;
 
 pub async fn handle_create_schema(
     handler_args: HandlerArgs,
@@ -56,7 +56,7 @@ pub async fn handle_create_schema(
                     .notice(format!("schema \"{}\" exists, skipping", schema_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("schema", schema_name).into())
+                Err(CatalogError::duplicated("schema", schema_name).into())
             };
         }
         let db = reader.get_database_by_name(database_name)?;

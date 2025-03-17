@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::pin::{pin, Pin};
-use std::task::{ready, Context, Poll};
+use std::pin::{Pin, pin};
+use std::task::{Context, Poll, ready};
 
-use futures::future::{pending, select, Either};
+use futures::future::{Either, pending, select};
 use futures::stream::Peekable;
 use futures::{FutureExt, Stream, StreamExt};
 

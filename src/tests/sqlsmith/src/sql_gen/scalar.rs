@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,14 @@
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
+use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
-use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
 
-use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;
+use crate::sql_gen::expr::typed_null;
 
 impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates integer scalar expression.

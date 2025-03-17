@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,10 +31,10 @@ use risingwave_pb::expr::{
     PbAggCall, PbAggType, PbExprNode, PbInputRef, PbUserDefinedFunctionMetadata,
 };
 
-use crate::expr::{
-    build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
-};
 use crate::Result;
+use crate::expr::{
+    BoxedExpression, ExpectExt, Expression, LiteralExpression, Token, build_from_prost,
+};
 
 /// Represents an aggregation function.
 // TODO(runji):

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 
+use crate::PlanRef;
 use crate::catalog::SourceId;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -23,7 +24,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue};
 use crate::optimizer::{PlanRewriter, PlanVisitor};
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareSourceRewriter {

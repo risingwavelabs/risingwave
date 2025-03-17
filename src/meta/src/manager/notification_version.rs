@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use risingwave_meta_model::prelude::CatalogVersion;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 
-use crate::controller::SqlMetaStore;
 use crate::MetaResult;
+use crate::controller::SqlMetaStore;
 
 pub struct NotificationVersionGenerator {
     current_version: u64,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,12 +20,12 @@ use rdkafka::{Message, Timestamp};
 use risingwave_common::types::{
     Datum, DatumCow, DatumRef, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
 };
-use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::data::DataType as PbDataType;
+use risingwave_pb::data::data_type::TypeName as PbTypeName;
 
 use crate::parser::additional_columns::get_kafka_header_item_datatype;
-use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
+use crate::source::base::SourceMessage;
 
 #[derive(Debug, Clone)]
 pub struct KafkaMeta {

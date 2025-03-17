@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_sqlparser::ast::{ObjectName, SetVariableValue};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -21,12 +22,14 @@ use crate::catalog::CatalogError;
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::handler::alter_resource_group::resolve_resource_group;
 
 pub async fn handle_create_database(
     handler_args: HandlerArgs,
     database_name: ObjectName,
     if_not_exist: bool,
     owner: Option<ObjectName>,
+    resource_group: Option<SetVariableValue>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let database_name = Binder::resolve_database_name(database_name)?;
@@ -53,7 +56,7 @@ pub async fn handle_create_database(
                     .notice(format!("database \"{}\" exists, skipping", database_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("database", database_name).into())
+                Err(CatalogError::Duplicated("database", database_name, false).into())
             };
         }
     }
@@ -71,9 +74,13 @@ pub async fn handle_create_database(
         session.user_id()
     };
 
+    let resource_group = resource_group.map(resolve_resource_group).transpose()?;
+
+    let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_database(&database_name, database_owner)
+        .create_database(&database_name, database_owner, resource_group)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

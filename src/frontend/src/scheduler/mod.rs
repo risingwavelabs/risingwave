@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@ mod snapshot;
 pub use snapshot::*;
 mod local;
 pub use local::*;
+mod fast_insert;
+pub use fast_insert::*;
 
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 

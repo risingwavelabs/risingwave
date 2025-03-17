@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -139,7 +139,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     }
 
     fn is_valid(&self) -> bool {
-        self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.sstable_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

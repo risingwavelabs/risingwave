@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,11 @@ pub trait DockerServiceConfig: Send + 'static {
 
     /// The docker image to use, e.g. `mysql:5.7`.
     fn image(&self) -> String;
+
+    /// Additional arguments to pass to the docker container.
+    fn args(&self) -> Vec<String> {
+        vec![]
+    }
 
     /// The environment variables to pass to the docker container.
     fn envs(&self) -> Vec<(String, String)> {
@@ -119,6 +124,8 @@ where
         }
 
         cmd.arg(self.config.image());
+
+        cmd.args(self.config.args());
 
         Ok(cmd)
     }

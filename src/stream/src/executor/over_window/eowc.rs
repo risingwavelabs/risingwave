@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
-use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_expr::window_function::{
-    create_window_state, StateEvictHint, StateKey, WindowFuncCall, WindowStates,
+    StateEvictHint, StateKey, WindowFuncCall, WindowStates, create_window_state,
 };
 use risingwave_storage::store::PrefetchOptions;
 
@@ -366,18 +366,19 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    this.state_table.commit(barrier.epoch).await?;
+                    let post_commit = this.state_table.commit(barrier.epoch).await?;
                     vars.partitions.evict();
 
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let (_, cache_may_stale) =
-                            this.state_table.update_vnode_bitmap(vnode_bitmap);
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
+                    yield Message::Barrier(barrier);
+
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             vars.partitions.clear();
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }

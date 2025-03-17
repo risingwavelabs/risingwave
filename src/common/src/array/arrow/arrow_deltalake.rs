@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use arrow_array::ArrayRef;
 use num_traits::abs;
 
 pub use super::arrow_52::{
-    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+    FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{Array, ArrayError, DataChunk, Decimal, DecimalArray};
 
@@ -94,8 +94,8 @@ impl ToArrow for DeltaLakeConvert {
 mod test {
     use std::sync::Arc;
 
-    use arrow_array::cast::AsArray;
     use arrow_array::ArrayRef;
+    use arrow_array::cast::AsArray;
     use arrow_schema::Field;
 
     use super::*;

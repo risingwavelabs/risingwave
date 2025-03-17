@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_pb::connector_service::coordinate_response::{
     self, CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    coordinate_request, CoordinateRequest, CoordinateResponse, PbSinkParam,
+    CoordinateRequest, CoordinateResponse, PbSinkParam, coordinate_request,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};
@@ -26,7 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 
 use super::boxed::BoxCoordinator;
-use super::{SinkParam, BOUNDED_CHANNEL_SIZE};
+use super::{BOUNDED_CHANNEL_SIZE, SinkParam};
 
 #[derive(Clone)]
 pub enum SinkCoordinationRpcClientEnum {

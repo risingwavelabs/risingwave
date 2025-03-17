@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -20,13 +19,13 @@ use risingwave_pb::stream_plan::now_node::PbMode as PbNowMode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbNowModeGenerateSeries, PbNowModeUpdateCurrent, PbNowNode};
 
-use super::generic::Mode;
+use super::generic::{GenericPlanNode, Mode};
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill, TableCatalogBuilder};
-use super::{generic, ExprRewritable, PlanBase, StreamNode};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
+use super::{ExprRewritable, PlanBase, StreamNode, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::{Distribution, Monotonicity, MonotonicityMap};
+use crate::optimizer::property::{Distribution, Monotonicity, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -37,8 +36,8 @@ pub struct StreamNow {
 
 impl StreamNow {
     pub fn new(core: generic::Now) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(1);
-        watermark_columns.set(0, true);
+        let mut watermark_columns = WatermarkColumns::new();
+        watermark_columns.insert(0, core.ctx().next_watermark_group_id()); // `StreamNow` generates watermark messages
 
         let mut columns_monotonicity = MonotonicityMap::new();
         columns_monotonicity.insert(0, Monotonicity::NonDecreasing);

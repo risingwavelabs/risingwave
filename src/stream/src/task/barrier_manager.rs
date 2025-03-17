@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,9 +31,10 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
+use risingwave_storage::store_impl::AsHummock;
 use thiserror_ext::AsReport;
 use tokio::select;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
@@ -62,8 +63,8 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ReportDatabaseFailureResponse, ResetDatabaseResponse, Response, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
-    PbScoredError, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    BarrierCompleteResponse, InjectBarrierRequest, PbScoredError, StreamingControlStreamRequest,
+    StreamingControlStreamResponse, streaming_control_stream_response,
 };
 
 use crate::executor::exchange::permit::Receiver;
@@ -231,6 +232,7 @@ pub(super) enum LocalActorOperation {
     },
     TakeReceiver {
         database_id: DatabaseId,
+        term_id: String,
         ids: UpDownActorIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
@@ -302,19 +304,27 @@ pub(super) struct LocalBarrierWorker {
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
+
+    pub(super) term_id: String,
 }
 
 impl LocalBarrierWorker {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
+        term_id: String,
     ) -> Self {
-        let state = ManagedBarrierState::new(actor_manager.clone(), initial_partial_graphs);
+        let state = ManagedBarrierState::new(
+            actor_manager.clone(),
+            initial_partial_graphs,
+            term_id.clone(),
+        );
         Self {
             state,
             await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
+            term_id,
         }
     }
 
@@ -349,10 +359,17 @@ impl LocalBarrierWorker {
         current_shared_context: &'a mut HashMap<DatabaseId, Arc<SharedContext>>,
         database_id: DatabaseId,
         actor_manager: &StreamActorManager,
+        term_id: &String,
     ) -> &'a Arc<SharedContext> {
         current_shared_context
             .entry(database_id)
-            .or_insert_with(|| Arc::new(SharedContext::new(database_id, &actor_manager.env)))
+            .or_insert_with(|| {
+                Arc::new(SharedContext::new(
+                    database_id,
+                    &actor_manager.env,
+                    term_id.clone(),
+                ))
+            })
     }
 
     async fn next_completed_epoch(
@@ -507,17 +524,34 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::TakeReceiver {
                 database_id,
+                term_id,
                 ids,
                 result_sender,
             } => {
-                let _ = result_sender.send(
+                let result = try {
+                    if self.term_id != term_id {
+                        warn!(
+                            ?ids,
+                            term_id,
+                            current_term_id = self.term_id,
+                            "take receiver on unmatched term_id"
+                        );
+                        Err(anyhow!(
+                            "take receiver {:?} on unmatched term_id {} to current term_id {}",
+                            ids,
+                            term_id,
+                            self.term_id
+                        ))?;
+                    }
                     LocalBarrierWorker::get_or_insert_database_shared_context(
                         &mut self.state.current_shared_context,
                         database_id,
                         &self.actor_manager,
+                        &self.term_id,
                     )
-                    .take_receiver(ids),
-                );
+                    .take_receiver(ids)?
+                };
+                let _ = result_sender.send(result);
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
@@ -572,14 +606,14 @@ impl LocalBarrierWorker {
 mod await_epoch_completed_future {
     use std::future::Future;
 
-    use futures::future::BoxFuture;
     use futures::FutureExt;
+    use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
-    use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
+    use crate::task::{BarrierCompleteResult, PartialGraphId, await_tree_key};
 
     pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
         + 'static;
@@ -625,7 +659,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -634,14 +668,14 @@ fn sync_epoch(
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
     let timer = streaming_metrics.barrier_sync_latency.start_timer();
-    let hummock = state_store.as_hummock().cloned();
+
+    let state_store = state_store.clone();
     let future = async move {
-        if let Some(hummock) = hummock {
+        dispatch_state_store!(state_store, hummock, {
             hummock.sync(vec![(prev_epoch, table_ids)]).await
-        } else {
-            Ok(SyncResult::default())
-        }
+        })
     };
+
     future
         .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
@@ -848,19 +882,22 @@ impl LocalBarrierWorker {
                     &mut self.state.current_shared_context,
                     database_id,
                     &self.actor_manager,
+                    &self.term_id,
                 )
                 .clone(),
                 vec![],
             ))
         });
         if let Some(state) = status.state_for_request() {
-            assert!(state
-                .graph_states
-                .insert(
-                    partial_graph_id,
-                    PartialGraphManagedBarrierState::new(&self.actor_manager)
-                )
-                .is_none());
+            assert!(
+                state
+                    .graph_states
+                    .insert(
+                        partial_graph_id,
+                        PartialGraphManagedBarrierState::new(&self.actor_manager)
+                    )
+                    .is_none()
+            );
         }
     }
 
@@ -998,7 +1035,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, vec![]);
+        let worker = LocalBarrierWorker::new(actor_manager, vec![], "uninitialized".into());
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -1174,10 +1211,10 @@ pub(crate) mod barrier_test_utils {
         InitRequest, PbDatabaseInitialPartialGraph, PbInitialPartialGraph,
     };
     use risingwave_pb::stream_service::{
-        streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-        StreamingControlStreamRequest, StreamingControlStreamResponse,
+        InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
+        streaming_control_stream_request, streaming_control_stream_response,
     };
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::sync::oneshot;
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tonic::Status;
@@ -1217,6 +1254,7 @@ pub(crate) mod barrier_test_utils {
                             actor_infos: vec![],
                         }],
                     }],
+                    term_id: "for_test".into(),
                 },
             });
 

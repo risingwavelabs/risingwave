@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,16 +29,16 @@ use std::sync::Arc;
 
 use clap::Parser;
 use foyer::{Engine, HybridCacheBuilder};
-use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
+use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig,
+    NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
     GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl, USE_TRACE,
 };
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, FakeRemoteTableAccessor,

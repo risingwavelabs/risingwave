@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::CacheHint;
 use futures::future::try_join;
-use futures::{stream, FutureExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt, TryFutureExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
+use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -34,8 +34,8 @@ use tracing::{error, warn};
 
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::context::{await_tree_key, CompactorContext};
-use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
+use crate::hummock::compactor::context::{CompactorContext, await_tree_key};
+use crate::hummock::compactor::{CompactOutput, Compactor, check_flush_result};
 use crate::hummock::event_handler::uploader::UploadTaskOutput;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -573,7 +573,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, TableKey};
+    use risingwave_hummock_sdk::key::{TableKey, prefix_slice_with_vnode};
 
     use crate::hummock::compactor::shared_buffer_compact::generate_splits;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferValue;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
-use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
+use crate::types::{DatumRef, ToDatumRef, ToOwnedDatum, ToText, hash_datum};
 use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
@@ -464,9 +464,9 @@ mod slice;
 pub use ::tinyvec::ArrayVec;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
-pub use empty::{empty, Empty};
-pub use once::{once, Once};
+pub use empty::{Empty, empty};
+pub use once::{Once, once};
 pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
-pub use repeat_n::{repeat_n, RepeatN};
+pub use repeat_n::{RepeatN, repeat_n};
 pub use slice::Slice;

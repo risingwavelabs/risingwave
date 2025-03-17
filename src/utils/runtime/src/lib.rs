@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,7 +99,9 @@ where
             Err(_) => panic!("Failed to parse TOKIO_WORKER_THREADS"),
         };
         if worker_threads < MIN_WORKER_THREADS {
-            tracing::warn!("the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}");
+            tracing::warn!(
+                "the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}"
+            );
             std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string());
         }
     }

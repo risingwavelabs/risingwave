@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ use google_cloud_pubsub::subscription::SeekTo;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::source::base::SplitEnumerator;
-use crate::source::google_pubsub::split::PubsubSplit;
-use crate::source::google_pubsub::PubsubProperties;
 use crate::source::SourceEnumeratorContextRef;
+use crate::source::base::SplitEnumerator;
+use crate::source::google_pubsub::PubsubProperties;
+use crate::source::google_pubsub::split::PubsubSplit;
 
 pub struct PubsubSplitEnumerator {
     subscription: String,

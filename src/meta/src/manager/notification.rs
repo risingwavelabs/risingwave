@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    MetaSnapshot, Relation, RelationGroup, SubscribeResponse, SubscribeType,
+    MetaSnapshot, PbObject, PbObjectGroup, SubscribeResponse, SubscribeType,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tonic::Status;
 
 use crate::controller::SqlMetaStore;
-use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::manager::WorkerKey;
+use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::model::FragmentId;
 
 pub type MessageStatus = Status;
@@ -170,22 +170,33 @@ impl NotificationManager {
         )
     }
 
+    pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
+        for subscribe_type in [
+            SubscribeType::Frontend,
+            SubscribeType::Hummock,
+            SubscribeType::Compactor,
+            SubscribeType::Compute,
+        ] {
+            self.notify_without_version(subscribe_type.into(), operation, info.clone());
+        }
+    }
+
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
             .await
     }
 
-    pub async fn notify_frontend_relation_info(
+    pub async fn notify_frontend_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Frontend.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )
@@ -197,17 +208,17 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_hummock_relation_info(
+    pub async fn notify_hummock_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Hummock.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )
@@ -219,17 +230,17 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_compactor_relation_info(
+    pub async fn notify_compactor_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Compactor.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )
@@ -376,7 +387,7 @@ impl NotificationManagerCore {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
                     let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -389,7 +400,7 @@ impl NotificationManagerCore {
                 sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });

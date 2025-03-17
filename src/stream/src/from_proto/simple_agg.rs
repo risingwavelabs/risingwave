@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use crate::executor::SimpleAggExecutor;
+use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 
 pub struct SimpleAggExecutorBuilder;
 
@@ -45,7 +45,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
         // disable sanity check so that old value is not required when updating states
-        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+        let intermediate_state_table = StateTable::from_table_catalog(
             node.get_intermediate_state_table().unwrap(),
             store.clone(),
             None,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use rand::Rng;
-use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::Op;
+use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::util::iter_util::ZipEqFast;
 use smallvec::SmallVec;

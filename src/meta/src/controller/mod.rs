@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
-    connection, database, function, index, object, schema, secret, sink, source, subscription,
-    table, view, PrivateLinkService,
+    PrivateLinkService, connection, database, function, index, object, schema, secret, sink,
+    source, subscription, table, view,
 };
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
@@ -32,7 +32,7 @@ use risingwave_pb::catalog::{
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
     PbView,
 };
-use sea_orm::{DatabaseConnection, DbBackend, ModelTrait};
+use sea_orm::{ConnectOptions, DatabaseConnection, DbBackend, ModelTrait};
 
 use crate::{MetaError, MetaResult, MetaStoreBackend};
 
@@ -67,21 +67,39 @@ pub struct SqlMetaStore {
 impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
     pub async fn connect(backend: MetaStoreBackend) -> Result<Self, sea_orm::DbErr> {
+        const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
+
+        #[easy_ext::ext]
+        impl ConnectOptions {
+            /// Apply common settings for `SQLite` connections.
+            fn sqlite_common(&mut self) -> &mut Self {
+                self
+                    // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                    // here we forcibly specify the number of connections as 1.
+                    .min_connections(1)
+                    .max_connections(1)
+                    // Workaround for https://github.com/risingwavelabs/risingwave/issues/18966.
+                    // Note: don't quite get the point but `acquire_timeout` and `connect_timeout` maps to the
+                    //       same underlying setting in `sqlx` under current implementation.
+                    .acquire_timeout(MAX_DURATION)
+                    .connect_timeout(MAX_DURATION)
+            }
+        }
+
         Ok(match backend {
             MetaStoreBackend::Mem => {
                 const IN_MEMORY_STORE: &str = "sqlite::memory:";
 
-                let mut options = sea_orm::ConnectOptions::new(IN_MEMORY_STORE);
+                let mut options = ConnectOptions::new(IN_MEMORY_STORE);
 
                 options
-                    .max_connections(1)
-                    .min_connections(1)
+                    .sqlite_common()
                     // Releasing the connection to in-memory SQLite database is unacceptable
                     // because it will clear the database. Set a large enough timeout to prevent it.
                     // `sqlx` actually supports disabling these timeouts by passing a `None`, but
                     // `sea-orm` does not expose this option.
-                    .idle_timeout(Duration::MAX / 4)
-                    .max_lifetime(Duration::MAX / 4);
+                    .idle_timeout(MAX_DURATION)
+                    .max_lifetime(MAX_DURATION);
 
                 let conn = sea_orm::Database::connect(options).await?;
                 Self {
@@ -90,8 +108,7 @@ impl SqlMetaStore {
                 }
             }
             MetaStoreBackend::Sql { endpoint, config } => {
-                let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
-                let mut options = sea_orm::ConnectOptions::new(endpoint.clone());
+                let mut options = ConnectOptions::new(endpoint.clone());
                 options
                     .max_connections(config.max_connections)
                     .min_connections(config.min_connections)
@@ -99,10 +116,8 @@ impl SqlMetaStore {
                     .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
                     .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
-                if is_sqlite {
-                    // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                    // here we forcibly specify the number of connections as 1.
-                    options.max_connections(1);
+                if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                    options.sqlite_common();
                 }
 
                 let conn = sea_orm::Database::connect(options).await?;
@@ -159,6 +174,7 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
             id: value.0.database_id as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
+            resource_group: value.0.resource_group.clone(),
         }
     }
 }
@@ -436,11 +452,21 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             language: value.0.language,
             runtime: value.0.runtime,
             link: value.0.link,
-            identifier: value.0.identifier,
+            name_in_runtime: value.0.name_in_runtime,
             body: value.0.body,
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            is_async: value
+                .0
+                .options
+                .as_ref()
+                .and_then(|o| o.0.get("async").map(|v| v == "true")),
+            is_batched: value
+                .0
+                .options
+                .as_ref()
+                .and_then(|o| o.0.get("batch").map(|v| v == "true")),
         }
     }
 }

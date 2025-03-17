@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -183,7 +183,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
                     .tuple_windows()
                     .map(|(a, b)| (b - a) as usize),
             )
-            .flat_map(|(item, c)| std::iter::repeat(item).take(c))
+            .flat_map(|(item, c)| std::iter::repeat_n(item, c))
     }
 
     /// Iterate over all vnode-item pairs in this mapping.

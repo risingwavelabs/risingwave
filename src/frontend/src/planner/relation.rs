@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::rc::Rc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, Schema, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
+    ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
@@ -92,7 +92,9 @@ impl Planner {
         );
 
         match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, PlanFor::Stream) | (Engine::Hummock, PlanFor::Batch) => {
+            (Engine::Hummock, PlanFor::Stream)
+            | (Engine::Hummock, PlanFor::Batch)
+            | (Engine::Hummock, PlanFor::BatchDql) => {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
@@ -105,7 +107,7 @@ impl Planner {
                 };
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Stream) => {
+            (Engine::Iceberg, PlanFor::Stream) | (Engine::Iceberg, PlanFor::Batch) => {
                 match as_of {
                     None
                     | Some(AsOf::VersionNum(_))
@@ -120,7 +122,7 @@ impl Planner {
                 }
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Batch) => {
+            (Engine::Iceberg, PlanFor::BatchDql) => {
                 match as_of {
                     None
                     | Some(AsOf::VersionNum(_))
@@ -163,7 +165,7 @@ impl Planner {
                         .fields()
                         .iter()
                         .map(|field| {
-                            let source_filed_name = if field.name == ROWID_PREFIX {
+                            let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
                                 RISINGWAVE_ICEBERG_ROW_ID
                             } else {
                                 &field.name
@@ -405,7 +407,7 @@ impl Planner {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"
                 ))
-                .into())
+                .into());
             }
         };
         Ok(col_data_types)

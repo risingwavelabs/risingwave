@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use criterion::async_executor::FuturesExecutor;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::compactor::merge_imms_in_memory;

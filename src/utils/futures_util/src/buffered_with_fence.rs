@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use futures::TryFutureExt;
 use futures::future::{FusedFuture, IntoFuture, TryFuture};
 use futures::stream::{
     Fuse, FuturesOrdered, IntoStream, Stream, StreamExt, TryStream, TryStreamExt,
 };
-use futures::TryFutureExt;
 use pin_project_lite::pin_project;
 
 pub trait MaybeFence {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ impl<R: Row> PartialEq for Project<'_, R> {
 }
 impl<R: Row> Eq for Project<'_, R> {}
 
-impl<'i, R: Row> Row for Project<'i, R> {
+impl<R: Row> Row for Project<'_, R> {
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         // SAFETY: we have checked that `self.indices` are all valid in `new`.

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
+    ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,18 +18,18 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{
-    bound_table_key_range, FullKey, SetSlice, TableKeyRange, UserKey, UserKeyRange,
-};
 use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{
+    FullKey, SetSlice, TableKeyRange, UserKey, UserKeyRange, bound_table_key_range,
+};
 
+use crate::StateStoreIter;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
 use crate::monitor::IterLocalMetricsGuard;
 use crate::store::{ChangeLogValue, StateStoreReadLogItem, StateStoreReadLogItemRef};
-use crate::StateStoreIter;
 
 struct ChangeLogIteratorInner<
     NI: HummockIterator<Direction = Forward>,
@@ -292,11 +292,14 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
                         // epoch in the `new_value_iter`. If the assertion is broken, it means we must have a new value of the same epoch
                         // that are valid but older than the `oldest_epoch`, which breaks the definition of `oldest_epoch`.
                         assert!(
-                                old_value_iter_key.epoch_with_gap.pure_epoch() < self.min_epoch,
-                                "there should not be old value between oldest new_value and min_epoch. \
+                            old_value_iter_key.epoch_with_gap.pure_epoch() < self.min_epoch,
+                            "there should not be old value between oldest new_value and min_epoch. \
                                 new value key: {:?}, oldest epoch: {:?}, min epoch: {:?}, old value epoch: {:?}",
-                                self.curr_key, oldest_epoch, self.min_epoch, old_value_iter_key.epoch_with_gap
-                            );
+                            self.curr_key,
+                            oldest_epoch,
+                            self.min_epoch,
+                            old_value_iter_key.epoch_with_gap
+                        );
                         break;
                     }
                     Ordering::Equal => {
@@ -408,8 +411,8 @@ pub mod test_utils {
     use std::collections::HashMap;
 
     use bytes::Bytes;
-    use rand::{thread_rng, Rng, RngCore};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair, MAX_EPOCH};
+    use rand::{Rng, RngCore, thread_rng};
+    use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH, test_epoch};
     use risingwave_hummock_sdk::key::TableKey;
 
     use crate::hummock::iterator::test_utils::iterator_test_table_key_of;
@@ -531,24 +534,24 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{TableKey, UserKey};
 
-    use crate::hummock::iterator::change_log::test_utils::{
-        apply_test_log_data, gen_test_data, TestLogDataType,
-    };
+    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::iterator::change_log::ChangeLogIteratorInner;
+    use crate::hummock::iterator::change_log::test_utils::{
+        TestLogDataType, apply_test_log_data, gen_test_data,
+    };
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use crate::hummock::iterator::MergeIterator;
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableStore};
     use crate::memory::MemoryStateStore;
     use crate::store::{
-        ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions, StateStoreIter,
-        StateStoreRead, CHECK_BYTES_EQUAL,
+        CHECK_BYTES_EQUAL, ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions,
+        StateStoreReadLog,
     };
-    use crate::StateStore;
+    use crate::{StateStore, StateStoreIter};
 
     #[tokio::test]
     async fn test_empty() {

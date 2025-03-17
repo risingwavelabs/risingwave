@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use async_trait::async_trait;
 use risingwave_common::bail;
-use rumqttc::v5::{ConnectionError, Event, Incoming};
 use rumqttc::Outgoing;
+use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 
-use super::source::MqttSplit;
 use super::MqttProperties;
+use super::source::MqttSplit;
 use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 

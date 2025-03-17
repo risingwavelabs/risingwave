@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,11 +77,11 @@ impl MapType {
     }
 
     pub fn key(&self) -> &DataType {
-        &self.0 .0
+        &self.0.0
     }
 
     pub fn value(&self) -> &DataType {
-        &self.0 .1
+        &self.0.1
     }
 
     pub fn into_struct(self) -> DataType {

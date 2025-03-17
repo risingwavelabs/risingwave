@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::fmt::Write;
 
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use thiserror_ext::AsReport;
 
 const PARSE_BASE64_INVALID_END: &str = "invalid base64 end sequence";

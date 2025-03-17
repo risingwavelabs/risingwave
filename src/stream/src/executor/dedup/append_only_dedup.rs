@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -119,17 +119,18 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 }
 
                 Message::Barrier(barrier) => {
-                    self.state_table.commit(barrier.epoch).await?;
+                    let post_commit = self.state_table.commit(barrier.epoch).await?;
 
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let (_prev_vnode_bitmap, cache_may_stale) =
-                            self.state_table.update_vnode_bitmap(vnode_bitmap);
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    yield Message::Barrier(barrier);
+
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
                         if cache_may_stale {
                             self.cache.clear();
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
 
                 Message::Watermark(watermark) => {

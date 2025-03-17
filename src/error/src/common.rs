@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,8 +47,14 @@ impl From<Option<u32>> for TrackingIssue {
 impl Display for TrackingIssue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            Some(id) => write!(f, "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{id}"),
-            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml"),
+            Some(id) => write!(
+                f,
+                "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{id}"
+            ),
+            None => write!(
+                f,
+                "No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml"
+            ),
         }
     }
 }

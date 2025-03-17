@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::types::{Fields, StructType, Timestamp, Timestamptz, F32};
+    use crate::types::{F32, Fields, StructType, Timestamp, Timestamptz};
 
     #[test]
     #[allow(dead_code)]

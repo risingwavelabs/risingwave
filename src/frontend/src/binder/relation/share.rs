@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, Relation, ShareId};
 use crate::error::{ErrorCode, Result};
-use crate::optimizer::plan_node::generic::{CHANGELOG_OP, _CHANGELOG_ROW_ID};
+use crate::optimizer::plan_node::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP};
 
 /// Share a relation during binding and planning.
 /// It could be used to share a (recursive) CTE, a source, a view and so on.

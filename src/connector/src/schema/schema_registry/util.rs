@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
-use crate::schema::{bail_invalid_option_error, InvalidOptionError};
+use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
 pub fn handle_sr_list(addr: &str) -> Result<Vec<Url>, InvalidOptionError> {
     let segment = addr.split(',').collect::<Vec<&str>>();

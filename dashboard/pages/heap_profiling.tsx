@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,10 +26,10 @@ import {
 } from "@chakra-ui/react"
 import Editor from "@monaco-editor/react"
 import base64url from "base64url"
-import { randomUUID } from "crypto"
 import Head from "next/head"
 import path from "path"
 import { Fragment, useEffect, useState } from "react"
+import { v4 as uuidv4 } from "uuid"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
 import api from "../lib/api/api"
@@ -161,7 +161,7 @@ export default function HeapProfiling() {
       let objUrl = window.URL.createObjectURL(resObj.blob)
       let link = document.createElement("a")
       link.href = objUrl
-      link.download = resObj.filename || randomUUID()
+      link.download = resObj.filename || uuidv4()
       link.click()
       result = `${title}\n\nDownloaded!`
     } catch (e: any) {

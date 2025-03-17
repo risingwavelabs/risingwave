@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,10 @@ use std::vec::IntoIter;
 use futures::stream::FusedStream;
 use futures::{StreamExt, TryStreamExt};
 use postgres_types::FromSql;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::Conn;
+use crate::pg_protocol::{PgByteStream, PgStream};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::{Format, Row};
 
@@ -45,10 +44,10 @@ where
     }
 
     /// Return indicate whether the result is consumed completely.
-    pub async fn consume<S: AsyncWrite + AsyncRead + Unpin>(
+    pub async fn consume<S: PgByteStream>(
         &mut self,
         row_limit: usize,
-        msg_stream: &mut Conn<S>,
+        msg_stream: &mut PgStream<S>,
     ) -> PsqlResult<bool> {
         for notice in self.result.notices() {
             msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;

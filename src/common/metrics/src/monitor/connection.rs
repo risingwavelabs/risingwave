@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@ use hyper_util::rt::TokioIo;
 use itertools::Itertools;
 use pin_project_lite::pin_project;
 use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -41,7 +41,7 @@ use tower_service::Service;
 use tracing::{debug, info, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::{register_guarded_int_counter_vec_with_registry, LabelGuardedIntCounterVec};
+use crate::{LabelGuardedIntCounterVec, register_guarded_int_counter_vec_with_registry};
 
 #[auto_impl::auto_impl(&mut)]
 pub trait MonitorAsyncReadWrite {

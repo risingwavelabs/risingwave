@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use tonic::transport::Endpoint;
 
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
-use crate::{stream_rpc_client_method_impl, RpcClient, RpcClientPool, UnboundedBidiStreamHandle};
+use crate::{RpcClient, RpcClientPool, UnboundedBidiStreamHandle, stream_rpc_client_method_impl};
 
 #[derive(Clone)]
 pub struct StreamClient(StreamServiceClient<Channel>);
@@ -69,7 +69,6 @@ pub type StreamClientPoolRef = Arc<StreamClientPool>;
 macro_rules! for_all_stream_rpc {
     ($macro:ident) => {
         $macro! {
-            { 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse },
             { 0, get_min_uncommitted_sst_id, GetMinUncommittedSstIdRequest, GetMinUncommittedSstIdResponse }
         }
     };

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,16 +22,16 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as PgType;
 
 use super::{
-    LogSinker, SinkError, SinkLogReader, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
-use crate::connector_common::{create_pg_client, PostgresExternalTable, SslMode};
-use crate::parser::scalar_adapter::{validate_pg_type_to_rw_type, ScalarAdapter};
+use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -132,7 +132,8 @@ impl Sink for PostgresSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)")));
+                "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)"
+            )));
         }
 
         // Verify our sink schema is compatible with Postgres
@@ -155,12 +156,12 @@ impl Sink for PostgresSink {
             {
                 let pg_columns = pg_table.column_descs();
                 let sink_columns = self.schema.fields();
-                if pg_columns.len() != sink_columns.len() {
+                if pg_columns.len() < sink_columns.len() {
                     return Err(SinkError::Config(anyhow!(
-                    "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns",
-                    pg_columns.len(),
-                    sink_columns.len()
-                )));
+                        "Column count mismatch: Postgres table has {} columns, but sink schema has {} columns, sink should have less or equal columns to the Postgres table",
+                        pg_columns.len(),
+                        sink_columns.len()
+                    )));
                 }
 
                 let pg_columns_lookup = pg_columns
@@ -175,17 +176,17 @@ impl Sink for PostgresSink {
                                 "Column `{}` not found in Postgres table `{}`",
                                 sink_column.name,
                                 self.config.table
-                            )))
+                            )));
                         }
                         Some(pg_column) => {
                             if !validate_pg_type_to_rw_type(pg_column, &sink_column.data_type()) {
                                 return Err(SinkError::Config(anyhow!(
-                                "Column `{}` in Postgres table `{}` has type `{}`, but sink schema defines it as type `{}`",
-                                sink_column.name,
-                                self.config.table,
-                                pg_column,
-                                sink_column.data_type()
-                            )));
+                                    "Column `{}` in Postgres table `{}` has type `{}`, but sink schema defines it as type `{}`",
+                                    sink_column.name,
+                                    self.config.table,
+                                    pg_column,
+                                    sink_column.data_type()
+                                )));
                             }
                         }
                     }
@@ -202,17 +203,17 @@ impl Sink for PostgresSink {
                     .collect::<HashSet<_>>();
                 if pg_pk_names.len() != sink_pk_names.len() {
                     return Err(SinkError::Config(anyhow!(
-                    "Primary key mismatch: Postgres table has primary key on columns {:?}, but sink schema defines primary key on columns {:?}",
-                    pg_pk_names,
-                    sink_pk_names
-                )));
+                        "Primary key mismatch: Postgres table has primary key on columns {:?}, but sink schema defines primary key on columns {:?}",
+                        pg_pk_names,
+                        sink_pk_names
+                    )));
                 }
                 for name in pg_pk_names {
                     if !sink_pk_names.contains(name) {
                         return Err(SinkError::Config(anyhow!(
-                        "Primary key mismatch: Postgres table has primary key on column `{}`, but sink schema does not define it as a primary key",
-                        name
-                    )));
+                            "Primary key mismatch: Postgres table has primary key on column `{}`, but sink schema does not define it as a primary key",
+                            name
+                        )));
                     }
                 }
             }
@@ -390,7 +391,9 @@ impl PostgresSinkWriter {
                     parameter_buffer.add_row(row);
                 }
                 Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
-                    bail!("append-only sink should not receive update insert, update delete and delete operations")
+                    bail!(
+                        "append-only sink should not receive update insert, update delete and delete operations"
+                    )
                 }
             }
         }
@@ -424,13 +427,10 @@ impl PostgresSinkWriter {
         // 1d flattened array of parameters to be deleted.
         for (op, row) in chunk.rows() {
             match op {
-                Op::UpdateInsert | Op::UpdateDelete => {
-                    bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
-                }
-                Op::Insert => {
+                Op::UpdateInsert | Op::Insert => {
                     insert_parameter_buffer.add_row(row);
                 }
-                Op::Delete => {
+                Op::UpdateDelete | Op::Delete => {
                     delete_parameter_buffer.add_row(row.project(&self.pk_indices));
                 }
             }
@@ -472,14 +472,20 @@ impl PostgresSinkWriter {
         parameters: Vec<Vec<Option<ScalarAdapter>>>,
         remaining_parameter: Vec<Option<ScalarAdapter>>,
     ) -> Result<()> {
-        let column_length = schema.fields().len();
+        let column_length = match op {
+            Op::Insert => schema.len(),
+            Op::Delete => pk_indices.len(),
+            _ => unreachable!(),
+        };
         if !parameters.is_empty() {
             let parameter_length = parameters[0].len();
             let rows_length = parameter_length / column_length;
             assert_eq!(
                 parameter_length % column_length,
                 0,
-                "flattened parameters are unaligned"
+                "flattened parameters are unaligned, parameters={:#?} columns={:#?}",
+                parameters,
+                schema.fields(),
             );
             let statement = match op {
                 Op::Insert => create_insert_sql(schema, table_name, rows_length),
@@ -503,7 +509,9 @@ impl PostgresSinkWriter {
                 Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
                 _ => unreachable!(),
             };
+            tracing::trace!("binding statement: {:?}", statement);
             let statement = transaction.prepare(&statement).await?;
+            tracing::trace!("binding parameters: {:?}", remaining_parameter);
             transaction
                 .execute_raw(&statement, remaining_parameter)
                 .await?;
@@ -537,13 +545,11 @@ fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -
         .fields()
         .iter()
         .map(|field| field.name.clone())
-        .collect_vec()
         .join(", ");
     let parameters: String = (0..number_of_rows)
         .map(|i| {
             let row_parameters = (0..number_of_columns)
                 .map(|j| format!("${}", i * number_of_columns + j + 1))
-                .collect_vec()
                 .join(", ");
             format!("({row_parameters})")
         })
@@ -559,32 +565,30 @@ fn create_delete_sql(
     number_of_rows: usize,
 ) -> String {
     let number_of_pk = pk_indices.len();
+    let pk = {
+        let pk_symbols = pk_indices
+            .iter()
+            .map(|pk_index| &schema.fields()[*pk_index].name)
+            .join(", ");
+        format!("({})", pk_symbols)
+    };
     let parameters: String = (0..number_of_rows)
         .map(|i| {
-            let row_parameters: String = pk_indices
-                .iter()
-                .enumerate()
-                .map(|(j, pk_index)| {
-                    format!(
-                        "{} = ${}",
-                        schema.fields()[*pk_index].name,
-                        i * number_of_pk + j + 1
-                    )
-                })
-                .collect_vec()
-                .join(" AND ");
+            let row_parameters: String = (0..pk_indices.len())
+                .map(|j| format!("${}", i * number_of_pk + j + 1))
+                .join(", ");
             format!("({row_parameters})")
         })
         .collect_vec()
-        .join(" OR ");
-    format!("DELETE FROM {table_name} WHERE {parameters}")
+        .join(", ");
+    format!("DELETE FROM {table_name} WHERE {pk} in ({parameters})")
 }
 
 #[cfg(test)]
 mod tests {
     use std::fmt::Display;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 
@@ -601,14 +605,10 @@ mod tests {
             Field {
                 data_type: DataType::Int32,
                 name: "a".to_owned(),
-                sub_fields: vec![],
-                type_name: "".to_owned(),
             },
             Field {
                 data_type: DataType::Int32,
                 name: "b".to_owned(),
-                sub_fields: vec![],
-                type_name: "".to_owned(),
             },
         ]);
         let table_name = "test_table";
@@ -625,21 +625,23 @@ mod tests {
             Field {
                 data_type: DataType::Int32,
                 name: "a".to_owned(),
-                sub_fields: vec![],
-                type_name: "".to_owned(),
             },
             Field {
                 data_type: DataType::Int32,
                 name: "b".to_owned(),
-                sub_fields: vec![],
-                type_name: "".to_owned(),
             },
         ]);
         let table_name = "test_table";
         let sql = create_delete_sql(&schema, table_name, &[1], 3);
         check(
             sql,
-            expect!["DELETE FROM test_table WHERE (b = $1) OR (b = $2) OR (b = $3)"],
+            expect!["DELETE FROM test_table WHERE (b) in (($1), ($2), ($3))"],
+        );
+        let table_name = "test_table";
+        let sql = create_delete_sql(&schema, table_name, &[0, 1], 3);
+        check(
+            sql,
+            expect!["DELETE FROM test_table WHERE (a, b) in (($1, $2), ($3, $4), ($5, $6))"],
         );
     }
 }

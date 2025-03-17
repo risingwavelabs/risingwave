@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
+use crate::Binder;
 use crate::error::Result;
 use crate::expr::OrderByExpr as BoundOrderByExpr;
-use crate::Binder;
 
 impl Binder {
     /// Bind an `ORDER BY` expression in other places than

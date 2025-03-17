@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ mod worker;
 
 use std::ops::Bound;
 
-use futures::stream::BoxStream;
 use futures::Stream;
+use futures::stream::BoxStream;
 #[cfg(test)]
 use futures_async_stream::try_stream;
 #[cfg(test)]
@@ -28,9 +28,9 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 pub use runner::*;
 pub(crate) use worker::*;
 
-use crate::error::Result;
 #[cfg(test)]
 use crate::TraceError;
+use crate::error::Result;
 use crate::{
     LocalStorageId, Record, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,

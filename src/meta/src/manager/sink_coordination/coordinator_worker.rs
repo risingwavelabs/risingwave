@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::future::{poll_fn, Future};
+use std::future::{Future, poll_fn};
 use std::pin::pin;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
+use risingwave_connector::sink::{Sink, SinkCommitCoordinator, SinkParam, build_sink};
 use risingwave_pb::connector_service::SinkMetadata;
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -96,7 +96,7 @@ impl EpochCommitRequests {
     }
 
     fn can_commit(&self) -> bool {
-        self.committed_bitmap.as_ref().map_or(false, |b| b.all())
+        self.committed_bitmap.as_ref().is_some_and(|b| b.all())
     }
 }
 
@@ -135,30 +135,32 @@ impl CoordinationHandleManager {
     async fn next_commit_request_inner(
         writer_handles: &mut HashMap<usize, SinkWriterCoordinationHandle>,
     ) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
-        poll_fn(|cx| 'outer: loop {
-            for (handle_id, handle) in writer_handles.iter_mut() {
-                if let Poll::Ready(result) = handle.poll_next_commit_request(cx) {
-                    match result {
-                        Ok(Some((epoch, metadata))) => {
-                            return Poll::Ready(Ok((
-                                *handle_id,
-                                handle.vnode_bitmap().clone(),
-                                epoch,
-                                metadata,
-                            )));
-                        }
-                        Ok(None) => {
-                            let handle_id = *handle_id;
-                            writer_handles.remove(&handle_id);
-                            continue 'outer;
-                        }
-                        Err(e) => {
-                            return Poll::Ready(Err(e));
+        poll_fn(|cx| {
+            'outer: loop {
+                for (handle_id, handle) in writer_handles.iter_mut() {
+                    if let Poll::Ready(result) = handle.poll_next_commit_request(cx) {
+                        match result {
+                            Ok(Some((epoch, metadata))) => {
+                                return Poll::Ready(Ok((
+                                    *handle_id,
+                                    handle.vnode_bitmap().clone(),
+                                    epoch,
+                                    metadata,
+                                )));
+                            }
+                            Ok(None) => {
+                                let handle_id = *handle_id;
+                                writer_handles.remove(&handle_id);
+                                continue 'outer;
+                            }
+                            Err(e) => {
+                                return Poll::Ready(Err(e));
+                            }
                         }
                     }
                 }
+                return Poll::Pending;
             }
-            return Poll::Pending;
         })
         .await
     }

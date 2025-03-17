@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Canal => vec![Encode::Json],
                 ),
                 KINESIS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                     Format::Maxwell => vec![Encode::Json],
@@ -70,9 +70,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 DATAGEN_CONNECTOR => hashmap!(
                     Format::Native => vec![Encode::Native],
                     Format::Plain => vec![Encode::Bytes, Encode::Json],
-                ),
-                S3_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 OPENDAL_S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
@@ -143,10 +140,10 @@ pub fn validate_compatibility(
         // reject s3_v2 creation
         return Err(RwError::from(Deprecated(
             OPENDAL_S3_CONNECTOR.to_owned(),
-            S3_CONNECTOR.to_owned(),
+            LEGACY_S3_CONNECTOR.to_owned(),
         )));
     }
-    if connector == S3_CONNECTOR {
+    if connector == LEGACY_S3_CONNECTOR {
         // S3 connector is deprecated, use OPENDAL_S3_CONNECTOR instead
         // do s3 -> s3_v2 migration
         let entry = props.get_mut(UPSTREAM_SOURCE_KEY).unwrap();

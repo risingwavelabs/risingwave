@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use foyer::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
-    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
-    MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
+    CacheEvictionConfig, EvictionConfig, MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS,
+    MIN_BUFFER_SIZE_PER_SHARD, StorageConfig, StorageMemoryConfig,
 };
 use risingwave_common::util::pretty_bytes::convert;
 
@@ -80,7 +80,7 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
 /// The reserved memory size is calculated based on the following gradient:
 /// - 30% of the first 16GB
 /// - 20% of the rest
-fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
+pub fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
     let mut total_memory_bytes = total_memory_bytes;
     let mut reserved = 0;
     for i in 0..RESERVED_MEMORY_LEVELS.len() {
@@ -139,7 +139,11 @@ pub fn storage_memory_config(
             if config_storage_memory_bytes as f64 > storage_memory_bytes {
                 tracing::warn!(
                     "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
-                    block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb, convert(config_storage_memory_bytes as _), convert(storage_memory_bytes as _)
+                    block_cache_capacity_mb,
+                    meta_cache_capacity_mb,
+                    shared_buffer_capacity_mb,
+                    convert(config_storage_memory_bytes as _),
+                    convert(storage_memory_bytes as _)
                 );
                 (None, None, None)
             } else {

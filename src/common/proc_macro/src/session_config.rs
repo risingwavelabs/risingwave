@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bae::FromAttributes;
+use proc_macro_error::{OptionExt, ResultExt, abort};
 use proc_macro2::TokenStream;
-use proc_macro_error::{abort, OptionExt, ResultExt};
 use quote::{format_ident, quote, quote_spanned};
 use syn::DeriveInput;
 

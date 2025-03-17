@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ use super::{
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
-    ToDatumRef, ToText,
+    DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl, ToDatumRef, ToText,
+    hash_datum,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -674,7 +674,7 @@ impl ToText for ListRef<'_> {
                 // chars and whitespaces.
                 let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
                     && (s.is_empty()
-                        || s.to_ascii_lowercase() == "null"
+                        || s.eq_ignore_ascii_case("null")
                         || s.contains([
                             '"', '\\', ',',
                             // whilespace:

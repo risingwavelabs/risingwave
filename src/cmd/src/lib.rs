@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
-use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
+use risingwave_rt::{LoggerSettings, init_risingwave_logger, main_okk};
 
 /// Define the `main` function for a component.
 #[macro_export]

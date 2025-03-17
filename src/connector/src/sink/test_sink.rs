@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,11 +88,13 @@ impl Drop for TestSinkRegistryGuard {
 }
 
 pub fn registry_build_sink(build_box_writer: impl BuildBoxWriterTrait) -> TestSinkRegistryGuard {
-    assert!(get_registry()
-        .build_box_writer
-        .lock()
-        .replace(Box::new(build_box_writer))
-        .is_none());
+    assert!(
+        get_registry()
+            .build_box_writer
+            .lock()
+            .replace(Box::new(build_box_writer))
+            .is_none()
+    );
     TestSinkRegistryGuard
 }
 

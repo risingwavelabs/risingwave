@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,12 +30,12 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{
-    write_date_time_tz, DataType, Interval, ScalarRefImpl, Timestamptz,
+    DataType, Interval, ScalarRefImpl, Timestamptz, write_date_time_tz,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
     CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
@@ -46,7 +46,7 @@ use thiserror_ext::AsReport;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
-use crate::session::{current, SessionImpl};
+use crate::session::{SessionImpl, current};
 use crate::{Binder, HashSet, TableCatalog};
 
 pin_project! {
@@ -206,7 +206,9 @@ impl CompatibleFormatEncode {
         match self {
             CompatibleFormatEncode::RowFormat(inner) => {
                 // TODO: should be warning
-                current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
+                current::notice_to_user(
+                    "RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.",
+                );
                 inner.into_format_encode_v2()
             }
             CompatibleFormatEncode::V2(inner) => inner,

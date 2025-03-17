@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::fmt::Formatter;
-use core::iter::repeat;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -61,7 +60,7 @@ impl ChangeLogExecutor {
                     let new_ops = vec![Op::Insert; ops.len()];
                     // They are all 0, will be add in row id gen executor.
                     let changelog_row_id_array = Arc::new(ArrayImpl::Serial(
-                        SerialArray::from_iter(repeat(None).take(ops.len())),
+                        SerialArray::from_iter(std::iter::repeat_n(None, ops.len())),
                     ));
                     let new_chunk = if self.need_op {
                         let ops: Vec<Option<i16>> =

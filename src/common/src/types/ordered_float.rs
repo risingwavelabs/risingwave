@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ use num_traits::{
     Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Pow,
     Zero,
 };
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{IsNull, ToSql, Type, accepts, to_sql_checked};
 
 // masks for the parts of the IEEE 754 float
 const SIGN_MASK: u64 = 0x8000000000000000u64;
@@ -846,9 +846,9 @@ fn raw_double_bits<F: Float>(f: &F) -> u64 {
 }
 
 mod impl_rand {
+    use rand::Rng;
     use rand::distributions::uniform::*;
     use rand::distributions::{Distribution, Open01, OpenClosed01, Standard};
-    use rand::Rng;
 
     use super::OrderedFloat;
 
@@ -1019,8 +1019,8 @@ use serde::Serialize;
 mod tests {
     use risingwave_common_estimate_size::EstimateSize;
 
-    use crate::types::ordered_float::OrderedFloat;
     use crate::types::IntoOrdered;
+    use crate::types::ordered_float::OrderedFloat;
 
     #[test]
     fn test_cast_to_f64() {

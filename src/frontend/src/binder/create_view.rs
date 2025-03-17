@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, SqlOption};
 
-use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::BoundQuery;
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::expr::ExprRewriter;
 
 /// Represents a bounded `CREATE MATERIALIZED VIEW` statement.

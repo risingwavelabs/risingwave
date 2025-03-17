@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,12 +24,14 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
+use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
+use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -38,6 +40,7 @@ use risingwave_pb::meta::event_log;
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
+use crate::MetaError;
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
@@ -45,7 +48,6 @@ use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceStreamJobInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
-use crate::MetaError;
 
 #[derive(Clone)]
 pub struct DdlServiceImpl {
@@ -96,21 +98,23 @@ impl DdlServiceImpl {
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
+        let replace_streaming_job: StreamingJob = match replace_job.unwrap() {
+            replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
+                table,
+                source,
+                job_type,
+            }) => StreamingJob::Table(
+                source,
+                table.unwrap(),
+                TableJobType::try_from(job_type).unwrap(),
+            ),
+            replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
+                StreamingJob::Source(source.unwrap())
+            }
+        };
+
         ReplaceStreamJobInfo {
-            streaming_job: match replace_job.unwrap() {
-                replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
-                    table,
-                    source,
-                    job_type,
-                }) => StreamingJob::Table(
-                    source,
-                    table.unwrap(),
-                    TableJobType::try_from(job_type).unwrap(),
-                ),
-                replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
-                    StreamingJob::Source(source.unwrap())
-                }
-            },
+            streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
             col_index_mapping,
         }
@@ -233,9 +237,10 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<DropSchemaResponse>, Status> {
         let req = request.into_inner();
         let schema_id = req.get_schema_id();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id as _))
+            .run_command(DdlCommand::DropSchema(schema_id as _, drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -272,6 +277,7 @@ impl DdlService for DdlServiceImpl {
                         CreateType::Foreground,
                         None,
                         HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        None,
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -339,6 +345,7 @@ impl DdlService for DdlServiceImpl {
             CreateType::Foreground,
             affected_table_change,
             dependencies,
+            None,
         );
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -423,6 +430,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
         let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
+        let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req
             .get_dependencies()
@@ -439,6 +447,7 @@ impl DdlService for DdlServiceImpl {
                 create_type,
                 None,
                 dependencies,
+                specific_resource_group,
             ))
             .await?;
 
@@ -493,6 +502,7 @@ impl DdlService for DdlServiceImpl {
                 CreateType::Foreground,
                 None,
                 HashSet::new(),
+                None,
             ))
             .await?;
 
@@ -580,6 +590,7 @@ impl DdlService for DdlServiceImpl {
                 CreateType::Foreground,
                 None,
                 HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                None,
             ))
             .await?;
 
@@ -892,12 +903,18 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterParallelismResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
-
         self.ddl_controller
-            .alter_parallelism(table_id, parallelism, deferred)
+            .reschedule_streaming_job(
+                job_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+                deferred,
+            )
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
@@ -1122,6 +1139,30 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn alter_resource_group(
+        &self,
+        request: Request<AlterResourceGroupRequest>,
+    ) -> Result<Response<AlterResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let table_id = req.get_table_id();
+        let deferred = req.get_deferred();
+        let resource_group = req.resource_group;
+
+        self.ddl_controller
+            .reschedule_streaming_job(
+                table_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Refresh,
+                    resource_group: JobResourceGroupTarget::Update(resource_group),
+                },
+                deferred,
+            )
+            .await?;
+
+        Ok(Response::new(AlterResourceGroupResponse {}))
     }
 }
 

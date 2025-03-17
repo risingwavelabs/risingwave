@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,11 +29,11 @@ use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt
 use risingwave_pb::expr::window_frame::PbSessionFrameBounds;
 
 use super::FrameBoundsImpl;
-use crate::expr::{
-    build_func, BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression,
-    LiteralExpression,
-};
 use crate::Result;
+use crate::expr::{
+    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    build_func,
+};
 
 /// To implement Session Window in a similar way to Range Frame, we define a similar frame bounds
 /// structure here. It's very like [`RangeFrameBounds`](super::RangeFrameBounds), but with a gap

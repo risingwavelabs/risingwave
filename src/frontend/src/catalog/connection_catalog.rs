@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::connection::Info;
-use risingwave_pb::catalog::{connection, PbConnection};
+use risingwave_pb::catalog::{PbConnection, connection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
 use crate::user::UserId;

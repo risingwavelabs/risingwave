@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ pub mod compaction_task;
 pub mod connection;
 pub mod database;
 pub mod fragment;
+pub mod fragment_relation;
 pub mod function;
 pub mod hummock_epoch_to_version;
 pub mod hummock_gc_history;

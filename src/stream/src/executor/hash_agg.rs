@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,26 +15,28 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
+use futures::future::try_join_all;
 use futures::stream;
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common_estimate_size::collections::EstimatedHashMap;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_common_estimate_size::collections::EstimatedHashMap;
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggStateCacheStats, AggStateStorage,
-    DistinctDeduplicater, GroupKey, OnlyOutputIfHasInput,
+    AggStateCacheStats, AggStateStorage, DistinctDeduplicater, GroupKey, OnlyOutputIfHasInput,
+    agg_call_filter_res, iter_table_storage,
 };
 use super::monitor::HashAggMetrics;
 use super::sort_buffer::SortBuffer;
-use crate::cache::{cache_may_stale, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::prelude::*;
 
@@ -196,11 +198,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // NOTE: we assume the prefix of table pk is exactly the group key
         let group_key_table_pk_projection =
             &args.intermediate_state_table.pk_indices()[..group_key_len];
-        assert!(group_key_table_pk_projection
-            .iter()
-            .sorted()
-            .copied()
-            .eq(0..group_key_len));
+        assert!(
+            group_key_table_pk_projection
+                .iter()
+                .sorted()
+                .copied()
+                .eq(0..group_key_len)
+        );
 
         Ok(Self {
             input: args.input,
@@ -298,6 +302,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.intermediate_state_table,
                                 &this.input_pk_indices,
                                 this.row_count_index,
+                                this.emit_on_window_close,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
@@ -407,14 +412,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_watermark = vars.window_watermark.take();
 
         // flush changed states into intermediate state table
-        for agg_group in vars.dirty_groups.values() {
-            let encoded_states = agg_group.encode_states(&this.agg_funcs)?;
+        for mut agg_group in vars.dirty_groups.values_mut() {
+            let Some(inter_states_change) = agg_group.build_states_change(&this.agg_funcs)? else {
+                continue;
+            };
+
             if this.emit_on_window_close {
                 vars.buffer
-                    .update_without_old_value(encoded_states, &mut this.intermediate_state_table);
+                    .apply_change(inter_states_change, &mut this.intermediate_state_table);
             } else {
                 this.intermediate_state_table
-                    .update_without_old_value(encoded_states);
+                    .write_record(inter_states_change);
             }
         }
 
@@ -432,9 +440,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .into_iter()
                         .take(this.group_key_indices.len())
                         .collect();
-                    let states = row.into_iter().skip(this.group_key_indices.len()).collect();
+                    let inter_states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
-                    let mut agg_group = AggGroup::create_eowc(
+                    let mut agg_group = AggGroup::<S>::for_eowc_output(
                         this.version,
                         Some(GroupKey::new(
                             group_key,
@@ -443,15 +451,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         &this.agg_calls,
                         &this.agg_funcs,
                         &this.storages,
-                        &states,
+                        &inter_states,
                         &this.input_pk_indices,
                         this.row_count_index,
+                        this.emit_on_window_close,
                         this.extreme_cache_size,
                         &this.input_schema,
                     )?;
 
                     let (change, stats) = agg_group
-                        .build_change(&this.storages, &this.agg_funcs)
+                        .build_outputs_change(&this.storages, &this.agg_funcs)
                         .await?;
                     vars.stats.merge_state_cache_stats(stats);
 
@@ -468,7 +477,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             for mut agg_group in vars.dirty_groups.values_mut() {
                 let agg_group = agg_group.as_mut();
                 let (change, stats) = agg_group
-                    .build_change(&this.storages, &this.agg_funcs)
+                    .build_outputs_change(&this.storages, &this.agg_funcs)
                     .await?;
                 vars.stats.merge_state_cache_stats(stats);
 
@@ -530,13 +539,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     async fn commit_state_tables(
         this: &mut ExecutorInner<K, S>,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<Vec<StateTablePostCommit<'_, S>>> {
         futures::future::try_join_all(
             this.all_state_tables_mut()
                 .map(|table| async { table.commit(epoch).await }),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     async fn try_flush_data(this: &mut ExecutorInner<K, S>) -> StreamExecutorResult<()> {
@@ -554,6 +562,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input,
             inner: mut this,
         } = self;
+
+        let actor_id = this.actor_ctx.id;
 
         let window_col_idx_in_group_key = this.intermediate_state_table.pk_indices()[0];
         let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
@@ -643,9 +653,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         yield Message::Chunk(chunk?);
                     }
                     Self::flush_metrics(&this, &mut vars);
-                    Self::commit_state_tables(&mut this, barrier.epoch).await?;
+                    let emit_on_window_close = this.emit_on_window_close;
+                    let post_commits = Self::commit_state_tables(&mut this, barrier.epoch).await?;
 
-                    if this.emit_on_window_close {
+                    if emit_on_window_close {
                         // ignore watermarks on other columns
                         if let Some(watermark) =
                             vars.buffered_watermarks[window_col_idx_in_group_key].take()
@@ -660,23 +671,27 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         }
                     }
 
-                    // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        let previous_vnode_bitmap = this.intermediate_state_table.vnodes().clone();
-                        this.all_state_tables_mut().for_each(|table| {
-                            let _ = table.update_vnode_bitmap(vnode_bitmap.clone());
-                        });
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    yield Message::Barrier(barrier);
 
+                    // Update the vnode bitmap for state tables of all agg calls if asked.
+                    if let Some(cache_may_stale) =
+                        try_join_all(post_commits.into_iter().map(|post_commit| {
+                            post_commit.post_yield_barrier(update_vnode_bitmap.clone())
+                        }))
+                        .await?
+                        .pop()
+                        .expect("should have at least one table")
+                        .map(|(_, cache_may_stale)| cache_may_stale)
+                    {
                         // Manipulate the cache if necessary.
-                        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+                        if cache_may_stale {
                             vars.agg_group_cache.clear();
                             vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
                                 cache.clear();
                             });
                         }
                     }
-
-                    yield Message::Barrier(barrier);
                 }
             }
         }

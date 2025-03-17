@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::{capture_context, function, Result};
+use risingwave_expr::{Result, capture_context, function};
 
 use super::context::{CATALOG_READER, DB_NAME};
 use crate::catalog::CatalogReader;

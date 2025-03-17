@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use risingwave_common::types::{JsonbRef, MapRef, MapValue, Scalar, StructRef, StructValue};
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Expands the top-level JSON object to a row having the composite type of the base argument.
 /// The JSON object is scanned for fields whose names match column names of the output row type,

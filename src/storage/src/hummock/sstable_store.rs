@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -23,7 +23,7 @@ use fail::fail_point;
 use foyer::{
     CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
-use futures::{future, StreamExt};
+use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -417,11 +417,11 @@ impl SstableStore {
                     Ok(data) => data,
                     Err(e) => {
                         tracing::error!(
-                        "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                        range,
-                        object_id,
-                        file_size
-                    );
+                            "get_block_response meet error when read {:?} from sst-{}, total length: {}",
+                            range,
+                            object_id,
+                            file_size
+                        );
                         return Err(anyhow::Error::from(HummockError::from(e)));
                     }
                 };
@@ -637,7 +637,7 @@ impl SstableStore {
                 return Err(HummockError::other(format!(
                     "failed to get result, this read request may be canceled: {}",
                     e.as_report()
-                )))
+                )));
             }
         };
         Ok(BlockDataStream::new(reader, metas.to_vec()))
@@ -675,12 +675,12 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::HummockSstableObjectId;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
-    use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,

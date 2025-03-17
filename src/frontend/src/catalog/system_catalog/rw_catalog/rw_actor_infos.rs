@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ struct RwActorInfo {
 async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo>> {
     let table_ids = reader
         .meta_client
-        .list_table_fragment_states()
+        .list_streaming_job_states()
         .await?
         .into_iter()
         .map(|fragment| fragment.table_id)

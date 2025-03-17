@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,12 @@
 #![feature(buf_read_has_data_left)]
 #![feature(round_char_boundary)]
 #![feature(never_type)]
+#![feature(let_chains)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
 pub mod error_or_notice;
+pub mod memory_manager;
 pub mod net;
 pub mod pg_extended;
 pub mod pg_field_descriptor;

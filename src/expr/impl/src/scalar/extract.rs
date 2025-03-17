@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::str::FromStr;
 
 use chrono::{Datelike, NaiveTime, Timelike};
-use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_common::types::{Date, Decimal, F64, Interval, Time, Timestamp, Timestamptz};
+use risingwave_expr::{ExprError, Result, function};
 
 use self::Unit::*;
 use crate::scalar::timestamptz::time_zone_err;

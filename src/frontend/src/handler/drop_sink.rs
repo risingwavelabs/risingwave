@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,16 @@
 use std::collections::HashSet;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableJobType};
+use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
+use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::hijack_merger_for_target_table;
 use crate::handler::create_sink::{fetch_incoming_sinks, reparse_table_for_sink};
-use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_sink(
     handler_args: HandlerArgs,
@@ -51,7 +51,7 @@ pub async fn handle_drop_sink(
                             .into())
                     } else {
                         Err(e.into())
-                    }
+                    };
                 }
             };
 

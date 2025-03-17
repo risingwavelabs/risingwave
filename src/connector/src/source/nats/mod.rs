@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub use enumerator::NatsSplitEnumerator;
 pub mod source;
 pub mod split;
 
@@ -23,15 +24,14 @@ use std::time::Duration;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::source::nats::enumerator::NatsSplitEnumerator;
-use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
+use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::{
     deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
 };

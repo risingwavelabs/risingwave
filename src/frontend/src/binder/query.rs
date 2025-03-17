@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ use risingwave_sqlparser::ast::{
 };
 use thiserror_ext::AsReport;
 
+use super::BoundValues;
 use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
-use super::BoundValues;
 use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result, RwError};
@@ -302,7 +302,7 @@ impl Binder {
                             "ORDER BY \"{}\" is ambiguous",
                             name.real_value()
                         ))
-                        .into())
+                        .into());
                     }
                 }
             }
@@ -313,7 +313,7 @@ impl Binder {
                         "Invalid ordinal number in ORDER BY: {}",
                         number
                     ))
-                    .into())
+                    .into());
                 }
             },
             expr => {
@@ -342,7 +342,7 @@ impl Binder {
                             right,
                         },
                         with,
-                    ) = Self::validate_rcte(query)?
+                    ) = Self::validate_rcte(*query)?
                     else {
                         return Err(ErrorCode::BindError(
                             "expect `SetOperation` as the return type of validation".into(),
@@ -378,7 +378,7 @@ impl Binder {
             } else {
                 match cte_inner {
                     CteInner::Query(query) => {
-                        let bound_query = self.bind_query(query)?;
+                        let bound_query = self.bind_query(*query)?;
                         self.context.cte_to_relation.insert(
                             table_name,
                             Rc::new(RefCell::new(BindingCte {
@@ -393,7 +393,7 @@ impl Binder {
                     CteInner::ChangeLog(from_table_name) => {
                         self.push_context();
                         let from_table_relation =
-                            self.bind_relation_by_name(from_table_name.clone(), None, None)?;
+                            self.bind_relation_by_name(from_table_name.clone(), None, None, true)?;
                         self.pop_context()?;
                         self.context.cte_to_relation.insert(
                             table_name,

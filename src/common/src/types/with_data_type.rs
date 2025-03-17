@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use super::{
-    DataType, Date, Decimal, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial, StructType,
-    Time, Timestamp, Timestamptz, F32, F64,
+    DataType, Date, Decimal, F32, F64, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial,
+    StructType, Time, Timestamp, Timestamptz,
 };
 
 /// A trait for all physical types that can be associated with a [`DataType`].

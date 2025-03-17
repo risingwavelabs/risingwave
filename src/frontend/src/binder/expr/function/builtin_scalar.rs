@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,17 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use bk_tree::{metrics, BKTree};
+use bk_tree::{BKTree, metrics};
 use itertools::Itertools;
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ListValue, ScalarImpl, Timestamptz};
 use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use thiserror_ext::AsReport;
 
+use crate::Binder;
 use crate::binder::Clause;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now};
-use crate::Binder;
 
 impl Binder {
     pub(super) fn bind_builtin_scalar_function(
@@ -202,6 +202,8 @@ impl Binder {
                 ("atanh", raw_call(ExprType::Atanh)),
                 ("asind", raw_call(ExprType::Asind)),
                 ("acosd", raw_call(ExprType::Acosd)),
+                ("atand", raw_call(ExprType::Atand)),
+                ("atan2d", raw_call(ExprType::Atan2d)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
@@ -598,7 +600,7 @@ impl Binder {
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),
                 ("format_type", raw_call(ExprType::FormatType)),
-                ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_table_is_visible", raw_call(ExprType::PgTableIsVisible)),
                 ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
@@ -681,6 +683,7 @@ impl Binder {
                 ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
+                ("rw_license", raw_call(ExprType::License)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
@@ -728,7 +731,7 @@ impl Binder {
                         "VARIADIC argument is not allowed in function \"{}\"",
                         function_name
                     ))
-                    .into())
+                    .into());
                 }
             };
             return Ok(FunctionCall::new(func, inputs)?.into());

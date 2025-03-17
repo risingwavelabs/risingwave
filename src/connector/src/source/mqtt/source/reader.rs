@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,13 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
-use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
 
-use super::message::MqttMessage;
 use super::MqttSplit;
+use super::message::MqttMessage;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;

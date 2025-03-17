@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{generic, EqJoinPredicate};
+use super::{EqJoinPredicate, generic};
+use crate::PlanRef;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMappingRewriteExt;
-use crate::PlanRef;
 
 pub struct StreamJoinCommon;
 

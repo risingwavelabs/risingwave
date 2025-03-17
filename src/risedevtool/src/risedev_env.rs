@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{add_hummock_backend, Application, HummockInMemoryStrategy, ServiceConfig};
+use crate::{Application, HummockInMemoryStrategy, ServiceConfig, add_hummock_backend};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future
@@ -117,6 +117,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"PGUSER="{user}""#,).unwrap();
                 writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
                 writeln!(env, r#"PGDATABASE="{database}""#,).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_POSTGRES_WITH_OPTIONS_COMMON="connector='postgres-cdc',hostname='{host}',port='{port}'""#,
+                )
+                .unwrap();
             }
             ServiceConfig::SqlServer(c) => {
                 let host = &c.address;

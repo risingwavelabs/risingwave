@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,7 +123,7 @@ pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String
 
 #[cfg(test)]
 mod tests {
-    use crate::util::addr::{is_local_address, HostAddr};
+    use crate::util::addr::{HostAddr, is_local_address};
 
     #[test]
     fn test_is_local_address() {

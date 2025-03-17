@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use prometheus::{
-    exponential_buckets, histogram_opts, linear_buckets, register_histogram_with_registry,
-    Histogram, Registry,
+    Histogram, Registry, exponential_buckets, histogram_opts, linear_buckets,
+    register_histogram_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{

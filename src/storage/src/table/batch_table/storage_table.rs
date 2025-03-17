@@ -923,31 +923,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .map_ok(|(_, row)| row))
     }
 
-    async fn batch_iter_log_inner<K: CopyFromSlice>(
-        &self,
-        start_epoch: u64,
-        end_epoch: HummockReadEpoch,
-        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
-        vnode: VirtualNode,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>>> {
-        let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
-        let read_options = ReadLogOptions {
-            table_id: self.table_id,
-        };
-        let iter = StorageTableInnerIterLogInner::<S, SD>::new(
-            &self.store,
-            self.mapping.clone(),
-            self.row_serde.clone(),
-            table_key_range,
-            read_options,
-            start_epoch,
-            end_epoch,
-        )
-        .await?
-        .into_stream::<K>();
-
-        Ok(iter)
-    }
+    .
 
     pub async fn batch_iter_vnode_log(
         &self,

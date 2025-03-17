@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,17 +31,17 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
 use chrono::{Datelike, NaiveDateTime, Timelike};
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use futures::stream::BoxStream;
+use jni::JNIEnv;
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
     JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
 use jni::sys::{
-    jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
+    JNI_FALSE, JNI_TRUE, jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue,
 };
-use jni::JNIEnv;
 pub use paste::paste;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
@@ -152,21 +152,36 @@ impl<T> From<T> for Pointer<'static, T> {
 
 impl<'a, T> Pointer<'a, T> {
     fn as_ref(&self) -> &'a T {
-        debug_assert!(self.pointer != 0);
+        assert!(self.pointer != 0);
         unsafe { &*(self.pointer as *const T) }
     }
 
     fn as_mut(&mut self) -> &'a mut T {
-        debug_assert!(self.pointer != 0);
+        assert!(self.pointer != 0);
         unsafe { &mut *(self.pointer as *mut T) }
     }
 }
 
+/// A pointer that owns the object it points to.
+///
+/// Note that dropping an `OwnedPointer` does not release the object.
+/// Instead, you should call [`OwnedPointer::release`] manually.
 pub type OwnedPointer<T> = Pointer<'static, T>;
 
 impl<T> OwnedPointer<T> {
-    fn drop(self) {
-        debug_assert!(self.pointer != 0);
+    /// Consume `self` and return the pointer value. Used for passing to JNI.
+    pub fn into_pointer(self) -> jlong {
+        self.pointer
+    }
+
+    /// Release the object behind the pointer.
+    fn release(self) {
+        tracing::debug!(
+            type_name = std::any::type_name::<T>(),
+            address = %format_args!("{:x}", self.pointer),
+            "release jni OwnedPointer"
+        );
+        assert!(self.pointer != 0);
         unsafe { drop(Box::from_raw(self.pointer as *mut T)) }
     }
 }
@@ -389,7 +404,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose<'a>(
     _env: EnvParam<'a>,
     pointer: OwnedPointer<JavaBindingIterator<'a>>,
 ) {
-    pointer.drop()
+    pointer.release()
 }
 
 #[no_mangle]
@@ -419,7 +434,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkClose(
     _env: EnvParam<'_>,
     chunk: OwnedPointer<StreamChunk>,
 ) {
-    chunk.drop()
+    chunk.release()
 }
 
 #[no_mangle]
@@ -1050,6 +1065,14 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
             }
         }
     })
+}
+
+#[no_mangle]
+extern "system" fn Java_com_risingwave_java_binding_Binding_cdcSourceSenderClose(
+    _env: EnvParam<'_>,
+    channel: OwnedPointer<JniSenderType<GetEventStreamResponse>>,
+) {
+    channel.release();
 }
 
 pub enum JniSinkWriterStreamRequest {

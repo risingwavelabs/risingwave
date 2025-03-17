@@ -1,4 +1,4 @@
-//  Copyright 2024 RisingWave Labs
+//  Copyright 2025 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@
 
 use itertools::Itertools;
 
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 
 pub struct BatchPushLimitToScanRule {}
 

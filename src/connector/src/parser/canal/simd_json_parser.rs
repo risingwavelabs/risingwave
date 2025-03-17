@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 use simd_json::BorrowedValue;
+use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
+use crate::parser::unified::ChangeEventOperation;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{
     ByteStreamSourceParser, JsonProperties, ParserFormat, SourceStreamChunkRowWriter,
 };

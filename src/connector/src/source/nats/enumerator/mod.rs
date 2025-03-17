@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_common::bail;
 
-use super::source::{NatsOffset, NatsSplit};
 use super::NatsProperties;
+use super::source::{NatsOffset, NatsSplit};
 use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 

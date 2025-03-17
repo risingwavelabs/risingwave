@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -97,13 +97,14 @@ impl DebeziumMongoJsonParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
+        let meta = writer.source_meta();
         let key_accessor = match key {
             None => None,
-            Some(data) => Some(self.key_builder.generate_accessor(data).await?),
+            Some(data) => Some(self.key_builder.generate_accessor(data, meta).await?),
         };
         let payload_accessor = match payload {
             None => None,
-            Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
+            Some(data) => Some(self.payload_builder.generate_accessor(data, meta).await?),
         };
 
         let row_op = DebeziumChangeEvent::new_mongodb_event(key_accessor, payload_accessor);
@@ -142,8 +143,8 @@ mod tests {
     use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 
     use super::*;
-    use crate::parser::unified::debezium::extract_bson_id;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::parser::unified::debezium::extract_bson_id;
     use crate::source::SourceCtrlOpts;
     #[test]
     fn test_parse_bson_value_id_int() {

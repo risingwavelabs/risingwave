@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use sea_schema::postgres::def::{ColumnType, TableInfo, Type as SeaType};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::Deserialize;
-use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::PgPool;
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};

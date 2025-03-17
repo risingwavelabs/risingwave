@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -160,8 +160,8 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
 
-    use super::super::test_utils::expr::build_from_pretty;
     use super::super::test_utils::MockSource;
+    use super::super::test_utils::expr::build_from_pretty;
     use super::super::*;
     use super::*;
 

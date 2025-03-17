@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -326,7 +326,7 @@ async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
     match handle.await? {
         Ok(_) => panic!("create m1 should fail"),
         Err(e) => {
-            assert!(e.to_string().contains("adhoc recovery triggered"));
+            assert!(e.to_string().contains("adhoc recovery"));
         }
     }
     Ok(())

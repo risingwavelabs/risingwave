@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
+use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
@@ -33,10 +33,10 @@ use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
 
-use crate::hummock::HummockManagerRef;
-use crate::manager::event_log::EventLogManagerRef;
-use crate::manager::MetadataManager;
 use crate::MetaResult;
+use crate::hummock::HummockManagerRef;
+use crate::manager::MetadataManager;
+use crate::manager::event_log::EventLogManagerRef;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 
@@ -558,7 +558,10 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "object store operation rate");
         let query = format!(
             "sum(rate(object_store_operation_latency_count{{{}}}[10m])) by (le, type, job, instance)",
-            merge_prometheus_selector([&self.prometheus_selector, "job=~\"compute|compactor\", type!~\"streaming_upload_write_bytes|streaming_read_read_bytes|streaming_read\""])
+            merge_prometheus_selector([
+                &self.prometheus_selector,
+                "job=~\"compute|compactor\", type!~\"streaming_upload_write_bytes|streaming_read_read_bytes|streaming_read\""
+            ])
         );
         self.write_instant_vector_impl(s, &query, vec!["type", "job", "instance"])
             .await;
@@ -567,14 +570,17 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "object store operation duration (second)");
         let query = format!(
             "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket{{{}}}[10m])) by (le, type, job, instance))",
-            merge_prometheus_selector([&self.prometheus_selector, "job=~\"compute|compactor\", type!~\"streaming_upload_write_bytes|streaming_read\""])
+            merge_prometheus_selector([
+                &self.prometheus_selector,
+                "job=~\"compute|compactor\", type!~\"streaming_upload_write_bytes|streaming_read\""
+            ])
         );
         self.write_instant_vector_impl(s, &query, vec!["type", "job", "instance"])
             .await;
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_instant_vector_impl<'a>(&self, s: &mut String, query: &str, labels: Vec<&str>) {
+    async fn write_instant_vector_impl(&self, s: &mut String, query: &str, labels: Vec<&str>) {
         let Some(ref client) = self.prometheus_client else {
             return;
         };

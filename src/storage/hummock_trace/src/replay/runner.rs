@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{GlobalReplay, ReplayWorkerScheduler, WorkerScheduler};
+use crate::Operation;
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::Operation;
 
 pub struct HummockReplay<R: TraceReader, G: GlobalReplay> {
     reader: R,

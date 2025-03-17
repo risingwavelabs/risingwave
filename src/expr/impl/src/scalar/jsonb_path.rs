@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use jsonbb::ValueRef;
 use risingwave_common::types::{JsonbRef, JsonbVal};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use sql_json_path::{EvalError, JsonPath, ParseError};
 use thiserror_ext::AsReport;
 

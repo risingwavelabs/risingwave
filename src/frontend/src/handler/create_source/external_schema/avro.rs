@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ pub async fn extract_avro_table_schema(
     Ok(vec_column_desc
         .into_iter()
         .map(|col| ColumnCatalog {
-            column_desc: col.into(),
+            column_desc: ColumnDesc::from_field_without_column_id(&col),
             is_hidden: false,
         })
         .collect_vec())

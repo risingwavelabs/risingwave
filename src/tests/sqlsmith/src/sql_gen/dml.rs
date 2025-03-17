@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::types::DataType;
@@ -22,8 +22,8 @@ use risingwave_sqlparser::ast::{
     Values,
 };
 
-use crate::sql_gen::SqlGenerator;
 use crate::Table;
+use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     pub(crate) fn generate_insert_statement(

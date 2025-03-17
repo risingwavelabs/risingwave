@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,9 +57,9 @@ macro_rules! commit_multi_var_with_provided_txn {
 use risingwave_hummock_sdk::SstObjectIdRange;
 pub(crate) use {commit_multi_var, commit_multi_var_with_provided_txn};
 
+use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::sequence::next_sstable_object_id;
-use crate::hummock::HummockManager;
 
 impl HummockManager {
     #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -142,7 +142,6 @@ impl From<&PbSstableInfo> for SstableInfoInner {
 
 impl From<SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: SstableInfoInner) -> Self {
-        assert!(sstable_info.sst_size > 0);
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
             object_id: sstable_info.object_id,
@@ -181,7 +180,6 @@ impl From<SstableInfoInner> for PbSstableInfo {
 
 impl From<&SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: &SstableInfoInner) -> Self {
-        assert!(sstable_info.sst_size > 0);
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
             object_id: sstable_info.object_id,

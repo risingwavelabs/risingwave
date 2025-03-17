@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,9 @@
 #![feature(allocator_api)]
 #![feature(bound_as_ref)]
 #![feature(custom_test_frameworks)]
-#![feature(extract_if)]
 #![feature(coroutines)]
-#![feature(hash_extract_if)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(strict_provenance)]
 #![feature(test)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
@@ -34,7 +31,6 @@
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
 

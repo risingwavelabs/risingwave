@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ use risingwave_common::config::{MetaBackend, MetaStoreConfig, ObjectStoreConfig}
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
+use crate::MetaStoreBackend;
 use crate::backup_restore::RestoreOpts;
 use crate::controller::SqlMetaStore;
-use crate::MetaStoreBackend;
 
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {

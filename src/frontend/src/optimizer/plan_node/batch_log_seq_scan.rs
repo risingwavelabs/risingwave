@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LogRowSeqScanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch};
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, scan_ranges_as_strs, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb};
+use super::utils::{Distill, childless_record, scan_ranges_as_strs};
+use super::{ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb, generic};
 use crate::catalog::ColumnId;
 use crate::error::Result;
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 use crate::scheduler::SchedulerResult;
 

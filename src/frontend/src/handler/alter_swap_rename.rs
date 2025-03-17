@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,13 +20,13 @@ use risingwave_pb::ddl_service::alter_swap_rename_request;
 use risingwave_pb::ddl_service::alter_swap_rename_request::ObjectNameSwapPair;
 use risingwave_sqlparser::ast::ObjectName;
 
-use crate::catalog::root_catalog::SchemaPath;
+use crate::Binder;
 use crate::catalog::CatalogError;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
 use crate::session::SessionImpl;
 use crate::user::UserId;
-use crate::Binder;
 
 /// Check if the session user has the privilege to swap and rename the objects.
 fn check_swap_rename_privilege(

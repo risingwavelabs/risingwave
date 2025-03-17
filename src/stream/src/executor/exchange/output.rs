@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use risingwave_common::util::addr::is_local_address;
 use super::error::ExchangeChannelClosed;
 use super::permit::Sender;
 use crate::error::StreamResult;
-use crate::executor::DispatcherMessage as Message;
+use crate::executor::DispatcherMessageBatch as Message;
 use crate::task::{ActorId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.

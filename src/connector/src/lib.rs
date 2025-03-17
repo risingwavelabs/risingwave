@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@
 #![feature(never_type)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
+#![feature(min_specialization)]
 
 use std::time::Duration;
 
@@ -49,7 +50,6 @@ pub mod parser;
 pub mod schema;
 pub mod sink;
 pub mod source;
-pub use source::ConnectionImpl;
 
 pub mod connector_common;
 

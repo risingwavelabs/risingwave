@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -328,7 +328,7 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
 
     if let Some(opts) = &frontend_opts {
         let host = opts.listen_addr.split(':').next().unwrap_or("localhost");
-        let port = opts.listen_addr.split(':').last().unwrap_or("4566");
+        let port = opts.listen_addr.split(':').next_back().unwrap_or("4566");
         let database = "dev";
         let user = "root";
 

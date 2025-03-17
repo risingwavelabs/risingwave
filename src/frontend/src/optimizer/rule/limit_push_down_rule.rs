@@ -1,4 +1,4 @@
-//  Copyright 2024 RisingWave Labs
+//  Copyright 2025 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, LogicalProject, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalLimit, LogicalProject, PlanTreeNodeUnary};
 
 pub struct LimitPushDownRule {}
 

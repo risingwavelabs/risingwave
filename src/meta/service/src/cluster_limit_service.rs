@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,11 @@ use std::collections::HashMap;
 use risingwave_common::util::cluster_limit::{
     ActorCountPerParallelism, ClusterLimit, WorkerActorCount,
 };
-use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_meta::MetaResult;
+use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
 use risingwave_pb::meta::{GetClusterLimitsRequest, GetClusterLimitsResponse};
 use tonic::{Request, Response, Status};

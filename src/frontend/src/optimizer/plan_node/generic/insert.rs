@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,10 @@ use risingwave_common::catalog::{ColumnCatalog, Field, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -349,6 +349,13 @@ fn on_field<D: MaybeData>(
         },
         DataType::Varchar => match proto_field.kind() {
             Kind::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+            Kind::Enum(enum_desc) => maybe.on_base(|s| {
+                let name = s.into_utf8();
+                let enum_value_desc = enum_desc.get_value_by_name(name).ok_or_else(|| {
+                    FieldEncodeError::new(format!("'{name}' not in enum {}", enum_desc.name()))
+                })?;
+                Ok(Value::EnumNumber(enum_value_desc.number()))
+            })?,
             _ => return no_match_err(),
         },
         DataType::Bytea => match proto_field.kind() {

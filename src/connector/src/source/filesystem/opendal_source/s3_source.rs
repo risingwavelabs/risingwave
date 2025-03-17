@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 use std::marker::PhantomData;
 
 use anyhow::Context;
+use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
-use opendal::Operator;
 
-use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
+use super::opendal_enumerator::OpendalEnumerator;
 use crate::error::ConnectorResult;
-use crate::source::filesystem::s3::enumerator::get_prefix;
 use crate::source::filesystem::s3::S3PropertiesCommon;
+use crate::source::filesystem::s3::enumerator::get_prefix;
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal s3 source.

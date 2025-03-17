@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::types::{data_types, DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, data_types};
 use risingwave_common::{bail_not_implemented, must_match};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_expr::window_function::{
@@ -24,10 +24,10 @@ use risingwave_sqlparser::ast::{
     self, WindowFrameBound, WindowFrameBounds, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 
+use crate::Binder;
 use crate::binder::Clause;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, OrderBy, WindowFunction};
-use crate::Binder;
 
 impl Binder {
     fn ensure_window_function_allowed(&self) -> Result<()> {
@@ -164,7 +164,7 @@ impl Binder {
                                 ),
                                 "Please re-consider the `ORDER BY` column".to_owned(),
                             )
-                            .into())
+                            .into());
                         }
                     };
 

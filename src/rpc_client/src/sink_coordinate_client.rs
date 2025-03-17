@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
 use risingwave_pb::connector_service::{
-    coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
-    SinkMetadata,
+    CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
+    coordinate_response,
 };
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use futures::future::BoxFuture;
+use criterion::{Criterion, criterion_group, criterion_main};
 use futures::FutureExt;
+use futures::future::BoxFuture;
 #[cfg(target_os = "macos")]
 use libc::F_NOCACHE;
 use tempfile::TempDir;

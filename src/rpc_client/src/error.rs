@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ impl RpcError {
             RpcError::MetaAddressParse(_) => false,
             RpcError::Internal(anyhow) => anyhow
                 .downcast_ref::<Self>() // this skips all contexts attached to the error
-                .map_or(false, Self::is_connection_error),
+                .is_some_and(Self::is_connection_error),
         }
     }
 }

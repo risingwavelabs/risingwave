@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_storage::StateStore;
 
 use super::{GroupKey, ManagedTopNState};

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,25 +26,25 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
+    use risingwave_common::util::epoch::{Epoch, EpochExt, test_epoch};
     use risingwave_common_service::NotificationClient;
     use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
-        next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
-        TABLE_PREFIX_LEN,
+        FullKey, TABLE_PREFIX_LEN, TableKey, next_key, prefix_slice_with_vnode,
+        prefixed_range_with_vnode,
     };
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::table_watermark::{
-        ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,
+        ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
     };
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
+    use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
     use risingwave_meta::hummock::compaction::selector::{
-        default_compaction_selector, ManualCompactionOption,
+        ManualCompactionOption, default_compaction_selector,
     };
     use risingwave_meta::hummock::test_utils::{
         get_compaction_group_id_by_table_id, register_table_ids_to_compaction_group,
@@ -58,7 +58,7 @@ pub(crate) mod tests {
         FixedLengthFilterKeyExtractor, MultiFilterKeyExtractor,
     };
     use risingwave_storage::hummock::compactor::compactor_runner::{
-        compact_with_agent, CompactorRunner,
+        CompactorRunner, compact_with_agent,
     };
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
@@ -66,10 +66,11 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::{
-        ConcatIterator, SkipWatermarkIterator, UserIterator,
+        ConcatIterator, NonPkPrefixSkipWatermarkIterator, NonPkPrefixSkipWatermarkState,
+        PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-    use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
+    use risingwave_storage::hummock::test_utils::*;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
@@ -85,8 +86,8 @@ pub(crate) mod tests {
     use crate::get_notification_client_for_test;
     use crate::local_state_store_test_utils::LocalStateStoreTestExt;
     use crate::test_utils::{
-        register_tables_with_id_for_test, update_filter_key_extractor_for_table_ids,
-        TestIngestBatch,
+        TestIngestBatch, register_tables_with_id_for_test,
+        update_filter_key_extractor_for_table_ids,
     };
 
     pub(crate) async fn get_hummock_storage(
@@ -195,10 +196,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
         }
     }
 
@@ -359,10 +357,7 @@ pub(crate) mod tests {
             .seal_and_sync_epoch(epoch, HashSet::from([table_id]))
             .await
             .unwrap();
-        hummock_meta_client
-            .commit_epoch(epoch, res, false)
-            .await
-            .unwrap();
+        hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
     }
 
     async fn prepare_data(
@@ -458,10 +453,12 @@ pub(crate) mod tests {
         assert!(compact_task.is_none());
 
         let current_version = hummock_manager_ref.get_current_version().await;
-        assert!(current_version
-            .get_sst_ids_by_group_id(compaction_group_id)
-            .collect_vec()
-            .is_empty());
+        assert!(
+            current_version
+                .get_sst_ids_by_group_id(compaction_group_id)
+                .collect_vec()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -568,10 +565,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
             epoch.inc_epoch();
         }
 
@@ -766,10 +760,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
             epoch += millisec_interval_epoch;
         }
 
@@ -926,9 +917,11 @@ pub(crate) mod tests {
 
         let table_id_to_vnode =
             HashMap::from_iter([(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         let compact_ctx = get_compactor_context(&storage);
@@ -979,10 +972,7 @@ pub(crate) mod tests {
                 .seal_and_sync_epoch(epoch, table_id_set.clone())
                 .await
                 .unwrap();
-            hummock_meta_client
-                .commit_epoch(epoch, res, false)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, res).await.unwrap();
             epoch += millisec_interval_epoch;
         }
 
@@ -1771,6 +1761,7 @@ pub(crate) mod tests {
                     vec![VnodeWatermark::new(bitmap.clone(), watermark_key.clone())].into(),
                 )],
                 direction: WatermarkDirection::Ascending,
+                watermark_type: WatermarkSerdeType::PkPrefix,
             },
         );
 
@@ -1795,7 +1786,7 @@ pub(crate) mod tests {
             target_file_size,
             compression_algorithm: 1,
             gc_delete_keys: true,
-            table_watermarks,
+            pk_prefix_table_watermarks: table_watermarks,
             ..Default::default()
         };
         let (ret, fast_ret) = run_fast_and_normal_runner(
@@ -1830,21 +1821,42 @@ pub(crate) mod tests {
             }
         }
         let watermark = BTreeMap::from_iter([(TableId::new(1), watermark)]);
+        let compaction_catalog_agent = CompactionCatalogAgent::for_test(vec![1]);
 
-        let mut normal_iter = UserIterator::for_test(
-            SkipWatermarkIterator::new(
+        let combine_iter = {
+            let iter = PkPrefixSkipWatermarkIterator::new(
                 ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
-                watermark.clone(),
-            ),
-            (Bound::Unbounded, Bound::Unbounded),
-        );
-        let mut fast_iter = UserIterator::for_test(
-            SkipWatermarkIterator::new(
-                ConcatIterator::new(fast_ret, sstable_store, read_options),
-                watermark,
-            ),
-            (Bound::Unbounded, Bound::Unbounded),
-        );
+                PkPrefixSkipWatermarkState::new(watermark.clone()),
+            );
+
+            NonPkPrefixSkipWatermarkIterator::new(
+                iter,
+                NonPkPrefixSkipWatermarkState::new(
+                    BTreeMap::default(),
+                    compaction_catalog_agent.clone(),
+                ),
+            )
+        };
+
+        let mut normal_iter =
+            UserIterator::for_test(combine_iter, (Bound::Unbounded, Bound::Unbounded));
+
+        let combine_iter = {
+            let iter = PkPrefixSkipWatermarkIterator::new(
+                ConcatIterator::new(fast_ret, sstable_store.clone(), read_options.clone()),
+                PkPrefixSkipWatermarkState::new(watermark.clone()),
+            );
+
+            NonPkPrefixSkipWatermarkIterator::new(
+                iter,
+                NonPkPrefixSkipWatermarkState::new(
+                    BTreeMap::default(),
+                    compaction_catalog_agent.clone(),
+                ),
+            )
+        };
+        let mut fast_iter =
+            UserIterator::for_test(combine_iter, (Bound::Unbounded, Bound::Unbounded));
         normal_iter.rewind().await.unwrap();
         fast_iter.rewind().await.unwrap();
         let mut count = 0;
@@ -1979,10 +1991,7 @@ pub(crate) mod tests {
                     .seal_and_sync_epoch(*epoch, table_id_set.clone())
                     .await
                     .unwrap();
-                hummock_meta_client
-                    .commit_epoch(*epoch, res, false)
-                    .await
-                    .unwrap();
+                hummock_meta_client.commit_epoch(*epoch, res).await.unwrap();
                 *epoch += millisec_interval_epoch;
             }
         }

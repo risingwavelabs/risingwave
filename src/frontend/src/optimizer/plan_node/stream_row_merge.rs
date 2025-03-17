@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,25 +13,24 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use crate::PlanRef;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 /// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
 /// It will buffer the outputs from its input streams until we receive a barrier.
@@ -81,7 +80,7 @@ impl StreamRowMerge {
         }
         let schema = Schema::new(schema_fields);
         assert!(!schema.is_empty());
-        let watermark_columns = FixedBitSet::with_capacity(schema.fields.len());
+        let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream(
             lhs_input.ctx(),

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
-use crate::hummock::utils::{range_overlap, MemoryTracker};
+use crate::hummock::utils::{MemoryTracker, range_overlap};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockResult};
 use crate::mem_table::ImmId;
@@ -216,14 +216,12 @@ impl SharedBufferBatchInner {
         assert!(!entries.is_empty());
         debug_assert!(entries.iter().is_sorted_by_key(|entry| &entry.key));
         debug_assert!(entries.iter().is_sorted_by_key(|entry| &entry.value_offset));
-        debug_assert!((0..entries.len()).all(|i| SharedBufferKeyEntry::values(
-            i,
-            &entries,
-            &new_values
-        )
-        .iter()
-        .rev()
-        .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)));
+        debug_assert!((0..entries.len()).all(|i| {
+            SharedBufferKeyEntry::values(i, &entries, &new_values)
+                .iter()
+                .rev()
+                .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)
+        }));
         debug_assert!(!epochs.is_empty());
         debug_assert!(epochs.is_sorted());
 
@@ -814,8 +812,8 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
 mod tests {
     use std::ops::Bound::Excluded;
 
-    use itertools::{zip_eq, Itertools};
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use itertools::{Itertools, zip_eq};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;

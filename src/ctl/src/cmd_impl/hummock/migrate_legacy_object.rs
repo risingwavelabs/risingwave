@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,14 @@
 use std::time::Instant;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
 use futures::StreamExt;
+use futures::future::try_join_all;
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_hummock_sdk::{get_object_id_from_path, get_sst_data_path, OBJECT_SUFFIX};
+use risingwave_hummock_sdk::{OBJECT_SUFFIX, get_object_id_from_path, get_sst_data_path};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::prefix::opendal_engine::get_object_prefix;
 use risingwave_object_store::object::{
-    build_remote_object_store, ObjectStoreImpl, OpendalObjectStore,
+    ObjectStoreImpl, OpendalObjectStore, build_remote_object_store,
 };
 
 pub async fn migrate_legacy_object(
@@ -92,7 +92,10 @@ pub async fn migrate_legacy_object(
         copy(from_to.into_iter(), opendal.inner()).await?;
     }
     let cost = timer.elapsed();
-    println!("Migration is finished in {} seconds. {count} objects have been migrated from {source_dir} to {target_dir}.", cost.as_secs());
+    println!(
+        "Migration is finished in {} seconds. {count} objects have been migrated from {source_dir} to {target_dir}.",
+        cost.as_secs()
+    );
     Ok(())
 }
 

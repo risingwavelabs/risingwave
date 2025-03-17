@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@ mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
-use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
+use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
+use risingwave_pb::hummock::PbCompactTask;
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::PbCompactTask;
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -47,14 +47,14 @@ pub use compaction_filter::{
     TtlCompactionFilter,
 };
 pub use context::{
-    await_tree_key, new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext,
+    CompactionAwaitTreeRegRef, CompactorContext, await_tree_key, new_compaction_await_tree_reg_ref,
 };
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
-use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::{
-    compact_task_to_string, HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo,
+    HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo, compact_task_to_string,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
@@ -72,8 +72,8 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 pub use self::compaction_utils::{
-    check_compaction_result, check_flush_result, CompactionStatistics, RemoteBuilderFactory,
-    TaskConfig,
+    CompactionStatistics, RemoteBuilderFactory, TaskConfig, check_compaction_result,
+    check_flush_result,
 };
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
@@ -87,8 +87,8 @@ use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
-    SstableWriterFactory, UnifiedSstableWriterFactory,
+    BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
+    UnifiedSstableWriterFactory, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -188,9 +188,11 @@ impl Compactor {
             .get_table_id_total_time_duration
             .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
-        debug_assert!(split_table_outputs
-            .iter()
-            .all(|table_info| table_info.sst_info.table_ids.is_sorted()));
+        debug_assert!(
+            split_table_outputs
+                .iter()
+                .all(|table_info| table_info.sst_info.table_ids.is_sorted())
+        );
 
         if task_id.is_some() {
             // skip shared buffer compaction
@@ -540,15 +542,22 @@ pub fn start_compactor(
                                     let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
 
                                     if enable_check_compaction_result && need_check_task {
-                                        match check_compaction_result(&compact_task, context.clone())
-                                            .await
-                                        {
+                                        let compact_table_ids = compact_task.build_compact_table_ids();
+                                        match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
+                                            Ok(compaction_catalog_agent_ref) =>  {
+                                                match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
+                                                {
+                                                    Err(e) => {
+                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
+                                                    }
+                                                    Ok(true) => (),
+                                                    Ok(false) => {
+                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                    }
+                                                }
+                                            },
                                             Err(e) => {
-                                                tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
-                                            }
-                                            Ok(true) => (),
-                                            Ok(false) => {
-                                                panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                tracing::warn!(error = %e.as_report(), "failed to acquire compaction catalog agent");
                                             }
                                         }
                                     }
@@ -582,7 +591,7 @@ pub fn start_compactor(
                                 } else {
                                     tracing::warn!(
                                         "Attempting to cancel non-existent compaction task. task_id: {}",
-                                            cancel_compact_task.task_id
+                                        cancel_compact_task.task_id
                                     );
                                 }
                             }
@@ -691,7 +700,7 @@ pub fn start_shared_compactor(
                                         compact_task,
                                         rx,
                                         Box::new(shared_compactor_object_id_manager),
-                                        compaction_catalog_agent_ref,
+                                        compaction_catalog_agent_ref.clone(),
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
@@ -712,7 +721,7 @@ pub fn start_shared_compactor(
                                             let enable_check_compaction_result = context.storage_opts.check_compaction_result;
                                             let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
                                             if enable_check_compaction_result && need_check_task {
-                                                match check_compaction_result(&compact_task, context.clone()).await {
+                                                match check_compaction_result(&compact_task, context.clone(),compaction_catalog_agent_ref).await {
                                                     Err(e) => {
                                                         tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}", task_id);
                                                     },

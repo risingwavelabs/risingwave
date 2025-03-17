@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::ops::Range;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::Result;
+use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 
 pub struct Projection {
     inner: BoxedAggregateFunction,

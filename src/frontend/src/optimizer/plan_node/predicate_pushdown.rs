@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use paste::paste;
 
 use super::*;
-use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::optimizer::PlanVisitor;
+use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl

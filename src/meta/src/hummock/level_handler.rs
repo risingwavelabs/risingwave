@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -136,6 +136,11 @@ impl LevelHandler {
 
     pub fn compacting_files(&self) -> &HashMap<HummockSstableId, HummockCompactionTaskId> {
         &self.compacting_files
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_add_pending_sst(&mut self, sst_id: HummockSstableId, task_id: u64) {
+        self.compacting_files.insert(sst_id, task_id);
     }
 }
 

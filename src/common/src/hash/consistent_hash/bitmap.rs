@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::ops::RangeInclusive;
 use std::sync::{Arc, LazyLock};
 
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::hash::table_distribution::SINGLETON_VNODE;
 use crate::hash::VirtualNode;
+use crate::hash::table_distribution::SINGLETON_VNODE;
 
 /// An extension trait for `Bitmap` to support virtual node operations.
 #[easy_ext::ext(VnodeBitmapExt)]

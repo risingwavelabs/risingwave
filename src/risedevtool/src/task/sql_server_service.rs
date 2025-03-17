@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::task::docker_service::{DockerService, DockerServiceConfig};
 use crate::SqlServerConfig;
+use crate::task::docker_service::{DockerService, DockerServiceConfig};
 
 impl DockerServiceConfig for SqlServerConfig {
     fn id(&self) -> String {

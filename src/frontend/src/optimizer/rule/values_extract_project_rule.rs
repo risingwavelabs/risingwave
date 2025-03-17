@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ use risingwave_common::types::DataType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprVisitor};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalValues};
 use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
-use crate::optimizer::PlanRef;
 
 pub struct ValuesExtractProjectRule {}
 impl Rule for ValuesExtractProjectRule {

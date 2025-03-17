@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
-use prometheus::{register_int_counter_vec_with_registry, Registry};
+use prometheus::{Registry, register_int_counter_vec_with_registry};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]

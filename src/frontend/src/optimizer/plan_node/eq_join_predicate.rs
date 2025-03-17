@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -160,6 +160,16 @@ impl EqJoinPredicate {
     /// Get a mutable reference to the join predicate's other cond.
     pub fn other_cond_mut(&mut self) -> &mut Condition {
         &mut self.other_cond
+    }
+
+    /// Get the equal predicate
+    pub fn eq_predicate(&self) -> Self {
+        Self {
+            other_cond: Condition::true_cond(),
+            eq_keys: self.eq_keys.clone(),
+            left_cols_num: self.left_cols_num,
+            right_cols_num: self.right_cols_num,
+        }
     }
 
     /// Get a reference to the join predicate's eq keys.

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ mod tests {
     use risingwave_common::hash::{ActorMapping, VirtualNode};
 
     use crate::model::ActorId;
-    use crate::stream::scale::rebalance_actor_vnode;
     use crate::stream::CustomActorInfo;
+    use crate::stream::scale::rebalance_actor_vnode;
 
     fn simulated_parallelism(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT_FOR_TEST];

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::{DataType, ListRef, ScalarRefImpl, StructType};
-use risingwave_expr::{function, Result};
+use risingwave_expr::{Result, function};
 
 /// Returns the input array as a set of rows with an index.
 ///

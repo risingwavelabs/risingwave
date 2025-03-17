@@ -64,7 +64,7 @@ risedev ci-start ci-1cn-1fe-jdbc-to-native
 
 echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
+risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
 sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
@@ -73,15 +73,28 @@ echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
 risedev ci-kill
 
 echo "--- starting risingwave cluster"
-risedev ci-start ci-1cn-1fe
+# Use ci-inline-source-test since it will configure ports, db, host etc... env vars via risedev-env.
+# These are required for cli tools like psql have env vars correctly configured.
+risedev ci-start ci-inline-source-test
+
+echo "--- check connectivity for postgres"
+PGPASSWORD=postgres psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
+
+echo "--- dumping risedev-env"
+echo "risedev-env:"
+risedev show-risedev-env
+
+# MUST use risedev slt, not sqllogictest, else env var not loaded and test fails.
+echo "--- testing postgres_sink"
+risedev slt './e2e_test/sink/postgres_sink.slt'
 
 echo "--- testing common sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/sink_into_table/*.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/file_sink.slt'
+risedev slt './e2e_test/sink/append_only_sink.slt'
+risedev slt './e2e_test/sink/create_sink_as.slt'
+risedev slt './e2e_test/sink/blackhole_sink.slt'
+risedev slt './e2e_test/sink/remote/types.slt'
+risedev slt './e2e_test/sink/sink_into_table/*.slt'
+risedev slt './e2e_test/sink/file_sink.slt'
 sleep 1
 
 echo "--- preparing postgresql"
@@ -90,7 +103,7 @@ prepare_pg
 echo "--- testing remote sinks"
 
 # check sink destination postgres
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
+risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
 sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
@@ -147,8 +160,8 @@ risedev ci-kill
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe
-sqllogictest -p 4566 -d dev './e2e_test/sink/nexmark_endless_mvs/*.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/nexmark_endless_sinks/*.slt'
+risedev slt './e2e_test/sink/nexmark_endless_mvs/*.slt'
+risedev slt './e2e_test/sink/nexmark_endless_sinks/*.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill

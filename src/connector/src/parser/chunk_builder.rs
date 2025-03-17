@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -250,6 +250,12 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
 
     pub fn row_meta(&self) -> Option<MessageMeta<'a>> {
         self.row_meta
+    }
+
+    pub fn source_meta(&self) -> &'a SourceMeta {
+        self.row_meta
+            .map(|m| m.source_meta)
+            .unwrap_or(&SourceMeta::Empty)
     }
 
     /// Convert the row writer to invisible row writer.

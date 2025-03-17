@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,5 +22,6 @@ mod pg_get_viewdef;
 mod pg_index_column_has_property;
 mod pg_indexes_size;
 mod pg_relation_size;
+mod pg_table_is_visible;
 mod rw_epoch_to_ts;
 mod rw_recovery_status;

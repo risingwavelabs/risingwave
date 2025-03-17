@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,8 @@ use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use regex::Regex;
-use risingwave_connector::error::ConnectorResult;
-use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
-};
-use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
+use risingwave_connector::WithOptionsSecResolved;
+use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
 use risingwave_pb::cloud_service::{
@@ -76,43 +73,39 @@ impl CloudService for CloudServiceImpl {
                 e.to_report_string(),
             ));
         };
+        let props = props.unwrap();
 
-        async fn new_enumerator<P: SourceProperties>(
-            props: P,
-        ) -> ConnectorResult<P::SplitEnumerator> {
-            P::SplitEnumerator::new(props, SourceEnumeratorContext::dummy().into()).await
+        let enumerator = props
+            .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+            .await;
+        if let Err(e) = enumerator {
+            return Ok(new_rwc_validate_fail_response(
+                ErrorType::KafkaInvalidProperties,
+                e.to_report_string(),
+            ));
+        }
+        if let Err(e) = enumerator.unwrap().list_splits().await {
+            let error_message = e.to_report_string();
+            if error_message.contains("BrokerTransportFailure") {
+                return Ok(new_rwc_validate_fail_response(
+                    ErrorType::KafkaBrokerUnreachable,
+                    e.to_report_string(),
+                ));
+            }
+            static TOPIC_NOT_FOUND: LazyLock<Regex> =
+                LazyLock::new(|| Regex::new(r"topic .* not found").unwrap());
+            if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
+                return Ok(new_rwc_validate_fail_response(
+                    ErrorType::KafkaTopicNotFound,
+                    e.to_report_string(),
+                ));
+            }
+            return Ok(new_rwc_validate_fail_response(
+                ErrorType::KafkaOther,
+                e.to_report_string(),
+            ));
         }
 
-        dispatch_source_prop!(props.unwrap(), props, {
-            let enumerator = new_enumerator(*props).await;
-            if let Err(e) = enumerator {
-                return Ok(new_rwc_validate_fail_response(
-                    ErrorType::KafkaInvalidProperties,
-                    e.to_report_string(),
-                ));
-            }
-            if let Err(e) = enumerator.unwrap().list_splits().await {
-                let error_message = e.to_report_string();
-                if error_message.contains("BrokerTransportFailure") {
-                    return Ok(new_rwc_validate_fail_response(
-                        ErrorType::KafkaBrokerUnreachable,
-                        e.to_report_string(),
-                    ));
-                }
-                static TOPIC_NOT_FOUND: LazyLock<Regex> =
-                    LazyLock::new(|| Regex::new(r"topic .* not found").unwrap());
-                if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
-                    return Ok(new_rwc_validate_fail_response(
-                        ErrorType::KafkaTopicNotFound,
-                        e.to_report_string(),
-                    ));
-                }
-                return Ok(new_rwc_validate_fail_response(
-                    ErrorType::KafkaOther,
-                    e.to_report_string(),
-                ));
-            }
-        });
         Ok(Response::new(RwCloudValidateSourceResponse {
             ok: true,
             error: None,

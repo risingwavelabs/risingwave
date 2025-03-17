@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,24 +20,24 @@ use bytes::{BufMut, Bytes};
 use foyer::CacheHint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::StateStore;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead,
-    TryWaitEpochOptions, WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, TryWaitEpochOptions,
+    WriteOptions,
 };
-use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_str, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_str};
 
 #[tokio::test]
 #[ignore]
@@ -147,7 +147,7 @@ async fn test_failpoints_state_store_read_upload() {
         .seal_and_sync_epoch(1, table_id_set.clone())
         .await
         .unwrap();
-    meta_client.commit_epoch(1, res, false).await.unwrap();
+    meta_client.commit_epoch(1, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(
             HummockReadEpoch::Committed(1),
@@ -227,7 +227,7 @@ async fn test_failpoints_state_store_read_upload() {
         .seal_and_sync_epoch(3, table_id_set)
         .await
         .unwrap();
-    meta_client.commit_epoch(3, res, false).await.unwrap();
+    meta_client.commit_epoch(3, res).await.unwrap();
     hummock_storage
         .try_wait_epoch(
             HummockReadEpoch::Committed(3),

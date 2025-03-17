@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,10 @@ use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
-    register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry, exponential_buckets,
+    histogram_opts, register_gauge_vec_with_registry, register_histogram_vec_with_registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
@@ -36,7 +35,7 @@ use risingwave_common::{
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
-    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+    GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 use risingwave_pb::common::WorkerType;
 use thiserror_ext::AsReport;
@@ -65,18 +64,18 @@ pub struct MetaMetrics {
     // ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
-    pub barrier_latency: Histogram,
+    pub barrier_latency: LabelGuardedHistogramVec<1>,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
     /// Latency between each barrier send
-    pub barrier_send_latency: Histogram,
+    pub barrier_send_latency: LabelGuardedHistogramVec<1>,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
-    pub all_barrier_nums: IntGaugeVec,
+    pub all_barrier_nums: LabelGuardedIntGaugeVec<1>,
     /// The number of in-flight barriers
-    pub in_flight_barrier_nums: IntGaugeVec,
+    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec<1>,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
-    pub last_committed_barrier_time: IntGauge,
+    pub last_committed_barrier_time: IntGaugeVec,
 
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
@@ -89,8 +88,8 @@ pub struct MetaMetrics {
     pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec<1>, // (table_id, _)
 
     // ********************************** Recovery ************************************
-    pub recovery_failure_cnt: IntCounter,
-    pub recovery_latency: Histogram,
+    pub recovery_failure_cnt: IntCounterVec,
+    pub recovery_latency: HistogramVec,
 
     // ********************************** Hummock ************************************
     /// Max committed epoch
@@ -169,6 +168,7 @@ pub struct MetaMetrics {
     pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
+    pub compact_task_trivial_move_sst_count: HistogramVec,
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
@@ -227,7 +227,9 @@ impl MetaMetrics {
             "barrier latency",
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
-        let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let barrier_latency =
+            register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
+                .unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
@@ -242,25 +244,28 @@ impl MetaMetrics {
             "barrier send latency",
             exponential_buckets(0.1, 1.5, 19).unwrap() // max 148s
         );
-        let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let barrier_send_latency =
+            register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
+                .unwrap();
 
-        let all_barrier_nums = register_int_gauge_vec_with_registry!(
+        let all_barrier_nums = register_guarded_int_gauge_vec_with_registry!(
             "all_barrier_nums",
             "num of of all_barrier",
             &["database_id"],
             registry
         )
         .unwrap();
-        let in_flight_barrier_nums = register_int_gauge_vec_with_registry!(
+        let in_flight_barrier_nums = register_guarded_int_gauge_vec_with_registry!(
             "in_flight_barrier_nums",
             "num of of in_flight_barrier",
             &["database_id"],
             registry
         )
         .unwrap();
-        let last_committed_barrier_time = register_int_gauge_with_registry!(
+        let last_committed_barrier_time = register_int_gauge_vec_with_registry!(
             "last_committed_barrier_time",
             "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
+            &["database_id"],
             registry
         )
         .unwrap();
@@ -564,9 +569,10 @@ impl MetaMetrics {
         .unwrap();
         let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
-        let recovery_failure_cnt = register_int_counter_with_registry!(
+        let recovery_failure_cnt = register_int_counter_vec_with_registry!(
             "recovery_failure_cnt",
             "Number of failed recovery attempts",
+            &["recovery_type"],
             registry
         )
         .unwrap();
@@ -575,7 +581,8 @@ impl MetaMetrics {
             "Latency of the recovery process",
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
-        let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let recovery_latency =
+            register_histogram_vec_with_registry!(opts, &["recovery_type"], registry).unwrap();
 
         let auto_schema_change_failure_cnt = register_guarded_int_counter_vec_with_registry!(
             "auto_schema_change_failure_cnt",
@@ -772,6 +779,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "storage_compact_task_trivial_move_sst_count",
+            "sst count of compact trivial-move task",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_trivial_move_sst_count =
+            register_histogram_vec_with_registry!(opts, &["group"], registry).unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -834,6 +849,7 @@ impl MetaMetrics {
             compact_task_size,
             compact_task_file_count,
             compact_task_batch_count,
+            compact_task_trivial_move_sst_count,
             table_write_throughput,
             split_compaction_group_count,
             state_table_count,

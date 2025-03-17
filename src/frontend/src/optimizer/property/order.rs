@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +44,16 @@ impl Order {
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.column_orders.len()
+    }
+
+    pub fn concat(self, other: Self) -> Self {
+        Self {
+            column_orders: self
+                .column_orders
+                .into_iter()
+                .chain(other.column_orders)
+                .collect(),
+        }
     }
 }
 

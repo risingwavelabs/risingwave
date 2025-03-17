@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,9 +33,9 @@ use risingwave_pb::stream_plan::{
 
 use self::rewrite::build_delta_join_without_arrange;
 use crate::error::Result;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::reorganize_elements_id;
-use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
 
 /// The mutable state when building fragment graph.
@@ -314,9 +314,21 @@ fn build_fragment(
 
             NodeBody::StreamScan(node) => {
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
-                if node.stream_scan_type() == StreamScanType::SnapshotBackfill {
-                    current_fragment.fragment_type_mask |=
-                        FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                match node.stream_scan_type() {
+                    StreamScanType::SnapshotBackfill => {
+                        current_fragment.fragment_type_mask |=
+                            FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                    }
+                    StreamScanType::CrossDbSnapshotBackfill => {
+                        current_fragment.fragment_type_mask |=
+                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32;
+                    }
+                    StreamScanType::Unspecified
+                    | StreamScanType::Chain
+                    | StreamScanType::Rearrange
+                    | StreamScanType::Backfill
+                    | StreamScanType::UpstreamOnly
+                    | StreamScanType::ArrangementBackfill => {}
                 }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbDataChunk;
 
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray};
-use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
+use crate::array::data_chunk_iter::RowRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
@@ -38,12 +38,12 @@ use crate::util::chunk_coalesce::DataChunkBuilder;
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{
-    estimate_serialize_datum_size, serialize_datum_into, try_get_exact_serialize_datum_size,
-    ValueRowSerializer,
+    ValueRowSerializer, estimate_serialize_datum_size, serialize_datum_into,
+    try_get_exact_serialize_datum_size,
 };
 
 /// [`DataChunk`] is a collection of Columns,
-/// a with visibility mask for each row.
+/// with a visibility mask for each row.
 /// For instance, we could have a [`DataChunk`] of this format.
 ///
 /// | v1 | v2 | v3 |

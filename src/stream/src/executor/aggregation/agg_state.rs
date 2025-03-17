@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
 use super::{AggStateCacheStats, GroupKey};
-use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
+use crate::common::table::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.

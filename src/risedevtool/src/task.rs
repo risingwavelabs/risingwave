@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ mod redis_service;
 mod schema_registry_service;
 mod sql_server_service;
 mod task_configure_minio;
+mod task_db_ready_check;
 mod task_kafka_ready_check;
 mod task_log_ready_check;
 mod task_pubsub_emu_ready_check;
@@ -46,7 +47,7 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use indicatif::ProgressBar;
 use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;
@@ -70,13 +71,14 @@ pub use self::redis_service::*;
 pub use self::schema_registry_service::SchemaRegistryService;
 pub use self::sql_server_service::*;
 pub use self::task_configure_minio::*;
+pub use self::task_db_ready_check::*;
 pub use self::task_kafka_ready_check::*;
 pub use self::task_log_ready_check::*;
 pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
 pub use self::task_tcp_ready_check::*;
 pub use self::tempo_service::*;
-use crate::util::{complete_spin, get_program_args, get_program_name};
+use crate::util::{begin_spin, complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
 
 pub trait Task: 'static + Send {
@@ -134,6 +136,7 @@ where
     pub fn service(&mut self, task: &impl Task) {
         let id = task.id();
         if !id.is_empty() {
+            begin_spin(&self.pb);
             self.pb.set_prefix(id.clone());
             self.id = Some(id.clone());
             self.status_file = Some(self.status_dir.path().join(format!("{}.status", id)));

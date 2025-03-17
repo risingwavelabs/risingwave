@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
+use crate::hummock::HummockResult;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
@@ -27,7 +28,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatchIterator, SharedBufferVersionedEntryRef,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 pub struct Node<I: HummockIterator> {
@@ -271,7 +271,7 @@ where
     }
 
     fn is_valid(&self) -> bool {
-        self.heap.peek().map_or(false, |n| n.iter.is_valid())
+        self.heap.peek().is_some_and(|n| n.iter.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

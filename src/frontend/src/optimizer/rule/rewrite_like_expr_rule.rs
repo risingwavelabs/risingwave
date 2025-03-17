@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,12 @@
 use std::cmp::min;
 use std::str::from_utf8;
 
-use risingwave_common::types::ScalarImpl;
-use risingwave_connector::source::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 
 /// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
 /// col like 'ABC' => col = 'ABC'

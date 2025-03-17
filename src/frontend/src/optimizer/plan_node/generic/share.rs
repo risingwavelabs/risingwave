@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use std::hash::Hash;
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Share<PlanRef> {

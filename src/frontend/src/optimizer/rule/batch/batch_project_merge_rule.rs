@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
-use crate::optimizer::plan_node::{generic, BatchProject, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{BatchProject, PlanTreeNodeUnary, generic};
 use crate::optimizer::rule::Rule;
 use crate::optimizer::{BoxedRule, PlanRef};
 use crate::utils::Substitute;

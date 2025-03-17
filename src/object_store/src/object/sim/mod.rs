@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ use std::ops::{Range, RangeBounds};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use madsim::rand::{thread_rng, RngCore};
-use madsim::time::{sleep, Duration};
+use madsim::rand::{RngCore, thread_rng};
+use madsim::time::{Duration, sleep};
 use risingwave_common::range::RangeBoundsExt;
 
 use self::client::Client;

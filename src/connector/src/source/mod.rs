@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,36 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+pub mod prelude {
+    // import all split enumerators
+    pub use crate::source::datagen::DatagenSplitEnumerator;
+    pub use crate::source::filesystem::LegacyS3SplitEnumerator;
+    pub use crate::source::filesystem::opendal_source::OpendalEnumerator;
+    pub use crate::source::google_pubsub::PubsubSplitEnumerator as GooglePubsubSplitEnumerator;
+    pub use crate::source::iceberg::IcebergSplitEnumerator;
+    pub use crate::source::kafka::KafkaSplitEnumerator;
+    pub use crate::source::kinesis::KinesisSplitEnumerator;
+    pub use crate::source::mqtt::MqttSplitEnumerator;
+    pub use crate::source::nats::NatsSplitEnumerator;
+    pub use crate::source::nexmark::NexmarkSplitEnumerator;
+    pub use crate::source::pulsar::PulsarSplitEnumerator;
+    pub use crate::source::test_source::TestSourceSplitEnumerator as TestSplitEnumerator;
+    pub type AzblobSplitEnumerator =
+        OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalAzblob>;
+    pub type GcsSplitEnumerator =
+        OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalGcs>;
+    pub type OpendalS3SplitEnumerator =
+        OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalS3>;
+    pub type PosixFsSplitEnumerator =
+        OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalPosixFs>;
+    pub use crate::source::cdc::enumerator::DebeziumSplitEnumerator;
+    pub type CitusCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Citus>;
+    pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
+    pub type PostgresCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Postgres>;
+    pub type MysqlCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mysql>;
+    pub type SqlServerCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::SqlServer>;
+}
 
 pub mod base;
 pub mod cdc;
@@ -50,10 +80,10 @@ use risingwave_common::array::{Array, ArrayRef};
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
+pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::filesystem::opendal_source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
-pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 
@@ -136,14 +166,12 @@ impl WaitCheckpointTask {
                 ref ack_policy,
             ) => {
                 async fn ack(context: &JetStreamContext, reply_subject: String) {
-                    match context.publish(reply_subject.clone(), "".into()).await {
+                    match context.publish(reply_subject.clone(), "+ACK".into()).await {
                         Err(e) => {
                             tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
                         }
                         Ok(ack_future) => {
-                            if let Err(e) = ack_future.into_future().await {
-                                tracing::error!(error = %e.as_report(), subject = ?reply_subject, "failed to ack NATS JetStream message");
-                            }
+                            let _ = ack_future.into_future().await;
                         }
                     }
                 }
@@ -163,6 +191,9 @@ impl WaitCheckpointTask {
                     JetStreamAckPolicy::None => (),
                     JetStreamAckPolicy::Explicit => {
                         for reply_subject in reply_subjects {
+                            if reply_subject.is_empty() {
+                                continue;
+                            }
                             ack(context, reply_subject).await;
                         }
                     }

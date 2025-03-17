@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{
-    build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
+    AggCall, AggregateState, BoxedAggregateFunction, build_retractable,
 };
 
 use super::aggregation::agg_call_filter_res;
@@ -130,8 +130,8 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
-    use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::test_utils::agg_executor::generate_agg_schema;
 
     #[tokio::test]
     async fn test_no_chunk() {

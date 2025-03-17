@@ -1,0 +1,52 @@
+control substitution on
+
+system ok
+rpk registry schema create "opentelemetry_common.proto" --schema "/risingwave/src/connector/codec/tests/test_data/opentelemetry_common.proto"
+
+system ok
+rpk registry schema create "opentelemetry_test-value" --schema "/dev/stdin" --references opentelemetry_common.proto:opentelemetry_common.proto:1 --type protobuf << EOF
+syntax = "proto3";
+package opentelemetry_test;
+import "opentelemetry_common.proto";
+message OTLPTestMessage {
+  opentelemetry.proto.common.v1.AnyValue any_value = 1;
+  opentelemetry.proto.common.v1.KeyValueList key_value_list = 2;
+  opentelemetry.proto.common.v1.InstrumentationScope instrumentation_scope = 3;
+}
+EOF
+
+
+system ok
+echo '{"any_value":{"string_value":"example"},"key_value_list":{"values":[{"key":"key1","value":{"string_value":"value1"}},{"key":"key2","value":{"int_value":42}}]},"instrumentation_scope":{"name":"test-scope","version":"1.0"}}' | rpk topic produce "opentelemetry_test" --schema-id=topic --schema-type="opentelemetry_test.OTLPTestMessage" --allow-auto-topic-creation
+
+statement ok
+create table opentelemetry_test with ( ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'opentelemetry_test' ) format plain encode protobuf ( schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}', message = 'opentelemetry_test.OTLPTestMessage', messages_as_jsonb = 'opentelemetry.proto.common.v1.ArrayValue,opentelemetry.proto.common.v1.KeyValueList,opentelemetry.proto.common.v1.AnyValue');
+
+statement ok
+flush;
+
+sleep 1s
+
+query T retry 3 backoff 5s
+select count(*) from opentelemetry_test;
+----
+1
+
+query TTT
+select any_value, key_value_list, instrumentation_scope from opentelemetry_test;
+----
+{"stringValue": "example"} {"values": [{"key": "key1", "value": {"stringValue": "value1"}}, {"key": "key2", "value": {"intValue": "42"}}]} (test-scope,1.0,{},0)
+
+# ==== clean up ====
+
+statement ok
+drop table opentelemetry_test;
+
+system ok
+rpk topic  delete opentelemetry_test;
+
+system ok
+rpk registry subject delete "opentelemetry_test-value"
+
+system ok
+rpk registry subject delete "opentelemetry_common.proto"

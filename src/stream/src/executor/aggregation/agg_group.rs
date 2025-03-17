@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
@@ -31,17 +31,61 @@ use risingwave_storage::StateStore;
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
-use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
+use crate::executor::error::StreamExecutorResult;
+
+#[derive(Debug)]
+pub struct Context {
+    group_key: Option<GroupKey>,
+}
+
+impl Context {
+    pub fn group_key(&self) -> Option<&GroupKey> {
+        self.group_key.as_ref()
+    }
+
+    pub fn group_key_row(&self) -> OwnedRow {
+        self.group_key()
+            .map(GroupKey::table_row)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+fn row_count_of(ctx: &Context, row: Option<impl Row>, row_count_col: usize) -> usize {
+    match row {
+        Some(row) => {
+            let mut row_count = row
+                .datum_at(row_count_col)
+                .expect("row count field should not be NULL")
+                .into_int64();
+
+            if row_count < 0 {
+                consistency_panic!(group = ?ctx.group_key_row(), row_count, "row count should be non-negative");
+
+                // NOTE: Here is the case that an inconsistent `DELETE` arrives at HashAgg executor, and there's no
+                // corresponding group existing before (or has been deleted). In this case, previous row count should
+                // be `0` and current row count be `-1` after handling the `DELETE`. To ignore the inconsistency, we
+                // reset `row_count` to `0` here, so that `OnlyOutputIfHasInput` will return no change, so that the
+                // inconsistent will be hidden from downstream. This won't prevent from incorrect results of existing
+                // groups, but at least can prevent from downstream panicking due to non-existing keys.
+                // See https://github.com/risingwavelabs/risingwave/issues/14031 for more information.
+                row_count = 0;
+            }
+            row_count.try_into().unwrap()
+        }
+        None => 0,
+    }
+}
 
 pub trait Strategy {
     /// Infer the change type of the aggregation result. Don't need to take the ownership of
-    /// `prev_outputs` and `curr_outputs`.
+    /// `prev_row` and `curr_row`.
     fn infer_change_type(
-        prev_row_count: usize,
-        curr_row_count: usize,
-        prev_outputs: Option<&OwnedRow>,
-        curr_outputs: &OwnedRow,
+        ctx: &Context,
+        prev_row: Option<&OwnedRow>,
+        curr_row: &OwnedRow,
+        row_count_col: usize,
     ) -> Option<RecordType>;
 }
 
@@ -53,12 +97,13 @@ pub struct OnlyOutputIfHasInput;
 
 impl Strategy for AlwaysOutput {
     fn infer_change_type(
-        prev_row_count: usize,
-        _curr_row_count: usize,
-        prev_outputs: Option<&OwnedRow>,
-        _curr_outputs: &OwnedRow,
+        ctx: &Context,
+        prev_row: Option<&OwnedRow>,
+        _curr_row: &OwnedRow,
+        row_count_col: usize,
     ) -> Option<RecordType> {
-        match prev_outputs {
+        let prev_row_count = row_count_of(ctx, prev_row, row_count_col);
+        match prev_row {
             None => {
                 // First time to build changes, assert to ensure correctness.
                 // Note that it's not true vice versa, i.e. `prev_row_count == 0` doesn't imply
@@ -85,11 +130,14 @@ impl Strategy for AlwaysOutput {
 
 impl Strategy for OnlyOutputIfHasInput {
     fn infer_change_type(
-        prev_row_count: usize,
-        curr_row_count: usize,
-        prev_outputs: Option<&OwnedRow>,
-        curr_outputs: &OwnedRow,
+        ctx: &Context,
+        prev_row: Option<&OwnedRow>,
+        curr_row: &OwnedRow,
+        row_count_col: usize,
     ) -> Option<RecordType> {
+        let prev_row_count = row_count_of(ctx, prev_row, row_count_col);
+        let curr_row_count = row_count_of(ctx, Some(curr_row), row_count_col);
+
         match (prev_row_count, curr_row_count) {
             (0, 0) => {
                 // No rows of current group exist.
@@ -105,7 +153,7 @@ impl Strategy for OnlyOutputIfHasInput {
             }
             (_, _) => {
                 // Update output row.
-                if prev_outputs.expect("must exist previous outputs") == curr_outputs {
+                if prev_row.expect("must exist previous row") == curr_row {
                     // No output change.
                     None
                 } else {
@@ -159,17 +207,24 @@ impl GroupKey {
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
 pub struct AggGroup<S: StateStore, Strtg: Strategy> {
-    /// Group key.
-    group_key: Option<GroupKey>,
+    /// Agg group context, containing the group key.
+    ctx: Context,
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState>,
 
-    /// Previous outputs of aggregate functions. Initializing with `None`.
+    /// Previous intermediate states, stored in the intermediate state table.
+    prev_inter_states: Option<OwnedRow>,
+
+    /// Previous outputs, yielded to downstream.
+    /// If `EOWC` is true, this field is not used.
     prev_outputs: Option<OwnedRow>,
 
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
+
+    /// Whether the emit policy is EOWC.
+    emit_on_window_close: bool,
 
     _phantom: PhantomData<(S, Strtg)>,
 }
@@ -177,14 +232,18 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
 impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggGroup")
-            .field("group_key", &self.group_key)
+            .field("group_key", &self.ctx.group_key)
+            .field("prev_inter_states", &self.prev_inter_states)
             .field("prev_outputs", &self.prev_outputs)
+            .field("row_count_index", &self.row_count_index)
+            .field("emit_on_window_close", &self.emit_on_window_close)
             .finish()
     }
 }
 
 impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
     fn estimated_heap_size(&self) -> usize {
+        // TODO(rc): should include the size of `prev_inter_states` and `prev_outputs`
         self.states
             .iter()
             .map(|state| state.estimated_heap_size())
@@ -205,14 +264,15 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         intermediate_state_table: &StateTable<S>,
         pk_indices: &PkIndices,
         row_count_index: usize,
+        emit_on_window_close: bool,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        let encoded_states = intermediate_state_table
+        let inter_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
-        if let Some(encoded_states) = &encoded_states {
-            assert_eq!(encoded_states.len(), agg_calls.len());
+        if let Some(inter_states) = &inter_states {
+            assert_eq!(inter_states.len(), agg_calls.len());
         }
 
         let mut states = Vec::with_capacity(agg_calls.len());
@@ -222,7 +282,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_call,
                 agg_func,
                 &storages[idx],
-                encoded_states.as_ref().map(|outputs| &outputs[idx]),
+                inter_states.as_ref().map(|s| &s[idx]),
                 pk_indices,
                 extreme_cache_size,
                 input_schema,
@@ -231,32 +291,36 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         }
 
         let mut this = Self {
-            group_key,
+            ctx: Context { group_key },
             states,
-            prev_outputs: None, // will be initialized later
+            prev_inter_states: inter_states,
+            prev_outputs: None, // will be set below
             row_count_index,
+            emit_on_window_close,
             _phantom: PhantomData,
         };
 
-        if encoded_states.is_some() {
-            let (_, outputs, _stats) = this.get_outputs(storages, agg_funcs).await?;
+        if !this.emit_on_window_close && this.prev_inter_states.is_some() {
+            let (outputs, _stats) = this.get_outputs(storages, agg_funcs).await?;
             this.prev_outputs = Some(outputs);
         }
 
         Ok(this)
     }
 
-    /// Create a group from encoded states for EOWC. The previous output is set to `None`.
+    /// Create a group from intermediate states for EOWC output.
+    /// Will always produce `Insert` when building change.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_eowc(
+    pub fn for_eowc_output(
         version: PbAggNodeVersion,
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
-        encoded_states: &OwnedRow,
+        inter_states: &OwnedRow,
         pk_indices: &PkIndices,
         row_count_index: usize,
+        emit_on_window_close: bool,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
@@ -267,7 +331,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_call,
                 agg_func,
                 &storages[idx],
-                Some(&encoded_states[idx]),
+                Some(&inter_states[idx]),
                 pk_indices,
                 extreme_cache_size,
                 input_schema,
@@ -276,36 +340,18 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         }
 
         Ok(Self {
-            group_key,
+            ctx: Context { group_key },
             states,
-            prev_outputs: None,
+            prev_inter_states: None, // this doesn't matter
+            prev_outputs: None,      // this will make sure the outputs change to be `Insert`
             row_count_index,
+            emit_on_window_close,
             _phantom: PhantomData,
         })
     }
 
     pub fn group_key(&self) -> Option<&GroupKey> {
-        self.group_key.as_ref()
-    }
-
-    pub fn group_key_row(&self) -> OwnedRow {
-        self.group_key
-            .as_ref()
-            .map(GroupKey::table_row)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn prev_row_count(&self) -> usize {
-        match &self.prev_outputs {
-            Some(states) => states[self.row_count_index]
-                .as_ref()
-                .map(|x| {
-                    TryInto::try_into(*x.as_int64()).expect("row count should be non-negative")
-                })
-                .unwrap_or(0),
-            None => 0,
-        }
+        self.ctx.group_key()
     }
 
     /// Get current row count of this group.
@@ -314,27 +360,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             self.states[self.row_count_index],
             AggState::Value(ref state) => state
         );
-        let mut row_count = *row_count_state
-            .as_datum()
-            .as_ref()
-            .expect("row count state should not be NULL")
-            .as_int64();
-        if row_count < 0 {
-            consistency_panic!(group = ?self.group_key_row(), row_count, "row count should be non-negative");
-
-            // NOTE: Here is the case that an inconsistent `DELETE` arrives at HashAgg executor, and there's no
-            // corresponding group existing before (or has been deleted). In this case, `prev_row_count()` will
-            // report `0`. To ignore the inconsistent, we set `curr_row_count` to `0` here, so that `OnlyOutputIfHasInput`
-            // will return no change, so that the inconsistent will be hidden from downstream. This won't prevent from
-            // incorrect results of existing groups, but at least can prevent from downstream panicking due to non-existing
-            // keys. See https://github.com/risingwavelabs/risingwave/issues/14031 for more information.
-            row_count = 0;
-        }
-        row_count.try_into().unwrap()
+        row_count_of(&self.ctx, Some([row_count_state.as_datum().clone()]), 0)
     }
 
     pub(crate) fn is_uninitialized(&self) -> bool {
-        self.prev_outputs.is_none()
+        self.prev_inter_states.is_none()
     }
 
     /// Apply input chunk to all managed agg states.
@@ -349,7 +379,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         visibilities: Vec<Bitmap>,
     ) -> StreamExecutorResult<()> {
         if self.curr_row_count() == 0 {
-            tracing::trace!(group = ?self.group_key_row(), "first time see this group");
+            tracing::trace!(group = ?self.ctx.group_key_row(), "first time see this group");
         }
         for (((state, call), func), visibility) in (self.states.iter_mut())
             .zip_eq_fast(calls)
@@ -360,7 +390,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         }
 
         if self.curr_row_count() == 0 {
-            tracing::trace!(group = ?self.group_key_row(), "last time see this group");
+            tracing::trace!(group = ?self.ctx.group_key_row(), "last time see this group");
         }
 
         Ok(())
@@ -375,26 +405,18 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         Ok(())
     }
 
-    /// Encode intermediate states.
-    pub fn encode_states(
-        &self,
-        funcs: &[BoxedAggregateFunction],
-    ) -> StreamExecutorResult<OwnedRow> {
-        let mut encoded_states = Vec::with_capacity(self.states.len());
+    /// Get the encoded intermediate states of all managed agg states.
+    fn get_inter_states(&self, funcs: &[BoxedAggregateFunction]) -> StreamExecutorResult<OwnedRow> {
+        let mut inter_states = Vec::with_capacity(self.states.len());
         for (state, func) in self.states.iter().zip_eq_fast(funcs) {
             let encoded = match state {
                 AggState::Value(s) => func.encode_state(s)?,
                 // For minput state, we don't need to store it in state table.
                 AggState::MaterializedInput(_) => None,
             };
-            encoded_states.push(encoded);
+            inter_states.push(encoded);
         }
-        let states = self
-            .group_key()
-            .map(GroupKey::table_row)
-            .chain(OwnedRow::new(encoded_states))
-            .into_owned_row();
-        Ok(states)
+        Ok(OwnedRow::new(inter_states))
     }
 
     /// Get the outputs of all managed agg states, without group key prefix.
@@ -405,12 +427,13 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         &mut self,
         storages: &[AggStateStorage<S>],
         funcs: &[BoxedAggregateFunction],
-    ) -> StreamExecutorResult<(usize, OwnedRow, AggStateCacheStats)> {
+    ) -> StreamExecutorResult<(OwnedRow, AggStateCacheStats)> {
         let row_count = self.curr_row_count();
         if row_count == 0 {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
+            // This actually also prevents inconsistent negative row count from being worse.
             // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
             // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
             self.reset(funcs)?;
@@ -422,7 +445,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 .zip_eq_fast(storages)
                 .zip_eq_fast(funcs)
                 .map(|((state, storage), func)| {
-                    state.get_output(storage, func, self.group_key.as_ref())
+                    state.get_output(storage, func, self.ctx.group_key())
                 }),
         )
         .await
@@ -435,50 +458,55 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 })
                 .collect::<Vec<_>>()
         })
-        .map(|row| (row_count, OwnedRow::new(row), stats))
+        .map(|row| (OwnedRow::new(row), stats))
     }
 
-    /// Build aggregation result change, according to previous and current agg outputs.
-    /// The saved previous outputs will be updated to the latest outputs after this method.
-    pub async fn build_change(
+    /// Build change for aggregation intermediate states, according to previous and current agg states.
+    /// The change should be applied to the intermediate state table.
+    ///
+    /// The saved previous inter states will be updated to the latest states after calling this method.
+    pub fn build_states_change(
         &mut self,
-        storages: &[AggStateStorage<S>],
         funcs: &[BoxedAggregateFunction],
-    ) -> StreamExecutorResult<(Option<Record<OwnedRow>>, AggStateCacheStats)> {
-        let prev_row_count = self.prev_row_count();
-        let (curr_row_count, curr_outputs, stats) = self.get_outputs(storages, funcs).await?;
-
+    ) -> StreamExecutorResult<Option<Record<OwnedRow>>> {
+        let curr_inter_states = self.get_inter_states(funcs)?;
         let change_type = Strtg::infer_change_type(
-            prev_row_count,
-            curr_row_count,
-            self.prev_outputs.as_ref(),
-            &curr_outputs,
+            &self.ctx,
+            self.prev_inter_states.as_ref(),
+            &curr_inter_states,
+            self.row_count_index,
         );
 
         tracing::trace!(
-            group = ?self.group_key_row(),
-            prev_row_count,
-            curr_row_count,
+            group = ?self.ctx.group_key_row(),
+            prev_inter_states = ?self.prev_inter_states,
+            curr_inter_states = ?curr_inter_states,
             change_type = ?change_type,
-            "build change"
+            "build intermediate states change"
         );
 
-        let change = change_type.map(|change_type| match change_type {
+        let Some(change_type) = change_type else {
+            return Ok(None);
+        };
+        Ok(Some(match change_type {
             RecordType::Insert => {
                 let new_row = self
                     .group_key()
                     .map(GroupKey::table_row)
-                    .chain(&curr_outputs)
+                    .chain(&curr_inter_states)
                     .into_owned_row();
-                self.prev_outputs = Some(curr_outputs);
+                self.prev_inter_states = Some(curr_inter_states);
                 Record::Insert { new_row }
             }
             RecordType::Delete => {
-                let prev_outputs = self.prev_outputs.take();
+                let prev_inter_states = self
+                    .prev_inter_states
+                    .take()
+                    .expect("must exist previous intermediate states");
                 let old_row = self
                     .group_key()
                     .map(GroupKey::table_row)
-                    .chain(prev_outputs)
+                    .chain(prev_inter_states)
                     .into_owned_row();
                 Record::Delete { old_row }
             }
@@ -486,19 +514,94 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 let new_row = self
                     .group_key()
                     .map(GroupKey::table_row)
-                    .chain(&curr_outputs)
+                    .chain(&curr_inter_states)
                     .into_owned_row();
-                let prev_outputs = self.prev_outputs.replace(curr_outputs);
+                let prev_inter_states = self
+                    .prev_inter_states
+                    .replace(curr_inter_states)
+                    .expect("must exist previous intermediate states");
                 let old_row = self
                     .group_key()
                     .map(GroupKey::table_row)
-                    .chain(prev_outputs)
+                    .chain(prev_inter_states)
                     .into_owned_row();
                 Record::Update { old_row, new_row }
             }
-        });
+        }))
+    }
 
-        Ok((change, stats))
+    /// Build aggregation result change, according to previous and current agg outputs.
+    /// The change should be yielded to downstream.
+    ///
+    /// The saved previous outputs will be updated to the latest outputs after this method.
+    ///
+    /// Note that this method is very likely to cost more than `build_states_change`, because it
+    /// needs to produce output for materialized input states which may involve state table read.
+    pub async fn build_outputs_change(
+        &mut self,
+        storages: &[AggStateStorage<S>],
+        funcs: &[BoxedAggregateFunction],
+    ) -> StreamExecutorResult<(Option<Record<OwnedRow>>, AggStateCacheStats)> {
+        let (curr_outputs, stats) = self.get_outputs(storages, funcs).await?;
+
+        let change_type = Strtg::infer_change_type(
+            &self.ctx,
+            self.prev_outputs.as_ref(),
+            &curr_outputs,
+            self.row_count_index,
+        );
+
+        tracing::trace!(
+            group = ?self.ctx.group_key_row(),
+            prev_outputs = ?self.prev_outputs,
+            curr_outputs = ?curr_outputs,
+            change_type = ?change_type,
+            "build outputs change"
+        );
+
+        let Some(change_type) = change_type else {
+            return Ok((None, stats));
+        };
+        Ok((
+            Some(match change_type {
+                RecordType::Insert => {
+                    let new_row = self
+                        .group_key()
+                        .map(GroupKey::table_row)
+                        .chain(&curr_outputs)
+                        .into_owned_row();
+                    // Although we say the `prev_outputs` field is not used in EOWC mode, we still
+                    // do the same here to keep the code simple. When it's actually running in EOWC
+                    // mode, `build_outputs_change` will be called only once for each group.
+                    self.prev_outputs = Some(curr_outputs);
+                    Record::Insert { new_row }
+                }
+                RecordType::Delete => {
+                    let prev_outputs = self.prev_outputs.take();
+                    let old_row = self
+                        .group_key()
+                        .map(GroupKey::table_row)
+                        .chain(prev_outputs)
+                        .into_owned_row();
+                    Record::Delete { old_row }
+                }
+                RecordType::Update => {
+                    let new_row = self
+                        .group_key()
+                        .map(GroupKey::table_row)
+                        .chain(&curr_outputs)
+                        .into_owned_row();
+                    let prev_outputs = self.prev_outputs.replace(curr_outputs);
+                    let old_row = self
+                        .group_key()
+                        .map(GroupKey::table_row)
+                        .chain(prev_outputs)
+                        .into_owned_row();
+                    Record::Update { old_row, new_row }
+                }
+            }),
+            stats,
+        ))
     }
 }
 

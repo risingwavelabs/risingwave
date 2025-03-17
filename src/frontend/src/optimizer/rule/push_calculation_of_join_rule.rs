@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedRule;
-use crate::expr::{align_types, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, align_types};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::rule::Rule;
-use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 pub struct PushCalculationOfJoinRule {}

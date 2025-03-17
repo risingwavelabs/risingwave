@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::OnceLock;
 
+use axum::Extension;
 use axum::body::Body;
 use axum::handler::{Handler, HandlerWithoutStateExt};
 use axum::response::{IntoResponse, Response};
-use axum::Extension;
 use axum_extra::extract::Query as ExtraQuery;
 use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;

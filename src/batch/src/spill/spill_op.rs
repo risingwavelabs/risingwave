@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ use std::sync::{Arc, LazyLock};
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
+use opendal::Operator;
 use opendal::layers::RetryLayer;
 use opendal::services::{Fs, Memory};
-use opendal::Operator;
 use risingwave_common::array::DataChunk;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 use risingwave_pb::Message;
+use risingwave_pb::data::DataChunk as PbDataChunk;
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use twox_hash::XxHash64;

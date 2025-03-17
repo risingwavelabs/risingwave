@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ mod filter;
 mod orderby;
 mod projection;
 
-use risingwave_expr::aggregate::{build_append_only, AggCall, BoxedAggregateFunction};
 use risingwave_expr::Result;
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 
 use self::distinct::Distinct;
 use self::filter::*;

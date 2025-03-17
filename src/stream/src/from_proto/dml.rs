@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::dml::DmlExecutor;
 use crate::executor::Executor;
+use crate::executor::dml::DmlExecutor;
 use crate::task::ExecutorParams;
 
 pub struct DmlExecutorBuilder;
@@ -45,7 +45,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             node.table_version_id,
             column_descs,
             params.env.config().developer.chunk_size,
-            node.rate_limit,
+            node.rate_limit.into(),
         );
         Ok((params.info, exec).into())
     }

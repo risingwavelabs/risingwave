@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 
 /// Transpose `LogicalApply` and `LogicalProject`.
 ///

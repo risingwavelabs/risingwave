@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,10 +42,11 @@ impl TaskManager {
     ) -> &UploadingTaskStatus {
         let task_id = task.task_id;
         self.task_order.push_front(task.task_id);
-        assert!(self
-            .tasks
-            .insert(task.task_id, TaskEntry { task, status })
-            .is_none());
+        assert!(
+            self.tasks
+                .insert(task.task_id, TaskEntry { task, status })
+                .is_none()
+        );
         &self.tasks.get(&task_id).expect("should exist").status
     }
 

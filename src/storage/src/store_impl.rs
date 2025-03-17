@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::prometheus::PrometheusMetricsRegistry;
 use foyer::{
     DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
+use futures::FutureExt;
+use futures::future::BoxFuture;
+use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
+use risingwave_common::catalog::TableId;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
 
+use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -33,17 +38,19 @@ use crate::hummock::{
     Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
     SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
-use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
+use crate::memory::sled::SledStateStore;
 use crate::monitor::{
-    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
+    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore, MonitoredStorageMetrics,
+    ObjectStoreMetrics,
 };
 use crate::opts::StorageOpts;
-use crate::StateStore;
 
-static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
-    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
+static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
+    Box::new(PrometheusMetricsRegistry::new(
+        GLOBAL_METRICS_REGISTRY.clone(),
+    ))
+});
 
 mod opaque_type {
     use super::*;
@@ -64,8 +71,45 @@ mod opaque_type {
         may_dynamic_dispatch(state_store)
     }
 }
-use opaque_type::{hummock, in_memory, sled};
 pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
+use opaque_type::{hummock, in_memory, sled};
+
+#[cfg(feature = "hm-trace")]
+type Monitored<S> = MonitoredStateStore<crate::monitor::traced_store::TracedStateStore<S>>;
+
+#[cfg(not(feature = "hm-trace"))]
+type Monitored<S> = MonitoredStateStore<S>;
+
+fn monitored<S: StateStore>(
+    state_store: S,
+    storage_metrics: Arc<MonitoredStorageMetrics>,
+) -> Monitored<S> {
+    let inner = {
+        #[cfg(feature = "hm-trace")]
+        {
+            crate::monitor::traced_store::TracedStateStore::new_global(state_store)
+        }
+        #[cfg(not(feature = "hm-trace"))]
+        {
+            state_store
+        }
+    };
+    inner.monitored(storage_metrics)
+}
+
+fn inner<S>(state_store: &Monitored<S>) -> &S {
+    let inner = state_store.inner();
+    {
+        #[cfg(feature = "hm-trace")]
+        {
+            inner.inner()
+        }
+        #[cfg(not(feature = "hm-trace"))]
+        {
+            inner
+        }
+    }
+}
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -95,8 +139,8 @@ fn may_dynamic_dispatch(state_store: impl StateStore + AsHummock) -> impl StateS
     }
     #[cfg(debug_assertions)]
     {
-        use crate::store_impl::boxed_state_store::BoxDynamicDispatchedStateStore;
-        Box::new(state_store) as BoxDynamicDispatchedStateStore
+        use crate::store_impl::dyn_state_store::StateStorePointer;
+        StateStorePointer(Arc::new(state_store) as _)
     }
 }
 
@@ -135,7 +179,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(in_memory(state_store).monitored(storage_metrics))
+        Self::MemoryStateStore(monitored(in_memory(state_store), storage_metrics))
     }
 
     pub fn hummock(
@@ -143,14 +187,14 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(hummock(state_store).monitored(storage_metrics))
+        Self::HummockStateStore(monitored(hummock(state_store), storage_metrics))
     }
 
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(sled(state_store).monitored(storage_metrics))
+        Self::SledStateStore(monitored(sled(state_store), storage_metrics))
     }
 
     pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
@@ -167,7 +211,7 @@ impl StateStoreImpl {
     pub fn as_hummock(&self) -> Option<&HummockStorage> {
         match self {
             StateStoreImpl::HummockStateStore(hummock) => {
-                Some(hummock.inner().as_hummock().expect("should be hummock"))
+                Some(inner(hummock).as_hummock().expect("should be hummock"))
             }
             _ => None,
         }
@@ -228,19 +272,18 @@ pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
     use std::marker::PhantomData;
-    use std::ops::{Bound, Deref};
+    use std::ops::Deref;
     use std::sync::Arc;
 
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
-    use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
@@ -263,35 +306,35 @@ pub mod verify {
         }
     }
 
+    #[derive(Clone)]
     pub struct VerifyStateStore<A, E, T = ()> {
         pub actual: A,
         pub expected: Option<E>,
         pub _phantom: PhantomData<T>,
     }
 
-    impl<A: AsHummock, E> AsHummock for VerifyStateStore<A, E> {
+    impl<A: AsHummock, E: AsHummock> AsHummock for VerifyStateStore<A, E> {
         fn as_hummock(&self) -> Option<&HummockStorage> {
             self.actual.as_hummock()
         }
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type ChangeLogIter = impl StateStoreReadChangeLogIter;
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
 
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
             let actual = self
                 .actual
-                .get_keyed_row(key.clone(), epoch, read_options.clone())
+                .get_keyed_row(key.clone(), read_options.clone())
                 .await;
             if let Some(expected) = &self.expected {
-                let expected = expected.get_keyed_row(key, epoch, read_options).await;
+                let expected = expected.get_keyed_row(key, read_options).await;
                 assert_result_eq(&actual, &expected);
             }
             actual
@@ -303,16 +346,16 @@ pub mod verify {
         fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             async move {
                 let actual = self
                     .actual
-                    .iter(key_range.clone(), epoch, read_options.clone())
+                    .iter(key_range.clone(), read_options.clone())
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.iter(key_range, epoch, read_options).await?)
+                    Some(expected.iter(key_range, read_options).await?)
                 } else {
                     None
                 };
@@ -325,22 +368,34 @@ pub mod verify {
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
             async move {
                 let actual = self
                     .actual
-                    .rev_iter(key_range.clone(), epoch, read_options.clone())
+                    .rev_iter(key_range.clone(), read_options.clone())
                     .await?;
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.rev_iter(key_range, epoch, read_options).await?)
+                    Some(expected.rev_iter(key_range, read_options).await?)
                 } else {
                     None
                 };
 
                 Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
+        }
+    }
+
+    impl<A: StateStoreReadLog, E: StateStoreReadLog> StateStoreReadLog for VerifyStateStore<A, E> {
+        type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            let actual = self.actual.next_epoch(epoch, options.clone()).await?;
+            if let Some(expected) = &self.expected {
+                assert_eq!(actual, expected.next_epoch(epoch, options).await?);
+            }
+            Ok(actual)
         }
 
         async fn iter_log(
@@ -392,37 +447,10 @@ pub mod verify {
         }
     }
 
-    impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-            write_options: WriteOptions,
-        ) -> StorageResult<usize> {
-            let actual = self.actual.ingest_batch(
-                kv_pairs.clone(),
-                delete_ranges.clone(),
-                write_options.clone(),
-            );
-            if let Some(expected) = &self.expected {
-                let expected = expected.ingest_batch(kv_pairs, delete_ranges, write_options);
-                assert_eq!(actual.is_err(), expected.is_err());
-            }
-            actual
-        }
-    }
-
-    impl<A: Clone, E: Clone> Clone for VerifyStateStore<A, E> {
-        fn clone(&self) -> Self {
-            Self {
-                actual: self.actual.clone(),
-                expected: self.expected.clone(),
-                _phantom: PhantomData,
-            }
-        }
-    }
-
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
+        type FlushedSnapshotReader =
+            VerifyStateStore<A::FlushedSnapshotReader, E::FlushedSnapshotReader>;
+
         type Iter<'a> = impl StateStoreIter + 'a;
         type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -548,12 +576,12 @@ pub mod verify {
             ret
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            let ret = self.actual.update_vnode_bitmap(vnodes.clone());
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                assert_eq!(ret, expected.update_vnode_bitmap(vnodes));
+                assert_eq!(ret, expected.update_vnode_bitmap(vnodes).await?);
             }
-            ret
+            Ok(ret)
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -563,10 +591,19 @@ pub mod verify {
             }
             ret
         }
+
+        fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+            VerifyStateStore {
+                actual: self.actual.new_flushed_snapshot_reader(),
+                expected: self.expected.as_ref().map(E::new_flushed_snapshot_reader),
+                _phantom: Default::default(),
+            }
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
+        type ReadSnapshot = VerifyStateStore<A::ReadSnapshot, E::ReadSnapshot>;
 
         fn try_wait_epoch(
             &self,
@@ -587,6 +624,23 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             }
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<Self::ReadSnapshot> {
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.new_read_snapshot(epoch, options).await?)
+            } else {
+                None
+            };
+            Ok(VerifyStateStore {
+                actual: self.actual.new_read_snapshot(epoch, options).await?,
+                expected,
+                _phantom: PhantomData::<()>,
+            })
         }
     }
 
@@ -766,12 +820,16 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                tracing::warn!(
+                    "In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported."
+                );
                 StateStoreImpl::shared_in_memory_store(storage_metrics.clone())
             }
 
             sled if sled.starts_with("sled://") => {
-                tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
+                tracing::warn!(
+                    "sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported."
+                );
                 let path = sled.strip_prefix("sled://").unwrap();
                 StateStoreImpl::sled(SledStateStore::new(path), storage_metrics.clone())
             }
@@ -783,8 +841,22 @@ impl StateStoreImpl {
     }
 }
 
-pub trait AsHummock {
+pub trait AsHummock: Send + Sync {
     fn as_hummock(&self) -> Option<&HummockStorage>;
+
+    fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            if let Some(hummock) = self.as_hummock() {
+                hummock.sync(sync_table_epochs).await
+            } else {
+                Ok(SyncResult::default())
+            }
+        }
+        .boxed()
+    }
 }
 
 impl AsHummock for HummockStorage {
@@ -806,39 +878,36 @@ impl AsHummock for SledStateStore {
 }
 
 #[cfg(debug_assertions)]
-pub mod boxed_state_store {
+mod dyn_state_store {
     use std::future::Future;
-    use std::ops::{Deref, DerefMut};
+    use std::ops::DerefMut;
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use dyn_clone::{clone_trait_object, DynClone};
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
-    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreIter<T: IterItem>: Send {
+    pub trait DynStateStoreIter<T: IterItem>: Send {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
     }
 
-    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
-    impl<T: IterItem, I: StateStoreIter<T>> DynamicDispatchedStateStoreIter<T> for I {
+    impl<T: IterItem, I: StateStoreIter<T>> DynStateStoreIter<T> for I {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
             self.try_next().await
         }
     }
 
-    pub type BoxStateStoreIter<'a, T> = Box<dyn DynamicDispatchedStateStoreIter<T> + 'a>;
-    impl<'a, T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'a, T> {
+    pub type BoxStateStoreIter<'a, T> = Box<dyn DynStateStoreIter<T> + 'a>;
+    impl<T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'_, T> {
         fn try_next(
             &mut self,
         ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_ {
@@ -852,28 +921,32 @@ pub mod boxed_state_store {
     pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
+    pub trait DynStateStoreRead: StaticSendSync {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>>;
 
         async fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
 
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
+    }
 
+    #[async_trait::async_trait]
+    pub trait DynStateStoreReadLog: StaticSendSync {
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64>;
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -882,35 +955,42 @@ pub mod boxed_state_store {
         ) -> StorageResult<BoxStateStoreReadChangeLogIter>;
     }
 
+    pub type StateStoreReadDynRef = StateStorePointer<Arc<dyn DynStateStoreRead>>;
+
     #[async_trait::async_trait]
-    impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
+    impl<S: StateStoreRead> DynStateStoreRead for S {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            self.get_keyed_row(key, epoch, read_options).await
+            self.get_keyed_row(key, read_options).await
         }
 
         async fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
-            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+            Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter> {
-            Ok(Box::new(
-                self.rev_iter(key_range, epoch, read_options).await?,
-            ))
+            Ok(Box::new(self.rev_iter(key_range, read_options).await?))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreReadLog> DynStateStoreReadLog for S {
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            self.next_epoch(epoch, options).await
         }
 
         async fn iter_log(
@@ -928,26 +1008,26 @@ pub mod boxed_state_store {
     // For LocalStateStore
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
-    pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
+    pub trait DynLocalStateStore: StaticSendSync {
         async fn get(
             &self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
+
+        fn new_flushed_snapshot_reader(&self) -> StateStoreReadDynRef;
 
         fn insert(
             &mut self,
@@ -970,13 +1050,13 @@ pub mod boxed_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>>;
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
 
     #[async_trait::async_trait]
-    impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
+    impl<S: LocalStateStore> DynLocalStateStore for S {
         async fn get(
             &self,
             key: TableKey<Bytes>,
@@ -985,7 +1065,6 @@ pub mod boxed_state_store {
             self.get(key, read_options).await
         }
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -994,13 +1073,16 @@ pub mod boxed_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
             Ok(Box::new(self.rev_iter(key_range, read_options).await?))
+        }
+
+        fn new_flushed_snapshot_reader(&self) -> StateStoreReadDynRef {
+            StateStorePointer(Arc::new(self.new_flushed_snapshot_reader()) as _)
         }
 
         fn insert(
@@ -1040,8 +1122,8 @@ pub mod boxed_state_store {
             self.seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            self.update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            self.update_vnode_bitmap(vnodes).await
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -1049,9 +1131,10 @@ pub mod boxed_state_store {
         }
     }
 
-    pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
+    pub type BoxDynLocalStateStore = StateStorePointer<Box<dyn DynLocalStateStore>>;
 
-    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
+    impl LocalStateStore for BoxDynLocalStateStore {
+        type FlushedSnapshotReader = StateStoreReadDynRef;
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
         type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
 
@@ -1060,7 +1143,7 @@ pub mod boxed_state_store {
             key: TableKey<Bytes>,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-            self.deref().get(key, read_options)
+            (*self.0).get(key, read_options)
         }
 
         fn iter(
@@ -1068,7 +1151,7 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
-            self.deref().iter(key_range, read_options)
+            (*self.0).iter(key_range, read_options)
         }
 
         fn rev_iter(
@@ -1076,11 +1159,15 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
-            self.deref().rev_iter(key_range, read_options)
+            (*self.0).rev_iter(key_range, read_options)
+        }
+
+        fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+            (*self.0).new_flushed_snapshot_reader()
         }
 
         fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-            self.deref().get_table_watermark(vnode)
+            (*self.0).get_table_watermark(vnode)
         }
 
         fn insert(
@@ -1089,60 +1176,65 @@ pub mod boxed_state_store {
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
-            self.deref_mut().insert(key, new_val, old_val)
+            (*self.0).insert(key, new_val, old_val)
         }
 
         fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
-            self.deref_mut().delete(key, old_val)
+            (*self.0).delete(key, old_val)
         }
 
         fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-            self.deref_mut().flush()
+            (*self.0).flush()
         }
 
         fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref_mut().try_flush()
+            (*self.0).try_flush()
         }
 
         fn epoch(&self) -> u64 {
-            self.deref().epoch()
+            (*self.0).epoch()
         }
 
         fn is_dirty(&self) -> bool {
-            self.deref().is_dirty()
+            (*self.0).is_dirty()
         }
 
         fn init(
             &mut self,
             options: InitOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref_mut().init(options)
+            (*self.0).init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-            self.deref_mut().seal_current_epoch(next_epoch, opts)
+            (*self.0).seal_current_epoch(next_epoch, opts)
         }
 
-        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-            self.deref_mut().update_vnode_bitmap(vnodes)
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            (*self.0).update_vnode_bitmap(vnodes).await
         }
     }
 
     // For global StateStore
 
     #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreExt: StaticSendSync {
+    pub trait DynStateStoreExt: StaticSendSync {
         async fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
             options: TryWaitEpochOptions,
         ) -> StorageResult<()>;
 
-        async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
+        async fn new_local(&self, option: NewLocalOptions) -> BoxDynLocalStateStore;
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<StateStoreReadDynRef>;
     }
 
     #[async_trait::async_trait]
-    impl<S: StateStore> DynamicDispatchedStateStoreExt for S {
+    impl<S: StateStore> DynStateStoreExt for S {
         async fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
@@ -1151,43 +1243,80 @@ pub mod boxed_state_store {
             self.try_wait_epoch(epoch, options).await
         }
 
-        async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
-            Box::new(self.new_local(option).await)
+        async fn new_local(&self, option: NewLocalOptions) -> BoxDynLocalStateStore {
+            StateStorePointer(Box::new(self.new_local(option).await))
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<StateStoreReadDynRef> {
+            Ok(StateStorePointer(Arc::new(
+                self.new_read_snapshot(epoch, options).await?,
+            )))
         }
     }
 
-    pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
+    pub type StateStoreDynRef = StateStorePointer<Arc<dyn DynStateStore>>;
 
-    impl StateStoreRead for BoxDynamicDispatchedStateStore {
-        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
+    macro_rules! state_store_pointer_dyn_as_ref {
+        ($pointer:ident < dyn $source_dyn_trait:ident > , $target_dyn_trait:ident) => {
+            impl AsRef<dyn $target_dyn_trait>
+                for StateStorePointer<$pointer<dyn $source_dyn_trait>>
+            {
+                fn as_ref(&self) -> &dyn $target_dyn_trait {
+                    (&*self.0) as _
+                }
+            }
+        };
+    }
+
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
+
+    #[derive(Clone)]
+    pub struct StateStorePointer<P>(pub(crate) P);
+
+    impl<P> StateStoreRead for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StaticSendSync,
+    {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
 
         fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-            self.deref().get_keyed_row(key, epoch, read_options)
+            self.as_ref().get_keyed_row(key, read_options)
         }
 
         fn iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-            self.deref().iter(key_range, epoch, read_options)
+            self.as_ref().iter(key_range, read_options)
         }
 
         fn rev_iter(
             &self,
             key_range: TableKeyRange,
-            epoch: u64,
+
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-            self.deref().rev_iter(key_range, epoch, read_options)
+            self.as_ref().rev_iter(key_range, read_options)
+        }
+    }
+
+    impl StateStoreReadLog for StateStoreDynRef {
+        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
+
+        async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
+            (*self.0).next_epoch(epoch, options).await
         }
 
         fn iter_log(
@@ -1196,45 +1325,45 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             options: ReadLogOptions,
         ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
-            self.deref().iter_log(epoch_range, key_range, options)
+            (*self.0).iter_log(epoch_range, key_range, options)
         }
     }
 
-    pub trait DynamicDispatchedStateStore:
-        DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock
-    {
-    }
+    pub trait DynStateStore: DynStateStoreReadLog + DynStateStoreExt + AsHummock {}
 
-    clone_trait_object!(DynamicDispatchedStateStore);
-
-    impl AsHummock for BoxDynamicDispatchedStateStore {
+    impl AsHummock for StateStoreDynRef {
         fn as_hummock(&self) -> Option<&HummockStorage> {
-            self.deref().as_hummock()
+            (*self.0).as_hummock()
         }
     }
 
-    impl<
-            S: DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock,
-        > DynamicDispatchedStateStore for S
-    {
-    }
+    impl<S: DynStateStoreReadLog + DynStateStoreExt + AsHummock> DynStateStore for S {}
 
-    impl StateStore for BoxDynamicDispatchedStateStore {
-        type Local = BoxDynamicDispatchedLocalStateStore;
+    impl StateStore for StateStoreDynRef {
+        type Local = BoxDynLocalStateStore;
+        type ReadSnapshot = StateStoreReadDynRef;
 
         fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,
             options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref().try_wait_epoch(epoch, options)
+            (*self.0).try_wait_epoch(epoch, options)
         }
 
         fn new_local(
             &self,
             option: NewLocalOptions,
         ) -> impl Future<Output = Self::Local> + Send + '_ {
-            self.deref().new_local(option)
+            (*self.0).new_local(option)
+        }
+
+        async fn new_read_snapshot(
+            &self,
+            epoch: HummockReadEpoch,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<Self::ReadSnapshot> {
+            (*self.0).new_read_snapshot(epoch, options).await
         }
     }
 }

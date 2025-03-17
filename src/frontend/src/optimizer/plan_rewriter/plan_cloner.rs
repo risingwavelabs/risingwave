@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
+use crate::PlanRef;
+use crate::optimizer::PlanRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNode, StreamShare};
-use crate::optimizer::PlanRewriter;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlanCloner {

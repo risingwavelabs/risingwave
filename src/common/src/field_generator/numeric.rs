@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
-use crate::types::{Datum, Scalar, F32, F64};
+use crate::types::{Datum, F32, F64, Scalar};
 
 trait NumericType
 where

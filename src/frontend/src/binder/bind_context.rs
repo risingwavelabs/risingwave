@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use super::statement::RewriteExprsRecursive;
 use super::BoundSetExpr;
-use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
+use super::statement::RewriteExprsRecursive;
+use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -218,7 +218,7 @@ impl BindContext {
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
                     Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name)?
+                        self.get_index_with_table_name(column_name, table_name)?,
                     ])
                 }
             }

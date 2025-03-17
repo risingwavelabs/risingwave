@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -27,16 +27,16 @@ use super::{
 };
 
 pub mod prelude {
-    pub use std::sync::atomic::AtomicU64;
     pub use std::sync::Arc;
+    pub use std::sync::atomic::AtomicU64;
 
     pub use risingwave_common::array::StreamChunk;
     pub use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     pub use risingwave_common::test_prelude::StreamChunkTestExt;
     pub use risingwave_common::types::DataType;
     pub use risingwave_common::util::sort_util::OrderType;
-    pub use risingwave_storage::memory::MemoryStateStore;
     pub use risingwave_storage::StateStore;
+    pub use risingwave_storage::memory::MemoryStateStore;
 
     pub use crate::common::table::state_table::StateTable;
     pub use crate::executor::test_utils::expr::build_from_pretty;
@@ -269,8 +269,8 @@ pub mod expr {
 }
 
 pub mod agg_executor {
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use futures::future;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -281,9 +281,9 @@ pub mod agg_executor {
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
+    use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
@@ -484,7 +484,7 @@ pub mod agg_executor {
         };
 
         let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx: ActorContext::for_test(123),
@@ -552,7 +552,7 @@ pub mod agg_executor {
         };
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
-            version: PbAggNodeVersion::Max,
+            version: PbAggNodeVersion::LATEST,
 
             input,
             actor_ctx,
@@ -626,22 +626,30 @@ pub mod top_n_executor {
 }
 
 pub mod hash_join_executor {
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use itertools::Itertools;
-    use risingwave_common::array::{I64Array, Op, StreamChunkTestExt};
+    use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::hash::Key128;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::plan_common::JoinType;
     use risingwave_storage::memory::MemoryStateStore;
+    use strum_macros::Display;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::StateTable;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType};
+    use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType as ConstJoinType};
+
+    #[derive(Clone, Copy, Debug, Display)]
+    pub enum HashJoinWorkload {
+        InCache,
+        NotInCache,
+    }
 
     pub async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
@@ -701,6 +709,8 @@ pub mod hash_join_executor {
     /// 4. Check memory utilization.
     pub async fn setup_bench_stream_hash_join(
         amp: usize,
+        workload: HashJoinWorkload,
+        join_type: JoinType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let fields = vec![DataType::Int64, DataType::Int64, DataType::Int64];
         let orders = vec![OrderType::ascending(), OrderType::ascending()];
@@ -715,27 +725,8 @@ pub mod hash_join_executor {
             create_in_memory_state_table(state_store.clone(), &fields, &orders, &[0, 1], 2).await;
 
         // Insert 100K records into the build side.
-        {
-            // Create column [0]: join key. Each record has the same value, to trigger join amplification.
-            let mut int64_jk_builder = DataType::Int64.create_array_builder(amp);
-            int64_jk_builder
-                .append_array(&I64Array::from_iter(vec![Some(200_000); amp].into_iter()).into());
-            let jk = int64_jk_builder.finish();
-
-            // Create column [1]: pk. The original pk will be here, it will be unique.
-            let mut int64_pk_data_chunk_builder = DataType::Int64.create_array_builder(amp);
-            let seq = I64Array::from_iter((0..amp as i64).map(Some));
-            int64_pk_data_chunk_builder.append_array(&I64Array::from(seq).into());
-            let pk = int64_pk_data_chunk_builder.finish();
-
-            // Create column [2]: value. This can be an arbitrary value, so just clone the pk column.
-            let values = pk.clone();
-
-            // Build the stream chunk.
-            let columns = vec![jk.into(), pk.into(), values.into()];
-            let ops = vec![Op::Insert; amp];
-            let stream_chunk = StreamChunk::new(ops, columns);
-
+        if matches!(workload, HashJoinWorkload::NotInCache) {
+            let stream_chunk = build_chunk(amp, 200_000);
             // Write to state table.
             rhs_state_table.write_chunk(stream_chunk);
         }
@@ -765,31 +756,96 @@ pub mod hash_join_executor {
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
 
-        let executor = HashJoinExecutor::<Key128, MemoryStateStore, { JoinType::Inner }>::new(
-            ActorContext::for_test(123),
-            info,
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            vec![false], // null-safe
-            (0..schema_len).collect_vec(),
-            None,   // condition, it is an eq join, we have no condition
-            vec![], // ineq pairs
-            lhs_state_table,
-            lhs_degree_state_table,
-            rhs_state_table,
-            rhs_degree_state_table,
-            Arc::new(AtomicU64::new(0)), // watermark epoch
-            false,                       // is_append_only
-            Arc::new(StreamingMetrics::unused()),
-            1024, // chunk_size
-            2048, // high_join_amplification_threshold
-        );
-        (tx_l, tx_r, executor.boxed().execute())
+        let cache_size = match workload {
+            HashJoinWorkload::InCache => Some(1_000_000),
+            HashJoinWorkload::NotInCache => None,
+        };
+
+        match join_type {
+            JoinType::Inner => {
+                let executor =
+                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new_with_cache_size(
+                        ActorContext::for_test(123),
+                        info,
+                        source_l,
+                        source_r,
+                        params_l,
+                        params_r,
+                        vec![false], // null-safe
+                        (0..schema_len).collect_vec(),
+                        None,   // condition, it is an eq join, we have no condition
+                        vec![], // ineq pairs
+                        lhs_state_table,
+                        lhs_degree_state_table,
+                        rhs_state_table,
+                        rhs_degree_state_table,
+                        Arc::new(AtomicU64::new(0)), // watermark epoch
+                        false,                       // is_append_only
+                        Arc::new(StreamingMetrics::unused()),
+                        1024, // chunk_size
+                        2048, // high_join_amplification_threshold
+                        cache_size,
+                    );
+                (tx_l, tx_r, executor.boxed().execute())
+            }
+            JoinType::LeftOuter => {
+                let executor = HashJoinExecutor::<
+                    Key128,
+                    MemoryStateStore,
+                    { ConstJoinType::LeftOuter },
+                >::new_with_cache_size(
+                    ActorContext::for_test(123),
+                    info,
+                    source_l,
+                    source_r,
+                    params_l,
+                    params_r,
+                    vec![false], // null-safe
+                    (0..schema_len).collect_vec(),
+                    None,   // condition, it is an eq join, we have no condition
+                    vec![], // ineq pairs
+                    lhs_state_table,
+                    lhs_degree_state_table,
+                    rhs_state_table,
+                    rhs_degree_state_table,
+                    Arc::new(AtomicU64::new(0)), // watermark epoch
+                    false,                       // is_append_only
+                    Arc::new(StreamingMetrics::unused()),
+                    1024, // chunk_size
+                    2048, // high_join_amplification_threshold
+                    cache_size,
+                );
+                (tx_l, tx_r, executor.boxed().execute())
+            }
+            _ => panic!("Unsupported join type"),
+        }
+    }
+
+    fn build_chunk(size: usize, join_key_value: i64) -> StreamChunk {
+        // Create column [0]: join key. Each record has the same value, to trigger join amplification.
+        let mut int64_jk_builder = DataType::Int64.create_array_builder(size);
+        int64_jk_builder
+            .append_array(&I64Array::from_iter(vec![Some(join_key_value); size]).into());
+        let jk = int64_jk_builder.finish();
+
+        // Create column [1]: pk. The original pk will be here, it will be unique.
+        let mut int64_pk_data_chunk_builder = DataType::Int64.create_array_builder(size);
+        let seq = I64Array::from_iter((0..size as i64).map(Some));
+        int64_pk_data_chunk_builder.append_array(&I64Array::from(seq).into());
+        let pk = int64_pk_data_chunk_builder.finish();
+
+        // Create column [2]: value. This can be an arbitrary value, so just clone the pk column.
+        let values = pk.clone();
+
+        // Build the stream chunk.
+        let columns = vec![jk.into(), pk.into(), values.into()];
+        let ops = vec![Op::Insert; size];
+        StreamChunk::new(ops, columns)
     }
 
     pub async fn handle_streams(
+        hash_join_workload: HashJoinWorkload,
+        join_type: JoinType,
         amp: usize,
         mut tx_l: MessageSender,
         mut tx_r: MessageSender,
@@ -798,11 +854,31 @@ pub mod hash_join_executor {
         // Init executors
         tx_l.push_barrier(test_epoch(1), false);
         tx_r.push_barrier(test_epoch(1), false);
-        // Push a single record into tx_l, matches 100K records in the build side.
-        let chunk = StreamChunk::from_pretty(
-            "  I      I I
-         + 200000 0 1",
-        );
+
+        if matches!(hash_join_workload, HashJoinWorkload::InCache) {
+            // Push a single record into tx_r, so 100K records to be matched are cached.
+            let chunk = build_chunk(amp, 200_000);
+            tx_r.push_chunk(chunk);
+
+            // Ensure that the chunk on the rhs is processed, before inserting a chunk
+            // into the lhs. This is to ensure that the rhs chunk is cached,
+            // and we don't get interleaving of chunks between lhs and rhs.
+            tx_l.push_barrier(test_epoch(2), false);
+            tx_r.push_barrier(test_epoch(2), false);
+        }
+
+        // Push a chunk of records into tx_l, matches 100K records in the build side.
+        let chunk_size = match hash_join_workload {
+            HashJoinWorkload::InCache => 64,
+            HashJoinWorkload::NotInCache => 1,
+        };
+        let chunk = match join_type {
+            // Make sure all match
+            JoinType::Inner => build_chunk(chunk_size, 200_000),
+            // Make sure no match is found.
+            JoinType::LeftOuter => build_chunk(chunk_size, 300_000),
+            _ => panic!("Unsupported join type"),
+        };
         tx_l.push_chunk(chunk);
 
         match stream.next().await {
@@ -814,13 +890,10 @@ pub mod hash_join_executor {
             }
         }
 
-        let chunks = amp / 1024;
-        let remainder = amp % 1024;
-
-        for _ in 0..chunks {
+        if matches!(hash_join_workload, HashJoinWorkload::InCache) {
             match stream.next().await {
-                Some(Ok(Message::Chunk(c))) => {
-                    assert_eq!(c.cardinality(), 1024);
+                Some(Ok(Message::Barrier(b))) => {
+                    assert_eq!(b.epoch.curr, test_epoch(2));
                 }
                 other => {
                     panic!("Expected a barrier, got {:?}", other);
@@ -828,12 +901,20 @@ pub mod hash_join_executor {
             }
         }
 
-        match stream.next().await {
-            Some(Ok(Message::Chunk(c))) => {
-                assert_eq!(c.cardinality(), remainder);
-            }
-            other => {
-                panic!("Expected a barrier, got {:?}", other);
+        let expected_count = match join_type {
+            JoinType::LeftOuter => chunk_size,
+            JoinType::Inner => amp * chunk_size,
+            _ => panic!("Unsupported join type"),
+        };
+        let mut current_count = 0;
+        while current_count < expected_count {
+            match stream.next().await {
+                Some(Ok(Message::Chunk(c))) => {
+                    current_count += c.cardinality();
+                }
+                other => {
+                    panic!("Expected a barrier, got {:?}", other);
+                }
             }
         }
     }

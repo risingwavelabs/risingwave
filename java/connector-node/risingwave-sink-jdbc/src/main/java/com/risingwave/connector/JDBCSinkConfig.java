@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,10 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     private String schemaName;
 
     @JsonProperty(value = "jdbc.query.timeout")
-    private int queryTimeoutSeconds = 600;
+    private int queryTimeoutSeconds = 60;
+
+    @JsonProperty(value = "jdbc.auto.commit")
+    private boolean autoCommit = false;
 
     @JsonCreator
     public JDBCSinkConfig(
@@ -80,5 +83,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public int getQueryTimeout() {
         return queryTimeoutSeconds;
+    }
+
+    public boolean isAutoCommit() {
+        return autoCommit;
     }
 }

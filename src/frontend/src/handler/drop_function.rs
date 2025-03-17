@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::*;
-use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::CatalogError;
-use crate::{bind_data_type, Binder};
+use crate::catalog::root_catalog::SchemaPath;
+use crate::{Binder, bind_data_type};
 
 /// Drop a function or an aggregate.
 pub async fn handle_drop_function(

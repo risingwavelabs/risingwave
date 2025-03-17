@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -494,7 +494,7 @@ impl NonOverlapSubLevelPicker {
                     let start_idx = actual_sst_ids
                         .iter()
                         .position(|sst_id| sst_id == expected_sst_ids.first().unwrap());
-                    if start_idx.map_or(true, |idx| {
+                    if start_idx.is_none_or(|idx| {
                         actual_sst_ids[idx..idx + expected_sst_ids.len()] != expected_sst_ids
                     }) {
                         // Print SstableInfo for `actual_sst_ids`

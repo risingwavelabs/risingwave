@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ use std::rc::Rc;
 use risingwave_connector::source::ConnectorProperties;
 
 use super::{DefaultBehavior, Merge};
+use crate::PlanRef;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::{BatchSource, LogicalSource, StreamSource};
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct DistributedDmlVisitor {}

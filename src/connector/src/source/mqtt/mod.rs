@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,20 @@
 
 pub mod enumerator;
 pub mod source;
+pub use enumerator::MqttSplitEnumerator;
 pub mod split;
 
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::{MqttCommon, MqttQualityOfService};
-use crate::source::mqtt::enumerator::MqttSplitEnumerator;
-use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;
+use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 
 pub const MQTT_CONNECTOR: &str = "mqtt";
 

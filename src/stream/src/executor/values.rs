@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -189,10 +189,12 @@ mod tests {
             ActorContext::for_test(actor_id),
             schema,
             progress,
-            vec![exprs
-                .into_iter()
-                .map(NonStrictExpression::for_test)
-                .collect()],
+            vec![
+                exprs
+                    .into_iter()
+                    .map(NonStrictExpression::for_test)
+                    .collect(),
+            ],
             barrier_receiver,
         );
         let mut values_executor = Box::new(values_executor_struct).execute();

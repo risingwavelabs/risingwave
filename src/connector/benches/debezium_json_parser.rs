@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 mod json_common;
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use json_common::*;
 use paste::paste;
@@ -33,7 +33,9 @@ fn generate_debezium_json_row(rng: &mut impl Rng, change_event: &str) -> String 
         "d" => (generate_json_row(rng), "null".to_owned()),
         _ => unreachable!(),
     };
-    format!("{{\"before\": {before}, \"after\": {after}, \"source\": {source}, \"op\": \"{change_event}\", \"ts_ms\":1639551564960, \"transaction\":null}}")
+    format!(
+        "{{\"before\": {before}, \"after\": {after}, \"source\": {source}, \"op\": \"{change_event}\", \"ts_ms\":1639551564960, \"transaction\":null}}"
+    )
 }
 
 macro_rules! create_debezium_bench_helpers {

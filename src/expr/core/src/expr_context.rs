@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::future::Future;
 
-use risingwave_expr::{define_context, Result as ExprResult};
+use risingwave_expr::{Result as ExprResult, define_context};
 use risingwave_pb::plan_common::ExprContext;
 
 // For all execution mode.

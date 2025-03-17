@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::raw::HttpClient;
 use opendal::services::S3;
-use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{MediaType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+use crate::object::object_metrics::ObjectStoreMetrics;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
@@ -78,7 +78,6 @@ impl OpendalObjectStore {
             "http://"
         };
         let (address, bucket) = rest.split_once('/').unwrap();
-
         let builder = S3::default()
             .bucket(bucket)
             .region("custom")

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use itertools::Itertools;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use serde::Serialize;
-use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type};
+use syn::{Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type, parse_file};
 use thiserror_ext::AsReport;
 use walkdir::{DirEntry, WalkDir};
 

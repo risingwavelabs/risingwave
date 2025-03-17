@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,12 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchMySqlQuery, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase,
-    PlanRef, PredicatePushdown, ToBatch, ToStream,
+    BatchMySqlQuery, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, ToBatch, ToStream, generic,
 };
+use crate::OptimizerContextRef;
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -30,7 +31,6 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMySqlQuery {

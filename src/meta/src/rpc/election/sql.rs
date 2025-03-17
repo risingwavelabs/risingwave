@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ pub trait SqlDriver: Send + Sync + 'static {
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
 
     async fn try_campaign(&self, service_name: &str, id: &str, ttl: i64)
-        -> MetaResult<ElectionRow>;
+    -> MetaResult<ElectionRow>;
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>>;
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>>;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -205,8 +205,8 @@ mod test {
     use risingwave_hummock_sdk::level::Level;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
-    use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::LevelType;
+    use risingwave_pb::hummock::compact_task;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

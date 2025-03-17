@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use educe::Educe;
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -29,12 +28,12 @@ use risingwave_connector::source::cdc::{
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
 use super::GenericPlanNode;
+use crate::WithOptions;
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap};
-use crate::WithOptions;
+use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap, WatermarkColumns};
 
 /// [`CdcScan`] reads rows of a table from an external upstream database
 #[derive(Debug, Clone, Educe)]
@@ -121,8 +120,8 @@ impl CdcScan {
         &self.cdc_table_desc.pk
     }
 
-    pub fn watermark_columns(&self) -> FixedBitSet {
-        FixedBitSet::with_capacity(self.get_table_columns().len())
+    pub fn watermark_columns(&self) -> WatermarkColumns {
+        WatermarkColumns::new()
     }
 
     pub fn columns_monotonicity(&self) -> MonotonicityMap {

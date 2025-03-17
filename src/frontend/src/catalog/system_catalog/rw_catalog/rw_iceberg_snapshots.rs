@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ use std::ops::Deref;
 use iceberg::table::Table;
 use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +19,15 @@ use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
+use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder, create_limiter, get_new_pos,
-    mapping_chunk, mapping_message, mark_chunk, BackfillRateLimiter, METADATA_STATE_LEN,
+    METADATA_STATE_LEN, compute_bounds, construct_initial_finished_state, create_builder,
+    get_new_pos, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -64,7 +65,7 @@ pub struct BackfillState {
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StorageTable<S>,
+    upstream_table: BatchTable<S>,
     /// Upstream with the same schema with the upstream table.
     upstream: Executor,
 
@@ -83,10 +84,7 @@ pub struct BackfillExecutor<S: StateStore> {
 
     chunk_size: usize,
 
-    /// Rate limit, just used to initialize the chunk size for
-    /// snapshot read side.
-    /// If smaller than `chunk_size`, it will take precedence.
-    rate_limit: Option<usize>,
+    rate_limiter: MonitoredRateLimiter,
 }
 
 impl<S> BackfillExecutor<S>
@@ -95,16 +93,17 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        upstream_table: StorageTable<S>,
+        upstream_table: BatchTable<S>,
         upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgressReporter,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        rate_limit: Option<usize>,
+        rate_limit: RateLimit,
     ) -> Self {
         let actor_id = progress.actor_id();
+        let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table.table_id());
         Self {
             upstream_table,
             upstream,
@@ -114,7 +113,7 @@ where
             actor_id,
             metrics,
             chunk_size,
-            rate_limit,
+            rate_limiter,
         }
     }
 
@@ -125,8 +124,6 @@ where
         // which will only contain output columns of the scan on the upstream table.
         // The pk indices specify the pk columns of the pruned chunk.
         let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
-
-        let mut rate_limit = self.rate_limit;
 
         let state_len = pk_indices.len() + METADATA_STATE_LEN;
 
@@ -159,7 +156,11 @@ where
         let data_types = self.upstream_table.schema().data_types();
 
         // Chunk builder will be instantiated with min(rate_limit, self.chunk_size) as the chunk's max size.
-        let mut builder = create_builder(rate_limit, self.chunk_size, data_types.clone());
+        let mut builder = create_builder(
+            self.rate_limiter.rate_limit(),
+            self.chunk_size,
+            data_types.clone(),
+        );
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -207,7 +208,6 @@ where
         if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
-            let mut rate_limiter = rate_limit.and_then(create_limiter);
 
             let metrics = self
                 .metrics
@@ -224,15 +224,18 @@ where
 
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
-                    let paused = paused || matches!(rate_limit, Some(0));
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
-                        &self.upstream_table,
-                        snapshot_read_epoch,
-                        current_pos.clone(),
-                        paused,
-                        &rate_limiter,
-                    )
-                    .map(Either::Right));
+                    let paused =
+                        paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
+                    let right_snapshot = pin!(
+                        Self::make_snapshot_stream(
+                            &self.upstream_table,
+                            snapshot_read_epoch,
+                            current_pos.clone(),
+                            paused,
+                            &self.rate_limiter,
+                        )
+                        .map(Either::Right)
+                    );
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -453,13 +456,15 @@ where
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
-                                if new_rate_limit != rate_limit {
-                                    rate_limit = new_rate_limit;
+                                let new_rate_limit = (*new_rate_limit).into();
+                                let old_rate_limit = self.rate_limiter.update(new_rate_limit);
+                                if old_rate_limit != new_rate_limit {
                                     tracing::info!(
-                                        id = self.actor_id,
-                                        new_rate_limit = ?rate_limit,
-                                        "actor rate limit changed",
+                                        old_rate_limit = ?old_rate_limit,
+                                        new_rate_limit = ?new_rate_limit,
+                                        upstream_table_id = upstream_table_id,
+                                        actor_id = self.actor_id,
+                                        "backfill rate limit changed",
                                     );
                                     // The builder is emptied above via `DataChunkBuilder::consume_all`.
                                     assert!(
@@ -467,11 +472,10 @@ where
                                         "builder should already be emptied"
                                     );
                                     builder = create_builder(
-                                        rate_limit,
+                                        new_rate_limit,
                                         self.chunk_size,
                                         self.upstream_table.schema().data_types(),
                                     );
-                                    rate_limiter = new_rate_limit.and_then(create_limiter);
                                 }
                             }
                         }
@@ -500,7 +504,9 @@ where
                     if is_finished {
                         // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
                         if let Some(table) = &mut self.state_table {
-                            table.commit(barrier.epoch).await?;
+                            table
+                                .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                                .await?;
                         }
                     } else {
                         // If snapshot was empty, we do not need to backfill,
@@ -570,7 +576,9 @@ where
                 if let Message::Barrier(barrier) = &msg {
                     // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
                     if let Some(table) = &mut self.state_table {
-                        table.commit(barrier.epoch).await?;
+                        table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
                     }
                 }
 
@@ -622,7 +630,7 @@ where
         let mut old_state = vec![None; pk_len + METADATA_STATE_LEN];
         old_state[1..row.len() + 1].clone_from_slice(&row);
         let current_pos = Some((&row[0..pk_len]).into_owned_row());
-        let is_finished = row[pk_len].clone().map_or(false, |d| d.into_bool());
+        let is_finished = row[pk_len].clone().is_some_and(|d| d.into_bool());
         let row_count = row
             .get(pk_len + 1)
             .cloned()
@@ -638,11 +646,11 @@ where
 
     #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
-        upstream_table: &'a StorageTable<S>,
+        upstream_table: &'a BatchTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         paused: bool,
-        rate_limiter: &'a Option<BackfillRateLimiter>,
+        rate_limiter: &'a MonitoredRateLimiter,
     ) {
         if paused {
             #[for_await]
@@ -655,9 +663,7 @@ where
             for r in
                 Self::snapshot_read(upstream_table, HummockReadEpoch::NoWait(epoch), current_pos)
             {
-                if let Some(rate_limit) = &rate_limiter {
-                    rate_limit.until_ready().await;
-                }
+                rate_limiter.wait(1).await;
                 yield Some(r?);
             }
         }
@@ -672,7 +678,7 @@ where
     /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     pub async fn snapshot_read(
-        upstream_table: &StorageTable<S>,
+        upstream_table: &BatchTable<S>,
         epoch: HummockReadEpoch,
         current_pos: Option<OwnedRow>,
     ) {

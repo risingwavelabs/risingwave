@@ -1,4 +1,4 @@
-//  Copyright 2024 RisingWave Labs
+//  Copyright 2025 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -26,13 +26,13 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::ptr;
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::FutureExt;
 use parking_lot::Mutex;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 use tokio::task::JoinHandle;
 
 const IN_CACHE: u8 = 1;

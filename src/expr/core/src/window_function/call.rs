@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,19 @@
 
 use std::fmt::Display;
 
+use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, must_match};
 use risingwave_pb::expr::window_frame::{PbBounds, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
-use FrameBound::{CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding};
 
 use super::{
     RangeFrameBounds, RowsFrameBound, RowsFrameBounds, SessionFrameBounds, WindowFuncKind,
 };
-use crate::aggregate::AggArgs;
 use crate::Result;
+use crate::aggregate::AggArgs;
 
 #[derive(Debug, Clone)]
 pub struct WindowFuncCall {
@@ -92,9 +92,12 @@ impl Frame {
         let bounds = match frame.get_type()? {
             PbType::Unspecified => bail!("unspecified type of `WindowFrame`"),
             PbType::RowsLegacy => {
-                let start = FrameBound::<usize>::from_protobuf_legacy(frame.get_start()?)?;
-                let end = FrameBound::<usize>::from_protobuf_legacy(frame.get_end()?)?;
-                FrameBounds::Rows(RowsFrameBounds { start, end })
+                #[expect(deprecated)]
+                {
+                    let start = FrameBound::<usize>::from_protobuf_legacy(frame.get_start()?)?;
+                    let end = FrameBound::<usize>::from_protobuf_legacy(frame.get_end()?)?;
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
+                }
             }
             PbType::Rows => {
                 let bounds = must_match!(frame.get_bounds()?, PbBounds::Rows(bounds) => bounds);

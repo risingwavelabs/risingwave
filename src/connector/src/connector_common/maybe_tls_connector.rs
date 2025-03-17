@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use futures::{Future, FutureExt};
 use openssl::error::ErrorStack;
 use postgres_openssl::{MakeTlsConnector, TlsConnector, TlsStream};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio_postgres::tls::{self, MakeTlsConnect, NoTlsFuture, NoTlsStream, TlsConnect};
 use tokio_postgres::NoTls;
+use tokio_postgres::tls::{self, MakeTlsConnect, NoTlsFuture, NoTlsStream, TlsConnect};
 
 pub enum MaybeMakeTlsConnector {
     NoTls(NoTls),

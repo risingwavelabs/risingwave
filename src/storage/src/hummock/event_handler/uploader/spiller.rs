@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 
+use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::event_handler::uploader::{
     LocalInstanceUnsyncData, UnsyncData, UnsyncEpochId, UploadTaskInput,
 };
-use crate::hummock::event_handler::LocalInstanceId;
 
 #[derive(Default)]
 struct EpochSpillableDataInfo {
@@ -164,8 +164,8 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::ops::Deref;
 
-    use futures::future::join_all;
     use futures::FutureExt;
+    use futures::future::join_all;
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::EpochExt;

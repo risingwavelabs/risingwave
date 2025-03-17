@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@
 risingwave_expr_impl::enable!();
 
 use criterion::async_executor::FuturesExecutor;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::aggregate::{build_append_only, AggCall, PbAggKind};
+use risingwave_expr::aggregate::{AggCall, PbAggKind, build_append_only};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_pb::expr::expr_node::PbType;

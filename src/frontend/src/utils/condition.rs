@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,14 +24,15 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
-use risingwave_common::util::sort_util::{cmp_rows, OrderType};
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
+use risingwave_common::util::sort_util::{OrderType, cmp_rows};
 
 use crate::error::Result;
 use crate::expr::{
-    collect_input_refs, column_self_eq_eliminate, factorization_expr, fold_boolean_constant,
-    push_down_not, to_conjunctions, try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator,
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
+    InequalityInputPair, InputRef, collect_input_refs, column_self_eq_eliminate,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    try_get_bool_constant,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -93,7 +94,7 @@ impl Condition {
     pub fn always_false(&self) -> bool {
         static FALSE: LazyLock<ExprImpl> = LazyLock::new(|| ExprImpl::literal_bool(false));
         // There is at least one conjunction that is false.
-        !self.conjunctions.is_empty() && self.conjunctions.iter().any(|e| *e == *FALSE)
+        !self.conjunctions.is_empty() && self.conjunctions.contains(&*FALSE)
     }
 
     /// Convert condition to an expression. If always true, return `None`.
@@ -629,6 +630,14 @@ impl Condition {
             }
         }
         Ok(None)
+    }
+
+    /// x = 1 AND y = 2 AND z = 3 => [x, y, z]
+    pub fn get_eq_const_input_refs(&self) -> Vec<InputRef> {
+        self.conjunctions
+            .iter()
+            .filter_map(|expr| expr.as_eq_const().map(|(input_ref, _)| input_ref))
+            .collect()
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).

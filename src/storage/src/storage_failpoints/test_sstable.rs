@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::assert_bytes_eq;
-use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
-    default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable,
-    gen_test_sstable_data, put_sst, test_key_of, test_value_of, TEST_KEYS_COUNT,
+    TEST_KEYS_COUNT, default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable,
+    gen_test_sstable_data, put_sst, test_key_of, test_value_of,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{SstableIterator, SstableIteratorType};

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ pub mod prefix;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use thiserror_ext::AsReport;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 #[cfg(madsim)]
 use self::sim::SimObjectStore;
@@ -998,7 +998,9 @@ pub async fn build_remote_object_store(
             tracing::error!("The s3 compatible mode has been unified with s3.");
             tracing::error!("If you want to use s3 compatible storage, please set your access_key, secret_key and region to the environment variable AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
             set your endpoint to the environment variable RW_S3_ENDPOINT.");
-            panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
+            panic!(
+                "Passing s3-compatible is not supported, please modify the environment variable and pass in s3."
+            );
         }
         minio if minio.starts_with("minio://") => {
             if config.s3.developer.use_opendal {
@@ -1018,17 +1020,29 @@ pub async fn build_remote_object_store(
         }
         "memory" => {
             if ident == "Meta Backup" {
-                tracing::warn!("You're using in-memory remote object store for {}. This is not recommended for production environment.", ident);
+                tracing::warn!(
+                    "You're using in-memory remote object store for {}. This is not recommended for production environment.",
+                    ident
+                );
             } else {
-                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+                tracing::warn!(
+                    "You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.",
+                    ident
+                );
             }
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics, config))
         }
         "memory-shared" => {
             if ident == "Meta Backup" {
-                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in production environment.", ident);
+                tracing::warn!(
+                    "You're using shared in-memory remote object store for {}. This should never be used in production environment.",
+                    ident
+                );
             } else {
-                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+                tracing::warn!(
+                    "You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.",
+                    ident
+                );
             }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
         }

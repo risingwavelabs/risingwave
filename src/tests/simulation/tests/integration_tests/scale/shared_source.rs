@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,16 +47,17 @@ fn source_backfill_upstream(
         }
     }
 
+    let (_, source_fragment_id) = source_backfill_fragment
+        .get_nodes()
+        .unwrap()
+        .find_source_backfill()
+        .unwrap();
+    assert_eq!(source_fragment.fragment_id, source_fragment_id);
+
     source_backfill_fragment
         .actors
         .iter()
         .map(|backfill_actor| {
-            let (_, source_fragment_id) = backfill_actor
-                .get_nodes()
-                .unwrap()
-                .find_source_backfill()
-                .unwrap();
-            assert_eq!(source_fragment.fragment_id, source_fragment_id);
             (
                 backfill_actor.actor_id,
                 no_shuffle_downstream_to_upstream[&backfill_actor.actor_id],

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ pub trait BatchPlanRef: PhysicalPlanRef {
 
 /// Prelude for batch plan nodes.
 pub mod prelude {
-    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
     pub use super::super::Batch;
+    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
     pub use super::BatchPlanRef;
 }

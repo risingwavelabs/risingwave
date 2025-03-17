@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,22 +17,22 @@ use std::iter::Peekable;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::LogReport;
-use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::expr_node::{PbType, RexNode};
 
+use super::NonStrictExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UserDefinedFunction;
 use super::strict::Strict;
+use super::wrapper::EvalErrorReport;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
-use super::wrapper::EvalErrorReport;
-use super::NonStrictExpression;
 use crate::expr::{
     BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
 };
 use crate::expr_context::strict_mode;
 use crate::sig::FUNCTION_REGISTRY;
-use crate::{bail, Result};
+use crate::{Result, bail};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {

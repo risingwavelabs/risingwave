@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use core::ops::{Bound, RangeBounds};
 
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -23,10 +23,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
-use risingwave_pb::batch_plan::{scan_range, PbScanRange};
+use risingwave_pb::batch_plan::{PbScanRange, scan_range};
 use risingwave_pb::plan_common::StorageTableDesc;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{BoxedDataChunkStream, Executor};
@@ -209,7 +209,7 @@ impl ScanRange {
 
     pub fn convert_to_range_bounds<S: StateStore>(
         self,
-        table: &StorageTable<S>,
+        table: &BatchTable<S>,
     ) -> impl RangeBounds<OwnedRow> {
         let ScanRange {
             pk_prefix,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use enum_as_inner::EnumAsInner;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
-use crate::aggregate::AggType;
 use crate::Result;
+use crate::aggregate::AggType;
 
 /// Kind of window functions.
 #[expect(clippy::large_enum_variant)]

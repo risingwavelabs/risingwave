@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,20 +13,21 @@
 // limitations under the License.
 
 use anyhow::Context;
+use either::Either;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::StructType;
-use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
+use risingwave_expr::sig::{CreateOptions, UdfKind};
+use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
-use risingwave_pb::catalog::Function;
 
 use super::*;
-use crate::catalog::CatalogError;
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_function(
     handler_args: HandlerArgs,
     or_replace: bool,
     temporary: bool,
+    if_not_exists: bool,
     name: ObjectName,
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
@@ -39,18 +40,31 @@ pub async fn handle_create_function(
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
-    // e.g., `language [ python / java / ...etc]`
+
+    let udf_config = handler_args.session.env().udf_config();
+
+    // e.g., `language [ python / javascript / ...etc]`
     let language = match params.language {
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
+                "java" => lang, // only support external UDF for Java
+                "python" if udf_config.enable_embedded_python_udf => lang,
+                "javascript" if udf_config.enable_embedded_javascript_udf => lang,
+                "rust" | "wasm" if udf_config.enable_embedded_wasm_udf => lang,
+                "python" | "javascript" | "rust" | "wasm" => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "{} UDF is not enabled in configuration",
+                        lang
+                    ))
+                    .into());
+                }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
                         lang
                     ))
-                    .into())
+                    .into());
                 }
             }
         }
@@ -93,7 +107,7 @@ pub async fn handle_create_function(
             return Err(ErrorCode::InvalidParameterValue(
                 "return type must be specified".to_owned(),
             )
-            .into())
+            .into());
         }
     };
 
@@ -107,20 +121,18 @@ pub async fn handle_create_function(
     // resolve database and schema id
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let (schema_name, function_name) =
+        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if the function exists in the catalog
-    if (session.env().catalog_reader().read_guard())
-        .get_schema_by_id(&database_id, &schema_id)?
-        .get_function_by_name_args(&function_name, &arg_types)
-        .is_some()
-    {
-        let name = format!(
-            "{function_name}({})",
-            arg_types.iter().map(|t| t.to_string()).join(",")
-        );
-        return Err(CatalogError::Duplicated("function", name).into());
+    if let Either::Right(resp) = session.check_function_name_duplicated(
+        StatementType::CREATE_FUNCTION,
+        name,
+        &arg_types,
+        if_not_exists,
+    )? {
+        return Ok(resp);
     }
 
     let link = match &params.using {
@@ -129,7 +141,7 @@ pub async fn handle_create_function(
     };
     let base64_decoded = match &params.using {
         Some(CreateFunctionUsing::Base64(encoded)) => {
-            use base64::prelude::{Engine, BASE64_STANDARD};
+            use base64::prelude::{BASE64_STANDARD, Engine};
             let bytes = BASE64_STANDARD
                 .decode(encoded)
                 .context("invalid base64 encoding")?;
@@ -140,7 +152,7 @@ pub async fn handle_create_function(
 
     let create_fn =
         risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
-    let output = create_fn(CreateFunctionOptions {
+    let output = create_fn(CreateOptions {
         kind: match kind {
             Kind::Scalar(_) => UdfKind::Scalar,
             Kind::Table(_) => UdfKind::Table,
@@ -155,7 +167,7 @@ pub async fn handle_create_function(
         using_base64_decoded: base64_decoded.as_deref(),
     })?;
 
-    let function = Function {
+    let function = PbFunction {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
@@ -166,7 +178,7 @@ pub async fn handle_create_function(
         return_type: Some(return_type.into()),
         language,
         runtime,
-        identifier: Some(output.identifier),
+        name_in_runtime: Some(output.name_in_runtime),
         link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,
@@ -174,6 +186,8 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
+        is_async: with_options.r#async,
+        is_batched: with_options.batch,
     };
 
     let catalog_writer = session.catalog_writer()?;

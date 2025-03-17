@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use rumqttc::v5::mqttbytes::v5::Publish;
 
-use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
+use crate::source::base::SourceMessage;
 
 #[derive(Clone, Debug)]
 pub struct MqttMessage {

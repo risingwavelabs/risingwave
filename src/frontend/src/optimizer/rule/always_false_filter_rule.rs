@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use risingwave_common::types::ScalarImpl;
 
 use super::{BoxedRule, Rule};
+use crate::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
-use crate::PlanRef;
 
 pub struct AlwaysFalseFilterRule;
 

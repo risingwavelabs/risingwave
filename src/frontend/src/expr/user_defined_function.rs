@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::FunctionId;
+use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl};
+use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -56,11 +56,13 @@ impl UserDefinedFunction {
             return_type,
             language: udf.language.clone(),
             runtime: udf.runtime.clone(),
-            identifier: udf.identifier.clone(),
+            name_in_runtime: udf.name_in_runtime().map(|x| x.to_owned()),
             body: udf.body.clone(),
             link: udf.link.clone(),
             compressed_binary: udf.compressed_binary.clone(),
             always_retry_on_network_error: udf.always_retry_on_network_error,
+            is_batched: udf.is_batched,
+            is_async: udf.is_async,
         };
 
         Ok(Self {
@@ -93,12 +95,34 @@ impl Expr for UserDefinedFunction {
                     .collect(),
                 language: self.catalog.language.clone(),
                 runtime: self.catalog.runtime.clone(),
-                identifier: self.catalog.identifier.clone(),
+                identifier: self.catalog.name_in_runtime.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
+                is_async: self.catalog.is_async,
+                is_batched: self.catalog.is_batched,
+                version: PbUdfExprVersion::LATEST as _,
             }))),
         }
+    }
+}
+
+pub struct UserDefinedFunctionDisplay<'a> {
+    pub func_call: &'a UserDefinedFunction,
+    pub input_schema: &'a Schema,
+}
+
+impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let that = self.func_call;
+        let mut builder = f.debug_tuple(&that.catalog.name);
+        that.args.iter().for_each(|arg| {
+            builder.field(&ExprDisplay {
+                expr: arg,
+                input_schema: self.input_schema,
+            });
+        });
+        builder.finish()
     }
 }

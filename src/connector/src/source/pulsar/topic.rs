@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
     if topic.contains(PARTITIONED_TOPIC_SUFFIX) {
         let partition = topic
             .split('-')
-            .last()
+            .next_back()
             .unwrap()
             .parse::<i32>()
             .map_err(|e| anyhow!(e))?;

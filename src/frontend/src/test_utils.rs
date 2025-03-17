@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
@@ -25,15 +25,16 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    FunctionId, IndexId, ObjectId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -45,8 +46,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType,
+    DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType, alter_name_request,
+    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -58,7 +59,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, PbTableParallelism, PbThrottleTarget, RecoveryStatus, SystemParams,
@@ -69,6 +70,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
 
+use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
@@ -77,10 +79,9 @@ use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
+use crate::user::UserId;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::user::UserId;
-use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -244,12 +245,18 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(&PbDatabase {
             name: db_name.to_owned(),
             id: database_id,
             owner,
+            resource_group: resource_group.to_owned(),
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
@@ -282,6 +289,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
+        _specific_resource_group: Option<String>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -312,7 +320,7 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph, HashSet::new())
+        self.create_materialized_view(table, graph, HashSet::new(), None)
             .await?;
         Ok(())
     }
@@ -577,7 +585,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_schema(&self, schema_id: u32) -> Result<()> {
+    async fn drop_schema(&self, schema_id: u32, _cascade: bool) -> Result<()> {
         let database_id = self.drop_schema_id(schema_id);
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
@@ -614,7 +622,7 @@ impl CatalogWriter for MockCatalogWriter {
                         if let Some(table) =
                             schema.get_created_table_by_id(&TableId::from(table_id))
                         {
-                            let mut pb_table = table.to_prost(schema.id(), database.id());
+                            let mut pb_table = table.to_prost();
                             pb_table.owner = owner_id;
                             self.catalog.write().update_table(&pb_table);
                             return Ok(());
@@ -635,13 +643,12 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
-                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
-                let database_id = self.get_database_id_by_schema(schema_id);
-                let pb_table = {
+                let mut pb_table = {
                     let reader = self.catalog.read();
                     let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
-                    table.to_prost(new_schema_id, database_id)
+                    table.to_prost()
                 };
+                pb_table.schema_id = new_schema_id;
                 self.catalog.write().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()
@@ -676,6 +683,15 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         unreachable!()
     }
+
+    async fn alter_resource_group(
+        &self,
+        _table_id: u32,
+        _resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockCatalogWriter {
@@ -687,6 +703,7 @@ impl MockCatalogWriter {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_owned(),
             owner: DEFAULT_SUPER_USER_ID,
+            resource_group: DEFAULT_RESOURCE_GROUP.to_owned(),
         });
         catalog.write().create_schema(&PbSchema {
             id: 1,
@@ -972,7 +989,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::default())
     }
 
-    async fn list_table_fragment_states(&self) -> RpcResult<Vec<TableFragmentState>> {
+    async fn list_streaming_job_states(&self) -> RpcResult<Vec<StreamingJobState>> {
         Ok(vec![])
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -195,7 +195,7 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::catalog::{
-        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_dml::dml_manager::DmlManager;

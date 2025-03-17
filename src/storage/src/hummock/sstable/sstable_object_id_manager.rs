@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -219,7 +219,9 @@ impl GetObjectId for SharedComapctorObjectIdManager {
         if let Some(first_element) = core.output_object_ids.pop_front() {
             Ok(first_element)
         } else {
-            tracing::warn!("The pre-allocated object ids are used up, and new object id are obtained through RPC.");
+            tracing::warn!(
+                "The pre-allocated object ids are used up, and new object id are obtained through RPC."
+            );
             let request = GetNewSstIdsRequest {
                 number: core.sstable_id_remote_fetch_number,
             };

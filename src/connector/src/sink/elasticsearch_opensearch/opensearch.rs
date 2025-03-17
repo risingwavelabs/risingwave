@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ pub struct OpenSearchSink {
     config: ElasticSearchOpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+    is_append_only: bool,
 }
 
 #[async_trait]
@@ -43,6 +44,7 @@ impl TryFrom<SinkParam> for OpenSearchSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
 }
@@ -69,6 +71,7 @@ impl Sink for OpenSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             Self::SINK_NAME,
+            self.is_append_only,
         )?
         .into_log_sinker(self.config.concurrent_requests))
     }
@@ -89,7 +92,9 @@ impl Sink for OpenSearchSink {
                     if std::matches!(user_specified, SinkDecouple::Disable)
                         && commit_checkpoint_interval > 1
                     {
-                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
                     }
                 }
                 None => match user_specified {
@@ -120,9 +125,5 @@ impl Sink for OpenSearchSink {
             | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => Ok(true),
             risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => Ok(false),
         }
-    }
-
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }

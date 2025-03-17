@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::num::NonZeroUsize;
-
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 
 use super::vnode::VirtualNode;
 
@@ -53,7 +51,7 @@ impl VnodeCount {
     /// Converts from protobuf representation of `maybe_vnode_count`.
     ///
     /// The value will be ignored if `is_singleton` returns `true`.
-    fn from_protobuf(v: Option<u32>, is_singleton: impl FnOnce() -> bool) -> Self {
+    pub fn from_protobuf(v: Option<u32>, is_singleton: impl FnOnce() -> bool) -> Self {
         match v {
             Some(0) => VnodeCount::Placeholder,
             _ => {
@@ -154,17 +152,6 @@ impl IsSingleton for risingwave_pb::plan_common::StorageTableDesc {
     }
 }
 impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
-    fn vnode_count_inner(&self) -> VnodeCount {
-        VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
-    }
-}
-
-impl IsSingleton for risingwave_pb::meta::table_fragments::Fragment {
-    fn is_singleton(&self) -> bool {
-        matches!(self.distribution_type(), FragmentDistributionType::Single)
-    }
-}
-impl VnodeCountCompat for risingwave_pb::meta::table_fragments::Fragment {
     fn vnode_count_inner(&self) -> VnodeCount {
         VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
     }

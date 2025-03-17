@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,18 @@
 
 use std::collections::HashSet;
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill, TableCatalogBuilder};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Monotonicity, MonotonicityMap};
-use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{Monotonicity, MonotonicityMap, WatermarkColumns};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcSort {
@@ -55,8 +54,16 @@ impl StreamEowcSort {
         let fd_set = input.functional_dependency().clone();
         let dist = input.distribution().clone();
 
-        let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
-        watermark_columns.insert(sort_column_index);
+        let mut watermark_columns = WatermarkColumns::new();
+        watermark_columns.insert(
+            sort_column_index,
+            // `StreamSort` operator will propagate input watermark as it is,
+            // so we can assign the same watermark group.
+            input
+                .watermark_columns()
+                .get_group(sort_column_index)
+                .unwrap(),
+        );
 
         // StreamEowcSort makes the sorting watermark column non-decreasing
         let mut columns_monotonicity = MonotonicityMap::new();

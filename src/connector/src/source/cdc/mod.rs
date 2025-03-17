@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ pub use enumerator::*;
 use itertools::Itertools;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::ExternalTableDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 

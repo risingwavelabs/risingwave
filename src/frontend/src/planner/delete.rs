@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use fixedbitset::FixedBitSet;
 use super::Planner;
 use crate::binder::BoundDelete;
 use crate::error::Result;
-use crate::optimizer::plan_node::{generic, LogicalDelete, LogicalProject};
+use crate::optimizer::plan_node::{LogicalDelete, LogicalProject, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 

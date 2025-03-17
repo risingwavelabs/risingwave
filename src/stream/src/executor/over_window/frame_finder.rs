@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1163,7 +1163,7 @@ mod tests {
     }
 
     mod range_frame_tests {
-        use risingwave_common::types::{data_types, DataType, Interval};
+        use risingwave_common::types::{DataType, Interval, data_types};
         use risingwave_common::util::sort_util::OrderType;
         use risingwave_expr::window_function::RangeFrameOffset;
 
