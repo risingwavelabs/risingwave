@@ -15,15 +15,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::raw::HttpClient;
 use opendal::services::S3;
-use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{MediaType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+use crate::object::object_metrics::ObjectStoreMetrics;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.

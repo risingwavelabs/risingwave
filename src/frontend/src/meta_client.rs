@@ -18,8 +18,8 @@ use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -34,7 +34,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
+use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
@@ -64,7 +64,7 @@ pub trait FrontendMetaClient: Send + Sync {
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>>;
 
-    async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>>;
+    async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>>;
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
@@ -163,8 +163,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_table_fragments(table_ids).await
     }
 
-    async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
-        self.0.list_table_fragment_states().await
+    async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>> {
+        self.0.list_streaming_job_states().await
     }
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {

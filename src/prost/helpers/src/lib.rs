@@ -16,9 +16,9 @@
 #![feature(iterator_try_collect)]
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, DataStruct, DeriveInput, Result};
+use syn::{Data, DataStruct, DeriveInput, Result, parse_macro_input};
 
 mod generate;
 
@@ -68,4 +68,41 @@ fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
         #pb_alias
         #struct_get
     })
+}
+
+#[cfg_attr(coverage, coverage(off))]
+#[proc_macro_derive(Version)]
+pub fn version(input: TokenStream) -> TokenStream {
+    fn version_inner(ast: &DeriveInput) -> syn::Result<TokenStream2> {
+        let last_variant = match &ast.data {
+            Data::Enum(v) => v.variants.iter().next_back().ok_or_else(|| {
+                syn::Error::new(
+                    Span::call_site(),
+                    "This macro requires at least one variant in the enum.",
+                )
+            })?,
+            _ => {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "This macro only supports enums.",
+                ));
+            }
+        };
+
+        let enum_name = &ast.ident;
+        let last_variant_name = &last_variant.ident;
+
+        Ok(quote! {
+            impl #enum_name {
+                pub const LATEST: Self = Self::#last_variant_name;
+            }
+        })
+    }
+
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    match version_inner(&ast) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
 }

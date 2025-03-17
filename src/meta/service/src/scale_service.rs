@@ -15,7 +15,10 @@
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
+use risingwave_meta::stream::{
+    JobReschedulePlan, JobReschedulePostUpdates, RescheduleOptions, ScaleControllerRef,
+    WorkerReschedule,
+};
 use risingwave_meta_model::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -63,14 +66,31 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
-        let table_fragments = self
+        let stream_job_fragments = self
             .metadata_manager
             .catalog_controller
             .table_fragments()
-            .await?
-            .values()
-            .cloned()
-            .collect();
+            .await?;
+
+        let mut table_fragments = Vec::with_capacity(stream_job_fragments.len());
+        for (_, stream_job_fragments) in stream_job_fragments {
+            let upstreams = self
+                .metadata_manager
+                .catalog_controller
+                .upstream_fragments(stream_job_fragments.fragment_ids())
+                .await?;
+            let dispatchers = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_actor_dispatchers(
+                    stream_job_fragments
+                        .fragment_ids()
+                        .map(|id| id as _)
+                        .collect(),
+                )
+                .await?;
+            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams, &dispatchers))
+        }
 
         let worker_nodes = self
             .metadata_manager
@@ -142,26 +162,31 @@ impl ScaleService for ScaleServiceImpl {
             self.stream_manager
                 .reschedule_actors(
                     database_id,
-                    worker_reschedules
-                        .into_iter()
-                        .map(|(fragment_id, reschedule)| {
-                            let PbWorkerReschedule { worker_actor_diff } = reschedule;
-                            (
-                                fragment_id,
-                                WorkerReschedule {
-                                    worker_actor_diff: worker_actor_diff
-                                        .into_iter()
-                                        .map(|(worker_id, diff)| (worker_id as _, diff as _))
-                                        .collect(),
-                                },
-                            )
-                        })
-                        .collect(),
+                    JobReschedulePlan {
+                        reschedules: worker_reschedules
+                            .into_iter()
+                            .map(|(fragment_id, reschedule)| {
+                                let PbWorkerReschedule { worker_actor_diff } = reschedule;
+                                (
+                                    fragment_id,
+                                    WorkerReschedule {
+                                        worker_actor_diff: worker_actor_diff
+                                            .into_iter()
+                                            .map(|(worker_id, diff)| (worker_id as _, diff as _))
+                                            .collect(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                        post_updates: JobReschedulePostUpdates {
+                            parallelism_updates: table_parallelisms,
+                            resource_group_updates: Default::default(),
+                        },
+                    },
                     RescheduleOptions {
                         resolve_no_shuffle_upstream,
                         skip_create_new_actors: false,
                     },
-                    Some(table_parallelisms),
                 )
                 .await?;
         }

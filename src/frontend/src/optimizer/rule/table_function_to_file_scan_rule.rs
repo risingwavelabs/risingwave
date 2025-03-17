@@ -15,14 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_connector::source::iceberg::{extract_bucket_and_file_name, FileScanBackend};
+use risingwave_connector::source::iceberg::{FileScanBackend, extract_bucket_and_file_name};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, TableFunctionType};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFileScan, LogicalTableFunction};
-use crate::optimizer::PlanRef;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToFileScanRule {}
@@ -37,9 +36,8 @@ impl Rule for TableFunctionToFileScanRule {
 
         if let DataType::Struct(st) = table_function_return_type.clone() {
             let fields = st
-                .types()
-                .zip_eq_debug(st.names())
-                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_owned()))
+                .iter()
+                .map(|(name, data_type)| Field::with_name(data_type.clone(), name.to_owned()))
                 .collect_vec();
 
             let schema = Schema::new(fields);
@@ -61,6 +59,7 @@ impl Rule for TableFunctionToFileScanRule {
             assert!(
                 ("s3".eq_ignore_ascii_case(&eval_args[1]))
                     || "gcs".eq_ignore_ascii_case(&eval_args[1])
+                    || "azblob".eq_ignore_ascii_case(&eval_args[1])
             );
 
             if "s3".eq_ignore_ascii_case(&eval_args[1]) {
@@ -102,6 +101,25 @@ impl Rule for TableFunctionToFileScanRule {
                         "parquet".to_owned(),
                         "gcs".to_owned(),
                         credential,
+                        file_location,
+                    )
+                    .into(),
+                )
+            } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                let endpoint = eval_args[2].clone();
+                let account_name = eval_args[3].clone();
+                let account_key = eval_args[4].clone();
+                // The rest of the arguments are file locations
+                let file_location = eval_args[5..].iter().cloned().collect_vec();
+                Some(
+                    LogicalFileScan::new_azblob_logical_file_scan(
+                        logical_table_function.ctx(),
+                        schema,
+                        "parquet".to_owned(),
+                        "azblob".to_owned(),
+                        account_name,
+                        account_key,
+                        endpoint,
                         file_location,
                     )
                     .into(),

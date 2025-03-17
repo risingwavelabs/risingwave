@@ -25,15 +25,16 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::BoxedExpression;
 
+use super::AsOfDesc;
 use crate::error::BatchError;
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
-    utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
-    HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
+    BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams, HashJoinExecutor,
+    JoinHashMap, JoinType, LookupExecutorBuilder, RowId, utils,
 };
 use crate::task::ShutdownToken;
 
@@ -54,6 +55,7 @@ pub struct LookupJoinBase<K> {
     pub schema: Schema,
     pub output_indices: Vec<usize>,
     pub chunk_size: usize,
+    pub asof_desc: Option<AsOfDesc>,
     pub identity: String,
     pub shutdown_rx: ShutdownToken,
     pub mem_ctx: MemoryContext,
@@ -178,9 +180,12 @@ impl<K: HashKey> LookupJoinBase<K> {
                 next_build_row_with_same_key,
                 self.chunk_size,
                 self.shutdown_rx.clone(),
+                self.asof_desc.clone(),
             );
 
-            if let Some(cond) = self.condition.as_ref() {
+            if let Some(cond) = self.condition.as_ref()
+                && !params.is_asof_join()
+            {
                 let stream = match self.join_type {
                     JoinType::Inner => {
                         HashJoinExecutor::do_inner_join_with_non_equi_condition(params, cond)
@@ -197,7 +202,9 @@ impl<K: HashKey> LookupJoinBase<K> {
                     JoinType::RightOuter
                     | JoinType::RightSemi
                     | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
+                    | JoinType::FullOuter
+                    | JoinType::AsOfInner
+                    | JoinType::AsOfLeftOuter => unimplemented!(),
                 };
                 // For non-equi join, we need an output chunk builder to align the output chunks.
                 let mut output_chunk_builder =
@@ -215,8 +222,12 @@ impl<K: HashKey> LookupJoinBase<K> {
                 }
             } else {
                 let stream = match self.join_type {
-                    JoinType::Inner => HashJoinExecutor::do_inner_join(params),
-                    JoinType::LeftOuter => HashJoinExecutor::do_left_outer_join(params),
+                    JoinType::Inner | JoinType::AsOfInner => {
+                        HashJoinExecutor::do_inner_join(params)
+                    }
+                    JoinType::LeftOuter | JoinType::AsOfLeftOuter => {
+                        HashJoinExecutor::do_left_outer_join(params)
+                    }
                     JoinType::LeftSemi => HashJoinExecutor::do_left_semi_anti_join::<false>(params),
                     JoinType::LeftAnti => HashJoinExecutor::do_left_semi_anti_join::<true>(params),
                     JoinType::RightOuter

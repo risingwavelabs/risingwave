@@ -19,13 +19,14 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
     PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
 };
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -35,18 +36,18 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
+    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
+    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
+use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
-use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
@@ -425,12 +426,13 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes = std::iter::once((
+    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
         0,
         WorkerNode {
             id: 0,
             property: Some(Property {
                 parallelism: 8,
+                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
                 ..Default::default()
             }),
             r#type: WorkerType::ComputeNode.into(),
@@ -438,8 +440,12 @@ fn make_cluster_info() -> StreamingClusterInfo {
         },
     ))
     .collect();
+
+    let schedulable_workers = worker_nodes.keys().cloned().collect();
+
     StreamingClusterInfo {
         worker_nodes,
+        schedulable_workers,
         unschedulable_workers: Default::default(),
     }
 }
@@ -460,12 +466,17 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
+        DEFAULT_RESOURCE_GROUP.to_owned(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
-    let ActorGraphBuildResult { graph, .. } =
-        actor_graph_builder.generate_graph(&env, &job, expr_context)?;
+    let ActorGraphBuildResult {
+        graph,
+        actor_upstreams,
+        actor_dispatchers,
+        ..
+    } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
     let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
     let actors = stream_job_fragments.actors();
@@ -474,16 +485,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert_eq!(actors.len(), 9);
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
-
-    let fragment_upstreams: HashMap<_, _> = stream_job_fragments
-        .fragments
-        .iter()
-        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
-        .collect();
-
-    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
-    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
@@ -509,29 +510,41 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     for actor in actors {
         assert_eq!(
-            expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor
-                .dispatcher
+            expected_downstream.get(&actor.actor_id).unwrap(),
+            actor_dispatchers
+                .get(&actor.fragment_id)
+                .unwrap()
+                .get(&actor.actor_id)
+                .unwrap()
                 .first()
                 .map_or(&vec![], |d| d.get_downstream_actor_id()),
         );
-        let mut node = actor.get_nodes().unwrap();
+    }
+    for fragment in stream_job_fragments.fragments() {
+        let mut node = &fragment.nodes;
         while !node.get_input().is_empty() {
             node = node.get_input().first().unwrap();
         }
         match node.get_node_body().unwrap() {
             NodeBody::Merge(merge_node) => {
-                assert_eq!(
-                    expected_upstream
-                        .get(&actor.get_actor_id())
-                        .unwrap()
-                        .iter()
-                        .collect::<HashSet<_>>(),
-                    merge_node
-                        .get_upstream_actor_id()
-                        .iter()
-                        .collect::<HashSet<_>>(),
-                );
+                for actor in &fragment.actors {
+                    assert_eq!(
+                        expected_upstream
+                            .get(&actor.actor_id)
+                            .unwrap()
+                            .iter()
+                            .collect::<HashSet<_>>(),
+                        actor_upstreams
+                            .get(&actor.fragment_id)
+                            .unwrap()
+                            .get(&actor.actor_id)
+                            .unwrap()
+                            .get(&merge_node.upstream_fragment_id)
+                            .unwrap()
+                            .iter()
+                            .collect::<HashSet<_>>(),
+                    );
+                }
             }
             NodeBody::Source(_) => {
                 // check nothing.

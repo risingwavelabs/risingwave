@@ -20,10 +20,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{FetchCursorStatement, Statement};
 
+use super::RwPgResponse;
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::query::BoundResult;
 use super::util::convert_interval_to_u64_seconds;
-use super::RwPgResponse;
 use crate::binder::BoundStatement;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
@@ -58,10 +58,7 @@ pub async fn handle_fetch_cursor(
     formats: &Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let db_name = &session.database();
-    let (_, cursor_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
-
+    let cursor_name = stmt.cursor_name.real_value();
     let with_options = WithOptions::try_from(stmt.with_properties.0.as_slice())?;
 
     if with_options.len() > 1 {
@@ -81,7 +78,7 @@ pub async fn handle_fetch_cursor(
 
     let (rows, pg_descs) = cursor_manager
         .get_rows_with_cursor(
-            cursor_name,
+            &cursor_name,
             stmt.count,
             handler_args,
             formats,
@@ -105,12 +102,10 @@ pub async fn handle_parse(
 ) -> Result<PrepareStatement> {
     if let Statement::FetchCursor { stmt } = &statement {
         let session = handler_args.session.clone();
-        let db_name = &session.database();
-        let (_, cursor_name) =
-            Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
+        let cursor_name = stmt.cursor_name.real_value();
         let fields = session
             .get_cursor_manager()
-            .get_fields_with_cursor(cursor_name.clone())
+            .get_fields_with_cursor(&cursor_name)
             .await?;
 
         let mut binder = Binder::new_with_param_types(&session, specific_param_types);

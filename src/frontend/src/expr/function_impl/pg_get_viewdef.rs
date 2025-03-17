@@ -15,7 +15,7 @@
 use std::fmt::Write;
 
 use anyhow::anyhow;
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 use risingwave_sqlparser::ast::Statement;
 
 use super::context::{CATALOG_READER, DB_NAME};

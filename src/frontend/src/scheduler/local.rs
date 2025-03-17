@@ -14,8 +14,8 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -58,7 +58,6 @@ use crate::session::{FrontendEnv, SessionImpl};
 // TODO(error-handling): use a concrete error type.
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 pub struct LocalQueryExecution {
-    sql: String,
     query: Query,
     front_env: FrontendEnv,
     batch_query_epoch: BatchQueryEpoch,
@@ -68,21 +67,18 @@ pub struct LocalQueryExecution {
 }
 
 impl LocalQueryExecution {
-    pub fn new<S: Into<String>>(
+    pub fn new(
         query: Query,
         front_env: FrontendEnv,
-        sql: S,
         support_barrier_read: bool,
         batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
-        let sql = sql.into();
         let worker_node_manager =
             WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
 
         Self {
-            sql,
             query,
             front_env,
             batch_query_epoch,
@@ -98,10 +94,11 @@ impl LocalQueryExecution {
 
     #[try_stream(ok = DataChunk, error = RwError)]
     pub async fn run_inner(self) {
-        debug!(%self.query.query_id, self.sql, "Starting to run query");
-
+        debug!(
+            query_id = %self.query.query_id,
+            "Starting to run query"
+        );
         let context = FrontendBatchTaskContext::create(self.session.clone());
-
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
             stage_id: 0,
@@ -118,8 +115,11 @@ impl LocalQueryExecution {
             self.batch_query_epoch,
             self.shutdown_rx().clone(),
         );
-
         let executor = executor.build().await?;
+        // The following loop can be slow.
+        // Release potential large object in Query and PlanNode early.
+        drop(plan_node);
+        drop(self);
 
         #[for_await]
         for chunk in executor.execute() {
@@ -288,7 +288,9 @@ impl LocalQueryExecution {
                     .source_stage_id
                     .expect("We expect stage id for Exchange Operator");
                 let Some(second_stages) = second_stages.as_mut() else {
-                    bail!("Unexpected exchange detected. We are either converting a single stage plan or converting the second stage of the plan.")
+                    bail!(
+                        "Unexpected exchange detected. We are either converting a single stage plan or converting the second stage of the plan."
+                    )
                 };
                 let second_stage = second_stages.remove(&exchange_source_stage_id).expect(
                     "We expect child stage fragment for Exchange Operator running in the frontend",

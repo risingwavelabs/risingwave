@@ -17,11 +17,12 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchFileScan, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase,
-    PlanRef, PredicatePushdown, ToBatch, ToStream,
+    BatchFileScan, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, ToBatch, ToStream, generic,
 };
+use crate::OptimizerContextRef;
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -30,7 +31,6 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFileScan {
@@ -92,6 +92,35 @@ impl LogicalFileScan {
         });
 
         let base = PlanBase::new_logical_with_core(&core);
+        LogicalFileScan { base, core }
+    }
+
+    pub fn new_azblob_logical_file_scan(
+        ctx: OptimizerContextRef,
+        schema: Schema,
+        file_format: String,
+        storage_type: String,
+        account_name: String,
+        account_key: String,
+        endpoint: String,
+        file_location: Vec<String>,
+    ) -> Self {
+        assert!("parquet".eq_ignore_ascii_case(&file_format));
+        assert!("azblob".eq_ignore_ascii_case(&storage_type));
+
+        let core = generic::FileScanBackend::AzblobFileScan(generic::AzblobFileScan {
+            schema,
+            file_format: generic::FileFormat::Parquet,
+            storage_type: generic::StorageType::Azblob,
+            account_name,
+            account_key,
+            endpoint,
+            file_location,
+            ctx,
+        });
+
+        let base = PlanBase::new_logical_with_core(&core);
+
         LogicalFileScan { base, core }
     }
 }

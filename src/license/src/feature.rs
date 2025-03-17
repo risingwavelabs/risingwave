@@ -14,7 +14,7 @@
 
 use thiserror::Error;
 
-use super::{report_telemetry, License, LicenseKeyError, LicenseManager, Tier};
+use super::{LicenseError, LicenseManager, Tier, report_telemetry};
 
 /// Define all features that are available based on the tier of the license.
 ///
@@ -113,14 +113,17 @@ pub enum FeatureNotAvailable {
     #[error("feature {feature:?} is not available due to license error")]
     LicenseError {
         feature: Feature,
-        source: LicenseKeyError,
+        source: LicenseError,
     },
 }
 
 impl Feature {
-    /// Check whether the feature is available based on the current license.
-    pub fn check_available(self) -> Result<(), FeatureNotAvailable> {
-        let check_res = match LicenseManager::get().license() {
+    /// Check whether the feature is available based on the given license manager.
+    pub(crate) fn check_available_with(
+        self,
+        manager: &LicenseManager,
+    ) -> Result<(), FeatureNotAvailable> {
+        let check_res = match manager.license() {
             Ok(license) => {
                 if license.tier >= self.min_tier() {
                     Ok(())
@@ -131,22 +134,19 @@ impl Feature {
                     })
                 }
             }
-            Err(error) => {
-                // If there's a license key error, we still try against the default license first
-                // to see if the feature is available for free.
-                if License::default().tier >= self.min_tier() {
-                    Ok(())
-                } else {
-                    Err(FeatureNotAvailable::LicenseError {
-                        feature: self,
-                        source: error,
-                    })
-                }
-            }
+            Err(error) => Err(FeatureNotAvailable::LicenseError {
+                feature: self,
+                source: error,
+            }),
         };
 
         report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
 
         check_res
+    }
+
+    /// Check whether the feature is available based on the current license.
+    pub fn check_available(self) -> Result<(), FeatureNotAvailable> {
+        self.check_available_with(LicenseManager::get())
     }
 }

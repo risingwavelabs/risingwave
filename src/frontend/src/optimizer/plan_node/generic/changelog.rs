@@ -17,11 +17,11 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::{DistillUnit, GenericPlanNode};
+use crate::OptimizerContextRef;
 use crate::optimizer::plan_node::stream::prelude::GenericPlanRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
-use crate::OptimizerContextRef;
 
 pub const CHANGELOG_OP: &str = "changelog_op";
 pub const _CHANGELOG_ROW_ID: &str = "_changelog_row_id";

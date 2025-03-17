@@ -34,17 +34,17 @@ use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, CompactionCatalogManagerRef,
 };
 use risingwave_storage::error::StorageResult;
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockVersionUpdate;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use risingwave_storage::hummock::test_utils::default_opts_for_test;
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::write_limiter::WriteLimiter;
-use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
@@ -256,10 +256,7 @@ impl HummockTestEnv {
             .seal_and_sync_epoch(epoch, table_ids)
             .await
             .unwrap();
-        self.meta_client
-            .commit_epoch(epoch, res, false)
-            .await
-            .unwrap();
+        self.meta_client.commit_epoch(epoch, res).await.unwrap();
 
         self.wait_sync_committed_version().await;
     }

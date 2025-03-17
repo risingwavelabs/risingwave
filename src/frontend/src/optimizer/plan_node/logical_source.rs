@@ -17,19 +17,20 @@ use std::rc::Rc;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
+use risingwave_common::types::DataType;
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
-use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
-    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
-    StreamSource, StreamSourceScan, ToBatch, ToStream,
+    BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject,
+    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource,
+    StreamSourceScan, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -188,8 +189,6 @@ impl LogicalSource {
                         &Field {
                             name: "filename".to_owned(),
                             data_type: DataType::Varchar,
-                            sub_fields: vec![],
-                            type_name: "".to_owned(),
                         },
                         0,
                     ),
@@ -200,8 +199,6 @@ impl LogicalSource {
                         &Field {
                             name: "last_edit_time".to_owned(),
                             data_type: DataType::Timestamptz,
-                            sub_fields: vec![],
-                            type_name: "".to_owned(),
                         },
                         1,
                     ),
@@ -212,8 +209,6 @@ impl LogicalSource {
                         &Field {
                             name: "file_size".to_owned(),
                             data_type: DataType::Int64,
-                            sub_fields: vec![],
-                            type_name: "".to_owned(),
                         },
                         0,
                     ),

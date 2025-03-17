@@ -14,6 +14,7 @@
 
 use super::*;
 
+/// TODO: make hidden columns additional columns, instead of normal columns?
 pub async fn extract_iceberg_columns(
     with_properties: &WithOptionsSecResolved,
 ) -> anyhow::Result<Vec<ColumnCatalog>> {
@@ -37,13 +38,11 @@ pub async fn extract_iceberg_columns(
                     column_desc,
                     // hide the _row_id column for iceberg engine table
                     // This column is auto generated when users define a table without primary key
-                    is_hidden: field.name() == ROWID_PREFIX,
+                    is_hidden: field.name() == ROW_ID_COLUMN_NAME,
                 }
             })
             .collect();
-        columns.push(ColumnCatalog::iceberg_sequence_num_column());
-        columns.push(ColumnCatalog::iceberg_file_path_column());
-        columns.push(ColumnCatalog::iceberg_file_pos_column());
+        columns.extend(ColumnCatalog::iceberg_hidden_cols());
 
         Ok(columns)
     } else {
@@ -52,56 +51,4 @@ pub async fn extract_iceberg_columns(
             props
         )))
     }
-}
-
-pub async fn check_iceberg_source(
-    props: &WithOptionsSecResolved,
-    columns: &[ColumnCatalog],
-) -> anyhow::Result<()> {
-    let props = ConnectorProperties::extract(props.clone(), true)?;
-    let ConnectorProperties::Iceberg(properties) = props else {
-        return Err(anyhow!(format!(
-            "Invalid properties for iceberg source: {:?}",
-            props
-        )));
-    };
-
-    let schema = Schema {
-        fields: columns
-            .iter()
-            .filter(|&c| {
-                c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME
-                    && c.column_desc.name != ICEBERG_FILE_PATH_COLUMN_NAME
-                    && c.column_desc.name != ICEBERG_FILE_POS_COLUMN_NAME
-            })
-            .cloned()
-            .map(|c| c.column_desc.into())
-            .collect(),
-    };
-
-    let table = properties.load_table().await?;
-
-    let iceberg_schema =
-        ::iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
-
-    for f1 in schema.fields() {
-        if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
-            return Err(anyhow::anyhow!(format!(
-                "Column {} not found in iceberg table",
-                f1.name
-            )));
-        }
-    }
-
-    let new_iceberg_field = iceberg_schema
-        .fields
-        .iter()
-        .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
-        .cloned()
-        .collect::<Vec<_>>();
-    let new_iceberg_schema = arrow_schema_iceberg::Schema::new(new_iceberg_field);
-
-    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
-
-    Ok(())
 }

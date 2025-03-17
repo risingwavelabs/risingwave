@@ -51,7 +51,7 @@ fn parse_create_table_with_defaults() {
                         None,
                         vec![ColumnOptionDef {
                             name: None,
-                            option: ColumnOption::DefaultColumns(verified_expr(
+                            option: ColumnOption::DefaultValue(verified_expr(
                                 "nextval(public.customer_customer_id_seq)"
                             ))
                         }],
@@ -100,7 +100,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(Expr::Value(Value::Boolean(
+                                option: ColumnOption::DefaultValue(Expr::Value(Value::Boolean(
                                     true
                                 ))),
                             },
@@ -117,7 +117,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(verified_expr(
+                                option: ColumnOption::DefaultValue(verified_expr(
                                     "CAST(now() AS TEXT)"
                                 ))
                             },
@@ -134,7 +134,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(verified_expr("now()")),
+                                option: ColumnOption::DefaultValue(verified_expr("now()")),
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -192,7 +192,9 @@ fn parse_create_table_from_pg_dump() {
             release_year public.year,
             active integer
         )";
-    one_statement_parses_to(sql, "CREATE TABLE public.customer (\
+    one_statement_parses_to(
+        sql,
+        "CREATE TABLE public.customer (\
             customer_id INT DEFAULT nextval(CAST('public.customer_customer_id_seq' AS REGCLASS)) NOT NULL, \
             store_id SMALLINT NOT NULL, \
             first_name CHARACTER VARYING NOT NULL, \
@@ -205,7 +207,8 @@ fn parse_create_table_from_pg_dump() {
             last_update TIMESTAMP DEFAULT now(), \
             release_year public.year, \
             active INT\
-        )");
+        )",
+    );
 }
 
 #[test]
@@ -688,7 +691,9 @@ fn test_transaction_statement() {
             session: false
         }
     );
-    let statement = verified_stmt("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY, READ WRITE, ISOLATION LEVEL SERIALIZABLE");
+    let statement = verified_stmt(
+        "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY, READ WRITE, ISOLATION LEVEL SERIALIZABLE",
+    );
     assert_eq!(
         statement,
         Statement::SetTransaction {
@@ -753,6 +758,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("add")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -777,6 +783,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("sub")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -801,6 +808,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("return_test")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -826,6 +834,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: true,
             temporary: false,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("add")]),
             args: Some(vec![
                 OperateFunctionArg::with_name("a", DataType::Int),
@@ -851,12 +860,14 @@ fn parse_create_function() {
         }
     );
 
-    let sql = "CREATE FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
+    let sql =
+        "CREATE TEMPORARY FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: false,
-            temporary: false,
+            temporary: true,
+            if_not_exists: false,
             name: ObjectName(vec![Ident::new_unchecked("unnest")]),
             args: Some(vec![OperateFunctionArg::with_name(
                 "a",
@@ -874,16 +885,60 @@ fn parse_create_function() {
             with_options: Default::default(),
         }
     );
+
+    let sql = "CREATE FUNCTION IF NOT EXISTS add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            if_not_exists: true,
+            name: ObjectName(vec![Ident::new_unchecked("add")]),
+            args: Some(vec![
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+            ]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef(
+                    "select $1 + $2;".into()
+                )),
+                ..Default::default()
+            },
+            with_options: Default::default(),
+        }
+    );
 }
 
 #[test]
 fn parse_create_aggregate() {
-    let sql =
-        "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
+    let sql = "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateAggregate {
             or_replace: true,
+            if_not_exists: false,
+            name: ObjectName(vec![Ident::new_unchecked("sum")]),
+            args: vec![OperateFunctionArg::unnamed(DataType::Int)],
+            returns: DataType::BigInt,
+            append_only: true,
+            params: CreateFunctionBody {
+                language: Some("python".into()),
+                as_: Some(FunctionDefinition::SingleQuotedDef("sum".into())),
+                using: Some(CreateFunctionUsing::Link("xxx".into())),
+                ..Default::default()
+            },
+        }
+    );
+
+    let sql = "CREATE AGGREGATE IF NOT EXISTS sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateAggregate {
+            or_replace: false,
+            if_not_exists: true,
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![OperateFunctionArg::unnamed(DataType::Int)],
             returns: DataType::BigInt,
@@ -1263,8 +1318,10 @@ fn parse_variadic_argument() {
     _ = verified_stmt(sql);
 
     let sql = "SELECT foo(VARIADIC a, b, VARIADIC c)";
-    assert!(parse_sql_statements(sql)
-        .unwrap_err()
-        .to_string()
-        .contains("VARIADIC argument must be the last"),);
+    assert!(
+        parse_sql_statements(sql)
+            .unwrap_err()
+            .to_string()
+            .contains("VARIADIC argument must be the last"),
+    );
 }

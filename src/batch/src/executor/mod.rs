@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod fast_insert;
 mod managed;
 pub mod test_utils;
 
@@ -20,13 +21,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_recursion::async_recursion;
+pub use fast_insert::*;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 pub use managed::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
 use risingwave_pb::batch_plan::PlanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
 use risingwave_pb::common::BatchQueryEpoch;
 use thiserror_ext::AsReport;
 
@@ -148,7 +150,7 @@ macro_rules! register_executor {
     ($node_body:ident, $builder:ty) => {
         const _: () = {
             use futures::FutureExt;
-            use risingwave_batch::executor::{ExecutorBuilderDescriptor, BUILDER_DESCS};
+            use risingwave_batch::executor::{BUILDER_DESCS, ExecutorBuilderDescriptor};
             use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
 
             #[linkme::distributed_slice(BUILDER_DESCS)]
@@ -161,7 +163,7 @@ macro_rules! register_executor {
 }
 pub use register_executor;
 
-impl<'a> ExecutorBuilder<'a> {
+impl ExecutorBuilder<'_> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build()
             .await

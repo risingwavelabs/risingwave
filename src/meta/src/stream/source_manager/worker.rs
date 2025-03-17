@@ -12,10 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::WithPropertiesExt;
+#[cfg(not(debug_assertions))]
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::AnySplitEnumerator;
+
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
+
+// The key used to load `SplitImpl` directly from source properties.
+// When this key is present, the enumerator will only return the given ones
+// instead of fetching them from the external source.
+// Only valid in debug builds - will return an error in release builds.
+const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
 pub struct SharedSplitMap {
     pub splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -25,16 +36,19 @@ type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
 /// `ConnectorSourceWorker` keeps fetching the latest split metadata from the external source service ([`Self::tick`]),
 /// and maintains it in `current_splits`.
-pub struct ConnectorSourceWorker<P: SourceProperties> {
+pub struct ConnectorSourceWorker {
     source_id: SourceId,
     source_name: String,
     current_splits: SharedSplitMapRef,
-    enumerator: P::SplitEnumerator,
+    // XXX: box or arc?
+    enumerator: Box<dyn AnySplitEnumerator>,
     period: Duration,
     metrics: Arc<MetaMetrics>,
-    connector_properties: P,
+    connector_properties: ConnectorProperties,
     fail_cnt: u32,
     source_is_up: LabelGuardedIntGauge<2>,
+
+    debug_splits: Option<Vec<SplitImpl>>,
 }
 
 fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
@@ -45,8 +59,24 @@ fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<Connect
     Ok(properties)
 }
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let options_with_secret =
-        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let options_with_secret = WithOptionsSecResolved::new(
+        {
+            let mut with_properties = source.with_properties.clone();
+            let _removed = with_properties.remove(DEBUG_SPLITS_KEY);
+
+            #[cfg(not(debug_assertions))]
+            {
+                if _removed.is_some() {
+                    return Err(ConnectorError::from(anyhow::anyhow!(
+                        "`debug_splits` is not allowed in release mode"
+                    )));
+                }
+            }
+
+            with_properties
+        },
+        source.secret_refs.clone(),
+    );
     let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -67,11 +97,15 @@ pub async fn create_source_worker(
     let connector_properties = extract_prop_from_new_source(source)?;
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
-    let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-    let handle = dispatch_source_prop!(connector_properties, prop, {
+    let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+    let sync_call_timeout = source
+        .with_properties
+        .get_sync_call_timeout()
+        .unwrap_or(DEFAULT_SOURCE_TICK_TIMEOUT);
+    let handle = {
         let mut worker = ConnectorSourceWorker::create(
             source,
-            *prop,
+            connector_properties,
             DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
             current_splits_ref.clone(),
             metrics,
@@ -79,12 +113,8 @@ pub async fn create_source_worker(
         .await?;
 
         // if fail to fetch meta info, will refuse to create source
-
-        // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
-        // in kafka
-        tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+        tokio::time::timeout(sync_call_timeout, worker.tick())
             .await
-            .ok()
             .with_context(|| {
                 format!(
                     "failed to fetch meta info for source {}, timeout {:?}",
@@ -92,11 +122,11 @@ pub async fn create_source_worker(
                 )
             })??;
 
-        tokio::spawn(async move { worker.run(sync_call_rx).await })
-    });
+        tokio::spawn(async move { worker.run(command_rx).await })
+    };
     Ok(ConnectorSourceWorkerHandle {
         handle,
-        sync_call_tx,
+        command_tx,
         splits,
         enable_drop_split: enable_scale_in,
         enable_adaptive_splits,
@@ -119,42 +149,40 @@ pub fn create_source_worker_async(
 
     let enable_drop_split = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
-    let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = tokio::spawn(async move {
         let mut ticker = time::interval(DEFAULT_SOURCE_WORKER_TICK_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        dispatch_source_prop!(connector_properties, prop, {
-            let mut worker = loop {
-                ticker.tick().await;
+        let mut worker = loop {
+            ticker.tick().await;
 
-                match ConnectorSourceWorker::create(
-                    &source,
-                    prop.deref().clone(),
-                    DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                    current_splits_ref.clone(),
-                    metrics.clone(),
-                )
-                .await
-                {
-                    Ok(worker) => {
-                        break worker;
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "failed to create source worker");
-                    }
+            match ConnectorSourceWorker::create(
+                &source,
+                connector_properties.clone(),
+                DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
+                current_splits_ref.clone(),
+                metrics.clone(),
+            )
+            .await
+            {
+                Ok(worker) => {
+                    break worker;
                 }
-            };
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "failed to create source worker");
+                }
+            }
+        };
 
-            worker.run(sync_call_rx).await
-        });
+        worker.run(command_rx).await
     });
 
     managed_sources.insert(
         source_id as SourceId,
         ConnectorSourceWorkerHandle {
             handle,
-            sync_call_tx,
+            command_tx,
             splits,
             enable_drop_split,
             enable_adaptive_splits,
@@ -165,20 +193,20 @@ pub fn create_source_worker_async(
 
 const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
-impl<P: SourceProperties> ConnectorSourceWorker<P> {
+impl ConnectorSourceWorker {
     /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
     async fn refresh(&mut self) -> MetaResult<()> {
-        let enumerator = P::SplitEnumerator::new(
-            self.connector_properties.clone(),
-            Arc::new(SourceEnumeratorContext {
+        let enumerator = self
+            .connector_properties
+            .clone()
+            .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
                     source_id: self.source_id as u32,
                 },
-            }),
-        )
-        .await
-        .context("failed to create SplitEnumerator")?;
+            }))
+            .await
+            .context("failed to create SplitEnumerator")?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
@@ -189,22 +217,21 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// will not be updated until `tick` is called.
     pub async fn create(
         source: &Source,
-        connector_properties: P,
+        connector_properties: ConnectorProperties,
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
-        let enumerator = P::SplitEnumerator::new(
-            connector_properties.clone(),
-            Arc::new(SourceEnumeratorContext {
+        let enumerator = connector_properties
+            .clone()
+            .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
                     source_id: source.id,
                 },
-            }),
-        )
-        .await
-        .context("failed to create SplitEnumerator")?;
+            }))
+            .await
+            .context("failed to create SplitEnumerator")?;
 
         let source_is_up = metrics
             .source_is_up
@@ -220,21 +247,69 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             connector_properties,
             fail_cnt: 0,
             source_is_up,
+            debug_splits: {
+                let debug_splits = source.with_properties.get(DEBUG_SPLITS_KEY);
+                #[cfg(not(debug_assertions))]
+                {
+                    if debug_splits.is_some() {
+                        return Err(ConnectorError::from(anyhow::anyhow!(
+                            "`debug_splits` is not allowed in release mode"
+                        ))
+                        .into());
+                    }
+                    None
+                }
+
+                #[cfg(debug_assertions)]
+                {
+                    use risingwave_common::types::JsonbVal;
+                    if let Some(debug_splits) = debug_splits {
+                        let mut splits = Vec::new();
+                        let debug_splits_value =
+                            jsonbb::serde_json::from_str::<serde_json::Value>(debug_splits)
+                                .context("failed to parse split impl")?;
+                        for split_impl_value in debug_splits_value.as_array().unwrap() {
+                            splits.push(SplitImpl::restore_from_json(JsonbVal::from(
+                                split_impl_value.clone(),
+                            ))?);
+                        }
+                        Some(splits)
+                    } else {
+                        None
+                    }
+                }
+            },
         })
     }
 
-    pub async fn run(
-        &mut self,
-        mut sync_call_rx: UnboundedReceiver<oneshot::Sender<MetaResult<()>>>,
-    ) {
+    pub async fn run(&mut self, mut command_rx: UnboundedReceiver<SourceWorkerCommand>) {
         let mut interval = time::interval(self.period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             select! {
                 biased;
-                tx = sync_call_rx.borrow_mut().recv() => {
-                    if let Some(tx) = tx {
-                        let _ = tx.send(self.tick().await);
+                cmd = command_rx.borrow_mut().recv() => {
+                    if let Some(cmd) = cmd {
+                        match cmd {
+                            SourceWorkerCommand::Tick(tx) => {
+                                let _ = tx.send(self.tick().await);
+                            }
+                            SourceWorkerCommand::DropFragments(fragment_ids) => {
+                                if let Err(e) = self.drop_fragments(fragment_ids).await {
+                                    // when error happens, we just log it and ignore
+                                    tracing::warn!(error = %e.as_report(), "error happened when drop fragment");
+                                }
+                            }
+                            SourceWorkerCommand::FinishBackfill(fragment_ids) => {
+                                if let Err(e) = self.finish_backfill(fragment_ids).await {
+                                    // when error happens, we just log it and ignore
+                                    tracing::warn!(error = %e.as_report(), "error happened when finish backfill");
+                                }
+                            }
+                            SourceWorkerCommand::Terminate => {
+                                return;
+                            }
+                        }
                     }
                 }
                 _ = interval.tick() => {
@@ -251,33 +326,52 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         }
     }
 
-    /// Uses [`SplitEnumerator`] to fetch the latest split metadata from the external source service.
+    /// Uses [`risingwave_connector::source::SplitEnumerator`] to fetch the latest split metadata from the external source service.
     async fn tick(&mut self) -> MetaResult<()> {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };
-        let splits = self.enumerator.list_splits().await.inspect_err(|_| {
-            source_is_up(0);
-            self.fail_cnt += 1;
-        })?;
+
+        let splits = {
+            if let Some(debug_splits) = &self.debug_splits {
+                debug_splits.clone()
+            } else {
+                self.enumerator.list_splits().await.inspect_err(|_| {
+                    source_is_up(0);
+                    self.fail_cnt += 1;
+                })?
+            }
+        };
+
         source_is_up(1);
         self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits
                 .into_iter()
-                .map(|split| (split.id(), P::Split::into(split)))
+                .map(|split| (split.id(), split))
                 .collect(),
         );
 
+        Ok(())
+    }
+
+    async fn drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
+        self.enumerator.on_drop_fragments(fragment_ids).await?;
+        Ok(())
+    }
+
+    async fn finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
+        self.enumerator.on_finish_backfill(fragment_ids).await?;
         Ok(())
     }
 }
 
 /// Handle for a running [`ConnectorSourceWorker`].
 pub struct ConnectorSourceWorkerHandle {
-    pub handle: JoinHandle<()>,
-    pub sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
+    #[expect(dead_code)]
+    handle: JoinHandle<()>,
+    command_tx: UnboundedSender<SourceWorkerCommand>,
     pub splits: SharedSplitMapRef,
     pub enable_drop_split: bool,
     pub enable_adaptive_splits: bool,
@@ -293,6 +387,7 @@ impl ConnectorSourceWorkerHandle {
         source_id: SourceId,
         actors: &HashSet<ActorId>,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
+        // XXX: when is this None? Can we remove the Option?
         let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
             tracing::info!(
                 "The discover loop for source {} is not ready yet; we'll wait for the next run",
@@ -317,4 +412,62 @@ impl ConnectorSourceWorkerHandle {
 
         Ok(discovered_splits)
     }
+
+    fn send_command(&self, command: SourceWorkerCommand) -> MetaResult<()> {
+        let cmd_str = format!("{:?}", command);
+        self.command_tx
+            .send(command)
+            .with_context(|| format!("failed to send {cmd_str} command to source worker"))?;
+        Ok(())
+    }
+
+    /// Force [`ConnectorSourceWorker::tick()`] to be called.
+    pub async fn force_tick(&self) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send_command(SourceWorkerCommand::Tick(tx))?;
+        rx.await
+            .context("failed to receive tick command response from source worker")?
+            .context("source worker tick failed")?;
+        Ok(())
+    }
+
+    pub fn drop_fragments(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("drop_fragments: {:?}", fragment_ids);
+        if let Err(e) = self.send_command(SourceWorkerCommand::DropFragments(fragment_ids)) {
+            // ignore drop fragment error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to drop fragments");
+        }
+    }
+
+    pub fn finish_backfill(&self, fragment_ids: Vec<FragmentId>) {
+        tracing::debug!("finish_backfill: {:?}", fragment_ids);
+        if let Err(e) = self.send_command(SourceWorkerCommand::FinishBackfill(fragment_ids)) {
+            // ignore error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to finish backfill");
+        }
+    }
+
+    pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
+        tracing::debug!("terminate: {:?}", dropped_fragments);
+        if let Some(dropped_fragments) = dropped_fragments {
+            self.drop_fragments(dropped_fragments.into_iter().collect());
+        }
+        if let Err(e) = self.send_command(SourceWorkerCommand::Terminate) {
+            // ignore terminate error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to terminate source worker");
+        }
+    }
+}
+
+#[derive(educe::Educe)]
+#[educe(Debug)]
+pub enum SourceWorkerCommand {
+    /// Sync command to force [`ConnectorSourceWorker::tick()`] to be called.
+    Tick(#[educe(Debug(ignore))] oneshot::Sender<MetaResult<()>>),
+    /// Async command to drop a fragment.
+    DropFragments(Vec<FragmentId>),
+    /// Async command to finish backfill.
+    FinishBackfill(Vec<FragmentId>),
+    /// Terminate the worker task.
+    Terminate,
 }

@@ -105,7 +105,7 @@ with (
 sleep 2s
 
 
-query II
+query II retry 3 backoff 5s
 SELECT
  * except (rw_key)
 FROM
@@ -121,7 +121,7 @@ NULL id6 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL (abcdefg) NULL NaN
 NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9247-bb680e5fe0c8 NaN
 
 
-query II
+query II retry 3 backoff 5s
 SELECT
   *
 FROM
@@ -140,7 +140,7 @@ NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9
 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
 
 
-query II
+query II retry 3 backoff 5s
 SELECT
  * except (rw_key)
 FROM

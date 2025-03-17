@@ -13,16 +13,20 @@
 // limitations under the License.
 
 use std::cmp::min;
+use std::env;
+use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
-use rand::{thread_rng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, thread_rng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{Condition, ParallelTestError, QueryExpect, Record, StatementExpect};
+use sqllogictest::{
+    Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
+};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -199,6 +203,45 @@ async fn wait_background_mv_finished(mview_name: &str) -> Result<()> {
     }
 }
 
+// Copied from sqllogictest-bin.
+#[derive(Clone)]
+struct HashPartitioner {
+    count: u64,
+    id: u64,
+}
+
+impl HashPartitioner {
+    fn new(count: u64, id: u64) -> Result<Self> {
+        if count == 0 {
+            bail!("partition count must be greater than zero");
+        }
+        if id >= count {
+            bail!("partition id (zero-based) must be less than count");
+        }
+        Ok(Self { count, id })
+    }
+}
+
+impl Partitioner for HashPartitioner {
+    fn matches(&self, file_name: &str) -> bool {
+        let mut hasher = DefaultHasher::new();
+        file_name.hash(&mut hasher);
+        hasher.finish() % self.count == self.id
+    }
+}
+
+static PARTITIONER: LazyLock<Option<HashPartitioner>> = LazyLock::new(|| {
+    let count = env::var("BUILDKITE_PARALLEL_JOB_COUNT")
+        .ok()?
+        .parse::<u64>()
+        .unwrap();
+    let id = env::var("BUILDKITE_PARALLEL_JOB")
+        .ok()?
+        .parse::<u64>()
+        .unwrap();
+    Some(HashPartitioner::new(count, id).unwrap())
+});
+
 pub struct Opts {
     pub kill_opts: KillOpts,
     /// Probability of `background_ddl` being set to true per ddl record.
@@ -236,10 +279,18 @@ pub async fn run_slt_task(
 
         let file = file.unwrap();
         let path = file.as_path();
-        println!("{}", path.display());
-        if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
+
+        if let Some(partitioner) = PARTITIONER.as_ref()
+            && !partitioner.matches(path.to_str().unwrap())
+        {
+            println!("{} [partition skipped]", path.display());
+            continue;
+        } else if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
+            println!("{} [kill ignored]", path.display());
             continue;
         }
+        println!("{}", path.display());
+
         // XXX: hack for kafka source test
         let tempfile = (path.ends_with("kafka.slt") || path.ends_with("kafka_batch.slt"))
             .then(|| hack_kafka_test(path));
@@ -277,8 +328,20 @@ pub async fn run_slt_task(
             }
 
             let cmd = match &record {
-                sqllogictest::Record::Statement { sql, .. }
-                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
+                sqllogictest::Record::Statement {
+                    sql, conditions, ..
+                }
+                | sqllogictest::Record::Query {
+                    sql, conditions, ..
+                } if conditions
+                    .iter()
+                    .all(|c| !matches!(c, Condition::SkipIf{ label } if label == "madsim"))
+                    && !conditions
+                        .iter()
+                        .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
+                {
+                    extract_sql_command(sql)
+                }
                 _ => SqlCmd::Others,
             };
 
@@ -328,10 +391,9 @@ pub async fn run_slt_task(
             // For kill enabled.
             tracing::debug!(?cmd, "Running");
 
-            if background_ddl_rate > 0.0
-                && let SqlCmd::SetBackgroundDdl { enable } = cmd
-            {
+            if let SqlCmd::SetBackgroundDdl { enable } = cmd {
                 manual_background_ddl_enabled = enable;
+                background_ddl_enabled = enable;
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
@@ -348,6 +410,7 @@ pub async fn run_slt_task(
                         label: "madsim".to_owned(),
                     }
                 })
+                && background_ddl_rate > 0.0
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
@@ -458,7 +521,9 @@ pub async fn run_slt_task(
                                         "failed to wait for background mv to finish creating"
                                     );
                                     if i >= MAX_RETRY {
-                                        panic!("failed to run test after retry {i} times, error={err:#?}");
+                                        panic!(
+                                            "failed to run test after retry {i} times, error={err:#?}"
+                                        );
                                     }
                                     continue;
                                 }
@@ -477,13 +542,15 @@ pub async fn run_slt_task(
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0
+                                    && let e = e.to_string()
                                     // It should not be a gRPC request to meta error,
                                     // otherwise it means that the catalog is not yet populated to fe.
-                                    && !e.to_string().contains("gRPC request to meta service failed")
-                                    && e.to_string().contains("exists")
-                                    && e.to_string().contains("Catalog error") =>
+                                    && !e.contains("gRPC request to meta service failed")
+                                    && e.contains("exists")
+                                    && !e.contains("under creation")
+                                    && e.contains("Catalog error") =>
                             {
-                                break
+                                break;
                             }
                             // allow 'not found' error when retry DROP statement
                             SqlCmd::Drop
@@ -491,7 +558,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("not found")
                                     && e.to_string().contains("Catalog error") =>
                             {
-                                break
+                                break;
                             }
 
                             // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
@@ -520,7 +587,9 @@ pub async fn run_slt_task(
                                             "failed to wait for background mv to finish creating"
                                         );
                                         if i >= MAX_RETRY {
-                                            panic!("failed to run test after retry {i} times, error={err:#?}");
+                                            panic!(
+                                                "failed to run test after retry {i} times, error={err:#?}"
+                                            );
                                         }
                                         continue;
                                     }
@@ -548,6 +617,10 @@ pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), Parall
     let mut tester =
         sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
     tester.add_label("madsim");
+
+    if let Some(partitioner) = PARTITIONER.as_ref() {
+        tester.with_partitioner(partitioner.clone());
+    }
 
     tester
         .run_parallel_async(
@@ -597,7 +670,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

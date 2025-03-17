@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
 use std::mem;
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use prehash::{new_prehashed_map_with_capacity, Passthru, Prehashed};
+use prehash::{Passthru, Prehashed, new_prehashed_map_with_capacity};
 use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::stream_record::Record;
@@ -129,31 +129,33 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(v));
             }
-            Entry::Occupied(mut e) => {
-                match e.get() {
-                    RowOp::Delete(ref old_v) => {
-                        e.insert(RowOp::Update((*old_v, v)));
-                    }
-                    RowOp::Insert(_) => {
-                        if self.warn_for_inconsistent_stream {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
-                                suppressed_count, "double insert for the same pk, breaking the sink's pk constraint"
-                            );
-                            }
-                        }
-                        e.insert(RowOp::Insert(v));
-                    }
-                    RowOp::Update((ref old_v, _)) => {
-                        if self.warn_for_inconsistent_stream {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(suppressed_count, "double insert for the same pk, breaking the sink's pk constraint");
-                            }
-                        }
-                        e.insert(RowOp::Update((*old_v, v)));
-                    }
+            Entry::Occupied(mut e) => match e.get() {
+                RowOp::Delete(ref old_v) => {
+                    e.insert(RowOp::Update((*old_v, v)));
                 }
-            }
+                RowOp::Insert(_) => {
+                    if self.warn_for_inconsistent_stream {
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(
+                                suppressed_count,
+                                "double insert for the same pk, breaking the sink's pk constraint"
+                            );
+                        }
+                    }
+                    e.insert(RowOp::Insert(v));
+                }
+                RowOp::Update((ref old_v, _)) => {
+                    if self.warn_for_inconsistent_stream {
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(
+                                suppressed_count,
+                                "double insert for the same pk, breaking the sink's pk constraint"
+                            );
+                        }
+                    }
+                    e.insert(RowOp::Update((*old_v, v)));
+                }
+            },
         }
     }
 
@@ -232,9 +234,6 @@ impl StreamChunkCompactor {
     ///   have three kind of patterns Insert, Delete or Update.
     /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
     ///   removed.
-    ///
-    /// All UPDATE INSERT and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
-    /// certain rules (see `merge_insert` and `merge_delete` for more details).
     pub fn into_compacted_chunks(self) -> impl Iterator<Item = StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 

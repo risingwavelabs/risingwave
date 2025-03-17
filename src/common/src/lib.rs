@@ -16,7 +16,6 @@
     refining_impl_trait,
     reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
 )]
-#![feature(extract_if)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -80,6 +79,7 @@ pub use {
     risingwave_license as license,
 };
 pub mod lru;
+pub mod operator;
 pub mod opts;
 pub mod range;
 pub mod row;
@@ -132,4 +132,19 @@ pub fn current_cluster_version() -> String {
         "PostgreSQL {}-RisingWave-{} ({})",
         PG_VERSION, RW_VERSION, GIT_SHA
     )
+}
+
+/// Panics if `debug_assertions` is set, otherwise logs a warning.
+///
+/// Note: unlike `panic` which returns `!`, this macro returns `()`,
+/// which cannot be used like `result.unwrap_or_else(|| panic_if_debug!(...))`.
+#[macro_export]
+macro_rules! panic_if_debug {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            panic!($($arg)*)
+        } else {
+            tracing::warn!($($arg)*)
+        }
+    };
 }

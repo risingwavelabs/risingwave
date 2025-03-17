@@ -16,7 +16,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::types::JsonbRef;
-use risingwave_expr::{function, Result};
+use risingwave_expr::{Result, function};
 
 /// Expands the top-level JSON array into a set of JSON values.
 #[function("jsonb_array_elements(jsonb) -> setof jsonb")]

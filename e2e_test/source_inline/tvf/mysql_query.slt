@@ -6,6 +6,7 @@ mysql -e "DROP DATABASE IF EXISTS tvf; CREATE DATABASE tvf;"
 system ok
 mysql -e "
 USE tvf;
+set global sql_mode='';
 CREATE TABLE test (
     id bigint primary key,
     v0 bit,
@@ -61,13 +62,118 @@ INSERT INTO test SELECT
   null as v23;
 "
 
+statement ok
+create source mysql_cdc_source with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '$RISEDEV_MYSQL_USER',
+  password = '$MYSQL_PWD',
+  database.name = 'tvf',
+);
+
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
 1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+
+query
+select * from mysql_query('mysql_cdc_source', 'select * from test;');
+----
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+
+
+system ok
+mysql -e "
+USE tvf;
+set global sql_mode='';
+INSERT INTO test SELECT
+  2 as id,
+  true as v0,
+  true as v1,
+  2 as v2,
+  3 as v3,
+  4 as v4,
+  5 as v5,
+  6 as v6,
+  7 as v7,
+  1.08 as v8,
+  1.09 as v9,
+  1.10 as v10,
+  1.11 as v11,
+  'char' as v12,
+  'varchar' as v13,
+  b'1010' as v14,
+  x'16' as v15,
+  x'17' as v16,
+  x'18' as v17,
+  x'19' as v18,
+  '2021-01-01' as v19,
+  '12:34:56' as v20,
+  '0000-00-00' as v21,
+  JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
+  null as v23;
+"
+
+statement error db error: ERROR: Failed to run the query
+Caused by these errors (recent errors listed first):
+ 1: External system error
+ 2: column: v21, index: 22, rust_type: chrono::NaiveDateTime
+ 3: failed to deserialize MySQL value into rust value
+ 4: Couldn't convert the value `Bytes("0000-00-..")` to a desired type
+select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
+
+statement ok
+drop table if exists test;
+
+statement ok
+create table test (
+    id bigint primary key,
+    v0 bool,
+    v1 bool,
+    v2 smallint,
+    v3 smallint,
+    v4 smallint,
+    v5 int,
+    v6 int,
+    v7 bigint,
+    v8 float,
+    v9 double,
+    v10 decimal,
+    v11 decimal,
+    v12 varchar,
+    v13 varchar,
+    v14 bytea,
+    v15 bytea,
+    v16 bytea,
+    v17 bytea,
+    v18 bytea,
+    v19 date,
+    v20 time,
+    v21 timestamptz,
+    v22 jsonb,
+    v23 int
+) with (
+ connector = 'mysql-cdc',
+ hostname = '$MYSQL_HOST',
+ port = '$MYSQL_TCP_PORT',
+ username = '$RISEDEV_MYSQL_USER',
+ password = '$MYSQL_PWD',
+ database.name = 'tvf',
+ table.name = 'test',
+);
+
+sleep 5s
+
+query I
+select * from test order by id;
+----
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL
 
 system ok
 mysql -e "
 USE tvf;
 DROP DATABASE tvf;
 "
+
+statement ok
+drop source mysql_cdc_source;

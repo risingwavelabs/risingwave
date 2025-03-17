@@ -25,15 +25,15 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
+use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, test_epoch};
 use risingwave_hummock_sdk::key::{
-    gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
+    FullKey, TABLE_PREFIX_LEN, TableKey, UserKey, gen_key_from_bytes, prefixed_range_with_vnode,
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -41,12 +41,13 @@ use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::read_filter_for_version;
+use risingwave_storage::hummock::test_utils::*;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_str, prepare_hummock_test_env, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_str, prepare_hummock_test_env};
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -570,7 +571,7 @@ async fn test_state_store_sync() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res, false)
+        .commit_epoch(epoch1, res)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -616,7 +617,7 @@ async fn test_state_store_sync() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res, false)
+        .commit_epoch(epoch2, res)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -889,7 +890,7 @@ async fn test_delete_get() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, res, false)
+        .commit_epoch(epoch1, res)
         .await
         .unwrap();
 
@@ -915,24 +916,26 @@ async fn test_delete_get() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, res, false)
+        .commit_epoch(epoch2, res)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
-    assert!(test_env
-        .storage
-        .get(
-            gen_key_from_str(VirtualNode::ZERO, "bb"),
-            epoch2,
-            ReadOptions {
-                prefix_hint: None,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                ..Default::default()
-            }
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        test_env
+            .storage
+            .get(
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
+                epoch2,
+                ReadOptions {
+                    prefix_hint: None,
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1044,20 +1047,22 @@ async fn test_multiple_epoch_sync() {
                     .unwrap(),
                 "222".as_bytes()
             );
-            assert!(hummock_storage_clone
-                .get(
-                    gen_key_from_str(VirtualNode::ZERO, "bb"),
-                    epoch2,
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        read_committed,
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                hummock_storage_clone
+                    .get(
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
+                        epoch2,
+                        ReadOptions {
+                            table_id: TEST_TABLE_ID,
+                            read_committed,
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(
                 hummock_storage_clone
                     .get(
@@ -1104,19 +1109,19 @@ async fn test_multiple_epoch_sync() {
 
     test_env
         .meta_client
-        .commit_epoch(epoch1, sync_result1, false)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2, false)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
     test_env
         .meta_client
-        .commit_epoch(epoch3, sync_result3, false)
+        .commit_epoch(epoch3, sync_result3)
         .await
         .unwrap();
     test_env.wait_sync_committed_version().await;
@@ -1295,12 +1300,12 @@ async fn test_iter_with_min_epoch() {
             .unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch1, sync_result1, false)
+            .commit_epoch(epoch1, sync_result1)
             .await
             .unwrap();
         test_env
             .meta_client
-            .commit_epoch(epoch2, sync_result2, false)
+            .commit_epoch(epoch2, sync_result2)
             .await
             .unwrap();
         test_env.wait_sync_committed_version().await;
@@ -1601,7 +1606,7 @@ async fn test_hummock_version_reader() {
                 .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch1, sync_result1, false)
+                .commit_epoch(epoch1, sync_result1)
                 .await
                 .unwrap();
             test_env.wait_sync_committed_version().await;
@@ -1613,7 +1618,7 @@ async fn test_hummock_version_reader() {
                 .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch2, sync_result2, false)
+                .commit_epoch(epoch2, sync_result2)
                 .await
                 .unwrap();
             test_env.wait_sync_committed_version().await;
@@ -1625,7 +1630,7 @@ async fn test_hummock_version_reader() {
                 .unwrap();
             test_env
                 .meta_client
-                .commit_epoch(epoch3, sync_result3, false)
+                .commit_epoch(epoch3, sync_result3)
                 .await
                 .unwrap();
             test_env.wait_sync_committed_version().await;
@@ -2026,12 +2031,12 @@ async fn test_get_with_min_epoch() {
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch1, sync_result1, false)
+        .commit_epoch(epoch1, sync_result1)
         .await
         .unwrap();
     test_env
         .meta_client
-        .commit_epoch(epoch2, sync_result2, false)
+        .commit_epoch(epoch2, sync_result2)
         .await
         .unwrap();
 
@@ -2164,12 +2169,18 @@ async fn test_table_watermark() {
         .init_for_test_with_prev_epoch(epoch1, prev_epoch)
         .await
         .unwrap();
-    local1.update_vnode_bitmap(vnode_bitmap1.clone());
+    local1
+        .update_vnode_bitmap(vnode_bitmap1.clone())
+        .await
+        .unwrap();
     local2
         .init_for_test_with_prev_epoch(epoch1, prev_epoch)
         .await
         .unwrap();
-    local2.update_vnode_bitmap(vnode_bitmap2.clone());
+    local2
+        .update_vnode_bitmap(vnode_bitmap2.clone())
+        .await
+        .unwrap();
 
     fn gen_inner_key(index: usize) -> Bytes {
         Bytes::copy_from_slice(format!("key_{:05}", index).as_bytes())
@@ -2268,6 +2279,7 @@ async fn test_table_watermark() {
                 table_watermarks: Some((
                     WatermarkDirection::Ascending,
                     vec![VnodeWatermark::new(vnode_bitmap, gen_inner_key(watermark1))],
+                    WatermarkSerdeType::PkPrefix,
                 )),
                 switch_op_consistency_level: None,
             },
@@ -2595,6 +2607,7 @@ async fn test_table_watermark() {
                 table_watermarks: Some((
                     WatermarkDirection::Ascending,
                     vec![VnodeWatermark::new(vnode_bitmap, gen_inner_key(5))],
+                    WatermarkSerdeType::PkPrefix,
                 )),
                 switch_op_consistency_level: None,
             },

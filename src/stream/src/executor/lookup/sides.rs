@@ -17,15 +17,15 @@ use std::pin::pin;
 use anyhow::Context;
 use either::Either;
 use futures::future::select;
-use futures::{future, StreamExt};
+use futures::{StreamExt, future};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, MessageStream};
@@ -76,7 +76,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     /// Whether to join with the arrangement of the current epoch
     pub use_current_epoch: bool,
 
-    pub storage_table: StorageTable<S>,
+    pub batch_table: BatchTable<S>,
 }
 
 /// Message from the `arrange_join_stream`.
@@ -410,9 +410,9 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
+    use crate::executor::StreamExecutorResult;
     use crate::executor::lookup::sides::stream_lookup_arrange_this_epoch;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::StreamExecutorResult;
 
     #[tokio::test]
     async fn test_stream_lookup_arrange_this_epoch() -> StreamExecutorResult<()> {

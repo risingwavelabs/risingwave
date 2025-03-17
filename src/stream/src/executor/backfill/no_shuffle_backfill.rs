@@ -22,12 +22,12 @@ use risingwave_common::{bail, row};
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
-    mapping_message, mark_chunk, METADATA_STATE_LEN,
+    METADATA_STATE_LEN, compute_bounds, construct_initial_finished_state, create_builder,
+    get_new_pos, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -65,7 +65,7 @@ pub struct BackfillState {
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StorageTable<S>,
+    upstream_table: BatchTable<S>,
     /// Upstream with the same schema with the upstream table.
     upstream: Executor,
 
@@ -93,7 +93,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        upstream_table: StorageTable<S>,
+        upstream_table: BatchTable<S>,
         upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
@@ -226,14 +226,16 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
                     let paused =
                         paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
-                        &self.upstream_table,
-                        snapshot_read_epoch,
-                        current_pos.clone(),
-                        paused,
-                        &self.rate_limiter,
-                    )
-                    .map(Either::Right));
+                    let right_snapshot = pin!(
+                        Self::make_snapshot_stream(
+                            &self.upstream_table,
+                            snapshot_read_epoch,
+                            current_pos.clone(),
+                            paused,
+                            &self.rate_limiter,
+                        )
+                        .map(Either::Right)
+                    );
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -502,7 +504,9 @@ where
                     if is_finished {
                         // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
                         if let Some(table) = &mut self.state_table {
-                            table.commit(barrier.epoch).await?;
+                            table
+                                .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                                .await?;
                         }
                     } else {
                         // If snapshot was empty, we do not need to backfill,
@@ -572,7 +576,9 @@ where
                 if let Message::Barrier(barrier) = &msg {
                     // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
                     if let Some(table) = &mut self.state_table {
-                        table.commit(barrier.epoch).await?;
+                        table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
                     }
                 }
 
@@ -624,7 +630,7 @@ where
         let mut old_state = vec![None; pk_len + METADATA_STATE_LEN];
         old_state[1..row.len() + 1].clone_from_slice(&row);
         let current_pos = Some((&row[0..pk_len]).into_owned_row());
-        let is_finished = row[pk_len].clone().map_or(false, |d| d.into_bool());
+        let is_finished = row[pk_len].clone().is_some_and(|d| d.into_bool());
         let row_count = row
             .get(pk_len + 1)
             .cloned()
@@ -640,7 +646,7 @@ where
 
     #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
-        upstream_table: &'a StorageTable<S>,
+        upstream_table: &'a BatchTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         paused: bool,
@@ -672,7 +678,7 @@ where
     /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     pub async fn snapshot_read(
-        upstream_table: &StorageTable<S>,
+        upstream_table: &BatchTable<S>,
         epoch: HummockReadEpoch,
         current_pos: Option<OwnedRow>,
     ) {

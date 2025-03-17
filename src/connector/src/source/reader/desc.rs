@@ -21,14 +21,14 @@ use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::PbColumnCatalog;
 
 #[expect(deprecated)]
-use super::fs_reader::FsSourceReader;
+use super::fs_reader::LegacyFsSourceReader;
 use super::reader::SourceReader;
+use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::additional_columns::source_add_partition_offset_cols;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
-use crate::WithOptionsSecResolved;
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
@@ -44,8 +44,8 @@ pub struct SourceDesc {
 #[deprecated = "will be replaced by new fs source (list + fetch)"]
 #[expect(deprecated)]
 #[derive(Debug)]
-pub struct FsSourceDesc {
-    pub source: FsSourceReader,
+pub struct LegacyFsSourceDesc {
+    pub source: LegacyFsSourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 }
@@ -139,7 +139,7 @@ impl SourceDescBuilder {
 
     #[deprecated = "will be replaced by new fs source (list + fetch)"]
     #[expect(deprecated)]
-    pub fn build_fs_source_desc(&self) -> ConnectorResult<FsSourceDesc> {
+    pub fn build_fs_source_desc(&self) -> ConnectorResult<LegacyFsSourceDesc> {
         let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (
@@ -161,10 +161,13 @@ impl SourceDescBuilder {
 
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let source =
-            FsSourceReader::new(self.with_properties.clone(), columns.clone(), parser_config)?;
+        let source = LegacyFsSourceReader::new(
+            self.with_properties.clone(),
+            columns.clone(),
+            parser_config,
+        )?;
 
-        Ok(FsSourceDesc {
+        Ok(LegacyFsSourceDesc {
             source,
             columns,
             metrics: self.metrics.clone(),
@@ -178,7 +181,7 @@ pub mod test_utils {
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
     use risingwave_pb::catalog::StreamSourceInfo;
 
-    use super::{SourceDescBuilder, DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE};
+    use super::{DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE, SourceDescBuilder};
 
     pub fn create_source_desc_builder(
         schema: &Schema,

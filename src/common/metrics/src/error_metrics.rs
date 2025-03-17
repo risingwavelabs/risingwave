@@ -17,9 +17,9 @@ use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
 use parking_lot::Mutex;
+use prometheus::Registry;
 use prometheus::core::{Collector, Desc};
 use prometheus::proto::{Gauge, LabelPair, Metric, MetricFamily};
-use prometheus::Registry;
 use rw_iter_util::ZipEqFast;
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;

@@ -7,6 +7,7 @@ numer = "numer"         # numerator
 nd = "nd"               # N-dimentional / 2nd
 steam = "stream"        # You played with Steam games too much.
 ser = "ser"             # Serialization
+typ = "typ"             # Type, to avoid conflict with rust keyword `type`
 # Some weird short variable names
 ot = "ot"
 bui = "bui"             # BackwardUserIterator
@@ -21,6 +22,7 @@ extreact = "extract"
 buidler = "builder"
 epoches = "epochs"
 
+
 [default.extend-identifiers]
 TABLE_SCHEM = "TABLE_SCHEM"
 
@@ -33,7 +35,7 @@ extend-exclude = [
     "src/sqlparser/tests/testdata/",
     "src/frontend/planner_test/tests/testdata",
     "src/tests/sqlsmith/tests/freeze",
-    "src/license/src/manager.rs",
+    "src/license/**/*.rs", # JWT license key
     "Cargo.lock",
     "**/Cargo.toml",
     "**/go.mod",

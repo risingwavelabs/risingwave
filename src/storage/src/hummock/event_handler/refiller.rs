@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
 
 use foyer::{HybridCacheEntry, RangeBoundsExt};
@@ -25,8 +25,8 @@ use futures::{Future, FutureExt};
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
+    Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -543,7 +543,7 @@ impl CacheRefillTask {
         let parent_ssts = match try_join_all(futures).await {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten(),
             Err(e) => {
-                return tracing::error!(error = %e.as_report(), "get old meta from cache error")
+                return tracing::error!(error = %e.as_report(), "get old meta from cache error");
             }
         };
         let units = Self::get_units_to_refill_by_inheritance(context, &holders, parent_ssts);

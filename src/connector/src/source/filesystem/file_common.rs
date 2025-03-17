@@ -24,55 +24,6 @@ use super::opendal_source::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
-///  [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
-/// and can be a local file, a distributed file system, or am object in S3 bucket.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct FsSplit {
-    pub name: String,
-    pub offset: usize,
-    pub size: usize,
-}
-
-impl From<&Object> for FsSplit {
-    fn from(value: &Object) -> Self {
-        Self {
-            name: value.key().unwrap().to_owned(),
-            offset: 0,
-            size: value.size().unwrap_or_default() as usize,
-        }
-    }
-}
-
-impl SplitMetaData for FsSplit {
-    fn id(&self) -> SplitId {
-        self.name.as_str().into()
-    }
-
-    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
-        serde_json::from_value(value.take()).map_err(Into::into)
-    }
-
-    fn encode_to_json(&self) -> JsonbVal {
-        serde_json::to_value(self.clone()).unwrap().into()
-    }
-
-    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        let offset = last_seen_offset.parse().unwrap();
-        self.offset = offset;
-        Ok(())
-    }
-}
-
-impl FsSplit {
-    pub fn new(name: String, start: usize, size: usize) -> Self {
-        Self {
-            name,
-            offset: start,
-            size,
-        }
-    }
-}
-
 ///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]

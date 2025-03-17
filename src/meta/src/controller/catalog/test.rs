@@ -14,7 +14,6 @@
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_pb::catalog::StreamSourceInfo;
 
     use crate::controller::catalog::*;
@@ -50,7 +49,8 @@ mod tests {
             .unwrap();
         assert_eq!(database.name, "db2");
 
-        mgr.drop_database(database_id).await?;
+        mgr.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
+            .await?;
 
         Ok(())
     }
@@ -83,7 +83,8 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(schema.name, "schema2");
-        mgr.drop_schema(schema_id, DropMode::Restrict).await?;
+        mgr.drop_object(ObjectType::Schema, schema_id, DropMode::Restrict)
+            .await?;
 
         Ok(())
     }
@@ -103,12 +104,14 @@ mod tests {
         assert!(mgr.create_view(pb_view).await.is_err());
 
         let view = View::find().one(&mgr.inner.read().await.db).await?.unwrap();
-        mgr.drop_relation(ObjectType::View, view.view_id, DropMode::Cascade)
+        mgr.drop_object(ObjectType::View, view.view_id, DropMode::Cascade)
             .await?;
-        assert!(View::find_by_id(view.view_id)
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .is_none());
+        assert!(
+            View::find_by_id(view.view_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -152,11 +155,18 @@ mod tests {
         assert_eq!(function.arg_types.to_protobuf().len(), 1);
         assert_eq!(function.language, "python");
 
-        mgr.drop_function(function.function_id).await?;
-        assert!(Object::find_by_id(function.function_id)
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .is_none());
+        mgr.drop_object(
+            ObjectType::Function,
+            function.function_id,
+            DropMode::Restrict,
+        )
+        .await?;
+        assert!(
+            Object::find_by_id(function.function_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -235,12 +245,14 @@ mod tests {
             "CREATE VIEW view_1 AS SELECT v1 FROM s2 AS s1"
         );
 
-        mgr.drop_relation(ObjectType::Source, source_id, DropMode::Cascade)
+        mgr.drop_object(ObjectType::Source, source_id, DropMode::Cascade)
             .await?;
-        assert!(View::find_by_id(view_id)
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .is_none());
+        assert!(
+            View::find_by_id(view_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }

@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::alloc::Global;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use either::Either;
-use futures::stream::{self, PollNext};
 use futures::TryStreamExt;
+use futures::stream::{self, PollNext};
 use itertools::Itertools;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
@@ -31,12 +31,12 @@ use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::join::{JoinType, JoinTypePrimitive};
 use super::monitor::TemporalJoinMetrics;
-use crate::cache::{cache_may_stale, ManagedLruCache};
+use crate::cache::{ManagedLruCache, cache_may_stale};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
@@ -104,7 +104,7 @@ impl JoinEntry {
 }
 
 struct TemporalSide<K: HashKey, S: StateStore> {
-    source: StorageTable<S>,
+    source: BatchTable<S>,
     table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
     cache: ManagedLruCache<K, JoinEntry, DefaultHasher, SharedStatsAlloc<Global>>,
@@ -312,7 +312,7 @@ pub(super) fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> Stream
 pub(super) mod phase1 {
     use std::ops::Bound;
 
-    use futures::{pin_mut, StreamExt};
+    use futures::{StreamExt, pin_mut};
     use futures_async_stream::try_stream;
     use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
     use risingwave_common::array::{Op, StreamChunk};
@@ -597,7 +597,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         info: ExecutorInfo,
         left: Executor,
         right: Executor,
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
@@ -823,12 +823,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                                 .init_epoch(barrier_epoch)
                                 .await?;
                         } else {
-                            self.memo_table
+                            let post_commit = self
+                                .memo_table
                                 .as_mut()
                                 .unwrap()
                                 .commit(barrier.epoch)
                                 .await?;
                             yield Message::Barrier(barrier);
+                            post_commit
+                                .post_yield_barrier(update_vnode_bitmap.clone())
+                                .await?;
                         }
                     } else {
                         yield Message::Barrier(barrier);

@@ -12,28 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use anyhow::Context;
+use opendal::Operator;
+use opendal::services::{Gcs, S3};
 use rdkafka::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
+use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::PbConnection;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tonic::async_trait;
+use url::Url;
 use with_options::WithOptions;
 
-use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
+use crate::connector_common::{
+    AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
+};
+use crate::deserialize_optional_bool_from_string;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
+use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
-use crate::{dispatch_connection_impl, ConnectionImpl};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
 #[async_trait]
-pub trait Connection {
-    async fn test_connection(&self) -> ConnectorResult<()>;
+pub trait Connection: Send {
+    async fn validate_connection(&self) -> ConnectorResult<()>;
 }
 
 #[serde_as]
@@ -56,9 +65,8 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
                 let secret_refs = cp.secret_refs.clone().into_iter().collect();
                 let props_secret_resolved =
                     LocalSecretManager::global().fill_secrets(options, secret_refs)?;
-                let connection_impl =
-                    ConnectionImpl::from_proto(cp.connection_type(), props_secret_resolved)?;
-                dispatch_connection_impl!(connection_impl, inner, inner.test_connection().await?)
+                let connection = build_connection(cp.connection_type(), props_secret_resolved)?;
+                connection.validate_connection().await?
             }
             risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => unreachable!(),
         }
@@ -68,7 +76,7 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
 
 #[async_trait]
 impl Connection for KafkaConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         let client = self.build_client().await?;
         // describe cluster here
         client.fetch_metadata(None, Duration::from_secs(10)).await?;
@@ -109,12 +117,174 @@ impl KafkaConnection {
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 #[serde(deny_unknown_fields)]
-pub struct IcebergConnection {}
+pub struct IcebergConnection {
+    #[serde(rename = "catalog.type")]
+    pub catalog_type: Option<String>,
+    #[serde(rename = "s3.region")]
+    pub region: Option<String>,
+    #[serde(rename = "s3.endpoint")]
+    pub endpoint: Option<String>,
+    #[serde(rename = "s3.access.key")]
+    pub access_key: Option<String>,
+    #[serde(rename = "s3.secret.key")]
+    pub secret_key: Option<String>,
+
+    #[serde(rename = "gcs.credential")]
+    pub gcs_credential: Option<String>,
+
+    /// Path of iceberg warehouse.
+    #[serde(rename = "warehouse.path")]
+    pub warehouse_path: Option<String>,
+    /// Catalog id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
+    /// Catalog name, default value is risingwave.
+    #[serde(rename = "catalog.name")]
+    pub catalog_name: Option<String>,
+    /// URI of iceberg catalog, only applicable in rest catalog.
+    #[serde(rename = "catalog.uri")]
+    pub catalog_uri: Option<String>,
+    /// Credential for accessing iceberg catalog, only applicable in rest catalog.
+    /// A credential to exchange for a token in the OAuth2 client credentials flow.
+    #[serde(rename = "catalog.credential")]
+    pub credential: Option<String>,
+    /// token for accessing iceberg catalog, only applicable in rest catalog.
+    /// A Bearer token which will be used for interaction with the server.
+    #[serde(rename = "catalog.token")]
+    pub token: Option<String>,
+    /// `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
+    #[serde(rename = "catalog.oauth2-server-uri")]
+    pub oauth2_server_uri: Option<String>,
+    /// scope for accessing iceberg catalog, only applicable in rest catalog.
+    /// Additional scope for OAuth2.
+    #[serde(rename = "catalog.scope")]
+    pub scope: Option<String>,
+
+    #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub path_style_access: Option<bool>,
+
+    #[serde(rename = "catalog.jdbc.user")]
+    pub jdbc_user: Option<String>,
+
+    #[serde(rename = "catalog.jdbc.password")]
+    pub jdbc_password: Option<String>,
+}
 
 #[async_trait]
 impl Connection for IcebergConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
-        todo!()
+    async fn validate_connection(&self) -> ConnectorResult<()> {
+        let info = match &self.warehouse_path {
+            Some(warehouse_path) => {
+                let url = Url::parse(warehouse_path);
+                if url.is_err()
+                    && matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust"))
+                {
+                    // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
+                    // so we allow it to pass here.
+                    None
+                } else {
+                    let url =
+                        url.with_context(|| format!("Invalid warehouse path: {}", warehouse_path))?;
+                    let bucket = url
+                        .host_str()
+                        .with_context(|| {
+                            format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
+                        })?
+                        .to_owned();
+                    let root = url.path().trim_start_matches('/').to_owned();
+                    Some((url.scheme().to_owned(), bucket, root))
+                }
+            }
+            None => {
+                if matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust")) {
+                    None
+                } else {
+                    bail!("`warehouse.path` must be set");
+                }
+            }
+        };
+
+        // Test warehouse
+        if let Some((scheme, bucket, root)) = info {
+            match scheme.as_str() {
+                "s3" | "s3a" => {
+                    let mut builder = S3::default();
+                    if let Some(region) = &self.region {
+                        builder = builder.region(region);
+                    }
+                    if let Some(endpoint) = &self.endpoint {
+                        builder = builder.endpoint(endpoint);
+                    }
+                    if let Some(access_key) = &self.access_key {
+                        builder = builder.access_key_id(access_key);
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        builder = builder.secret_access_key(secret_key);
+                    }
+                    builder = builder.root(root.as_str()).bucket(bucket.as_str());
+                    let op = Operator::new(builder)?.finish();
+                    op.check().await?;
+                }
+                "gs" | "gcs" => {
+                    let mut builder = Gcs::default();
+                    if let Some(credential) = &self.gcs_credential {
+                        builder = builder.credential(credential);
+                    }
+                    builder = builder.root(root.as_str()).bucket(bucket.as_str());
+                    let op = Operator::new(builder)?.finish();
+                    op.check().await?;
+                }
+                _ => {
+                    bail!("Unsupported scheme: {}", scheme);
+                }
+            }
+        }
+
+        if self.catalog_type.is_none() {
+            bail!("`catalog.type` must be set");
+        }
+
+        // Test catalog
+        let iceberg_common = IcebergCommon {
+            catalog_type: self.catalog_type.clone(),
+            region: self.region.clone(),
+            endpoint: self.endpoint.clone(),
+            access_key: self.access_key.clone(),
+            secret_key: self.secret_key.clone(),
+            gcs_credential: self.gcs_credential.clone(),
+            warehouse_path: self.warehouse_path.clone(),
+            glue_id: self.glue_id.clone(),
+            catalog_name: self.catalog_name.clone(),
+            catalog_uri: self.catalog_uri.clone(),
+            credential: self.credential.clone(),
+            token: self.token.clone(),
+            oauth2_server_uri: self.oauth2_server_uri.clone(),
+            scope: self.scope.clone(),
+            path_style_access: self.path_style_access,
+            database_name: Some("test_database".to_owned()),
+            table_name: "test_table".to_owned(),
+            enable_config_load: Some(false),
+        };
+
+        let mut java_map = HashMap::new();
+        if let Some(jdbc_user) = &self.jdbc_user {
+            java_map.insert("jdbc.user".to_owned(), jdbc_user.to_owned());
+        }
+        if let Some(jdbc_password) = &self.jdbc_password {
+            java_map.insert("jdbc.password".to_owned(), jdbc_password.to_owned());
+        }
+        let catalog = iceberg_common.create_catalog(&java_map).await?;
+        // test catalog by `table_exists` api
+        catalog
+            .table_exists(&iceberg_common.full_table_name()?)
+            .await?;
+        Ok(())
     }
 }
 
@@ -133,7 +303,7 @@ pub struct ConfluentSchemaRegistryConnection {
 
 #[async_trait]
 impl Connection for ConfluentSchemaRegistryConnection {
-    async fn test_connection(&self) -> ConnectorResult<()> {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
         // GET /config to validate the connection
         let client = ConfluentSchemaRegistryClient::try_from(self)?;
         client.validate_connection().await?;

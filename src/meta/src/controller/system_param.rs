@@ -24,12 +24,12 @@ use risingwave_common::system_param::{
 use risingwave_common::{for_all_params, key_of};
 use risingwave_meta_model::prelude::SystemParameter;
 use risingwave_meta_model::system_parameter;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PbSystemParams;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
-use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::controller::SqlMetaStore;
@@ -302,11 +302,13 @@ mod tests {
         .await
         .unwrap();
         // check deprecated params are cleaned up.
-        assert!(SystemParameter::find_by_id("deprecated_param".to_owned())
-            .one(&system_param_ctl.db)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            SystemParameter::find_by_id("deprecated_param".to_owned())
+                .one(&system_param_ctl.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
         // check new params are set.
         let params = system_param_ctl.get_pb_params().await;
         assert_eq!(params, new_params);

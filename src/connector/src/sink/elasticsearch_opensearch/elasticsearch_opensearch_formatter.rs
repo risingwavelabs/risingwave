@@ -19,9 +19,9 @@ use risingwave_common::row::Row;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value};
 
+use super::super::SinkError;
 use super::super::encoder::template::TemplateEncoder;
 use super::super::encoder::{JsonEncoder, RowEncoder};
-use super::super::SinkError;
 use crate::sink::Result;
 
 pub struct ElasticSearchOpenSearchFormatter {
@@ -103,7 +103,8 @@ impl ElasticSearchOpenSearchFormatter {
         } else {
             None
         };
-        let key_encoder = TemplateEncoder::new(schema.clone(), col_indices.clone(), key_format);
+        let key_encoder =
+            TemplateEncoder::new_string(schema.clone(), col_indices.clone(), key_format);
         let value_encoder = JsonEncoder::new_with_es(schema.clone(), col_indices.clone());
         Ok(Self {
             key_encoder,
@@ -152,7 +153,7 @@ impl ElasticSearchOpenSearchFormatter {
                 .transpose()?;
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let key = self.key_encoder.encode(rows)?;
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let mut modified_col_indices = Vec::new();
                     if let Some((delete_key, delete_row)) = update_delete_row.take()
                         && delete_key == key
@@ -191,7 +192,7 @@ impl ElasticSearchOpenSearchFormatter {
                             "`Delete` operation is not supported in `append_only` mode"
                         )));
                     }
-                    let key = self.key_encoder.encode(rows)?;
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
                         index: index.to_owned(),
@@ -207,7 +208,7 @@ impl ElasticSearchOpenSearchFormatter {
                             "`UpdateDelete` operation is not supported in `append_only` mode"
                         )));
                     } else {
-                        let key = self.key_encoder.encode(rows)?;
+                        let key = self.key_encoder.encode(rows)?.into_string()?;
                         update_delete_row = Some((key, rows));
                     }
                 }

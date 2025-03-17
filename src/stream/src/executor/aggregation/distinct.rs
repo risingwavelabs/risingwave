@@ -291,7 +291,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
 mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -395,9 +395,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -423,7 +421,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
 
         // --- chunk 2 ---
@@ -436,9 +434,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -464,7 +460,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
 
         drop(deduplicater);
@@ -487,9 +483,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -530,7 +524,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
     }
 
@@ -576,9 +570,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(
                 &ops,
@@ -606,7 +598,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
 
         let chunk = StreamChunk::from_pretty(
@@ -617,9 +609,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(
                 &ops,
@@ -657,7 +647,7 @@ mod tests {
 
         epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit_for_test(epoch).await.unwrap();
         }
     }
 }

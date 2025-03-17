@@ -16,16 +16,16 @@ use std::sync::Arc;
 
 use risingwave_pb::telemetry::PbEventMessage;
 pub use risingwave_telemetry_event::{
-    current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
     TELEMETRY_EVENT_REPORT_INTERVAL, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+    current_timestamp, do_telemetry_event_report, post_telemetry_report_pb,
 };
 use risingwave_telemetry_event::{
-    get_telemetry_risingwave_cloud_uuid, TELEMETRY_EVENT_REPORT_STASH_SIZE,
-    TELEMETRY_EVENT_REPORT_TX,
+    TELEMETRY_EVENT_REPORT_STASH_SIZE, TELEMETRY_EVENT_REPORT_TX,
+    get_telemetry_risingwave_cloud_uuid,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tokio::time::{interval as tokio_interval_fn, Duration};
+use tokio::time::{Duration, interval as tokio_interval_fn};
 use uuid::Uuid;
 
 use super::{Result, TELEMETRY_REPORT_INTERVAL};
@@ -76,22 +76,23 @@ where
         // There is only one case tracking_id updated at the runtime ---- metastore data has been
         // cleaned. There is no way that metastore has been cleaned but nodes are still running
         let tracking_id = {
-            if let Some(cloud_uuid) = get_telemetry_risingwave_cloud_uuid() {
-                cloud_uuid
-            } else {
-                match info_fetcher.fetch_telemetry_info().await {
-                    Ok(Some(id)) => id,
-                    Ok(None) => {
-                        tracing::info!("Telemetry is disabled");
-                        return;
-                    }
-                    Err(err) => {
-                        tracing::error!("Telemetry failed to get tracking_id, err {}", err);
-                        return;
-                    }
+            match (
+                info_fetcher.fetch_telemetry_info().await,
+                get_telemetry_risingwave_cloud_uuid(),
+            ) {
+                (Ok(None), _) => {
+                    tracing::info!("Telemetry is disabled");
+                    return;
                 }
+                (Err(err), _) => {
+                    tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                    return;
+                }
+                (Ok(Some(_)), Some(cloud_uuid)) => cloud_uuid,
+                (Ok(Some(id)), None) => id,
             }
         };
+
         TELEMETRY_TRACKING_ID
             .set(tracking_id.clone())
             .unwrap_or_else(|_| {
@@ -101,17 +102,25 @@ where
             });
 
         let (tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<PbEventMessage>();
+
+        let mut enable_event_report = true;
         TELEMETRY_EVENT_REPORT_TX.set(tx).unwrap_or_else(|_| {
             tracing::warn!(
                 "Telemetry failed to set event reporting tx, event reporting will be disabled"
             );
+            // possible failure:
+            // When running in standalone mode, the static TELEMETRY_EVENT_REPORT_TX is shared
+            // and can be set by meta/compute nodes.
+            // In such case, the one first set the static will do the event reporting and others'
+            // event report is disabled.
+            enable_event_report = false;
         });
         let mut event_stash = Vec::new();
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
-                event = event_rx.recv() => {
+                event = event_rx.recv(), if enable_event_report => {
                     debug_assert!(event.is_some());
                     event_stash.push(event.unwrap());
                     if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
@@ -119,7 +128,7 @@ where
                     }
                     continue;
                 }
-                _ = event_interval.tick() => {
+                _ = event_interval.tick(), if enable_event_report => {
                     do_telemetry_event_report(&mut event_stash).await;
                     continue;
                 },

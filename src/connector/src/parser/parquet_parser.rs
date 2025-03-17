@@ -14,10 +14,10 @@
 use std::future::IntoFuture;
 use std::sync::Arc;
 
-use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
+use parquet::arrow::async_reader::AsyncFileReader;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::types::{Datum, ScalarImpl};
@@ -109,6 +109,10 @@ impl ParquetParser {
 
                             if let Some(parquet_column) =
                                 record_batch.column_by_name(rw_column_name)
+                                && is_parquet_schema_match_source_schema(
+                                    parquet_column.data_type(),
+                                    rw_data_type,
+                                )
                             {
                                 let arrow_field = IcebergArrowConvert
                                     .to_arrow_field(rw_column_name, rw_data_type)?;
@@ -182,6 +186,7 @@ impl ParquetParser {
     }
 }
 
+#[allow(clippy::doc_overindented_list_items)]
 /// Retrieves the total number of rows in the specified Parquet file.
 ///
 /// This function constructs an `OpenDAL` operator using the information

@@ -21,13 +21,13 @@ use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 
 use super::utils::get_kafka_topic;
 use super::{DebeziumProps, TimestamptzHandling};
+use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
-use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use crate::source::{extract_source_struct, SourceColumnDesc, SourceEncode, SourceFormat};
-use crate::WithOptionsSecResolved;
+use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
 
 /// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]
@@ -204,32 +204,30 @@ impl SpecificParserConfig {
 
                 let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),
-                    use_schema_registry: info.use_schema_registry,
-                    row_schema_location: info.row_schema_location.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                        .unwrap(),
                     key_message_name: info.key_message_name.clone(),
                     messages_as_jsonb,
                     ..Default::default()
                 };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
-                if info.use_schema_registry {
-                    config
-                        .topic
-                        .clone_from(get_kafka_topic(&options_with_secret)?);
-                    config.client_config =
-                        SchemaRegistryAuth::from(&format_encode_options_with_secret);
+                config.schema_location = if info.use_schema_registry {
+                    SchemaLocation::Confluent {
+                        urls: info.row_schema_location.clone(),
+                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
+                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
+                            .unwrap(),
+                        topic: get_kafka_topic(&options_with_secret)?.clone(),
+                    }
                 } else {
-                    config.aws_auth_props = Some(
-                        serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(format_encode_options_with_secret.clone())
-                                .unwrap(),
-                        )
-                        .map_err(|e| anyhow::anyhow!(e))?,
-                    );
-                }
+                    SchemaLocation::File {
+                        url: info.row_schema_location.clone(),
+                        aws_auth_props: Some(
+                            serde_json::from_value::<AwsAuthProps>(
+                                serde_json::to_value(format_encode_options_with_secret.clone())
+                                    .unwrap(),
+                            )
+                            .map_err(|e| anyhow::anyhow!(e))?,
+                        ),
+                    }
+                };
                 EncodingProperties::Protobuf(config)
             }
             (SourceFormat::Debezium, SourceEncode::Avro) => {
@@ -330,15 +328,9 @@ impl Default for SchemaLocation {
 
 #[derive(Debug, Default, Clone)]
 pub struct ProtobufProperties {
+    pub schema_location: SchemaLocation,
     pub message_name: String,
-    pub use_schema_registry: bool,
-    pub row_schema_location: String,
-    pub aws_auth_props: Option<AwsAuthProps>,
-    pub client_config: SchemaRegistryAuth,
-    pub enable_upsert: bool,
-    pub topic: String,
     pub key_message_name: Option<String>,
-    pub name_strategy: PbSchemaRegistryNameStrategy,
     pub messages_as_jsonb: HashSet<String>,
 }
 

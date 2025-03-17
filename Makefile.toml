@@ -158,7 +158,7 @@ alias = "logs"
 
 [tasks.logs]
 category = "RiseDev - Start/Stop"
-description = "Open logs with VSCode or dump in console"
+description = "Open logs with VSCode"
 script = '''
 #!/usr/bin/env bash
 
@@ -166,17 +166,6 @@ code "${PREFIX_LOG}" 2> /dev/null
 if [[ $? -eq 0 ]]; then
   exit 0
 fi
-
-for out_file in ${PREFIX_LOG}/*.log
-do
-  echo "~~~ Dump log file $out_file"
-  echo ""
-  cat "$out_file" | tail -n 300
-done
-
-echo ""
-echo ""
-echo ""
 '''
 
 
@@ -688,6 +677,10 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
+if [[ $ENABLE_BUILD_RW_CONNECTOR == "true" ]]; then
+  export CONNECTOR_LIBS_PATH="${PREFIX_BIN}/connector-node/libs/"
+fi
+
 set -x
 target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
@@ -1181,7 +1174,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.28.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.30.2", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1323,15 +1316,10 @@ env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
-[tasks.ci-kill-no-dump-logs]
-category = "RiseDev - CI"
-dependencies = ["k", "check-logs", "wait-processes-exit"]
-description = "Kill cluster and check logs, do not dump logs"
-
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
-description = "Kill cluster, dump logs and check logs"
+dependencies = ["k", "check-logs", "wait-processes-exit"]
+description = "Kill cluster and check logs"
 
 [tasks.wait-processes-exit]
 category = "Misc"
@@ -1355,7 +1343,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.26.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.27.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]

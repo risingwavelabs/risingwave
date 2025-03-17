@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
-    TABLE_NAME_COLUMN_NAME,
+    CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME, ColumnDesc, ColumnId,
+    KAFKA_TIMESTAMP_COLUMN_NAME, ROW_ID_COLUMN_ID, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -30,7 +30,6 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub fields: Vec<ColumnDesc>,
     /// `additional_column` and `column_type` are orthogonal
     /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario
@@ -64,12 +63,13 @@ pub enum SourceColumnType {
 
 impl SourceColumnType {
     pub fn from_name(name: &str) -> Self {
-        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) || name.starts_with(TABLE_NAME_COLUMN_NAME)
+        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME)
+            || name.starts_with(CDC_TABLE_NAME_COLUMN_NAME)
         {
             Self::Meta
-        } else if name == (ROWID_PREFIX) {
+        } else if name == ROW_ID_COLUMN_NAME {
             Self::RowId
-        } else if name == OFFSET_COLUMN_NAME {
+        } else if name == CDC_OFFSET_COLUMN_NAME {
             Self::Offset
         } else {
             Self::Normal
@@ -78,19 +78,14 @@ impl SourceColumnType {
 }
 
 impl SourceColumnDesc {
-    /// Create a [`SourceColumnDesc`] without composite types.
-    #[track_caller]
+    /// Create a [`SourceColumnDesc`].
+    // TODO(struct): rename to `new`?
     pub fn simple(name: impl Into<String>, data_type: DataType, column_id: ColumnId) -> Self {
-        assert!(
-            !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
-            "called `SourceColumnDesc::simple` with a composite type."
-        );
         let name = name.into();
         Self {
             name,
             data_type,
             column_id,
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
             is_hidden_addition_col: false,
@@ -129,14 +124,13 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             data_type,
             column_id,
             name,
-            field_descs,
             additional_column,
             // ignored fields below
             generated_or_default_column,
-            type_name: _,
             description: _,
             version: _,
             system_column: _,
+            nullable: _,
         }: &ColumnDesc,
     ) -> Self {
         if let Some(option) = generated_or_default_column {
@@ -147,14 +141,19 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             )
         }
 
+        let column_type = SourceColumnType::from_name(name);
+        if column_type == SourceColumnType::RowId {
+            debug_assert_eq!(name, ROW_ID_COLUMN_NAME);
+            debug_assert_eq!(*column_id, ROW_ID_COLUMN_ID);
+        }
+
         Self {
             name: name.clone(),
             data_type: data_type.clone(),
             column_id: *column_id,
-            fields: field_descs.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            column_type: SourceColumnType::from_name(name),
+            column_type,
             is_pk: false,
             is_hidden_addition_col: false,
         }
@@ -167,7 +166,6 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name,
             data_type,
             column_id,
-            fields,
             additional_column,
             // ignored fields below
             column_type: _,
@@ -179,14 +177,13 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             data_type: data_type.clone(),
             column_id: *column_id,
             name: name.clone(),
-            field_descs: fields.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
-            version: ColumnDescVersion::Pr13707,
+            version: ColumnDescVersion::LATEST,
             system_column: None,
+            nullable: true,
         }
     }
 }

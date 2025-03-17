@@ -15,14 +15,13 @@
 use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::ScalarImpl;
-use risingwave_connector::source::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Specially for the predicate and sub-nodes under `LogicalFilter`

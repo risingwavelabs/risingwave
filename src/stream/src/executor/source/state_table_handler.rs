@@ -23,31 +23,23 @@ cfg_if::cfg_if! {
     }
 }
 
-use std::collections::HashSet;
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
-use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::PbTable;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
-use crate::executor::error::StreamExecutorError;
+use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
 
-const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
-
 pub struct SourceStateTableHandler<S: StateStore> {
-    pub state_table: StateTable<S>,
+    state_table: StateTable<S>,
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
@@ -83,75 +75,6 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         self.state_table
             .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
-            .map_err(StreamExecutorError::from)
-    }
-
-    /// this method should only be used by [`FsSourceExecutor`](super::FsSourceExecutor)
-    pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
-        let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
-            COMPLETE_SPLIT_PREFIX,
-        ))));
-        let next = next_key(COMPLETE_SPLIT_PREFIX.as_bytes());
-        let end = Bound::Excluded(row::once(Some(Self::string_to_scalar(
-            String::from_utf8(next).unwrap(),
-        ))));
-
-        // all source executor has vnode id zero
-        let iter = self
-            .state_table
-            .iter_with_vnode(VirtualNode::ZERO, &(start, end), PrefetchOptions::default())
-            .await?;
-
-        let mut set = HashSet::new();
-        pin_mut!(iter);
-        while let Some(keyed_row) = iter.next().await {
-            let row = keyed_row?;
-            if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
-                let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                let fs = split
-                    .as_s3()
-                    .unwrap_or_else(|| panic!("split {:?} is not fs", split));
-                if fs.offset == fs.size {
-                    let split_id = split.id();
-                    set.insert(split_id);
-                }
-            }
-        }
-        Ok(set)
-    }
-
-    async fn set_complete(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
-        let row = [
-            Some(Self::string_to_scalar(format!(
-                "{}{}",
-                COMPLETE_SPLIT_PREFIX,
-                key.deref()
-            ))),
-            Some(ScalarImpl::Jsonb(value)),
-        ];
-        if let Some(prev_row) = self.get(key).await? {
-            self.state_table.delete(prev_row);
-        }
-        self.state_table.insert(row);
-        Ok(())
-    }
-
-    /// set all complete
-    /// can only used by [`FsSourceExecutor`](super::FsSourceExecutor)
-    pub(crate) async fn set_all_complete(
-        &mut self,
-        states: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<()> {
-        if states.is_empty() {
-            // TODO should be a clear Error Code
-            bail!("states should not be null");
-        } else {
-            for split in states {
-                self.set_complete(split.id(), split.encode_to_json())
-                    .await?;
-            }
-        }
-        Ok(())
     }
 
     pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
@@ -198,11 +121,48 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    pub async fn try_recover_from_state_store(
+    pub async fn new_committed_reader(
+        &self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<SourceStateTableCommittedReader<'_, S>> {
+        self.state_table
+            .try_wait_committed_epoch(epoch.prev)
+            .await?;
+        Ok(SourceStateTableCommittedReader { handle: self })
+    }
+
+    pub fn state_table(&self) -> &StateTable<S> {
+        &self.state_table
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state_table.try_flush().await
+    }
+
+    pub async fn commit_may_update_vnode_bitmap(
         &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
+        self.state_table.commit(epoch).await
+    }
+
+    pub async fn commit(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await
+    }
+}
+
+pub struct SourceStateTableCommittedReader<'a, S: StateStore> {
+    handle: &'a SourceStateTableHandler<S>,
+}
+
+impl<S: StateStore> SourceStateTableCommittedReader<'_, S> {
+    pub async fn try_recover_from_state_store(
+        &self,
         stream_source_split: &SplitImpl,
     ) -> StreamExecutorResult<Option<SplitImpl>> {
-        Ok(match self.get(stream_source_split.id()).await? {
+        Ok(match self.handle.get(stream_source_split.id()).await? {
             None => None,
             Some(row) => match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
@@ -226,6 +186,7 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
                     ..Default::default()
                 }),
                 column_id,
+                nullable: true,
                 ..Default::default()
             }),
             is_hidden: false,
@@ -285,7 +246,7 @@ pub(crate) mod tests {
 
         state_table.init_epoch(init_epoch).await.unwrap();
         state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
-        state_table.commit(next_epoch).await.unwrap();
+        state_table.commit_for_test(next_epoch).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
@@ -312,11 +273,19 @@ pub(crate) mod tests {
         state_table_handler
             .set_states(vec![split_impl.clone()])
             .await?;
-        state_table_handler.state_table.commit(epoch_2).await?;
+        state_table_handler
+            .state_table
+            .commit_for_test(epoch_2)
+            .await?;
 
-        state_table_handler.state_table.commit(epoch_3).await?;
+        state_table_handler
+            .state_table
+            .commit_for_test(epoch_3)
+            .await?;
 
         match state_table_handler
+            .new_committed_reader(epoch_3)
+            .await?
             .try_recover_from_state_store(&split_impl)
             .await?
         {

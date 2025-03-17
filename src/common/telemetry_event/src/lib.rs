@@ -46,6 +46,10 @@ pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
 }
 
 pub async fn do_telemetry_event_report(event_stash: &mut Vec<PbEventMessage>) {
+    if event_stash.is_empty() {
+        return;
+    }
+
     const TELEMETRY_EVENT_REPORT_TYPE: &str = "events"; // the batch report url
     let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
     let batch_message = PbBatchEventMessage {
@@ -118,37 +122,5 @@ pub fn request_to_telemetry_event(
         let _ = tx.send(event).inspect_err(|e| {
             tracing::warn!("Failed to send telemetry event queue: {}", e.as_report())
         });
-    }
-}
-
-#[cfg(test)]
-mod test {
-
-    use super::*;
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_telemetry_report_event() {
-        let event_stage = PbTelemetryEventStage::CreateStreamJob;
-        let event_name = "test_feature";
-        let catalog_id = 1;
-        let connector_name = Some("test_connector".to_string());
-        let object = Some(PbTelemetryDatabaseObject::Source);
-        let attributes = None;
-        let node = "test_node".to_string();
-
-        request_to_telemetry_event(
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
-            event_stage,
-            event_name,
-            catalog_id,
-            connector_name,
-            object,
-            attributes,
-            node,
-            true,
-        );
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }

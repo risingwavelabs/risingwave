@@ -20,7 +20,6 @@
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
 #![feature(iterator_try_collect)]
-#![feature(hash_extract_if)]
 #![feature(try_blocks)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
@@ -31,11 +30,10 @@
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
-use std::iter::repeat;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
@@ -45,7 +43,7 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 
 pub mod error;
@@ -66,7 +64,9 @@ pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
-pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
+pub use hummock_meta_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use rw_futures_util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;
@@ -79,7 +79,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
 
     async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Arc<Vec<Self>>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client))
+        try_join_all(std::iter::repeat_n(host_addr, size).map(Self::new_client))
             .await
             .map(Arc::new)
     }

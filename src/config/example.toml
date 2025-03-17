@@ -21,7 +21,7 @@ gc_history_retention_time_sec = 21600
 max_inflight_time_travel_query = 1000
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
-vacuum_spin_interval_ms = 200
+vacuum_spin_interval_ms = 100
 hummock_version_checkpoint_interval_sec = 30
 enable_hummock_data_archive = false
 hummock_time_travel_snapshot_interval = 100
@@ -81,6 +81,15 @@ level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 max_level = 6
+sst_allowed_trivial_move_min_size = 4194304
+sst_allowed_trivial_move_max_count = 64
+max_l0_compact_level_count = 42
+disable_auto_group_scheduling = false
+max_overlapping_level_size = 268435456
+emergency_level0_sst_file_count = 2000
+emergency_level0_sub_level_partition = 256
+level0_stop_write_threshold_max_sst_count = 10000
+level0_stop_write_threshold_max_size = 322122547200
 
 [meta.developer]
 meta_cached_traces_num = 256
@@ -93,6 +102,10 @@ meta_actor_cnt_per_worker_parallelism_soft_limit = 100
 meta_actor_cnt_per_worker_parallelism_hard_limit = 400
 meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
 meta_hummock_time_travel_sst_info_insert_batch_size = 100
+meta_time_travel_vacuum_interval_sec = 30
+meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
+meta_hummock_gc_history_insert_batch_size = 1000
+meta_hummock_time_travel_filter_out_objects_batch_size = 1000
 
 [meta.meta_store_config]
 max_connections = 10
@@ -112,7 +125,14 @@ enable_spill = true
 [batch.developer]
 batch_connector_message_buffer_size = 16
 batch_output_channel_size = 64
+batch_receiver_channel_size = 1000
+batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+
+[frontend]
+max_total_query_size_bytes = 1073741824
+min_single_query_size_bytes = 1048576
+max_single_query_size_bytes = 1073741824
 
 [streaming]
 in_flight_barrier_nums = 10000
@@ -147,7 +167,9 @@ stream_exchange_connection_pool_size = 1
 stream_enable_auto_schema_change = true
 stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
+stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
+stream_enable_explain_analyze_stats = true
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -281,3 +303,10 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
+adaptive_parallelism_strategy = "Auto"
+per_database_isolation = true
+
+[udf]
+enable_embedded_python_udf = false
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true

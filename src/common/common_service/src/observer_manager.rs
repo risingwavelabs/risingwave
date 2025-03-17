@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::error::RpcError;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
@@ -104,7 +104,7 @@ where
         notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
             Info::Database(_)
             | Info::Schema(_)
-            | Info::RelationGroup(_)
+            | Info::ObjectGroup(_)
             | Info::User(_)
             | Info::Connection(_)
             | Info::Secret(_)
@@ -122,6 +122,7 @@ where
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
+            Info::ComputeNodeTotalCpuCount(_) => true,
             Info::StreamingWorkerSlotMapping(_) => {
                 notification.version
                     > info

@@ -28,19 +28,20 @@ use parse_display::{Display, FromStr};
 use paste::paste;
 use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
-use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
+use risingwave_pb::data::data_type::PbTypeName;
 use rw_iter_util::ZipEqFast as _;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
 use thiserror_ext::AsReport;
 
 use crate::array::{
-    ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
+    ArrayBuilderImpl, ArrayError, ArrayResult, NULL_VAL_FOR_HASH, PrimitiveArrayItemType,
 };
 // Complex type's value is based on the array
 pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
 use crate::cast::{str_to_bool, str_to_bytea};
+use crate::catalog::ColumnId;
 use crate::error::BoxedError;
 use crate::{
     dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_variants,
@@ -78,7 +79,7 @@ pub use risingwave_fields_derive::Fields;
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
-pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
+pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::map_type::MapType;
 pub use self::native_type::*;
@@ -212,9 +213,9 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
-            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => {
-                Err("Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.")
-            }
+            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => Err(
+                "Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.",
+            ),
         }
     }
 }
@@ -242,11 +243,19 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
-                if proto.field_names.is_empty() {
-                    StructType::unnamed(fields).into()
+                let field_ids = (proto.field_ids.iter().copied())
+                    .map(ColumnId::new)
+                    .collect_vec();
+
+                let mut struct_type = if proto.field_names.is_empty() {
+                    StructType::unnamed(fields)
                 } else {
-                    StructType::new(field_names.into_iter().zip_eq_fast(fields)).into()
+                    StructType::new(field_names.into_iter().zip_eq_fast(fields))
+                };
+                if !field_ids.is_empty() {
+                    struct_type = struct_type.with_ids(field_ids);
                 }
+                struct_type.into()
             }
             PbTypeName::List => DataType::List(
                 // The first (and only) item is the list element type.
@@ -290,11 +299,13 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
-/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+/// Convenient macros to generate match arms for [`DataType`].
 pub mod data_types {
-    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    use super::DataType;
+
+    /// Numeric [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! range_frame_numeric {
+    macro_rules! _range_frame_numeric_data_types {
         () => {
             DataType::Int16
                 | DataType::Int32
@@ -304,11 +315,11 @@ pub mod data_types {
                 | DataType::Decimal
         };
     }
-    pub use range_frame_numeric;
+    pub use _range_frame_numeric_data_types as range_frame_numeric;
 
-    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    /// Date/time [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! range_frame_datetime {
+    macro_rules! _range_frame_datetime_data_types {
         () => {
             DataType::Date
                 | DataType::Time
@@ -317,7 +328,49 @@ pub mod data_types {
                 | DataType::Interval
         };
     }
-    pub use range_frame_datetime;
+    pub use _range_frame_datetime_data_types as range_frame_datetime;
+
+    /// Data types that do not have inner fields.
+    #[macro_export]
+    macro_rules! _simple_data_types {
+        () => {
+            DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+                | DataType::Date
+                | DataType::Varchar
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
+                | DataType::Bytea
+                | DataType::Jsonb
+                | DataType::Serial
+                | DataType::Int256
+        };
+    }
+    pub use _simple_data_types as simple;
+
+    /// Data types that have inner fields.
+    #[macro_export]
+    macro_rules! _composite_data_types {
+        () => {
+            DataType::Struct { .. } | DataType::List { .. } | DataType::Map { .. }
+        };
+    }
+    pub use _composite_data_types as composite;
+
+    /// Test that all data types are covered either by `simple!()` or `composite!()`.
+    fn _simple_composite_data_types_exhausted(dt: DataType) {
+        match dt {
+            simple!() => {}
+            composite!() => {}
+        }
+    }
 }
 
 impl DataType {
@@ -341,8 +394,15 @@ impl DataType {
         };
         match self {
             DataType::Struct(t) => {
+                if !t.is_unnamed() {
+                    // To be consistent with `From<&PbDataType>`,
+                    // we only set field names when it's a named struct.
+                    pb.field_names = t.names().map(|s| s.into()).collect();
+                }
                 pb.field_type = t.types().map(|f| f.to_protobuf()).collect();
-                pb.field_names = t.names().map(|s| s.into()).collect();
+                if let Some(ids) = t.ids() {
+                    pb.field_ids = ids.map(|id| id.get_id()).collect();
+                }
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
@@ -383,6 +443,16 @@ impl DataType {
                 | DataType::Float64
                 | DataType::Decimal
         )
+    }
+
+    /// Returns whether the data type does not have inner fields.
+    pub fn is_simple(&self) -> bool {
+        matches!(self, data_types::simple!())
+    }
+
+    /// Returns whether the data type has inner fields.
+    pub fn is_composite(&self) -> bool {
+        matches!(self, data_types::composite!())
     }
 
     pub fn is_array(&self) -> bool {

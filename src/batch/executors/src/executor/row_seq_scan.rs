@@ -14,7 +14,7 @@
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
@@ -27,13 +27,13 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, PbScanRange};
+use risingwave_pb::batch_plan::{PbScanRange, scan_range};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};
+use risingwave_pb::plan_common::{PbAsOf, StorageTableDesc, as_of};
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::{StateStore, dispatch_state_store};
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -50,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     /// None: Local mode don't record mertics.
     metrics: Option<BatchMetrics>,
 
-    table: StorageTable<S>,
+    table: BatchTable<S>,
     scan_ranges: Vec<ScanRange>,
     ordered: bool,
     epoch: BatchQueryEpoch,
@@ -165,7 +165,7 @@ impl ScanRange {
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         scan_ranges: Vec<ScanRange>,
         ordered: bool,
         epoch: BatchQueryEpoch,
@@ -262,7 +262,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 scan_ranges,
@@ -399,7 +399,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     }
 
     async fn execute_point_get(
-        table: Arc<StorageTable<S>>,
+        table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         epoch: BatchQueryEpoch,
         histogram: Option<impl Deref<Target = Histogram>>,
@@ -421,7 +421,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
-        table: Arc<StorageTable<S>>,
+        table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         ordered: bool,
         epoch: BatchQueryEpoch,

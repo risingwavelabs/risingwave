@@ -47,10 +47,18 @@ pub fn new_spinner() -> ProgressBar {
     let pb = ProgressBar::new(0);
     pb.set_style(
         ProgressStyle::default_spinner()
-            .template("{spinner} {prefix}: {msg}")
+            .template("🟡 {prefix}: {msg}")
             .unwrap(),
     );
     pb
+}
+
+pub fn begin_spin(pb: &ProgressBar) {
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} {prefix}: {msg}")
+            .unwrap(),
+    );
 }
 
 pub fn complete_spin(pb: &ProgressBar) {

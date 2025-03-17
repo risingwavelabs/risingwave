@@ -16,7 +16,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use foyer::{Engine, HybridCacheBuilder};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
@@ -24,8 +24,8 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{
-    global_hummock_state_store_metrics, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
-    MonitoredStateStore, MonitoredStorageMetrics, ObjectStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics, global_hummock_state_store_metrics,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::{StateStore, StateStoreImpl};

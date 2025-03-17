@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::ConflictBehavior;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;

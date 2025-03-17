@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 

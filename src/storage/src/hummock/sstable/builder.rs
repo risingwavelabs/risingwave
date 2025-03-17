@@ -17,8 +17,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
+use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
@@ -27,14 +28,14 @@ use risingwave_pb::hummock::BloomFilterType;
 
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
-    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE,
+    DEFAULT_RESTART_INTERVAL, SstableMeta, SstableWriter, VERSION,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
     FullKeyFilterKeyExtractor,
 };
-use crate::hummock::sstable::{utils, FilterBuilder};
+use crate::hummock::sstable::{FilterBuilder, utils};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
@@ -136,10 +137,15 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         writer: W,
         options: SstableBuilderOptions,
         table_id_to_vnode: HashMap<StateTableId, usize>,
+        table_id_to_watermark_serde: HashMap<
+            u32,
+            Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
+        >,
     ) -> Self {
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         Self::new(
@@ -319,7 +325,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             assert!(
                 could_switch_block,
                 "is_new_user_key {} sst_id {} block_idx {} table_id {} last_table_id {:?} full_key {:?}",
-                is_new_user_key, self.sstable_id, self.block_metas.len(), table_id, self.last_table_id, full_key
+                is_new_user_key,
+                self.sstable_id,
+                self.block_metas.len(),
+                table_id,
+                self.last_table_id,
+                full_key
             );
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
@@ -720,8 +731,8 @@ pub(super) mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
-        test_value_of, TEST_KEYS_COUNT,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer,
+        test_key_of, test_value_of,
     };
     use crate::hummock::{CachePolicy, Sstable, SstableWriterOptions, Xor8FilterBuilder};
     use crate::monitor::StoreLocalStatistic;
@@ -737,7 +748,14 @@ pub(super) mod tests {
         };
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
-        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt, table_id_to_vnode);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         b.finish().await.unwrap();
     }
@@ -747,7 +765,14 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
-        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt, table_id_to_vnode);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let mut b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         for i in 0..TEST_KEYS_COUNT {
             b.add_for_test(
@@ -787,6 +812,7 @@ pub(super) mod tests {
         // build remote table
         let sstable_store = mock_sstable_store().await;
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
@@ -794,6 +820,7 @@ pub(super) mod tests {
             sstable_store.clone(),
             CachePolicy::NotFill,
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         )
         .await;
         let table = sstable_store
@@ -850,10 +877,12 @@ pub(super) mod tests {
             (2, VirtualNode::COUNT_FOR_TEST),
             (3, VirtualNode::COUNT_FOR_TEST),
         ]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(1, None), (2, None), (3, None)]);
 
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(filter),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         let mut builder = SstableBuilder::new(

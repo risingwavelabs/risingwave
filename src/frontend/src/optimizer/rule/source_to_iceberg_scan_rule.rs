@@ -23,9 +23,10 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
+use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
 use crate::utils::{Condition, FRONTEND_RUNTIME};
 
 pub struct SourceToIcebergScanRule {}
@@ -60,9 +61,11 @@ impl FallibleRule for SourceToIcebergScanRule {
             );
             #[cfg(not(madsim))]
             {
+                let timezone = plan.ctx().get_session_timezone();
+                let time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;
                 let (delete_column_names, have_position_delete) =
                     tokio::task::block_in_place(|| {
-                        FRONTEND_RUNTIME.block_on(s.get_delete_parameters())
+                        FRONTEND_RUNTIME.block_on(s.get_delete_parameters(time_travel_info))
                     })?;
                 // data file scan
                 let mut data_iceberg_scan: PlanRef =
@@ -92,14 +95,18 @@ fn build_equality_delete_hashjoin_scan(
     data_iceberg_scan: PlanRef,
 ) -> Result<PlanRef> {
     // equality delete scan
-    let column_catalog = source
+    let column_catalog_map = source
         .core
         .column_catalog
         .iter()
-        .filter(|c| {
-            delete_column_names.contains(&c.column_desc.name)
-                || c.column_desc.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
-        })
+        .map(|c| (&c.column_desc.name, c))
+        .collect::<std::collections::HashMap<_, _>>();
+    let column_catalog: Vec<_> = delete_column_names
+        .iter()
+        .chain(std::iter::once(
+            &ICEBERG_SEQUENCE_NUM_COLUMN_NAME.to_owned(),
+        ))
+        .map(|name| *column_catalog_map.get(&name).unwrap())
         .cloned()
         .collect();
     let equality_delete_source = source.clone_with_column_catalog(column_catalog)?;
@@ -109,19 +116,20 @@ fn build_equality_delete_hashjoin_scan(
     let data_columns_len = data_iceberg_scan.schema().len();
     // The join condition is delete_column_names is equal and sequence number is less than, join type is left anti
     let build_inputs = |scan: &PlanRef, offset: usize| {
-        let delete_column_inputs = scan
+        let delete_column_index_map = scan
             .schema()
             .fields()
             .iter()
             .enumerate()
-            .filter_map(|(index, data_column)| {
-                if delete_column_names.contains(&data_column.name) {
-                    Some(InputRef {
-                        index: offset + index,
-                        data_type: data_column.data_type(),
-                    })
-                } else {
-                    None
+            .map(|(index, data_column)| (&data_column.name, (index, &data_column.data_type)))
+            .collect::<std::collections::HashMap<_, _>>();
+        let delete_column_inputs = delete_column_names
+            .iter()
+            .map(|name| {
+                let (index, data_type) = delete_column_index_map.get(name).unwrap();
+                InputRef {
+                    index: offset + index,
+                    data_type: (*data_type).clone(),
                 }
             })
             .collect::<Vec<InputRef>>();

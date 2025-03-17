@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem::swap;
 use std::time::Duration;
 
@@ -32,11 +32,11 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
-    KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
+    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    into_chunk_stream, BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId,
-    SplitImpl, SplitMetaData, SplitReader,
+    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, into_chunk_stream,
 };
 
 pub struct KafkaSplitReader {
@@ -77,14 +77,7 @@ impl SplitReader for KafkaSplitReader {
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
-        let group_id_prefix = properties
-            .group_id_prefix
-            .as_deref()
-            .unwrap_or("rw-consumer");
-        config.set(
-            "group.id",
-            format!("{}-{}", group_id_prefix, source_ctx.fragment_id),
-        );
+        config.set("group.id", properties.group_id(source_ctx.fragment_id));
 
         let ctx_common = KafkaContextCommon::new(
             broker_rewrite_map,
@@ -131,9 +124,9 @@ impl SplitReader for KafkaSplitReader {
                     properties.common.sync_call_timeout,
                 )
                 .await?;
-            tracing::debug!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
-            // note: low is inclusive, high is exclusive
-            if low == high {
+            tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
+            // note: low is inclusive, high is exclusive, start_offset is exclusive
+            if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
             } else {
                 debug_assert!(high > 0);
@@ -145,7 +138,15 @@ impl SplitReader for KafkaSplitReader {
                 );
             }
         }
-        tracing::debug!("backfill_info: {:?}", backfill_info);
+        tracing::info!(
+            topic = properties.common.topic,
+            source_name = source_ctx.source_name,
+            fragment_id = source_ctx.fragment_id,
+            source_id = source_ctx.source_id.table_id,
+            actor_id = source_ctx.actor_id,
+            "backfill_info: {:?}",
+            backfill_info
+        );
 
         consumer.assign(&tpl)?;
 
@@ -334,5 +335,6 @@ impl KafkaSplitReader {
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.
         }
+        tracing::info!("kafka reader finished");
     }
 }

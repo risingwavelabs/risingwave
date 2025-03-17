@@ -19,15 +19,15 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::{Future, FutureExt, TryFuture};
+use rdkafka::ClientConfig;
 use rdkafka::error::KafkaError;
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
-use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
@@ -403,8 +403,8 @@ mod opaque_type {
         future.map(KafkaPayloadWriter::<'static>::map_future_result)
     }
 }
-use opaque_type::map_delivery_future;
 pub use opaque_type::KafkaSinkDeliveryFuture;
+use opaque_type::map_delivery_future;
 
 pub struct KafkaSinkWriter {
     formatter: SinkFormatterImpl,
@@ -466,7 +466,7 @@ impl AsyncTruncateSinkWriter for KafkaSinkWriter {
     }
 }
 
-impl<'w> KafkaPayloadWriter<'w> {
+impl KafkaPayloadWriter<'_> {
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
     async fn send_result<'a, K, P>(&'a mut self, mut record: FutureRecord<'a, K, P>) -> Result<()>
@@ -570,7 +570,7 @@ impl<'w> KafkaPayloadWriter<'w> {
     }
 }
 
-impl<'a> FormattedSink for KafkaPayloadWriter<'a> {
+impl FormattedSink for KafkaPayloadWriter<'_> {
     type K = Vec<u8>;
     type V = Vec<u8>;
 
@@ -752,14 +752,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "v2".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
         ]);
 

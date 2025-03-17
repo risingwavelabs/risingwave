@@ -39,14 +39,14 @@ use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    permits, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
-    TaskInfoResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
+    FastInsertResponse, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+    PbPermits, TaskInfoResponse, permits,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
+use tonic::transport::{Channel, Endpoint};
 
 use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
@@ -119,6 +119,7 @@ impl ComputeClient {
         up_fragment_id: u32,
         down_fragment_id: u32,
         database_id: DatabaseId,
+        term_id: String,
     ) -> Result<(
         Streaming<GetStreamResponse>,
         mpsc::UnboundedSender<permits::Value>,
@@ -137,6 +138,7 @@ impl ComputeClient {
                     up_fragment_id,
                     down_fragment_id,
                     database_id: database_id.database_id,
+                    term_id,
                 })),
             },
         ))
@@ -205,6 +207,16 @@ impl ComputeClient {
             .task_client
             .to_owned()
             .cancel_task(req)
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
+    pub async fn fast_insert(&self, req: FastInsertRequest) -> Result<FastInsertResponse> {
+        Ok(self
+            .task_client
+            .to_owned()
+            .fast_insert(req)
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

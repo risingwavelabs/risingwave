@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{Future, TryFutureExt};
+use futures::future::BoxFuture;
+use futures::{Future, FutureExt, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -26,10 +27,8 @@ use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
-use tracing::{error, Instrument};
+use tracing::{Instrument, error};
 
-#[cfg(all(not(madsim), feature = "hm-trace"))]
-use super::traced_store::TracedStateStore;
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -37,42 +36,18 @@ use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
+use crate::store_impl::AsHummock;
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
-    #[cfg(not(all(not(madsim), feature = "hm-trace")))]
     inner: Box<S>,
-
-    #[cfg(all(not(madsim), feature = "hm-trace"))]
-    inner: Box<TracedStateStore<S>>,
 
     storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
-        #[cfg(all(not(madsim), feature = "hm-trace"))]
-        let inner = TracedStateStore::new_global(inner);
-        Self {
-            inner: Box::new(inner),
-            storage_metrics,
-        }
-    }
-
-    #[cfg(all(not(madsim), feature = "hm-trace"))]
-    pub fn new_from_local(
-        inner: TracedStateStore<S>,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
-        Self {
-            inner: Box::new(inner),
-            storage_metrics,
-        }
-    }
-
-    #[cfg(not(all(not(madsim), feature = "hm-trace")))]
-    pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
             storage_metrics,
@@ -117,11 +92,6 @@ impl<S> MonitoredStateStore<S> {
     }
 
     pub fn inner(&self) -> &S {
-        #[cfg(all(not(madsim), feature = "hm-trace"))]
-        {
-            self.inner.inner()
-        }
-        #[cfg(not(all(not(madsim), feature = "hm-trace")))]
         &self.inner
     }
 
@@ -181,13 +151,12 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + '_ {
         let table_id = read_options.table_id;
         let key_len = key.len();
         self.monitored_get_keyed_row(
-            self.inner.get_keyed_row(key, epoch, read_options),
+            self.inner.get_keyed_row(key, read_options),
             table_id,
             key_len,
         )
@@ -196,30 +165,32 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     fn iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
-            self.inner.iter(key_range, epoch, read_options),
+            self.inner.iter(key_range, read_options),
         )
     }
 
     fn rev_iter(
         &self,
         key_range: TableKeyRange,
-        epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
         self.monitored_iter::<'_, _, _, StateStoreIterStats>(
             read_options.table_id,
-            self.inner.rev_iter(key_range, epoch, read_options),
+            self.inner.rev_iter(key_range, read_options),
         )
     }
 }
 
 impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+    fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64> {
+        self.inner.next_epoch(epoch, options)
+    }
 
     fn iter_log(
         &self,
@@ -235,6 +206,8 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    type FlushedSnapshotReader = MonitoredStateStore<S::FlushedSnapshotReader>;
+
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
 
@@ -315,17 +288,25 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             .verbose_instrument_await("store_try_flush")
     }
 
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        self.inner.update_vnode_bitmap(vnodes)
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
     }
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
         self.inner.get_table_watermark(vnode)
     }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        MonitoredStateStore::new(
+            self.inner.new_flushed_snapshot_reader(),
+            self.storage_metrics.clone(),
+        )
+    }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;
+    type ReadSnapshot = MonitoredStateStore<S::ReadSnapshot>;
 
     fn try_wait_epoch(
         &self,
@@ -346,13 +327,24 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
-        MonitoredStateStore::new_from_local(
+        MonitoredStateStore::new(
             self.inner
                 .new_local(option)
                 .instrument_await("store_new_local")
                 .await,
             self.storage_metrics.clone(),
         )
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        Ok(MonitoredStateStore::new(
+            self.inner.new_read_snapshot(epoch, options).await?,
+            self.storage_metrics.clone(),
+        ))
     }
 }
 
@@ -364,25 +356,34 @@ impl MonitoredStateStore<HummockStorage> {
     pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager().clone()
     }
+}
 
-    pub async fn sync(
+impl<S: AsHummock> AsHummock for MonitoredStateStore<S> {
+    fn as_hummock(&self) -> Option<&HummockStorage> {
+        self.inner.as_hummock()
+    }
+
+    fn sync(
         &self,
         sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
-    ) -> StorageResult<SyncResult> {
-        let future = self
-            .inner
-            .sync(sync_table_epochs)
-            .instrument_await("store_sync");
-        let timer = self.storage_metrics.sync_duration.start_timer();
-        let sync_size = self.storage_metrics.sync_size.clone();
-        let sync_result = future
-            .await
-            .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
-        timer.observe_duration();
-        if sync_result.sync_size != 0 {
-            sync_size.observe(sync_result.sync_size as _);
+    ) -> BoxFuture<'_, StorageResult<SyncResult>> {
+        async move {
+            let future = self
+                .inner
+                .sync(sync_table_epochs)
+                .instrument_await("store_sync");
+            let timer = self.storage_metrics.sync_duration.start_timer();
+            let sync_size = self.storage_metrics.sync_size.clone();
+            let sync_result = future
+                .await
+                .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
+            timer.observe_duration();
+            if sync_result.sync_size != 0 {
+                sync_size.observe(sync_result.sync_size as _);
+            }
+            Ok(sync_result)
         }
-        Ok(sync_result)
+        .boxed()
     }
 }
 

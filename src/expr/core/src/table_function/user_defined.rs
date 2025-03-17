@@ -15,13 +15,13 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use risingwave_common::array::I32Array;
 use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
-use risingwave_common::array::I32Array;
 use risingwave_common::bail;
 
 use super::*;
-use crate::sig::{UdfImpl, UdfKind, UdfOptions};
+use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
@@ -123,23 +123,31 @@ impl UserDefinedTableFunction {
 pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
     let udf = prost.get_udf()?;
 
-    let identifier = udf.get_identifier()?;
+    let arg_types = udf.arg_types.iter().map(|t| t.into()).collect::<Vec<_>>();
     let return_type = DataType::from(prost.get_return_type()?);
 
     let language = udf.language.as_str();
     let runtime = udf.runtime.as_deref();
     let link = udf.link.as_deref();
 
+    let name_in_runtime = udf
+        .name_in_runtime()
+        .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+
     let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
-    let runtime = build_fn(UdfOptions {
+    let runtime = build_fn(BuildOptions {
         kind: UdfKind::Table,
         body: udf.body.as_deref(),
         compressed_binary: udf.compressed_binary.as_deref(),
         link: udf.link.as_deref(),
-        identifier,
+        name_in_runtime,
         arg_names: &udf.arg_names,
+        arg_types: &arg_types,
         return_type: &return_type,
         always_retry_on_network_error: false,
+        language,
+        is_async: None,
+        is_batched: None,
     })
     .context("failed to build UDF runtime")?;
 
@@ -147,9 +155,9 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         legacy: runtime.is_legacy(),
     };
     let arg_schema = Arc::new(Schema::new(
-        udf.arg_types
+        arg_types
             .iter()
-            .map(|t| arrow_convert.to_arrow_field("", &DataType::from(t)))
+            .map(|t| arrow_convert.to_arrow_field("", t))
             .try_collect::<Fields>()?,
     ));
 

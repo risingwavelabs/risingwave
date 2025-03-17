@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{pin_mut, TryStreamExt};
+use futures::{TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_common::util::epoch;
 

@@ -123,13 +123,13 @@ async fn test_over_window() {
 # NOTE: no watermark message here, since watermark(1) was already received
 - !barrier 2
 - recovery
-- !barrier 3
+- !barrier 2
 - !chunk |2
       I  T  I   i
     + 10 p1 103 13
     + 12 p2 202 28
     + 13 p3 301 39
-- !barrier 4
+- !barrier 3
 "###,
         expect![[r#"
             - input: !barrier 1
@@ -163,9 +163,9 @@ async fn test_over_window() {
               - !barrier 2
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 2
               output:
-              - !barrier 3
+              - !barrier 2
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -179,9 +179,9 @@ async fn test_over_window() {
                 | + | 7 | p2 | 201 | 22 | 20 | 28 |
                 | + | 8 | p3 | 300 | 33 |    | 39 |
                 +---+---+----+-----+----+----+----+
-            - input: !barrier 4
+            - input: !barrier 3
               output:
-              - !barrier 4
+              - !barrier 3
         "#]],
         SnapshotOptions::default(),
     )

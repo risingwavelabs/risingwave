@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes};
-use chrono::offset::Utc;
 use chrono::DateTime;
+use chrono::offset::Utc;
 use clap::Args;
 use futures::TryStreamExt;
 use itertools::Itertools;
@@ -27,10 +27,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -40,8 +40,8 @@ use risingwave_storage::hummock::{
 use risingwave_storage::monitor::StoreLocalStatistic;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
-use crate::common::HummockServiceOpts;
 use crate::CtlContext;
+use crate::common::HummockServiceOpts;
 
 type TableData = HashMap<u32, TableCatalog>;
 

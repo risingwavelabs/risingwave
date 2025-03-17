@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_server::{BoxedError, SessionManager};
-use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableSchemaChange};
+use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 
 use crate::error::RwError;
+use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 use crate::session::SESSION_MANAGER;
 
@@ -97,6 +98,7 @@ async fn get_new_table_plan(
         .map(|c| c.into())
         .collect_vec();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);
+
     let (new_table_definition, original_catalog) =
         get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)
             .await?;
@@ -105,7 +107,7 @@ async fn get_new_table_plan(
         table_name,
         new_table_definition,
         &original_catalog,
-        Some(new_version_columns),
+        SqlColumnStrategy::FollowUnchecked, // not used
     )
     .await?;
 

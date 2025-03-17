@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
@@ -28,13 +28,13 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, add_table_stats_map};
 use risingwave_hummock_sdk::{
-    can_concat, compact_task_output_to_string, full_key_can_concat, HummockSstableObjectId,
-    KeyComparator,
+    HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
+    full_key_can_concat,
 };
-use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::LevelType;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -49,11 +49,13 @@ use crate::hummock::compactor::compaction_utils::{
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
-    await_tree_key, fast_compactor_runner, CompactOutput, CompactionFilter, Compactor,
-    CompactorContext,
+    CompactOutput, CompactionFilter, Compactor, CompactorContext, await_tree_key,
+    fast_compactor_runner,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
+    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+    ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -138,7 +140,8 @@ impl CompactorRunner {
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        let iter = self.build_sst_iter(task_progress.clone())?;
+        let iter =
+            self.build_sst_iter(task_progress.clone(), compaction_catalog_agent_ref.clone())?;
         let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
@@ -157,6 +160,7 @@ impl CompactorRunner {
     fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
@@ -237,15 +241,29 @@ impl CompactorRunner {
             }
         }
 
-        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
-        Ok(SkipWatermarkIterator::from_safe_epoch_watermarks(
-            MonitoredCompactorIterator::new(
-                MergeIterator::for_compactor(table_iters),
-                task_progress.clone(),
-            ),
-            &self.compact_task.table_watermarks,
-        ))
+        let combine_iter = {
+            let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
+                MonitoredCompactorIterator::new(
+                    MergeIterator::for_compactor(table_iters),
+                    task_progress.clone(),
+                ),
+                PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.pk_prefix_table_watermarks.clone(),
+                ),
+            );
+
+            NonPkPrefixSkipWatermarkIterator::new(
+                skip_watermark_iter,
+                NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref,
+                ),
+            )
+        };
+
+        Ok(combine_iter)
     }
 }
 
@@ -371,13 +389,13 @@ pub async fn compact_with_agent(
 
     tracing::info!(
         "Ready to handle task: {} compact_task_statistics {:?} compression_algorithm {:?}  parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}, {}",
-            compact_task.task_id,
-            compact_task_statistics,
-            compact_task.compression_algorithm,
-            parallelism,
-            task_memory_capacity_with_parallelism,
-            optimize_by_copy_block,
-            compact_task_to_string(&compact_task),
+        compact_task.task_id,
+        compact_task_statistics,
+        compact_task.compression_algorithm,
+        parallelism,
+        task_memory_capacity_with_parallelism,
+        optimize_by_copy_block,
+        compact_task_to_string(&compact_task),
     );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
@@ -387,12 +405,12 @@ pub async fn compact_with_agent(
         .try_require_memory(task_memory_capacity_with_parallelism);
     if memory_detector.is_none() {
         tracing::warn!(
-                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
-                compact_task.task_id,
-                task_memory_capacity_with_parallelism,
-                context.memory_limiter.get_memory_usage(),
-                context.memory_limiter.quota()
-            );
+            "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+            compact_task.task_id,
+            task_memory_capacity_with_parallelism,
+            context.memory_limiter.get_memory_usage(),
+            context.memory_limiter.quota()
+        );
         task_status = TaskStatus::NoAvailMemoryResourceCanceled;
         return (
             compact_done(compact_task, context.clone(), output_ssts, task_status),
@@ -575,19 +593,7 @@ pub async fn compact(
     ),
     Option<MemoryTracker>,
 ) {
-    let existing_table_ids: HashSet<u32> =
-        HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let compact_table_ids = Vec::from_iter(
-        compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
-            .filter(|table_id| existing_table_ids.contains(table_id))
-            .sorted()
-            .unique(),
-    );
-
+    let compact_table_ids = compact_task.build_compact_table_ids();
     let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
         .acquire(compact_table_ids.clone())
         .await
@@ -761,9 +767,7 @@ where
             local_stats.skip_multi_version_key_count += 1;
         }
 
-        if last_table_id.map_or(true, |last_table_id| {
-            last_table_id != iter_key.user_key.table_id.table_id
-        }) {
+        if last_table_id != Some(iter_key.user_key.table_id.table_id) {
             if let Some(last_table_id) = last_table_id.take() {
                 table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
             }

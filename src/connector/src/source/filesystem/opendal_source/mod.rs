@@ -14,28 +14,31 @@
 
 use std::collections::HashMap;
 
+pub use opendal_enumerator::OpendalEnumerator;
+
 pub mod azblob_source;
 pub mod gcs_source;
 pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
-use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
+use super::OpendalFsSplit;
 use super::file_common::CompressionFormat;
 pub use super::s3::S3PropertiesCommon;
-use super::OpendalFsSplit;
 use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, UnknownFields};
 
 pub const AZBLOB_CONNECTOR: &str = "azblob";
 pub const GCS_CONNECTOR: &str = "gcs";
-// The new s3_v2 will use opendal.
+/// The new `s3_v2` will use opendal.
+/// Note: user uses `connector='s3'`, which is converted to `connector='s3_v2'` in frontend (in `validate_compatibility`).
+/// If user inputs `connector='s3_v2'`, it will be rejected.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 

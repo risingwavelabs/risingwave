@@ -18,31 +18,30 @@ use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
-use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
 use tracing::warn;
 
+use crate::MetaResult;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
+    ActorId, ClusterId, Fragment, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
 };
-use crate::stream::SplitAssignment;
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
-use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub struct MetadataManager {
@@ -382,13 +381,13 @@ impl MetadataManager {
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         // temp convert u32 to i32
         let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
 
         self.catalog_controller
-            .post_apply_reschedules(reschedules, table_parallelism_assignment)
+            .post_apply_reschedules(reschedules, post_updates)
             .await
     }
 
@@ -465,6 +464,15 @@ impl MetadataManager {
         Ok(table_ids.into_iter().map(|id| id as u32).collect())
     }
 
+    pub async fn get_table_associated_source_id(
+        &self,
+        table_id: u32,
+    ) -> MetaResult<Option<SourceId>> {
+        self.catalog_controller
+            .get_table_associated_source_id(table_id as _)
+            .await
+    }
+
     pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
             .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
@@ -490,7 +498,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatchStrategy, PbFragment)>,
+        Vec<(PbDispatchStrategy, Fragment)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self
@@ -543,11 +551,9 @@ impl MetadataManager {
         &self,
         job_id: &TableId,
     ) -> MetaResult<StreamJobFragments> {
-        let pb_table_fragments = self
-            .catalog_controller
+        self.catalog_controller
             .get_job_fragments_by_id(job_id.table_id as _)
-            .await?;
-        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
+            .await
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -561,13 +567,18 @@ impl MetadataManager {
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
+    // (backfill_actor_id, upstream_source_actor_id)
     pub async fn get_running_actors_for_source_backfill(
         &self,
-        id: FragmentId,
+        source_backfill_fragment_id: FragmentId,
+        source_fragment_id: FragmentId,
     ) -> MetaResult<HashSet<(ActorId, ActorId)>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_for_source_backfill(id as _)
+            .get_running_actors_for_source_backfill(
+                source_backfill_fragment_id as _,
+                source_fragment_id as _,
+            )
             .await?;
         Ok(actor_ids
             .into_iter()
@@ -581,11 +592,11 @@ impl MetadataManager {
     ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
-            let pb_table_fragments = self
-                .catalog_controller
-                .get_job_fragments_by_id(id.table_id as _)
-                .await?;
-            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(
+                self.catalog_controller
+                    .get_job_fragments_by_id(id.table_id as _)
+                    .await?,
+            );
         }
         Ok(table_fragments)
     }
@@ -593,8 +604,7 @@ impl MetadataManager {
     pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
-        for (_, fragments) in table_fragments {
-            let tf = StreamJobFragments::from_protobuf(fragments);
+        for (_, tf) in table_fragments {
             for actor in tf.active_actors() {
                 actor_maps
                     .try_insert(actor.actor_id, actor)
@@ -685,6 +695,21 @@ impl MetadataManager {
             .collect())
     }
 
+    pub async fn update_fragment_rate_limit_by_fragment_id(
+        &self,
+        fragment_id: FragmentId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_fragment_rate_limit_by_fragment_id(fragment_id as _, rate_limit)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,
@@ -735,6 +760,21 @@ impl MetadataManager {
             .await
     }
 
+    pub async fn get_existing_job_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        self.catalog_controller
+            .get_existing_job_resource_group(streaming_job_id)
+            .await
+    }
+
+    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+        self.catalog_controller
+            .get_database_resource_group(database_id)
+            .await
+    }
+
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
     }
@@ -743,6 +783,17 @@ impl MetadataManager {
         let rate_limits = self.catalog_controller.list_rate_limits().await?;
         Ok(rate_limits)
     }
+
+    pub async fn get_job_backfill_scan_types(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
+        let backfill_types = self
+            .catalog_controller
+            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .await?;
+        Ok(backfill_types)
+    }
 }
 
 impl MetadataManager {
@@ -750,6 +801,7 @@ impl MetadataManager {
     /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,
+        database_id: DatabaseId,
         id: ObjectId,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("wait_streaming_job_finished: {id:?}");
@@ -759,13 +811,16 @@ impl MetadataManager {
         }
         let (tx, rx) = oneshot::channel();
 
-        mgr.register_finish_notifier(id, tx);
+        mgr.register_finish_notifier(database_id.database_id as _, id, tx);
         drop(mgr);
-        rx.await.map_err(|e| anyhow!(e))?
+        rx.await
+            .map_err(|_| "no received reason".to_owned())
+            .and_then(|result| result)
+            .map_err(|reason| anyhow!("failed to wait streaming job finish: {}", reason).into())
     }
 
-    pub(crate) async fn notify_finish_failed(&self, err: &MetaError) {
+    pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_finish_failed(err);
+        mgr.notify_finish_failed(database_id.map(|id| id.database_id as _), err);
     }
 }

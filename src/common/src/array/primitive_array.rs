@@ -19,8 +19,8 @@ use std::mem::size_of;
 use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
+use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
@@ -292,11 +292,11 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
-                self.data.extend(std::iter::repeat(x).take(n));
+                self.data.extend(std::iter::repeat_n(x, n));
             }
             None => {
                 self.bitmap.append_n(n, false);
-                self.data.extend(std::iter::repeat(T::default()).take(n));
+                self.data.extend(std::iter::repeat_n(T::default(), n));
             }
         }
     }

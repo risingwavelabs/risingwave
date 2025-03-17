@@ -73,6 +73,7 @@ message IntraLevelDelta {
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
   uint32 vnode_partition_count = 5;
+  uint64 compaction_group_version_id = 6;
 }
 
 enum CompatibilityVersion {
@@ -149,6 +150,9 @@ message TableWatermarks {
 
   // The direction of the table watermark.
   bool is_ascending = 2;
+
+  // The table watermark is non-pk prefix table watermark.
+  bool is_non_pk_prefix = 3;
 }
 
 message EpochNewChangeLog {
@@ -184,6 +188,7 @@ message HummockVersion {
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
     repeated uint32 member_table_ids = 5 [deprecated = true];
+    uint64 compaction_group_version_id = 6;
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -373,6 +378,8 @@ message CompactTask {
   map<uint32, TableSchema> table_schemas = 25;
   // Max sub compaction task numbers
   uint32 max_sub_compaction = 26;
+  // The compaction group id when the compaction task is created.
+  uint64 compaction_group_version_id = 27;
 }
 
 message LevelHandler {
@@ -661,6 +668,16 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 split_weight_by_vnode = 20;
       bool disable_auto_group_scheduling = 21;
       uint64 max_overlapping_level_size = 22;
+      // The emergency compaction limitations for the level0 sstables file count
+      uint32 emergency_level0_sst_file_count = 25;
+      // The emergency compaction limitations for the level0 sub level partition
+      uint32 emergency_level0_sub_level_partition = 26;
+      // The limitation of the max sst size of the level0 to trigger the write stop
+      uint32 level0_stop_write_threshold_max_sst_count = 27;
+      // The limitation of the max sst size of the level0 to trigger the write stop
+      uint64 level0_stop_write_threshold_max_size = 28;
+      // The limitation of the max sst count of the trivial move task
+      uint32 sst_allowed_trivial_move_max_count = 29;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -863,6 +880,21 @@ message CompactionConfig {
   // The limitation of the max size of the overlapping-level for the compaction
   // hummock will reorg the commit-sstables to the multi overlapping-level if the size of the commit-sstables is larger than `max_overlapping_level_size`
   optional uint64 max_overlapping_level_size = 24;
+
+  // The emergency compaction limitations for the level0 sstables file count
+  optional uint32 emergency_level0_sst_file_count = 25;
+
+  // The emergency compaction limitations for the level0 sub level partition
+  optional uint32 emergency_level0_sub_level_partition = 26;
+
+  // The limitation of the max sst count of the level0 to trigger the write stop
+  optional uint32 level0_stop_write_threshold_max_sst_count = 27;
+
+  // The limitation of the max sst size of the level0 to trigger the write stop
+  optional uint64 level0_stop_write_threshold_max_size = 28;
+
+  // The limitation of the max sst count of the trivial move task
+  optional uint32 sst_allowed_trivial_move_max_count = 29;
 }
 
 message TableStats {

@@ -19,8 +19,8 @@
 use std::vec;
 
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,
@@ -132,7 +132,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let (query, query_schema) = self.gen_local_query();
         let cte = Cte {
             alias: alias.clone(),
-            cte_inner: risingwave_sqlparser::ast::CteInner::Query(query),
+            cte_inner: risingwave_sqlparser::ast::CteInner::Query(Box::new(query)),
         };
 
         let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
@@ -311,7 +311,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
-            let upper_bound = (available.len() + 1) / 2;
+            let upper_bound = available.len().div_ceil(2);
             let n = self.rng.gen_range(1..=upper_bound);
             available.drain(..n).collect_vec()
         } else {

@@ -25,8 +25,8 @@ use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
 use super::{AggStateCacheStats, GroupKey};
-use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
+use crate::common::table::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Represents the persistent storage of aggregation state.
