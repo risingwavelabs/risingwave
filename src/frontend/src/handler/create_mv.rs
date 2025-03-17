@@ -272,7 +272,7 @@ pub async fn handle_create_mv_bound(
             )));
         }
 
-        let resource_group = if is_serverless_backfill {
+	if is_serverless_backfill {
             match provision_resource_group(sbc_addr).await {
                 Err(e) => {
                     return Err(RwError::from(ProtocolError(format!(
@@ -280,11 +280,9 @@ pub async fn handle_create_mv_bound(
                         e.as_report()
                     ))));
                 }
-                Ok(val) => Some(val),
+                Ok(val) => resource_group = Some(val),
             }
-        } else {
-            resource_group
-        };
+        }
         tracing::debug!(
             resource_group = resource_group,
             "provisioning on resource group"
