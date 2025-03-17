@@ -247,7 +247,7 @@ pub async fn handle_create_mv_bound(
 
         if resource_group.is_some() && is_serverless_backfill {
             return Err(RwError::from(InvalidInputSyntax(
-                "Please do not specify serverless backfilling and resource_group together"
+                "Please do not specify serverless backfilling and resource group together"
                     .to_owned(),
             )));
         }
