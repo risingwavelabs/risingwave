@@ -295,6 +295,7 @@ impl meta::event_log::EventRecovery {
         match self.recovery_event.as_ref() {
             Some(RecoveryEvent::DatabaseStart(_)) => "DATABASE_RECOVERY_START",
             Some(RecoveryEvent::DatabaseSuccess(_)) => "DATABASE_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::DatabaseFailure(_)) => "DATABASE_RECOVERY_FAILURE",
             Some(RecoveryEvent::GlobalStart(_)) => "GLOBAL_RECOVERY_START",
             Some(RecoveryEvent::GlobalSuccess(_)) => "GLOBAL_RECOVERY_SUCCESS",
             Some(RecoveryEvent::GlobalFailure(_)) => "GLOBAL_RECOVERY_FAILURE",
@@ -310,13 +311,18 @@ impl meta::event_log::EventRecovery {
         }
     }
 
-    pub fn database_recovery_success(database_id: u32, from_global: bool) -> Self {
+    pub fn database_recovery_failure(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseFailure(
+                event_recovery::DatabaseRecoveryFailure { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_success(database_id: u32) -> Self {
         Self {
             recovery_event: Some(RecoveryEvent::DatabaseSuccess(
-                event_recovery::DatabaseRecoverySuccess {
-                    database_id,
-                    from_global,
-                },
+                event_recovery::DatabaseRecoverySuccess { database_id },
             )),
         }
     }

@@ -247,8 +247,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             .insert_local_sender(local_notification_tx)
             .await;
 
-        let event_log_manager_ref = self.env.event_log_manager_ref();
-
         // Start the event loop.
         loop {
             tokio::select! {
@@ -359,10 +357,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
-                                let database_id = entering_running.database_id();
-                                event_log_manager_ref.add_event_logs(vec![Event::Recovery(EventRecovery::database_recovery_success(database_id.database_id, false))]);
-                                self.context.mark_ready(MarkReadyOptions::Database(database_id));
-                                entering_running.enter();
+                                self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
+                                entering_running.enter(&self.control_stream_manager);
                             }
                         }
                     };
@@ -386,7 +382,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     for database_id in failed_databases {
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                             warn!(worker_id, database_id = database_id.database_id, "database entering recovery on node failure");
-                                            event_log_manager_ref.add_event_logs(vec![Event::Recovery(EventRecovery::database_recovery_start(database_id.database_id))]);
                                             self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                             self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
                                             // TODO: add log on blocking time
@@ -415,7 +410,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 let database_id = DatabaseId::new(resp.database_id);
                                 if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(database_id = database_id.database_id, "database entering recovery");
-                                    event_log_manager_ref.add_event_logs(vec![Event::Recovery(EventRecovery::database_recovery_start(database_id.database_id))]);
                                     self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                     // TODO: add log on blocking time
                                     let output = self.completing_task.wait_completing_task().await?;
@@ -455,7 +449,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 for (database_id, err) in failed_databases {
                                     if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                         warn!(%database_id, e = %err.as_report(),"database entering recovery on inject failure");
-                                        event_log_manager_ref.add_event_logs(vec![Event::Recovery(EventRecovery::database_recovery_start(database_id.database_id))]);
                                         self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(err).context("inject barrier failure").into()));
                                         // TODO: add log on blocking time
                                         let output = self.completing_task.wait_completing_task().await?;
@@ -692,8 +685,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
             EventRecovery::global_recovery_start(recovery_reason.clone()),
         )]);
-
-        let recovering_databases = self.checkpoint_control.recovering_databases().collect_vec();
 
         let retry_strategy = get_retry_strategy();
 
