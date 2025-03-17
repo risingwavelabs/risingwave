@@ -24,9 +24,9 @@ use risingwave_sqlparser::ast::{
 };
 use thiserror_ext::AsReport;
 
-use super::BoundValues;
 use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
+use super::BoundValues;
 use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result, RwError};
@@ -145,6 +145,16 @@ impl Binder {
     /// After finishing binding, we pop the previous context from the stack.
     pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         self.push_context();
+        let result = self.bind_query_inner(query);
+        self.pop_context()?;
+        result
+    }
+
+    /// Bind a [`Query`] for view.
+    /// TODO: support `SECURITY INVOKER` for view.
+    pub fn bind_query_for_view(&mut self, query: Query) -> Result<BoundQuery> {
+        self.push_context();
+        self.context.disable_security_invoker = true;
         let result = self.bind_query_inner(query);
         self.pop_context()?;
         result
@@ -516,11 +526,13 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         // bind the rest of the recursive cte
         let mut recursive = self.bind_set_expr(right)?;
         // Reset context for the set operation.
         self.context = Default::default();
         self.context.cte_to_relation = new_context.cte_to_relation;
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
 
         Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
         let schema = base.schema().into_owned();

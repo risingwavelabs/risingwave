@@ -18,7 +18,7 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_system_schema};
+use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::user::grant_privilege::PbObject;
@@ -223,6 +223,11 @@ impl Binder {
         mode: AclMode,
         owner: UserId,
     ) -> Result<()> {
+        // security invoker is disabled for view, ignore privilege check.
+        if self.context.disable_security_invoker {
+            return Ok(());
+        }
+
         match self.bind_for {
             BindFor::Stream | BindFor::Batch => {
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
@@ -335,7 +340,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query(*query).map_err(|e| {
+        let query = self.bind_query_for_view(*query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,
