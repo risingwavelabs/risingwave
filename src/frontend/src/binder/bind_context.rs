@@ -158,6 +158,8 @@ pub struct BindContext {
     pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
+    /// Whether the security invoker is set, currently only used for views.
+    pub disable_security_invoker: bool,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.
