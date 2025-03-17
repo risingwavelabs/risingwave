@@ -227,9 +227,12 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             .iter()
             .position(|c| c.name == ROW_ID_COLUMN_NAME)
             .unwrap();
-        println!(
+        tracing::trace!(
             "source_desc.columns: {:#?}, file_path_idx: {}, file_pos_idx: {}, row_id_idx: {}",
-            source_desc.columns, file_path_idx, file_pos_idx, row_id_idx
+            source_desc.columns,
+            file_path_idx,
+            file_pos_idx,
+            row_id_idx
         );
         // Initialize state table.
         state_store_handler.init_epoch(first_epoch).await?;

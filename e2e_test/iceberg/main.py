@@ -9,7 +9,7 @@ import tomli as toml
 from datetime import date
 from datetime import datetime
 from datetime import timezone
-import decimal;
+import decimal
 
 
 def strtobool(v):
@@ -27,7 +27,7 @@ def strtots(v):
 g_spark = None
 
 
-def get_spark(args):
+def get_spark(args) -> SparkSession:
     spark_config = args["spark"]
     global g_spark
     if g_spark is None:
