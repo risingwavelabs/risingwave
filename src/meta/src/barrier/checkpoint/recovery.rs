@@ -114,8 +114,13 @@ impl DatabaseRecoveryMetrics {
     }
 }
 
+const INITIAL_RESET_REQUEST_ID: u32 = 0;
+
 impl DatabaseRecoveringState {
-    pub(super) fn resetting(database_id: DatabaseId) -> Self {
+    pub(super) fn resetting(
+        database_id: DatabaseId,
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> Self {
         let mut retry_backoff_strategy = get_retry_backoff_strategy();
         let backoff_future = retry_backoff_strategy.next().unwrap();
         let metrics = DatabaseRecoveryMetrics::new(database_id);
@@ -123,12 +128,13 @@ impl DatabaseRecoveringState {
 
         Self {
             stage: DatabaseRecoveringStage::Resetting {
-                remaining_workers: Default::default(),
+                remaining_workers: control_stream_manager
+                    .reset_database(database_id, INITIAL_RESET_REQUEST_ID),
                 reset_resps: Default::default(),
-                reset_request_id: 0,
+                reset_request_id: INITIAL_RESET_REQUEST_ID,
                 backoff_future: Some(backoff_future),
             },
-            next_reset_request_id: 1,
+            next_reset_request_id: INITIAL_RESET_REQUEST_ID + 1,
             retry_backoff_strategy,
             metrics,
         }
@@ -306,7 +312,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
             .expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(_) => {
-                let reset_request_id = 0;
+                let reset_request_id = INITIAL_RESET_REQUEST_ID;
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
                 let metrics = DatabaseRecoveryMetrics::new(self.database_id);
@@ -419,7 +425,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            control_stream_manager.add_partial_graph(self.database_id, None)?;
+            control_stream_manager.add_partial_graph(self.database_id, None);
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 database_fragment_info,
