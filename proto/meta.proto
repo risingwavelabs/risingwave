@@ -792,6 +792,8 @@ message EventLog {
     message GlobalRecoverySuccess {
       string reason = 1;
       float duration_secs = 2;
+      repeated uint32 running_database_ids = 3;
+      repeated uint32 recovering_database_ids = 4;
     }
     message GlobalRecoveryFailure {
       string reason = 1;

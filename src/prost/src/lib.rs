@@ -335,12 +335,19 @@ impl meta::event_log::EventRecovery {
         }
     }
 
-    pub fn global_recovery_success(reason: String, duration_secs: f32) -> Self {
+    pub fn global_recovery_success(
+        reason: String,
+        duration_secs: f32,
+        running_database_ids: Vec<u32>,
+        recovering_database_ids: Vec<u32>,
+    ) -> Self {
         Self {
             recovery_event: Some(RecoveryEvent::GlobalSuccess(
                 event_recovery::GlobalRecoverySuccess {
                     reason,
                     duration_secs,
+                    running_database_ids,
+                    recovering_database_ids,
                 },
             )),
         }

@@ -140,6 +140,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             checkpoint_frequency,
         );
 
+        let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
             enable_recovery,
             periodic_barriers,
@@ -147,7 +148,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             enable_per_database_isolation,
             context,
             env,
-            checkpoint_control: CheckpointControl::default(),
+            checkpoint_control,
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
@@ -358,7 +359,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
-                                entering_running.enter(&self.control_stream_manager);
+                                entering_running.enter();
                             }
                         }
                     };
@@ -868,16 +869,24 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         tracing::info!("recovery success");
 
-        // qq: can we assert here?
-        let curr_recovering_databases: HashSet<_> =
-            self.checkpoint_control.recovering_databases().collect();
-
-        if !curr_recovering_databases.is_empty() {
-            warn!(?curr_recovering_databases, "recovery not all success");
-        }
+        let recovering_databases = self
+            .checkpoint_control
+            .recovering_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+        let running_databases = self
+            .checkpoint_control
+            .running_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
 
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
-            EventRecovery::global_recovery_success(recovery_reason.clone(), duration as f32),
+            EventRecovery::global_recovery_success(
+                recovery_reason.clone(),
+                duration as f32,
+                running_databases,
+                recovering_databases,
+            ),
         )]);
 
         self.env

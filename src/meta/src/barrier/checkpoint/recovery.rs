@@ -303,7 +303,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
         barrier_complete_output: Option<BarrierCompleteOutput>,
         control_stream_manager: &mut ControlStreamManager,
     ) {
-        let event_log_manager_ref = control_stream_manager.env.event_log_manager_ref();
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
             self.control.ack_completed(output);
         }
@@ -486,9 +486,9 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
 pub(crate) struct EnterRunning;
 
 impl DatabaseStatusAction<'_, EnterRunning> {
-    pub(crate) fn enter(self, control_stream_manager: &ControlStreamManager) {
+    pub(crate) fn enter(self) {
         info!(database_id = ?self.database_id, "database enter running");
-        let event_log_manager_ref = control_stream_manager.env.event_log_manager_ref();
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
             EventRecovery::database_recovery_success(self.database_id.database_id),
         )]);
