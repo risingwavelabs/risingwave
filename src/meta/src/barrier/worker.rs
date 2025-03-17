@@ -880,21 +880,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let curr_recovering_databases: HashSet<_> =
             self.checkpoint_control.recovering_databases().collect();
 
-        let events = recovering_databases
-            .into_iter()
-            .filter(|database| !curr_recovering_databases.contains(database))
-            .map(|database_id| {
-                Event::Recovery(EventRecovery::database_recovery_success(
-                    database_id.database_id,
-                    true,
-                ))
-            })
-            .chain(std::iter::once(Event::Recovery(
-                EventRecovery::global_recovery_success(recovery_reason.clone(), duration as f32),
-            )))
-            .collect_vec();
+        if !curr_recovering_databases.is_empty() {
+            warn!(?curr_recovering_databases, "recovery not all success");
+        }
 
-        event_log_manager_ref.add_event_logs(events);
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_success(recovery_reason.clone(), duration as f32),
+        )]);
 
         self.env
             .notification_manager()
