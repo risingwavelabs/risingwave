@@ -894,13 +894,11 @@ mod dyn_state_store {
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
-    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     pub trait DynStateStoreIter<T: IterItem>: Send {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
     }
 
-    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     impl<T: IterItem, I: StateStoreIter<T>> DynStateStoreIter<T> for I {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
@@ -909,7 +907,7 @@ mod dyn_state_store {
     }
 
     pub type BoxStateStoreIter<'a, T> = Box<dyn DynStateStoreIter<T> + 'a>;
-    impl<'a, T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'a, T> {
+    impl<T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'_, T> {
         fn try_next(
             &mut self,
         ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_ {
@@ -1017,14 +1015,12 @@ mod dyn_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -1069,7 +1065,6 @@ mod dyn_state_store {
             self.get(key, read_options).await
         }
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1078,7 +1073,6 @@ mod dyn_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,

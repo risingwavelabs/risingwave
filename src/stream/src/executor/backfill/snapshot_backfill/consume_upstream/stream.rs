@@ -154,7 +154,7 @@ pub(super) struct ConsumeUpstreamStream<'a, T: UpstreamTable> {
     rate_limit: RateLimit,
 }
 
-impl<'a, T: UpstreamTable> ConsumeUpstreamStream<'a, T> {
+impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
     pub(super) fn consume_builder(&mut self) -> Option<StreamChunk> {
         match &mut self.state {
             ConsumeUpstreamStreamState::ConsumingSnapshotStream { stream, .. } => {

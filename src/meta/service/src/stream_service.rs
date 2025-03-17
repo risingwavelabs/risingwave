@@ -136,15 +136,29 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
                     .await?
             }
+            ThrottleTarget::Fragment => {
+                self.metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(request.id as _, request.rate)
+                    .await?
+            }
             ThrottleTarget::Unspecified => {
                 return Err(Status::invalid_argument("unspecified throttle target"));
             }
         };
 
+        let request_id = if request.kind() == ThrottleTarget::Fragment {
+            self.metadata_manager
+                .catalog_controller
+                .get_fragment_streaming_job_id(request.id as _)
+                .await?
+        } else {
+            request.id as _
+        };
+
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request.id as ObjectId)
+            .get_object_database_id(request_id as ObjectId)
             .await?;
         let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct

@@ -41,8 +41,8 @@ impl ExpandExecutor {
                 }
             };
             for (i, subsets) in self.column_subsets.iter().enumerate() {
-                let flags = I64Array::from_iter(std::iter::repeat(i as i64).take(input.capacity()))
-                    .into_ref();
+                let flags =
+                    I64Array::from_iter(std::iter::repeat_n(i as i64, input.capacity())).into_ref();
                 let (mut columns, vis) = input.data_chunk().keep_columns(subsets).into_parts();
                 columns.extend(input.columns().iter().cloned());
                 columns.push(flags);

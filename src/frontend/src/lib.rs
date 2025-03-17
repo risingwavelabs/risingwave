@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(async_closure)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
@@ -200,7 +198,8 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use pgwire::pg_protocol::TlsConfig;
+use pgwire::memory_manager::MessageMemoryManager;
+use pgwire::pg_protocol::{ConnectionContext, TlsConfig};
 
 use crate::session::SESSION_MANAGER;
 
@@ -228,16 +227,24 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+        let frontend_config = &session_mgr.env().frontend_config();
+        let message_memory_manager = Arc::new(MessageMemoryManager::new(
+            frontend_config.max_total_query_size_bytes,
+            frontend_config.min_single_query_size_bytes,
+            frontend_config.max_single_query_size_bytes,
+        ));
 
         let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
         let _task = tokio::spawn(webhook_service.serve());
-
         pg_serve(
             &listen_addr,
             tcp_keepalive,
             session_mgr.clone(),
-            TlsConfig::new_default(),
-            Some(redact_sql_option_keywords),
+            ConnectionContext {
+                tls_config: TlsConfig::new_default(),
+                redact_sql_option_keywords: Some(redact_sql_option_keywords),
+                message_memory_manager,
+            },
             shutdown,
         )
         .await

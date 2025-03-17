@@ -20,7 +20,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::compact_task::ReportTask;
+use risingwave_hummock_sdk::compact_task::{ReportTask, is_compaction_task_expired};
 use risingwave_hummock_sdk::compaction_group::{
     StateTableId, StaticCompactionGroupId, group_split,
 };
@@ -367,11 +367,11 @@ impl HummockManager {
     /// 1. ssts with `key_range.left` greater than `split_key` will be split to the right group
     /// 2. the sst containing `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.left`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`]
     /// 3. currently only `vnode` 0 and `vnode` max is supported. (Due to the above rule, vnode max will be rewritten as `table_id` + 1, `vnode` 0)
-    ///     `parent_group_id`: the `group_id` to split
-    ///     `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
-    ///     `table_id_to_split`: the `table_id` to split
-    ///     `vnode_to_split`: the `vnode` to split
-    ///     `partition_vnode_count`: the partition count for the single table group if need
+    ///   - `parent_group_id`: the `group_id` to split
+    ///   - `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
+    ///   - `table_id_to_split`: the `table_id` to split
+    ///   - `vnode_to_split`: the `vnode` to split
+    ///   - `partition_vnode_count`: the partition count for the single table group if need
     async fn split_compaction_group_impl(
         &self,
         parent_group_id: CompactionGroupId,
@@ -559,18 +559,11 @@ impl HummockManager {
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let input_sst_ids: HashSet<u64> = task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
-                        .collect();
-                    let input_level_ids: Vec<u32> = task
-                        .input_ssts
-                        .iter()
-                        .map(|level| level.level_idx)
-                        .collect();
-                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
-                    if need_cancel {
+                    let is_expired = is_compaction_task_expired(
+                        task.compaction_group_version_id,
+                        levels.compaction_group_version_id,
+                    );
+                    if is_expired {
                         canceled_tasks.push(ReportTask {
                             task_id: task.task_id,
                             task_status: TaskStatus::ManualCanceled,

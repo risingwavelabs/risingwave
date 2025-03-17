@@ -93,7 +93,7 @@ impl RpcError {
             RpcError::MetaAddressParse(_) => false,
             RpcError::Internal(anyhow) => anyhow
                 .downcast_ref::<Self>() // this skips all contexts attached to the error
-                .map_or(false, Self::is_connection_error),
+                .is_some_and(Self::is_connection_error),
         }
     }
 }
