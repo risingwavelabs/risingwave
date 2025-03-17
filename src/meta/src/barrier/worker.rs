@@ -455,6 +455,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 for (database_id, err) in failed_databases {
                                     if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                         warn!(%database_id, e = %err.as_report(),"database entering recovery on inject failure");
+                                        event_log_manager_ref.add_event_logs(vec![Event::Recovery(EventRecovery::database_recovery_start(database_id.database_id))]);
                                         self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(err).context("inject barrier failure").into()));
                                         // TODO: add log on blocking time
                                         let output = self.completing_task.wait_completing_task().await?;
