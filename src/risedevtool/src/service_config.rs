@@ -433,7 +433,7 @@ pub enum ServiceConfig {
     SqlServer(SqlServerConfig),
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub enum TaskGroup {
     RisingWave,
     Observability,

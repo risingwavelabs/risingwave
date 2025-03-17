@@ -27,6 +27,7 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataC
 use crate::array::ArrayRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
+use crate::row::Row;
 use crate::types::{
     DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef, ToText,
     hash_datum,
@@ -258,8 +259,19 @@ impl StructArray {
         self.children.iter()
     }
 
+    /// Get the field array at the given index.
+    ///
+    /// Panics if the index is out of bounds.
     pub fn field_at(&self, index: usize) -> &ArrayRef {
         &self.children[index]
+    }
+
+    /// Get the field array at the given index.
+    ///
+    /// # Safety
+    /// The caller must ensure that the index is within bounds.
+    pub unsafe fn field_at_unchecked(&self, index: usize) -> &ArrayRef {
+        self.children.get_unchecked(index)
     }
 
     #[cfg(test)]
@@ -387,12 +399,24 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
     }
 
-    /// # Panics
+    /// Get the field at the given index.
+    ///
     /// Panics if the index is out of bounds.
     pub fn field_at(&self, i: usize) -> DatumRef<'a> {
         match self {
             StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
             StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
+        }
+    }
+
+    /// Get the field at the given index.
+    ///
+    /// # Safety
+    /// The caller must ensure that the index is within bounds.
+    pub unsafe fn field_at_unchecked(&self, i: usize) -> DatumRef<'a> {
+        match self {
+            StructRef::Indexed { arr, idx } => arr.field_at_unchecked(i).value_at_unchecked(*idx),
+            StructRef::ValueRef { val } => val.fields.get_unchecked(i).to_datum_ref(),
         }
     }
 
@@ -497,6 +521,25 @@ impl ToText for StructRef<'_> {
             DataType::Struct(_) => self.write(f),
             _ => unreachable!(),
         }
+    }
+}
+
+/// A struct value can be treated as a row.
+impl Row for StructRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        self.field_at(index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        self.field_at_unchecked(index)
+    }
+
+    fn len(&self) -> usize {
+        self.iter_fields_ref().len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.iter_fields_ref()
     }
 }
 

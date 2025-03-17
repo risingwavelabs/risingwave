@@ -221,4 +221,10 @@ where
             .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
             .unwrap_or(AdaptiveParallelismStrategy::Auto)
     }
+
+    fn per_database_isolation(&self) -> <bool as ParamValue>::Borrowed<'_> {
+        self.inner()
+            .per_database_isolation
+            .unwrap_or_else(default::per_database_isolation)
+    }
 }

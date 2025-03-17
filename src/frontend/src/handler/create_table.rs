@@ -96,8 +96,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
-            ColumnOption::Null {} => {}
-            ColumnOption::NotNull {} => {}
+            ColumnOption::Null => {}
+            ColumnOption::NotNull => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
@@ -470,6 +470,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
+        not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
     }
 
     let db_name: &str = &session.database();
@@ -1047,13 +1048,16 @@ pub(super) async fn handle_create_table_plan(
         }
 
         (None, Some(cdc_table)) => {
-            sanity_check_for_cdc_table(
+            sanity_check_for_table_on_cdc_source(
                 append_only,
                 &column_defs,
                 &wildcard_idx,
                 &constraints,
                 &source_watermarks,
             )?;
+
+            generated_columns_check_for_cdc_table(&column_defs)?;
+            not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
 
             let session = &handler_args.session;
             let db_name = &session.database();
@@ -1067,8 +1071,6 @@ pub(super) async fn handle_create_table_plan(
             // cdc table cannot be append-only
             let (format_encode, source_name) =
                 Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
-
-            generated_columns_check_for_cdc_table(&column_defs)?;
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
@@ -1152,6 +1154,7 @@ pub(super) async fn handle_create_table_plan(
     Ok((plan, source, table, job_type))
 }
 
+// For both table from cdc source and table with cdc connector
 fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
     let mut found_generated_column = false;
     for column in columns {
@@ -1178,7 +1181,29 @@ fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()>
     Ok(())
 }
 
-fn sanity_check_for_cdc_table(
+// For both table from cdc source and table with cdc connector
+fn not_null_check_for_cdc_table(
+    wildcard_idx: &Option<usize>,
+    column_defs: &Vec<ColumnDef>,
+) -> Result<()> {
+    if !wildcard_idx.is_some()
+        && column_defs.iter().any(|col| {
+            col.options
+                .iter()
+                .any(|opt| matches!(opt.option, ColumnOption::NotNull))
+        })
+    {
+        return Err(ErrorCode::NotSupported(
+            "CDC table with NOT NULL constraint is not supported".to_owned(),
+            "Please remove the NOT NULL constraint for columns".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+// Only for table from cdc source
+fn sanity_check_for_table_on_cdc_source(
     append_only: bool,
     column_defs: &Vec<ColumnDef>,
     wildcard_idx: &Option<usize>,
@@ -1217,6 +1242,7 @@ fn sanity_check_for_cdc_table(
         )
         .into());
     }
+
     if append_only {
         return Err(ErrorCode::NotSupported(
             "append only modifier on the table created from a CDC source".into(),
@@ -1834,7 +1860,7 @@ pub async fn generate_stream_graph_for_replace_table(
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict: on_conflict.into(),
-        with_version_column: with_version_column.clone(),
+        with_version_column: with_version_column.as_ref().map(|x| x.real_value()),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
     };
@@ -1896,7 +1922,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 IncludeOption::default(),
                 table_name,
                 resolved_table_name,

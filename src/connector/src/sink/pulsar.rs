@@ -278,7 +278,7 @@ impl PulsarSinkWriter {
     }
 }
 
-impl<'w> PulsarPayloadWriter<'w> {
+impl PulsarPayloadWriter<'_> {
     async fn send_message(&mut self, message: Message) -> Result<()> {
         let mut success_flag = false;
         let mut connection_err = None;
@@ -335,7 +335,7 @@ impl<'w> PulsarPayloadWriter<'w> {
     }
 }
 
-impl<'w> FormattedSink for PulsarPayloadWriter<'w> {
+impl FormattedSink for PulsarPayloadWriter<'_> {
     type K = String;
     type V = Vec<u8>;
 

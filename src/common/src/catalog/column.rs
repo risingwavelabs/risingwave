@@ -123,7 +123,9 @@ pub struct ColumnDesc {
     /// Currently the system column is used for `_rw_timestamp` only and is generated at runtime,
     /// so this field is not persisted.
     pub system_column: Option<SystemColumn>,
-    /// Whether the column is nullable. Only applies to BatchInsert/BatchUpdate operations into tables.
+    /// Whether the column is nullable.
+    /// If a column is not nullable, BatchInsert/BatchUpdate operations will throw an error when NULL is inserted/updated into.
+    /// The row contains NULL for this column will be ignored when streaming data into the table.
     pub nullable: bool,
 }
 

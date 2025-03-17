@@ -127,6 +127,7 @@ message GetStreamRequest {
     uint32 up_fragment_id = 3;
     uint32 down_fragment_id = 4;
     uint32 database_id = 5;
+    string term_id = 6;
   }
 
   oneof value {

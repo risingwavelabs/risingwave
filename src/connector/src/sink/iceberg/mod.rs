@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -1026,7 +1027,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
-        if ops.len() == 0 {
+        if ops.is_empty() {
             return Ok(());
         }
         let write_batch_size = chunk.estimated_heap_size();
@@ -1410,7 +1411,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
         // because retry logic involved reapply the commit metadata.
         // For now, we just retry the commit operation.
-        let retry_strategy = ExponentialBackoff::from_millis(100)
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
             .map(jitter)
             .take(self.commit_retry_num as usize);
         let catalog = self.catalog.clone();
@@ -1425,7 +1427,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await?;
             let txn = Transaction::new(&table);
             let mut append_action = txn
-                .fast_append(None, vec![])
+                .fast_append(None, None, vec![])
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             append_action
                 .add_data_files(data_files.clone())
@@ -1434,7 +1436,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })?;
-            tx.commit_dyn(self.catalog.as_ref()).await.map_err(|err| {
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
                 tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })
@@ -1516,9 +1518,7 @@ fn check_compatibility(
             | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
                 let mut schema_fields = HashMap::new();
                 get_fields(our_field_type, field.data_type(), &mut schema_fields)
-                    .map_or(true, |fields| {
-                        check_compatibility(schema_fields, &fields).unwrap()
-                    })
+                    .is_none_or(|fields| check_compatibility(schema_fields, &fields).unwrap())
             }
             // validate nested structs
             (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
@@ -1584,12 +1584,11 @@ mod test {
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{MapType, StructType};
+    use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
-    use crate::source::DataType;
 
     #[test]
     fn test_compatible_arrow_schema() {

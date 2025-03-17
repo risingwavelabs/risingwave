@@ -15,8 +15,7 @@
 use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::ScalarImpl;
-use risingwave_connector::source::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::PlanRef;

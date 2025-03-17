@@ -604,7 +604,7 @@ impl TableWatermarks {
                 break;
             }
         }
-        while vnode_count.map_or(true, |vnode_count| set_vnode.len() != vnode_count)
+        while vnode_count != Some(set_vnode.len())
             && let Some((_, watermarks)) = self.watermarks.pop()
         {
             let mut new_vnode_watermarks = Vec::new();
