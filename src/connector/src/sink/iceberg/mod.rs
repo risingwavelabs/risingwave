@@ -1594,9 +1594,9 @@ impl IcebergSinkCommitter {
             .await?;
         }
         tracing::info!(
-            "Finish write pre_commit data into system table, sleep 5min before commit into iceberg to meet crash."
+            "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
         );
-        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        tokio::time::sleep(Duration::from_secs(10 * 60)).await;
 
         let data_files = write_results
             .into_iter()
@@ -1657,6 +1657,8 @@ impl IcebergSinkCommitter {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
             tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
+
+            tokio::time::sleep(Duration::from_secs(5 * 60)).await;
             self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
             tracing::info!("Succeeded delete pre commit metadata less than epoch {epoch}.");

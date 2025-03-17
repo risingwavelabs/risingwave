@@ -494,6 +494,16 @@ impl MetadataManager {
             .await
     }
 
+    pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
+        Ok(self
+            .catalog_controller
+            .get_sink_state_table_ids(sink_id)
+            .await?
+            .into_iter()
+            .map(|id| (id as u32).into())
+            .collect())
+    }
+
     pub async fn get_downstream_fragments(
         &self,
         job_id: u32,

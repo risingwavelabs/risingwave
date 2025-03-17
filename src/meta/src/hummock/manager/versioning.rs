@@ -260,6 +260,7 @@ impl HummockManager {
                 &mut versioning.hummock_version_deltas,
                 self.env.notification_manager(),
                 &self.metrics,
+                None,
             );
             let mut new_version_delta = version.new_delta();
             new_version_delta.with_latest_version(|version, delta| {

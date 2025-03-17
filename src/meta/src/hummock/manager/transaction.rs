@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 
+use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -28,6 +29,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use super::TableCommittedEpochNotifiers;
 use crate::hummock::model::CompactionGroup;
 use crate::manager::NotificationManager;
 use crate::model::{
@@ -53,6 +55,7 @@ pub(super) struct HummockVersionTransaction<'a> {
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
     notification_manager: &'a NotificationManager,
     meta_metrics: &'a MetaMetrics,
+    table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
 
     pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>)>,
     disable_apply_to_txn: bool,
@@ -64,6 +67,7 @@ impl<'a> HummockVersionTransaction<'a> {
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
         notification_manager: &'a NotificationManager,
         meta_metrics: &'a MetaMetrics,
+        table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     ) -> Self {
         Self {
             orig_version: version,
@@ -71,6 +75,7 @@ impl<'a> HummockVersionTransaction<'a> {
             pre_applied_version: None,
             disable_apply_to_txn: false,
             notification_manager,
+            table_committed_epoch_notifiers,
             meta_metrics,
         }
     }
@@ -220,6 +225,12 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                             .collect(),
                     }),
                 );
+                if let Some(table_committed_epoch_notifiers) = self.table_committed_epoch_notifiers
+                {
+                    table_committed_epoch_notifiers
+                        .lock()
+                        .notify_deltas(&deltas);
+                }
             }
             for delta in deltas {
                 assert!(self.orig_deltas.insert(delta.id, delta.clone()).is_none());
