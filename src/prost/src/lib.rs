@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(unfulfilled_lint_expectations)]
+#![allow(clippy::doc_overindented_list_items)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -282,8 +284,7 @@ impl meta::table_fragments::ActorStatus {
 impl common::WorkerNode {
     pub fn is_streaming_schedulable(&self) -> bool {
         let property = self.property.as_ref();
-        property.map_or(false, |p| p.is_streaming)
-            && !property.map_or(false, |p| p.is_unschedulable)
+        property.is_some_and(|p| p.is_streaming) && !property.is_some_and(|p| p.is_unschedulable)
     }
 }
 
@@ -494,6 +495,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             additional_column,
             generated_or_default_column,
             version,
+            nullable,
         } = self;
 
         let mut s = f.debug_struct("ColumnDesc");
@@ -520,6 +522,7 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
         }
+        s.field("nullable", nullable);
         s.finish()
     }
 }

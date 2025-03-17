@@ -201,6 +201,9 @@ message ExprNode {
     HMAC = 332;
     SECURE_COMPARE = 333;
 
+    // Constraints Check
+    CHECK_NOT_NULL = 350;
+
     // Unary operators
     NEG = 401;
     // Nested selection operators
@@ -331,6 +334,7 @@ message ExprNode {
     RW_RECOVERY_STATUS = 2412;
     RW_EPOCH_TO_TS = 2413;
     PG_TABLE_IS_VISIBLE = 2414;
+    HAS_FUNCTION_PRIVILEGE = 2415;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;

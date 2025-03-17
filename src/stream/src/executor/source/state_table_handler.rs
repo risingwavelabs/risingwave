@@ -37,7 +37,6 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
-use crate::executor::error::StreamExecutorError;
 
 pub struct SourceStateTableHandler<S: StateStore> {
     state_table: StateTable<S>,
@@ -76,7 +75,6 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         self.state_table
             .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
-            .map_err(StreamExecutorError::from)
     }
 
     pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
@@ -188,6 +186,7 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
                     ..Default::default()
                 }),
                 column_id,
+                nullable: true,
                 ..Default::default()
             }),
             is_hidden: false,

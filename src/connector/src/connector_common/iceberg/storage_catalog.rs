@@ -203,10 +203,10 @@ impl Catalog for StorageCatalog {
     /// Create a new namespace inside the catalog.
     async fn create_namespace(
         &self,
-        _namespace: &iceberg::NamespaceIdent,
+        namespace: &iceberg::NamespaceIdent,
         _properties: HashMap<String, String>,
     ) -> iceberg::Result<iceberg::Namespace> {
-        todo!()
+        Ok(iceberg::Namespace::new(namespace.clone()))
     }
 
     /// Get a namespace information from the catalog.
@@ -216,7 +216,7 @@ impl Catalog for StorageCatalog {
 
     /// Check if namespace exists in catalog.
     async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
-        todo!()
+        Ok(false)
     }
 
     /// Drop a namespace from the catalog.

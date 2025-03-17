@@ -69,7 +69,6 @@ def_anyhow_newtype! {
     async_nats::error::Error<async_nats::jetstream::context::RequestErrorKind> => "Nats error",
     NatsJetStreamError => "Nats error",
 
-    icelake::Error => "Iceberg error",
     iceberg::Error => "IcebergV2 error",
     redis::RedisError => "Redis error",
     risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
