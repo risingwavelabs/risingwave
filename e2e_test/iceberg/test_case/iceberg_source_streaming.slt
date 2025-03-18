@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH = true;
+
+statement ok
 CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
 
 statement ok
@@ -25,9 +28,6 @@ CREATE SINK sink1 AS select * from mv1 WITH (
 
 statement ok
 INSERT INTO s1 (i1, i2, i3) values(1,'1','1'),(2,'2','2'),(3,'3','3'),(4,'4','4'),(5,'5','5');
-
-statement ok
-flush
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -62,7 +62,7 @@ select * from mv2 order by i1;
 5 5 5
 
 
-query I
+query I retry 3 backoff 5s
 select * from mv3 order by i2;
 ----
 1 3
@@ -88,7 +88,7 @@ select count(*) from mv2;
 ----
 5
 
-query I
+query I retry 3 backoff 5s
 select count(*) from mv3;
 ----
 5
@@ -98,11 +98,7 @@ select count(*) from mv3;
 statement ok
 INSERT INTO s1 (i1, i2, i3) values(6,'6','6'),(7,'7','7'),(8,'8','8'),(9,'9','9'),(10,'10','10');
 
-statement ok
-flush
-
 sleep 5s
-
 
 query I
 select count(*) from iceberg_t1_source;
@@ -114,10 +110,52 @@ select count(*) from mv2;
 ----
 10
 
-query I
+query I retry 3 backoff 5s
 select count(*) from mv3;
 ----
 10
+
+
+# insert more data  -- with upsert
+statement ok
+INSERT INTO s1 (i1, i2, i3) values(9,'9','99'),(10,'10','1010'), (11,'11','1111');
+
+sleep 5s
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+3 3 3
+4 4 4
+5 5 5
+6 6 6
+7 7 7
+8 8 8
+9 9 99
+10 10 1010
+11 11 1111
+
+query I retry 3 backoff 5s
+select * from mv2 order by i1;
+----
+1 1 1
+2 2 2
+3 3 3
+4 4 4
+5 5 5
+6 6 6
+7 7 7
+8 8 8
+9 9 9
+9 9 99
+10 10 10
+10 10 1010
+11 11 1111
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+13
 
 # TODO: also test compaction
 
