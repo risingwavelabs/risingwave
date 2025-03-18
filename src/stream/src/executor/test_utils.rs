@@ -284,14 +284,11 @@ pub mod agg_executor {
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::agg_common::{
-        AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
+    use crate::executor::aggregation::{
+        AggExecutorArgs, AggStateStorage, HashAggExecutor, HashAggExecutorExtraArgs,
+        SimpleAggExecutor, SimpleAggExecutorExtraArgs,
     };
-    use crate::executor::aggregation::AggStateStorage;
-    use crate::executor::{
-        ActorContext, ActorContextRef, Executor, ExecutorInfo, HashAggExecutor, PkIndices,
-        SimpleAggExecutor,
-    };
+    use crate::executor::{ActorContext, ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
     /// Generate aggExecuter's schema from `input`, `agg_calls` and `group_key_indices`.
     /// For [`crate::executor::HashAggExecutor`], the group key indices should be provided.

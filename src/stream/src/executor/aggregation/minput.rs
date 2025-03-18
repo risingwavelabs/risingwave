@@ -29,8 +29,8 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
+use super::agg_group::{AggStateCacheStats, GroupKey};
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
-use super::{AggStateCacheStats, GroupKey};
 use crate::common::StateTableColumnMapping;
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
