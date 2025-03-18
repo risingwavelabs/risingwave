@@ -1473,9 +1473,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 tracing::info!("Iceberg commit coordinator inited.");
                 return Ok(Some(last_recommit_epoch));
             } else {
-                tracing::info!(
-                    "Recovery occurs and system table is empty, should rewind log store."
-                );
+                tracing::info!("Init iceberg coodinator, and system table is empty.");
                 return Ok(None);
             }
         }
@@ -1509,7 +1507,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 "schema_id and partition_spec_id should be the same in all write results"
             )));
         }
-        self.commit_iceberg_inner(epoch, write_results).await
+        self.commit_iceberg_inner(epoch, write_results, true).await
     }
 }
 
@@ -1527,7 +1525,8 @@ impl IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
-        self.commit_iceberg_inner(epoch, write_results).await?;
+        self.commit_iceberg_inner(epoch, write_results, false)
+            .await?;
         Ok(())
     }
 
@@ -1535,7 +1534,11 @@ impl IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
+        should_sleep_for_test: bool,
     ) -> Result<()> {
+        if should_sleep_for_test {
+            tracing::info!("Doing iceberg re commit.");
+        }
         self.last_commit_epoch = epoch;
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
@@ -1593,10 +1596,12 @@ impl IcebergSinkCommitter {
             )
             .await?;
         }
-        tracing::info!(
-            "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
-        );
-        tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+        if should_sleep_for_test {
+            tracing::info!(
+                "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
+            );
+            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+        }
 
         let data_files = write_results
             .into_iter()
@@ -1650,17 +1655,22 @@ impl IcebergSinkCommitter {
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        tracing::info!("Sleep 5min before delete iceberg system table");
-        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        if should_sleep_for_test {
+            tracing::info!("Sleep 5min before delete iceberg system table");
+            tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        }
 
         if self.is_exactly_once {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
             tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
 
-            tokio::time::sleep(Duration::from_secs(5 * 60)).await;
-            self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
-                .await?;
+            if should_sleep_for_test {
+                tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+                self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+                    .await?;
+            }
+
             tracing::info!("Succeeded delete pre commit metadata less than epoch {epoch}.");
         }
         Ok(())
