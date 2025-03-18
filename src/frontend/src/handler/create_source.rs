@@ -73,7 +73,7 @@ use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, CreateSourceStatement, Encode, Format,
-    FormatEncodeOptions, ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
+    FormatEncodeOptions, ObjectName, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
