@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod stateless_project;
-mod stateless_project_set;
+mod project_scalar;
+mod project_set;
 
-pub use stateless_project::ProjectExecutor;
-pub use stateless_project_set::{ProjectSetExecutor, ProjectSetSelectItem};
+pub use project_scalar::ProjectExecutor;
+pub use project_set::{ProjectSetExecutor, ProjectSetSelectItem};
