@@ -23,6 +23,12 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
+
 echo "--- starting risingwave cluster"
 PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
 risedev ci-start ci-iceberg-test
