@@ -37,7 +37,9 @@ use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
-use crate::executor::backfill::snapshot_backfill::state::{BackfillState, EpochBackfillProgress};
+use crate::executor::backfill::snapshot_backfill::state::{
+    BackfillState, EpochBackfillProgress, VnodeBackfillProgress,
+};
 use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 use crate::executor::backfill::utils::{create_builder, mapping_message};
 use crate::executor::monitor::StreamingMetrics;
@@ -720,12 +722,19 @@ async fn make_snapshot_stream(
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
         move |(vnode, progress)| {
-            let start_pk = match progress.map(|progress| &progress.progress) {
-                None => Some(None),
-                Some(EpochBackfillProgress::Consuming { latest_pk }) => Some(Some(latest_pk)),
-                Some(EpochBackfillProgress::Consumed) => None,
+            let start_pk = match progress {
+                None => Some((None, 0)),
+                Some(VnodeBackfillProgress {
+                    row_count,
+                    progress: EpochBackfillProgress::Consuming { latest_pk },
+                    ..
+                }) => Some((Some(latest_pk), *row_count)),
+                Some(VnodeBackfillProgress {
+                    progress: EpochBackfillProgress::Consumed,
+                    ..
+                }) => None,
             };
-            start_pk.map(|start_pk| {
+            start_pk.map(|(start_pk, row_count)| {
                 upstream_table
                     .batch_iter_vnode(
                         HummockReadEpoch::Committed(snapshot_epoch),
@@ -735,7 +744,7 @@ async fn make_snapshot_stream(
                     )
                     .map_ok(move |stream| {
                         let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
-                        (vnode, stream, 0)
+                        (vnode, stream, row_count)
                     })
             })
         },
