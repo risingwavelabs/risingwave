@@ -13,12 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
+
+const DATABASE_RECOVERY_START: &'static str = "DATABASE_RECOVERY_START";
+const DATABASE_RECOVERY_SUCCESS: &'static str = "DATABASE_RECOVERY_SUCCESS";
+
+const GLOBAL_RECOVERY_REASON_BOOTSTRAP: &'static str = "bootstrap";
 
 const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 1000;
 
@@ -34,6 +42,11 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
     cluster.simple_kill_nodes(["compute-1"]).await;
 
     session.run("use group1").await?;
+
+    let database_mapping = database_id_mapping(&mut session).await?;
+
+    let group1_database_id = database_mapping["group1"];
+    let group2_database_id = database_mapping["group2"];
 
     // should fail
     assert!(
@@ -57,12 +70,105 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
         .run("insert into t1 select * from generate_series(1, 100);")
         .await?;
 
+    let mut database_recovery_events = database_recovery_events(&mut session).await?;
+
+    assert!(database_recovery_events.get(&group2_database_id).is_none());
+    assert_eq!(
+        database_recovery_events.remove(&group1_database_id),
+        Some(vec![
+            DATABASE_RECOVERY_START.to_string(),
+            DATABASE_RECOVERY_SUCCESS.to_string()
+        ])
+    );
+
+    let global_recovery_events = global_recovery_events(&mut session).await?;
+
+    assert!(
+        global_recovery_events
+            .iter()
+            .filter(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
+            .next()
+            .is_none()
+    );
+
     Ok(())
+}
+
+async fn database_id_mapping(session: &mut Session) -> Result<HashMap<String, u32>> {
+    let events = session.run("select name, id from rw_databases").await?;
+
+    let databases: HashMap<_, _> = events
+        .lines()
+        .map(|line| {
+            let (name, num_str) = line.rsplit_once(' ').unwrap();
+            let num = u32::from_str(num_str.trim()).unwrap();
+            (name.to_string(), num)
+        })
+        .collect();
+
+    Ok(databases)
+}
+
+async fn database_recovery_events(session: &mut Session) -> Result<HashMap<u32, Vec<String>>> {
+    let events = session.run("
+    select event_type,
+       case event_type
+           when 'DATABASE_RECOVERY_START' then info -> 'recovery' -> 'databaseStart' ->> 'databaseId'
+           when 'DATABASE_RECOVERY_SUCCESS' then info -> 'recovery' -> 'databaseSuccess' ->> 'databaseId'
+           when 'DATABASE_RECOVERY_FAILURE' then info -> 'recovery' -> 'databaseFailure' ->> 'databaseId'
+           end as database_id
+from rw_catalog.rw_event_logs
+where event_type like '%DATABASE_RECOVERY%'
+order by timestamp;").await?;
+
+    let events: HashMap<_, _> = events
+        .lines()
+        .map(|line| {
+            let (event_type, num_str) = line.rsplit_once(' ').unwrap();
+            let num = u32::from_str(num_str.trim()).unwrap();
+            (num, event_type.to_string())
+        })
+        .fold(HashMap::new(), |mut map, (key, value)| {
+            map.entry(key).or_insert_with(Vec::new).push(value);
+            map
+        });
+
+    Ok(events)
+}
+
+async fn global_recovery_events(session: &mut Session) -> Result<Vec<(String, String)>> {
+    let events = session
+        .run(
+            "select event_type,
+       case event_type
+           when 'GLOBAL_RECOVERY_START' then info -> 'recovery' -> 'globalStart' ->> 'reason'
+           when 'GLOBAL_RECOVERY_SUCCESS' then info -> 'recovery' -> 'globalSuccess' ->> 'reason'
+           end as reason
+from rw_catalog.rw_event_logs
+where event_type like '%GLOBAL_RECOVERY%'
+order by timestamp;",
+        )
+        .await?;
+
+    let events = events
+        .lines()
+        .map(|line| {
+            let (event_type, reason) = line.rsplit_once(' ').unwrap();
+            (event_type.to_string(), reason.to_string())
+        })
+        .collect_vec();
+
+    Ok(events)
 }
 
 #[tokio::test]
 async fn test_isolation_simple_two_databases_join() -> Result<()> {
     let (cluster, mut session) = prepare_isolation_env().await?;
+
+    let database_id_mapping = database_id_mapping(&mut session).await?;
+
+    let group1_database_id = database_id_mapping["group1"];
+    let group2_database_id = database_id_mapping["group2"];
 
     session.run("use group1").await?;
     session.run("create table t1 (v int);").await?;
@@ -135,12 +241,40 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
         .await?
         .assert_result_eq("110");
 
+    let mut database_recovery_events = database_recovery_events(&mut session).await?;
+
+    assert!(database_recovery_events.get(&group2_database_id).is_none());
+
+    assert_eq!(
+        database_recovery_events.remove(&group1_database_id),
+        Some(vec![
+            DATABASE_RECOVERY_START.to_string(),
+            DATABASE_RECOVERY_SUCCESS.to_string(),
+        ])
+    );
+
+    let global_recovery_events = global_recovery_events(&mut session).await?;
+
+    assert!(
+        global_recovery_events
+            .iter()
+            .filter(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
+            .next()
+            .is_none()
+    );
+
     Ok(())
 }
 
 #[tokio::test]
 async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
     let (cluster, mut session) = prepare_isolation_env().await?;
+
+    let database_id_mapping = database_id_mapping(&mut session).await?;
+
+    let group1_database_id = database_id_mapping["group1"];
+    let group2_database_id = database_id_mapping["group2"];
+    let group3_database_id = database_id_mapping["group3"];
 
     // group1
     session.run("use group1").await?;
@@ -211,6 +345,36 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
         .run("select count(*) from mv_join;")
         .await?
         .assert_result_eq("110");
+
+    let mut database_recovery_events = database_recovery_events(&mut session).await?;
+
+    assert!(database_recovery_events.get(&group2_database_id).is_none());
+
+    assert_eq!(
+        database_recovery_events.remove(&group1_database_id),
+        Some(vec![
+            DATABASE_RECOVERY_START.to_string(),
+            DATABASE_RECOVERY_SUCCESS.to_string()
+        ])
+    );
+
+    assert_eq!(
+        database_recovery_events.remove(&group3_database_id),
+        Some(vec![
+            DATABASE_RECOVERY_START.to_string(),
+            DATABASE_RECOVERY_SUCCESS.to_string()
+        ])
+    );
+
+    let global_recovery_events = global_recovery_events(&mut session).await?;
+
+    assert!(
+        global_recovery_events
+            .iter()
+            .filter(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
+            .next()
+            .is_none()
+    );
 
     Ok(())
 }
