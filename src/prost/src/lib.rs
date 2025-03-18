@@ -25,12 +25,14 @@
 
 use std::str::FromStr;
 
+use event_recovery::RecoveryEvent;
 use plan_common::AdditionalColumn;
 pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
@@ -284,6 +286,78 @@ impl common::WorkerNode {
 impl common::ActorLocation {
     pub fn from_worker(worker_node_id: u32) -> Option<Self> {
         Some(Self { worker_node_id })
+    }
+}
+
+impl meta::event_log::EventRecovery {
+    pub fn event_type(&self) -> &str {
+        match self.recovery_event.as_ref() {
+            Some(RecoveryEvent::DatabaseStart(_)) => "DATABASE_RECOVERY_START",
+            Some(RecoveryEvent::DatabaseSuccess(_)) => "DATABASE_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::DatabaseFailure(_)) => "DATABASE_RECOVERY_FAILURE",
+            Some(RecoveryEvent::GlobalStart(_)) => "GLOBAL_RECOVERY_START",
+            Some(RecoveryEvent::GlobalSuccess(_)) => "GLOBAL_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::GlobalFailure(_)) => "GLOBAL_RECOVERY_FAILURE",
+            None => "UNKNOWN_RECOVERY_EVENT",
+        }
+    }
+
+    pub fn database_recovery_start(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseStart(
+                event_recovery::DatabaseRecoveryStart { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_failure(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseFailure(
+                event_recovery::DatabaseRecoveryFailure { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_success(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseSuccess(
+                event_recovery::DatabaseRecoverySuccess { database_id },
+            )),
+        }
+    }
+
+    pub fn global_recovery_start(reason: String) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalStart(
+                event_recovery::GlobalRecoveryStart { reason },
+            )),
+        }
+    }
+
+    pub fn global_recovery_success(
+        reason: String,
+        duration_secs: f32,
+        running_database_ids: Vec<u32>,
+        recovering_database_ids: Vec<u32>,
+    ) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalSuccess(
+                event_recovery::GlobalRecoverySuccess {
+                    reason,
+                    duration_secs,
+                    running_database_ids,
+                    recovering_database_ids,
+                },
+            )),
+        }
+    }
+
+    pub fn global_recovery_failure(reason: String, error: String) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalFailure(
+                event_recovery::GlobalRecoveryFailure { reason, error },
+            )),
+        }
     }
 }
 

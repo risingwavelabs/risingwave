@@ -51,17 +51,26 @@ use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     InflightSubscriptionInfo, SnapshotBackfillInfo, TracedEpoch,
 };
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
 
-#[derive(Default)]
 pub(crate) struct CheckpointControl {
+    pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
 }
 
 impl CheckpointControl {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        Self {
+            env,
+            databases: Default::default(),
+            hummock_version_stats: Default::default(),
+        }
+    }
+
     pub(crate) fn recover(
         databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
         failed_databases: HashSet<DatabaseId>,
@@ -69,6 +78,7 @@ impl CheckpointControl {
         hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
+            env: control_stream_manager.env.clone(),
             databases: databases
                 .into_iter()
                 .map(|(database_id, control)| {
@@ -158,6 +168,12 @@ impl CheckpointControl {
     pub(crate) fn recovering_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
         self.databases.iter().filter_map(|(database_id, database)| {
             database.running_state().is_none().then_some(*database_id)
+        })
+    }
+
+    pub(crate) fn running_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
+        self.databases.iter().filter_map(|(database_id, database)| {
+            database.running_state().is_some().then_some(*database_id)
         })
     }
 

@@ -91,7 +91,7 @@ struct ControlStreamNode {
 
 pub(super) struct ControlStreamManager {
     nodes: HashMap<WorkerId, ControlStreamNode>,
-    env: MetaSrvEnv,
+    pub(crate) env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
