@@ -284,7 +284,7 @@ pub mod agg_executor {
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::aggregation::{
+    use crate::executor::aggregate::{
         AggExecutorArgs, AggStateStorage, HashAggExecutor, HashAggExecutorExtraArgs,
         SimpleAggExecutor, SimpleAggExecutorExtraArgs,
     };

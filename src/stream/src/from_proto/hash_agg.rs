@@ -26,7 +26,7 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::aggregation::{AggExecutorArgs, HashAggExecutor, HashAggExecutorExtraArgs};
+use crate::executor::aggregate::{AggExecutorArgs, HashAggExecutor, HashAggExecutorExtraArgs};
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     args: AggExecutorArgs<S, HashAggExecutorExtraArgs>,

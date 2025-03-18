@@ -332,7 +332,7 @@ mod tests {
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::aggregation::GroupKey;
+    use crate::executor::aggregate::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
 
     fn create_chunk<S: StateStore>(

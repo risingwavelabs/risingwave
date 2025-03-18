@@ -54,7 +54,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
-pub mod aggregation;
+pub mod aggregate;
 pub mod asof_join;
 mod backfill;
 mod barrier_recv;
