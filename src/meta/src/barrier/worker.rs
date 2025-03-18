@@ -140,6 +140,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             checkpoint_frequency,
         );
 
+        let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
             enable_recovery,
             periodic_barriers,
@@ -147,7 +148,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             enable_per_database_isolation,
             context,
             env,
-            checkpoint_control: CheckpointControl::default(),
+            checkpoint_control,
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
@@ -646,6 +647,7 @@ mod retry_strategy {
 
 pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
+use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
 use crate::barrier::utils::is_valid_after_worker_err;
 
@@ -678,7 +680,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 
     async fn recovery_inner(&mut self, is_paused: bool, recovery_reason: String) {
+        let event_log_manager_ref = self.env.event_log_manager_ref();
+
         tracing::info!("recovery start!");
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_start(recovery_reason.clone()),
+        )]);
+
         let retry_strategy = get_retry_strategy();
 
         // We take retry into consideration because this is the latency user sees for a cluster to
@@ -825,6 +833,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
+
                 let checkpoint_control = CheckpointControl::recover(
                     collected_databases,
                     failed_databases,
@@ -840,13 +849,16 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
         }.inspect_err(|err: &MetaError| {
             tracing::error!(error = %err.as_report(), "recovery failed");
+            event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                EventRecovery::global_recovery_failure(recovery_reason.clone(), err.to_report_string()),
+            )]);
             GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
         }))
             .instrument(tracing::info_span!("recovery_attempt"))
             .await
             .expect("Retry until recovery success.");
 
-        recovery_timer.observe_duration();
+        let duration = recovery_timer.stop_and_record();
 
         (
             self.active_streaming_nodes,
@@ -856,6 +868,26 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         ) = new_state;
 
         tracing::info!("recovery success");
+
+        let recovering_databases = self
+            .checkpoint_control
+            .recovering_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+        let running_databases = self
+            .checkpoint_control
+            .running_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_success(
+                recovery_reason.clone(),
+                duration as f32,
+                running_databases,
+                recovering_databases,
+            ),
+        )]);
 
         self.env
             .notification_manager()
