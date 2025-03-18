@@ -36,6 +36,7 @@
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![feature(btree_cursors)]
+#![feature(assert_matches)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]

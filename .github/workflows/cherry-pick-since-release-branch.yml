@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensures all branches are fetched
 
       - name: Get all release branches including label version and higher
         id: filter-release-branches
@@ -27,6 +29,8 @@ jobs:
           echo "Base version from label: $base_version"
 
           branches=$(git branch -r | grep "origin/release-" | sed 's|origin/release-||' | sort -V)
+
+          echo "Branches: $branches"
 
           target_branches=()
 
