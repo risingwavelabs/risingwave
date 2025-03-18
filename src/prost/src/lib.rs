@@ -478,6 +478,7 @@ impl stream_plan::PbStreamScanType {
             // todo: should this be true?
             PbStreamScanType::UpstreamOnly => false,
             PbStreamScanType::ArrangementBackfill => true,
+            PbStreamScanType::CrossDbSnapshotBackfill => true,
             // todo: true when stable
             PbStreamScanType::SnapshotBackfill => false,
             _ => false,
