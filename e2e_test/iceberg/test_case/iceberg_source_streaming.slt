@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH = true;
 
 statement ok
-CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar, PRIMARY KEY(i1, i2));
 
 statement ok
 CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
