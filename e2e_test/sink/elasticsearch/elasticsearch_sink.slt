@@ -24,10 +24,18 @@ statement error Invalid field: foo, allowed fields: {"username", "url", "passwor
 create connection es_conn_1 with (
   type = 'elasticsearch',
   foo = 'bar',
-  url = 'http://localhost:9200',
+  url = 'http://elasticsearch:9200',
   username = 'elastic',
   password = 'risingwave'
 );
+
+statement error please set the password when the username is set.
+create connection es_conn_1 with (
+  type = 'elasticsearch',
+  url = 'http://elasticsearch:9200',
+  username = 'elastic'
+);
+
 
 statement ok
 create connection es_conn with (
