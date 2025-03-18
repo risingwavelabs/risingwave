@@ -57,77 +57,7 @@ echo "--- Running benchmarks"
 poetry run python main.py -t ./benches/predicate_pushdown.toml
 
 echo "--- Running iceberg engine tests"
-sqllogictest -p 4566 -d dev './e2e_test/iceberg/test_case/iceberg_engine.slt'
+risedev slt './e2e_test/iceberg/test_case/pure_slt/iceberg_engine.slt'
 
 echo "--- Legacy test"
-DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.3.1,org.apache.hadoop:hadoop-aws:3.3.2
-spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
-    --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
-    --conf spark.sql.catalog.demo.type=hadoop \
-    --conf spark.sql.catalog.demo.warehouse=s3a://iceberg/ \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
-    --S --e "CREATE TABLE demo.demo_db.e2e_demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');"
-
-echo "--- testing sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/iceberg_sink.slt'
-sleep 1
-
-# check sink destination iceberg
-spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
-    --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
-    --conf spark.sql.catalog.demo.type=hadoop \
-    --conf spark.sql.catalog.demo.warehouse=s3a://iceberg/ \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
-    --S --e "INSERT OVERWRITE DIRECTORY './spark-output' USING CSV SELECT * FROM demo.demo_db.e2e_demo_table;"
-
-# check sink destination using shell
-if cat ./spark-output/*.csv | sort | awk -F "," '{
-if ($1 == 1 && $2 == 50 && $3 == "1-50") c1++;
- if ($1 == 13 && $2 == 2 && $3 == "13-2") c2++;
-  if ($1 == 21 && $2 == 2 && $3 == "21-2") c3++;
-   if ($1 == 2 && $2 == 2 && $3 == "2-2") c4++;
-    if ($1 == 3 && $2 == 2 && $3 == "3-2") c5++;
-     if ($1 == 5 && $2 == 2 && $3 == "5-2") c6++;
-      if ($1 == 8 && $2 == 2 && $3 == "8-2") c7++; }
-       END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 1 && c7 == 1); }'; then
-  echo "Iceberg sink check passed"
-else
-  echo "The output is not as expected."
-  exit 1
-fi
-
-spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
-    --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
-    --conf spark.sql.catalog.demo.type=hadoop \
-    --conf spark.sql.catalog.demo.warehouse=s3a://iceberg/ \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
-    --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
-    --S --e "drop table demo.demo_db.e2e_demo_table;"
-
-
-
-echo "--- Legacy test (CDC)"
-
-# 1. import data to mysql
-mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc.sql
-
-# 2. create table and sink
-poetry run python main.py -t ./test_case/cdc/no_partition_cdc_init.toml
-
-# 3. insert new data to mysql
-mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
-
-sleep 20
-
-# 4. check change
-poetry run python main.py -t ./test_case/cdc/no_partition_cdc.toml
-
-
-echo "--- Kill cluster"
-cd ../../
-risedev ci-kill
+risedev slt './e2e_test/iceberg/test_case/pure_slt/iceberg_sink.slt'
