@@ -1597,10 +1597,10 @@ impl IcebergSinkCommitter {
             .await?;
         }
         if self.is_exactly_once && is_normal_commit {
-            tracing::info!(
-                "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
-            );
-            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+            // tracing::info!(
+            //     "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
+            // );
+            // tokio::time::sleep(Duration::from_secs(10 * 60)).await;
         }
 
         let data_files = write_results
@@ -1656,8 +1656,8 @@ impl IcebergSinkCommitter {
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if self.is_exactly_once && is_normal_commit {
-            tracing::info!("Sleep 5min before delete iceberg system table");
-            tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+            tracing::info!("Sleep 10min before mark committed");
+            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
         }
 
         if self.is_exactly_once {
@@ -1666,7 +1666,8 @@ impl IcebergSinkCommitter {
             tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
 
             if self.is_exactly_once && is_normal_commit {
-                tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+                tracing::info!("Sleep 10min before delete iceberg system table");
+                tokio::time::sleep(Duration::from_secs(10 * 60)).await;
                 self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                     .await?;
             }
