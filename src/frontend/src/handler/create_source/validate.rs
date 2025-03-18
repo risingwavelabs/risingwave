@@ -20,6 +20,7 @@ pub static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
             PbConnectionType::Unspecified,
             PbConnectionType::Kafka,
             PbConnectionType::Iceberg,
+            PbConnectionType::Elasticsearch,
         }
     });
 
