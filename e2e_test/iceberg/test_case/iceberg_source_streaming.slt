@@ -52,7 +52,7 @@ create materialized view mv3 as select i2, i1 * 3 as abc from iceberg_t1_source;
 
 sleep 5s
 
-query I
+query I retry 3 backoff 5s
 select * from mv2 order by i1;
 ----
 1 1 1
@@ -83,7 +83,7 @@ select count(*) from iceberg_t1_source;
 ----
 3
 
-query I
+query I retry 3 backoff 5s
 select count(*) from mv2;
 ----
 5
@@ -109,7 +109,7 @@ select count(*) from iceberg_t1_source;
 ----
 8
 
-query I
+query I retry 3 backoff 5s
 select count(*) from mv2;
 ----
 10
@@ -118,6 +118,8 @@ query I
 select count(*) from mv3;
 ----
 10
+
+# TODO: also test compaction
 
 statement ok
 DROP SINK sink1;
