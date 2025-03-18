@@ -1534,9 +1534,9 @@ impl IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
-        should_sleep_for_test: bool,
+        is_normal_commit: bool,
     ) -> Result<()> {
-        if should_sleep_for_test {
+        if !is_normal_commit {
             tracing::info!("Doing iceberg re commit.");
         }
         self.last_commit_epoch = epoch;
@@ -1576,7 +1576,7 @@ impl IcebergSinkCommitter {
         let txn = Transaction::new(&self.table);
         let snapshot_id = txn.generate_unique_snapshot_id();
 
-        if self.is_exactly_once {
+        if self.is_exactly_once && is_normal_commit {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
             for each_parallelism_write_result in write_results.clone() {
@@ -1596,7 +1596,7 @@ impl IcebergSinkCommitter {
             )
             .await?;
         }
-        if should_sleep_for_test {
+        if self.is_exactly_once && is_normal_commit {
             tracing::info!(
                 "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
             );
@@ -1655,7 +1655,7 @@ impl IcebergSinkCommitter {
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        if should_sleep_for_test {
+        if self.is_exactly_once && is_normal_commit {
             tracing::info!("Sleep 5min before delete iceberg system table");
             tokio::time::sleep(Duration::from_secs(5 * 60)).await;
         }
@@ -1665,7 +1665,7 @@ impl IcebergSinkCommitter {
                 .await?;
             tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
 
-            if should_sleep_for_test {
+            if self.is_exactly_once && is_normal_commit {
                 tokio::time::sleep(Duration::from_secs(5 * 60)).await;
                 self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                     .await?;
