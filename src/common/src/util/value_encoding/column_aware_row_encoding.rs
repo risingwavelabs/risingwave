@@ -186,6 +186,8 @@ mod new_serde {
     }
 }
 
+const COLUMN_ON_STACK: usize = 8;
+
 /// The width of the offset of the encoded data, i.e., how many bytes are used to represent the offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -250,7 +252,7 @@ struct Header {
 /// `RowEncoding` holds row-specific information for Column-Aware Encoding
 struct RowEncoding {
     header: Header,
-    offsets: SmallVec<[u8; 16]>,
+    offsets: SmallVec<[u8; COLUMN_ON_STACK * 2]>,
     data: Vec<u8>,
 }
 
@@ -329,7 +331,8 @@ impl RowEncoding {
             "should not encode one RowEncoding object multiple times."
         );
         let datums = datums.into_iter();
-        let mut offset_usize = Vec::with_capacity(datums.size_hint().0);
+        let mut offset_usize =
+            SmallVec::<[usize; COLUMN_ON_STACK]>::with_capacity(datums.size_hint().0);
         for (datum, data_type) in datums.zip_eq_debug(data_types) {
             offset_usize.push(self.data.len());
             datum.encode_to(data_type, &mut self.data);
@@ -367,7 +370,7 @@ pub struct Serializer<D: DataTypes = Vec<DataType>> {
     data_types: D,
 }
 
-type EncodedColumnIds = SmallVec<[u8; 32]>;
+type EncodedColumnIds = SmallVec<[u8; COLUMN_ON_STACK * 4]>;
 
 fn encode_column_ids(column_ids: impl ExactSizeIterator<Item = ColumnId>) -> EncodedColumnIds {
     // currently we hard-code ColumnId as i32
