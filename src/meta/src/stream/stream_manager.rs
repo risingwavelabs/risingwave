@@ -441,7 +441,10 @@ impl GlobalStreamManager {
             tracing::debug!(?streaming_job, "first barrier collected for stream job");
             let result = self
                 .metadata_manager
-                .wait_streaming_job_finished(streaming_job.id() as _)
+                .wait_streaming_job_finished(
+                    streaming_job.database_id().into(),
+                    streaming_job.id() as _,
+                )
                 .await?;
             tracing::debug!(?streaming_job, "stream job finish");
             result

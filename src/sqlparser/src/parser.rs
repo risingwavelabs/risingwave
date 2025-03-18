@@ -2513,12 +2513,12 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_with_version_column(&mut self) -> PResult<Option<String>> {
+    pub fn parse_with_version_column(&mut self) -> PResult<Option<Ident>> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
             self.expect_token(&Token::LParen)?;
             let name = self.parse_identifier_non_reserved()?;
             self.expect_token(&Token::RParen)?;
-            Ok(Some(name.value))
+            Ok(Some(name))
         } else {
             Ok(None)
         }
@@ -2990,6 +2990,13 @@ impl Parser<'_> {
             const CONNECTION_REF_KEY: &str = "connection";
             if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
                 let connection_name = self.parse_object_name()?;
+                // tolerate previous buggy Display that outputs `connection = connection foo`
+                let connection_name = match connection_name.0.as_slice() {
+                    [ident] if ident.real_value() == CONNECTION_REF_KEY => {
+                        self.parse_object_name()?
+                    }
+                    _ => connection_name,
+                };
                 SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
             } else {
                 self.parse_value_and_obj_ref::<false>()?

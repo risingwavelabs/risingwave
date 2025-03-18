@@ -160,6 +160,10 @@ pub struct RwConfig {
     #[config_doc(nested)]
     pub system: SystemConfig,
 
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub udf: UdfConfig,
+
     #[serde(flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -624,6 +628,21 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct UdfConfig {
+    /// Allow embedded Python UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_python_udf")]
+    pub enable_embedded_python_udf: bool,
+
+    /// Allow embedded JS UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_javascript_udf")]
+    pub enable_embedded_javascript_udf: bool,
+
+    /// Allow embedded WASM UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_wasm_udf")]
+    pub enable_embedded_wasm_udf: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1172,6 +1191,12 @@ pub struct BatchDeveloperConfig {
     /// The size of the channel used for output to exchange/shuffle.
     #[serde(default = "default::developer::batch_output_channel_size")]
     pub output_channel_size: usize,
+
+    #[serde(default = "default::developer::batch_receiver_channel_size")]
+    pub receiver_channel_size: usize,
+
+    #[serde(default = "default::developer::batch_root_stage_channel_size")]
+    pub root_stage_channel_size: usize,
 
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
@@ -1974,6 +1999,14 @@ pub mod default {
             64
         }
 
+        pub fn batch_receiver_channel_size() -> usize {
+            1000
+        }
+
+        pub fn batch_root_stage_channel_size() -> usize {
+            100
+        }
+
         pub fn batch_chunk_size() -> usize {
             1024
         }
@@ -2165,6 +2198,20 @@ pub mod default {
             .into_iter()
             .map(str::to_string)
             .collect()
+        }
+    }
+
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool {
+            false
+        }
+
+        pub fn enable_embedded_javascript_udf() -> bool {
+            true
+        }
+
+        pub fn enable_embedded_wasm_udf() -> bool {
+            true
         }
     }
 
