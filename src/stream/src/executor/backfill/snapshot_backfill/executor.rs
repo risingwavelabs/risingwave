@@ -267,7 +267,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         while let Some(chunk) =
                             upstream_buffer.run_future(stream.try_next()).await?
                         {
-                            debug!(
+                            trace!(
                                 ?barrier_epoch,
                                 size = chunk.cardinality(),
                                 "consume change log yield chunk",
