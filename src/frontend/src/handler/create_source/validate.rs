@@ -14,17 +14,16 @@
 
 use super::*;
 
-pub static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
+pub static SOURCE_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
     LazyLock::new(|| {
         hashset! {
             PbConnectionType::Unspecified,
             PbConnectionType::Kafka,
             PbConnectionType::Iceberg,
-            PbConnectionType::Elasticsearch,
         }
     });
 
-pub static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
+pub static SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
     LazyLock::new(|| {
         hashset! {
             PbConnectionType::Unspecified,
