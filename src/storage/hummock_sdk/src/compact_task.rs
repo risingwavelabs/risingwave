@@ -46,8 +46,10 @@ pub struct CompactTask {
     /// Lbase in LSM
     pub base_level: u32,
     pub task_status: PbTaskStatus,
-    /// compaction group the task belongs to
+    /// compaction group the task belongs to.
     pub compaction_group_id: u64,
+    /// compaction group id when the compaction task is created
+    pub compaction_group_version_id: u64,
     /// `existing_table_ids` for compaction drop key
     pub existing_table_ids: Vec<u32>,
     pub compression_algorithm: u32,
@@ -154,6 +156,20 @@ impl CompactTask {
             })
         })
     }
+
+    pub fn is_expired(&self, compaction_group_version_id_expected: u64) -> bool {
+        is_compaction_task_expired(
+            self.compaction_group_version_id,
+            compaction_group_version_id_expected,
+        )
+    }
+}
+
+pub fn is_compaction_task_expired(
+    compaction_group_version_id_in_task: u64,
+    compaction_group_version_id_expected: u64,
+) -> bool {
+    compaction_group_version_id_in_task != compaction_group_version_id_expected
 }
 
 impl From<PbCompactTask> for CompactTask {
@@ -205,6 +221,7 @@ impl From<PbCompactTask> for CompactTask {
                 .collect(),
             table_schemas: pb_compact_task.table_schemas,
             max_sub_compaction: pb_compact_task.max_sub_compaction,
+            compaction_group_version_id: pb_compact_task.compaction_group_version_id,
         }
     }
 }
@@ -258,6 +275,7 @@ impl From<&PbCompactTask> for CompactTask {
                 .collect(),
             table_schemas: pb_compact_task.table_schemas.clone(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
+            compaction_group_version_id: pb_compact_task.compaction_group_version_id,
         }
     }
 }
@@ -309,6 +327,7 @@ impl From<CompactTask> for PbCompactTask {
             split_by_state_table: compact_task.split_by_state_table,
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
+            compaction_group_version_id: compact_task.compaction_group_version_id,
         }
     }
 }
@@ -360,6 +379,7 @@ impl From<&CompactTask> for PbCompactTask {
             split_by_state_table: compact_task.split_by_state_table,
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
+            compaction_group_version_id: compact_task.compaction_group_version_id,
         }
     }
 }

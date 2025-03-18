@@ -774,6 +774,7 @@ pub struct IntraLevelDeltaCommon<T> {
     pub removed_table_ids: HashSet<u64>,
     pub inserted_table_infos: Vec<T>,
     pub vnode_partition_count: u32,
+    pub compaction_group_version_id: u64,
 }
 
 pub type IntraLevelDelta = IntraLevelDeltaCommon<SstableInfo>;
@@ -807,6 +808,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: pb_intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -826,6 +828,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -849,6 +852,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -870,6 +874,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: pb_intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -881,6 +886,7 @@ impl IntraLevelDelta {
         removed_table_ids: HashSet<u64>,
         inserted_table_infos: Vec<SstableInfo>,
         vnode_partition_count: u32,
+        compaction_group_version_id: u64,
     ) -> Self {
         Self {
             level_idx,
@@ -888,6 +894,7 @@ impl IntraLevelDelta {
             removed_table_ids,
             inserted_table_infos,
             vnode_partition_count,
+            compaction_group_version_id,
         }
     }
 }

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::try_join_all;
+use futures::future::join_all;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -98,12 +98,54 @@ impl ControlStreamManager {
         }
     }
 
+    pub(super) fn contains_worker(&self, worker_id: WorkerId) -> bool {
+        self.nodes.contains_key(&worker_id)
+    }
+
+    pub(super) async fn try_add_worker(
+        &mut self,
+        node: WorkerNode,
+        inflight_infos: impl Iterator<
+            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+        >,
+        term_id: String,
+        context: &impl GlobalBarrierWorkerContext,
+    ) {
+        let node_id = node.id as WorkerId;
+        if self.nodes.contains_key(&node_id) {
+            warn!(id = node.id, host = ?node.host, "node already exists");
+            return;
+        }
+        let node_host = node.host.clone().unwrap();
+
+        let init_request = self.collect_init_request(inflight_infos, term_id);
+        match context.new_control_stream(&node, &init_request).await {
+            Ok(handle) => {
+                assert!(self
+                    .nodes
+                    .insert(
+                        node_id,
+                        ControlStreamNode {
+                            worker: node.clone(),
+                            handle,
+                        }
+                    )
+                    .is_none());
+                info!(?node_host, "add control stream worker");
+            }
+            Err(e) => {
+                error!(err = %e.as_report(), ?node_host, "fail to create worker node");
+            }
+        }
+    }
+
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
         inflight_infos: impl Iterator<
             Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
         >,
+        term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -115,7 +157,7 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
-        let init_request = self.collect_init_request(inflight_infos);
+        let init_request = self.collect_init_request(inflight_infos, term_id);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context.new_control_stream(&node, &init_request).await {
@@ -148,27 +190,48 @@ impl ControlStreamManager {
     pub(super) async fn reset(
         &mut self,
         nodes: &HashMap<WorkerId, WorkerNode>,
+        term_id: String,
         context: &impl GlobalBarrierWorkerContext,
-    ) -> MetaResult<()> {
-        let init_request = PbInitRequest { databases: vec![] };
+    ) -> HashSet<WorkerId> {
+        let init_request = PbInitRequest {
+            databases: vec![],
+            term_id,
+        };
         let init_request = &init_request;
-        let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
-            let handle = context.new_control_stream(node, init_request).await?;
-            Result::<_, MetaError>::Ok((
-                *worker_id,
-                ControlStreamNode {
-                    worker: node.clone(),
-                    handle,
-                },
-            ))
+        let nodes = join_all(nodes.iter().map(|(worker_id, node)| async move {
+            let result = context.new_control_stream(node, init_request).await;
+            (*worker_id, node.clone(), result)
         }))
-        .await?;
+        .await;
         self.nodes.clear();
-        for (worker_id, node) in nodes {
-            assert!(self.nodes.insert(worker_id, node).is_none());
+        let mut failed_workers = HashSet::new();
+        for (worker_id, node, result) in nodes {
+            match result {
+                Ok(handle) => {
+                    assert!(self
+                        .nodes
+                        .insert(
+                            worker_id,
+                            ControlStreamNode {
+                                worker: node,
+                                handle
+                            }
+                        )
+                        .is_none());
+                }
+                Err(e) => {
+                    failed_workers.insert(worker_id);
+                    warn!(
+                        e = %e.as_report(),
+                        worker_id,
+                        ?node,
+                        "failed to connect to node"
+                    )
+                }
+            }
         }
 
-        Ok(())
+        failed_workers
     }
 
     /// Clear all nodes and response streams in the manager.
@@ -272,6 +335,7 @@ impl ControlStreamManager {
         initial_inflight_infos: impl Iterator<
             Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
         >,
+        term_id: String,
     ) -> PbInitRequest {
         PbInitRequest {
             databases: initial_inflight_infos
@@ -304,6 +368,7 @@ impl ControlStreamManager {
                     },
                 )
                 .collect(),
+            term_id,
         }
     }
 }
