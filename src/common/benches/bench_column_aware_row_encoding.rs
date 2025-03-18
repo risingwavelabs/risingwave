@@ -18,7 +18,9 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rand::{Rng, SeedableRng};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Date, ScalarImpl};
+use risingwave_common::types::{
+    DataType, Date, ListValue, MapType, MapValue, ScalarImpl, StructType, StructValue,
+};
 use risingwave_common::util::value_encoding::column_aware_row_encoding::*;
 use risingwave_common::util::value_encoding::*;
 
@@ -128,9 +130,75 @@ fn bench_column_aware_encoding_4_columns(c: &mut Criterion) {
     });
 }
 
+fn bench_column_aware_encoding_struct(c: &mut Criterion) {
+    use ScalarImpl::*;
+
+    // struct<f1 int, map map(varchar, struct<f2 int, f3 boolean>[])>
+    let make = |alterable| {
+        let mut inner_struct =
+            StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)]);
+        if alterable {
+            inner_struct = inner_struct.with_ids([ColumnId::new(11), ColumnId::new(12)]);
+        }
+        let inner_struct: DataType = inner_struct.into();
+        let list = DataType::List(Box::new(inner_struct.clone()));
+        let map = MapType::from_kv(DataType::Varchar, list.clone()).into();
+        let mut outer_struct = StructType::new([("f1", DataType::Int32), ("map", map)]);
+        if alterable {
+            outer_struct = outer_struct.with_ids([ColumnId::new(1), ColumnId::new(2)]);
+        }
+        let outer_struct: DataType = outer_struct.into();
+
+        let inner_struct_value = StructValue::new(vec![Some(Int32(6)), Some(Bool(true))]);
+        let list_value =
+            ListValue::from_datum_iter(&inner_struct, [Some(Struct(inner_struct_value))]);
+        let map_value = MapValue::try_from_kv(
+            ListValue::from_datum_iter(&DataType::Varchar, [Some(Utf8("key".into()))]),
+            ListValue::from_datum_iter(&list, [Some(List(list_value))]),
+        )
+        .unwrap();
+        let outer_struct_value = StructValue::new(vec![Some(Int32(5)), Some(Map(map_value))]);
+
+        let serializer = Serializer::new(&[ColumnId::new(1)], [outer_struct.clone()]);
+        let deserializer = Deserializer::new(
+            &[ColumnId::new(1)],
+            [outer_struct].into(),
+            std::iter::empty(),
+        );
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+
+        (serializer, deserializer, row)
+    };
+
+    for alterable in [false, true] {
+        let id = if alterable {
+            "column_aware_row_encoding_struct_alterable"
+        } else {
+            "column_aware_row_encoding_struct_unalterable"
+        };
+
+        let (serializer, deserializer, row) = make(alterable);
+
+        c.bench_function(&format!("{id}_encode"), |b| {
+            b.iter(|| {
+                black_box(serializer.serialize(&row));
+            });
+        });
+
+        let encoded = serializer.serialize(&row);
+        c.bench_function(&format!("{id}_decode"), |b| {
+            b.iter(|| {
+                let result = deserializer.deserialize(&encoded).unwrap();
+                black_box(result);
+            });
+        });
+    }
+}
+
 criterion_group!(
     benches,
     bench_column_aware_encoding_16_columns,
     bench_column_aware_encoding_4_columns,
+    bench_column_aware_encoding_struct,
 );
 criterion_main!(benches);
