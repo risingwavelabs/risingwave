@@ -40,7 +40,7 @@ WITH (
 statement ok
 flush;
 
-query I
+query I retry 3 backoff 5s
 select count(*) from iceberg_t_bench_source;
 ----
 1000000
