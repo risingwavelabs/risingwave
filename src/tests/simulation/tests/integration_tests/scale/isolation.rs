@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -23,10 +22,10 @@ use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
-const DATABASE_RECOVERY_START: &'static str = "DATABASE_RECOVERY_START";
-const DATABASE_RECOVERY_SUCCESS: &'static str = "DATABASE_RECOVERY_SUCCESS";
+const DATABASE_RECOVERY_START: &str = "DATABASE_RECOVERY_START";
+const DATABASE_RECOVERY_SUCCESS: &str = "DATABASE_RECOVERY_SUCCESS";
 
-const GLOBAL_RECOVERY_REASON_BOOTSTRAP: &'static str = "bootstrap";
+const GLOBAL_RECOVERY_REASON_BOOTSTRAP: &str = "bootstrap";
 
 const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 1000;
 
@@ -72,23 +71,21 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
 
-    assert!(database_recovery_events.get(&group2_database_id).is_none());
+    assert!(!database_recovery_events.contains_key(&group2_database_id));
     assert_eq!(
         database_recovery_events.remove(&group1_database_id),
         Some(vec![
-            DATABASE_RECOVERY_START.to_string(),
-            DATABASE_RECOVERY_SUCCESS.to_string()
+            DATABASE_RECOVERY_START.to_owned(),
+            DATABASE_RECOVERY_SUCCESS.to_owned()
         ])
     );
 
     let global_recovery_events = global_recovery_events(&mut session).await?;
 
     assert!(
-        global_recovery_events
+        !global_recovery_events
             .iter()
-            .filter(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
-            .next()
-            .is_none()
+            .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
     );
 
     Ok(())
@@ -102,7 +99,7 @@ async fn database_id_mapping(session: &mut Session) -> Result<HashMap<String, u3
         .map(|line| {
             let (name, num_str) = line.rsplit_once(' ').unwrap();
             let num = u32::from_str(num_str.trim()).unwrap();
-            (name.to_string(), num)
+            (name.to_owned(), num)
         })
         .collect();
 
@@ -121,19 +118,18 @@ from rw_catalog.rw_event_logs
 where event_type like '%DATABASE_RECOVERY%'
 order by timestamp;").await?;
 
-    let events: HashMap<_, _> = events
-        .lines()
-        .map(|line| {
-            let (event_type, num_str) = line.rsplit_once(' ').unwrap();
-            let num = u32::from_str(num_str.trim()).unwrap();
-            (num, event_type.to_string())
-        })
-        .fold(HashMap::new(), |mut map, (key, value)| {
-            map.entry(key).or_insert_with(Vec::new).push(value);
-            map
-        });
+    let mut result = HashMap::new();
 
-    Ok(events)
+    for line in events.lines() {
+        let (event_type, num_str) = line.rsplit_once(' ').unwrap();
+        let num = u32::from_str(num_str.trim())?;
+        result
+            .entry(num)
+            .or_insert_with(Vec::new)
+            .push(event_type.to_owned());
+    }
+
+    Ok(result)
 }
 
 async fn global_recovery_events(session: &mut Session) -> Result<Vec<(String, String)>> {
@@ -154,7 +150,7 @@ order by timestamp;",
         .lines()
         .map(|line| {
             let (event_type, reason) = line.rsplit_once(' ').unwrap();
-            (event_type.to_string(), reason.to_string())
+            (event_type.to_owned(), reason.to_owned())
         })
         .collect_vec();
 
@@ -243,24 +239,22 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
 
-    assert!(database_recovery_events.get(&group2_database_id).is_none());
+    assert!(!database_recovery_events.contains_key(&group2_database_id));
 
     assert_eq!(
         database_recovery_events.remove(&group1_database_id),
         Some(vec![
-            DATABASE_RECOVERY_START.to_string(),
-            DATABASE_RECOVERY_SUCCESS.to_string(),
+            DATABASE_RECOVERY_START.to_owned(),
+            DATABASE_RECOVERY_SUCCESS.to_owned(),
         ])
     );
 
     let global_recovery_events = global_recovery_events(&mut session).await?;
 
     assert!(
-        global_recovery_events
+        !global_recovery_events
             .iter()
-            .filter(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
-            .next()
-            .is_none()
+            .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
     );
 
     Ok(())
@@ -348,32 +342,30 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
 
-    assert!(database_recovery_events.get(&group2_database_id).is_none());
+    assert!(!database_recovery_events.contains_key(&group2_database_id));
 
     assert_eq!(
         database_recovery_events.remove(&group1_database_id),
         Some(vec![
-            DATABASE_RECOVERY_START.to_string(),
-            DATABASE_RECOVERY_SUCCESS.to_string()
+            DATABASE_RECOVERY_START.to_owned(),
+            DATABASE_RECOVERY_SUCCESS.to_owned()
         ])
     );
 
     assert_eq!(
         database_recovery_events.remove(&group3_database_id),
         Some(vec![
-            DATABASE_RECOVERY_START.to_string(),
-            DATABASE_RECOVERY_SUCCESS.to_string()
+            DATABASE_RECOVERY_START.to_owned(),
+            DATABASE_RECOVERY_SUCCESS.to_owned()
         ])
     );
 
     let global_recovery_events = global_recovery_events(&mut session).await?;
 
     assert!(
-        global_recovery_events
+        !global_recovery_events
             .iter()
-            .filter(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
-            .next()
-            .is_none()
+            .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
     );
 
     Ok(())
