@@ -1666,7 +1666,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let (sink, obj) = Sink::find_by_id(sink_id)
+        let (sink, _obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
             .one(&txn)
             .await?
@@ -1699,17 +1699,27 @@ impl CatalogController {
             }
         };
 
+        let mut definition = sink.definition.clone();
+        for (key, value) in &props {
+            definition = definition.replace(
+                &format!(
+                    "{} = {}",
+                    key,
+                    sink.properties.inner_ref().get(key).unwrap()
+                ),
+                &format!("{} = {}", key, value),
+            );
+        }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props);
 
-        {
-            let active_sink = sink::ActiveModel {
-                sink_id: Set(sink_id),
-                properties: Set(risingwave_meta_model::Property(new_config.clone())),
-                ..Default::default()
-            };
-            active_sink.update(&txn).await?;
-        }
+        let active_sink = sink::ActiveModel {
+            sink_id: Set(sink_id),
+            properties: Set(risingwave_meta_model::Property(new_config.clone())),
+            definition: Set(definition),
+            ..Default::default()
+        };
+        active_sink.update(&txn).await?;
 
         let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
             .select_only()
@@ -1755,6 +1765,12 @@ impl CatalogController {
             .update(&txn)
             .await?;
         }
+
+        let (sink, obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
 
         txn.commit().await?;
 
