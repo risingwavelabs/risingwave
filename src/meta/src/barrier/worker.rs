@@ -833,7 +833,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
-
+                if !self.enable_per_database_isolation && !failed_databases.is_empty() {
+                    return Err(anyhow!(
+                        "global recovery failed due to failure of databases {:?}",
+                        failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
+                    );
+                }
                 let checkpoint_control = CheckpointControl::recover(
                     collected_databases,
                     failed_databases,

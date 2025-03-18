@@ -325,6 +325,8 @@ test_scale_in() {
   risedev psql-env
   source .risingwave/config/psql-env
 
+  psql -c "alter system set per_database_isolation = false"
+
   psql -c "create table t(v1 int); insert into t select * from generate_series(1, 1000); flush"
   psql -c "set background_ddl=true; set backfill_rate_limit=10; create materialized view m1 as select * from t; flush"
   internal_table=$(psql -t -c "show internal tables;" | grep -v 'INFO')
