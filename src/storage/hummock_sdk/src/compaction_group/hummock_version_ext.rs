@@ -960,13 +960,24 @@ where
         self.get_sst_infos().map(|s| s.object_id()).collect()
     }
 
+    pub fn get_object_ids_exclude_change_log(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos_exclude_change_log()
+            .map(|s| s.object_id())
+            .collect()
+    }
+
     pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.get_sst_infos().map(|s| s.sst_id()).collect()
     }
 
+    pub fn get_sst_ids_exclude_change_log(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos_exclude_change_log()
+            .map(|s| s.sst_id())
+            .collect()
+    }
+
     pub fn get_sst_infos(&self) -> impl Iterator<Item = &T> {
-        self.get_combined_levels()
-            .flat_map(|level| level.table_infos.iter())
+        self.get_sst_infos_exclude_change_log()
             .chain(self.table_change_log.values().flat_map(|change_log| {
                 change_log.iter().flat_map(|epoch_change_log| {
                     epoch_change_log
@@ -975,6 +986,11 @@ where
                         .chain(epoch_change_log.new_value.iter())
                 })
             }))
+    }
+
+    pub fn get_sst_infos_exclude_change_log(&self) -> impl Iterator<Item = &T> {
+        self.get_combined_levels()
+            .flat_map(|level| level.table_infos.iter())
     }
 }
 
