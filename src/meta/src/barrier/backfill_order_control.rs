@@ -4,10 +4,10 @@ use crate::model::FragmentId;
 
 /// This is the "global" `fragment_id`.
 /// The local `fragment_id` is namespaced by the `fragment_id`.
-pub(crate) type ActorId = u32;
+pub type ActorId = u32;
 
 #[derive(Clone, Debug)]
-pub(crate) struct BackfillNode {
+pub struct BackfillNode {
     fragment_id: FragmentId,
     /// How many more actors need to finish,
     /// before this fragment can finish backfilling.
@@ -22,7 +22,7 @@ pub(crate) struct BackfillNode {
 /// Operator done                -> update downstream operator dependency
 /// Operator's dependencies done -> queue operator for backfill
 #[derive(Clone, Debug)]
-pub(crate) struct BackfillOrderState {
+pub struct BackfillOrderState {
     // The order plan.
     current_backfill_nodes: HashMap<FragmentId, BackfillNode>,
     // Remaining nodes to finish
@@ -32,7 +32,7 @@ pub(crate) struct BackfillOrderState {
 }
 
 impl BackfillOrderState {
-    pub(crate) fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
+    pub fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
         // Find the fragment_id of the actor.
         let fragment_id = self.actor_to_fragment_id.get(&actor_id).unwrap();
         // Decrease the remaining_actor_count of the operator.
@@ -45,7 +45,7 @@ impl BackfillOrderState {
         vec![]
     }
 
-    pub(crate) fn finish_fragment(&mut self, fragment_id: FragmentId) -> Vec<FragmentId> {
+    pub fn finish_fragment(&mut self, fragment_id: FragmentId) -> Vec<FragmentId> {
         let mut newly_scheduled = vec![];
         // Decrease the remaining_dependency_count of the children.
         // If the remaining_dependency_count is 0, add the child to the current_backfill_nodes.
