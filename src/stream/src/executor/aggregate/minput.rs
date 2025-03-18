@@ -328,11 +328,10 @@ mod tests {
     use risingwave_storage::StateStore;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::MaterializedInputState;
+    use super::*;
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::aggregate::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
 
     fn create_chunk<S: StateStore>(
