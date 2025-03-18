@@ -81,7 +81,7 @@ impl<S: StateStore> StateTableWrapper<S> {
     async fn remove_by_pk(&mut self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         let row = self.inner.get_row(pk).await?;
         if let Some(ref row) = row {
-            self.inner.delete(&row);
+            self.inner.delete(row);
         }
         Ok(row)
     }
