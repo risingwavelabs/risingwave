@@ -524,9 +524,9 @@ pub struct Deserializer<D: DataTypes = Arc<[DataType]>> {
 /// A mapping from column id to the index of the column in the schema.
 #[derive(Clone)]
 enum ColumnMapping {
-    /// For small number of columns, use linear search with SmallVec.
+    /// For small number of columns, use linear search with `SmallVec`. This ensures no heap allocation.
     Small(SmallVec<[i32; COLUMN_ON_STACK]>),
-    /// For larger number of columns, use a HashMap.
+    /// For larger number of columns, build a `HashMap` for faster lookup.
     Large(HashMap<i32, usize>),
 }
 
@@ -544,13 +544,10 @@ impl ColumnMapping {
         }
     }
 
-    fn get(&self, id: &i32) -> Option<usize> {
+    fn get(&self, id: i32) -> Option<usize> {
         match self {
-            ColumnMapping::Small(vec) => {
-                let idx = vec.iter().position(|&x| x == *id)?;
-                Some(idx)
-            }
-            ColumnMapping::Large(map) => map.get(id).copied(),
+            ColumnMapping::Small(vec) => vec.iter().position(|&x| x == id),
+            ColumnMapping::Large(map) => map.get(&id).copied(),
         }
     }
 }
@@ -579,8 +576,6 @@ impl Deserializer<StructType> {
     ///
     /// Panic if the struct type does not have field ids.
     pub fn from_struct(struct_type: StructType) -> Self {
-        // let default_row = vec![None; struct_type.len()];
-
         Self {
             mapping: ColumnMapping::new(struct_type.ids().unwrap()),
             data_types: struct_type,
@@ -593,13 +588,11 @@ impl<D: DataTypes> ValueRowDeserializer for Deserializer<D> {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let encoded_bytes = EncodedBytes::new(encoded_bytes)?;
 
-        let mut row = self
-            .default_row
-            .clone()
-            .unwrap_or_else(|| vec![None; self.data_types.iter().len()]);
+        let mut row =
+            (self.default_row.clone()).unwrap_or_else(|| vec![None; self.data_types.iter().len()]);
 
         for (id, mut data) in encoded_bytes {
-            let Some(decoded_idx) = self.mapping.get(&id) else {
+            let Some(decoded_idx) = self.mapping.get(id) else {
                 continue;
             };
             let data_type = self.data_types.at(decoded_idx);
