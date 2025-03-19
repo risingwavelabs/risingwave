@@ -210,7 +210,7 @@ psql -c "
   ALTER TABLE shipments1 DROP COLUMN destination;
 "
 
-statement error unable to drop the column due to being referenced by downstream materialized views or sinks
+statement error unable to drop or alter the column due to being referenced by downstream materialized views or sinks
 ALTER TABLE pg_shipments DROP COLUMN destination;
 
 # wait alter ddl
