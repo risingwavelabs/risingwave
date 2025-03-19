@@ -1,4 +1,4 @@
-name: PR for release branch
+name: PR for release branches
 on:
   pull_request:
     branches:
@@ -55,7 +55,7 @@ jobs:
             for branch in "${target_branches[@]}"; do
               echo "$branch"
             done
-            echo "branches=$(printf '%s\n' "${target_branches[@]}" | jq -R . | jq -s .)" >> "$GITHUB_OUTPUT"
+            echo "branches=$(printf '%s\n' "${target_branches[@]}" | jq -R . | jq -s -c .)" >> "$GITHUB_OUTPUT"
           fi
 
   release_pull_request:
