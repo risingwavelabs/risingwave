@@ -136,15 +136,29 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
                     .await?
             }
+            ThrottleTarget::Fragment => {
+                self.metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(request.id as _, request.rate)
+                    .await?
+            }
             ThrottleTarget::Unspecified => {
                 return Err(Status::invalid_argument("unspecified throttle target"));
             }
         };
 
+        let request_id = if request.kind() == ThrottleTarget::Fragment {
+            self.metadata_manager
+                .catalog_controller
+                .get_fragment_streaming_job_id(request.id as _)
+                .await?
+        } else {
+            request.id as _
+        };
+
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request.id as ObjectId)
+            .get_object_database_id(request_id as ObjectId)
             .await?;
         let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct
@@ -213,6 +227,14 @@ impl StreamManagerService for StreamServiceImpl {
                 .catalog_controller
                 .get_job_fragments_by_id(job_id as _)
                 .await?;
+            let mut dispatchers = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_actor_dispatchers(
+                    table_fragments.fragment_ids().map(|id| id as _).collect(),
+                )
+                .await?;
+            let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
                 table_fragments.stream_job_id().table_id,
                 TableFragmentInfo {
@@ -227,12 +249,17 @@ impl StreamManagerService for StreamServiceImpl {
                                 .map(|actor| ActorInfo {
                                     id: actor.actor_id,
                                     node: Some(fragment.nodes.clone()),
-                                    dispatcher: actor.dispatcher,
+                                    dispatcher: dispatchers
+                                        .get_mut(&(fragment.fragment_id as _))
+                                        .and_then(|dispatchers| {
+                                            dispatchers.remove(&(actor.actor_id as _))
+                                        })
+                                        .unwrap_or_default(),
                                 })
                                 .collect_vec(),
                         })
                         .collect_vec(),
-                    ctx: Some(table_fragments.ctx.to_protobuf()),
+                    ctx: Some(ctx),
                 },
             );
         }

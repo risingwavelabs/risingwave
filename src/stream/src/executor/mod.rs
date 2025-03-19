@@ -389,7 +389,7 @@ impl Barrier {
     /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
-            .map_or(false, |actors| actors.contains(&actor_id))
+            .is_some_and(|actors| actors.contains(&actor_id))
     }
 
     pub fn is_checkpoint(&self) -> bool {
@@ -741,7 +741,9 @@ impl Mutation {
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
+            PbMutation::Stop(stop) => {
+                Mutation::Stop(HashSet::from_iter(stop.actors.iter().cloned()))
+            }
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update

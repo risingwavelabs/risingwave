@@ -519,13 +519,18 @@ impl ManagedBarrierState {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
+        term_id: String,
     ) -> Self {
         let mut databases = HashMap::new();
         let mut current_shared_context = HashMap::new();
         for database in initial_partial_graphs {
             let database_id = DatabaseId::new(database.database_id);
             assert!(!databases.contains_key(&database_id));
-            let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env));
+            let shared_context = Arc::new(SharedContext::new(
+                database_id,
+                &actor_manager.env,
+                term_id.clone(),
+            ));
             shared_context.add_actors(
                 database
                     .graphs
@@ -762,28 +767,27 @@ impl DatabaseManagedBarrierState {
         let mut new_actors = HashSet::new();
         let subscriptions =
             LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
-        for (node, actor) in request
-            .actors_to_build
-            .into_iter()
-            .flat_map(|fragment_actors| {
-                let node = Arc::new(fragment_actors.node.unwrap());
-                fragment_actors
-                    .actors
-                    .into_iter()
-                    .map(move |actor| (node.clone(), actor))
-            })
+        for (node, fragment_id, actor) in
+            request
+                .actors_to_build
+                .into_iter()
+                .flat_map(|fragment_actors| {
+                    let node = Arc::new(fragment_actors.node.unwrap());
+                    fragment_actors
+                        .actors
+                        .into_iter()
+                        .map(move |actor| (node.clone(), fragment_actors.fragment_id, actor))
+                })
         {
-            let upstream = actor.fragment_upstreams;
-            let actor = actor.actor.unwrap();
             let actor_id = actor.actor_id;
             assert!(!is_stop_actor(actor_id));
             assert!(new_actors.insert(actor_id));
             assert!(request.actor_ids_to_collect.contains(&actor_id));
             let (join_handle, monitor_join_handle) = self.actor_manager.spawn_actor(
                 actor,
+                fragment_id,
                 node,
                 (*subscriptions).clone(),
-                upstream,
                 self.current_shared_context.clone(),
                 self.local_barrier_manager.clone(),
             );

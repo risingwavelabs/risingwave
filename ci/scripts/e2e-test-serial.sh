@@ -79,6 +79,9 @@ download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" ta
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
+echo "--- Install Python Dependencies"
+python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
+
 echo "--- e2e, $mode, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
 cluster_start
@@ -105,11 +108,9 @@ risedev slt -p 4566 -d dev './e2e_test/database/prepare.slt'
 risedev slt -p 4566 -d test './e2e_test/database/test.slt'
 
 echo "--- e2e, $mode, python_client"
-python3 -m pip install --break-system-packages psycopg
 python3 ./e2e_test/python_client/main.py
 
 echo "--- e2e, $mode, subscription"
-python3 -m pip install --break-system-packages psycopg2-binary
 risedev slt -p 4566 -d dev './e2e_test/subscription/check_sql_statement.slt'
 python3 ./e2e_test/subscription/main.py
 

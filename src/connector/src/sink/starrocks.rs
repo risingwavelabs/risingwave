@@ -691,14 +691,23 @@ impl StarrocksSchemaClient {
 
     pub async fn get_pk_from_starrocks(&mut self) -> Result<(String, String)> {
         let query = format!(
-            "select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",
+            "select table_model, primary_key, sort_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",
             self.table, self.db
         );
         let table_mode_pk: (String, String) = self
             .conn
-            .query_map(query, |(table_model, primary_key)| {
-                (table_model, primary_key)
-            })
+            .query_map(
+                query,
+                |(table_model, primary_key, sort_key): (String, String, String)| match table_model
+                    .as_str()
+                {
+                    // Get primary key of aggregate table from the sort_key field
+                    // https://docs.starrocks.io/docs/table_design/table_types/table_capabilities/
+                    // https://docs.starrocks.io/docs/sql-reference/information_schema/tables_config/
+                    "AGG_KEYS" => (table_model, sort_key),
+                    _ => (table_model, primary_key),
+                },
+            )
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .first()

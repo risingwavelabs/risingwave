@@ -87,7 +87,7 @@ impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
         let mut watermark_to_emit = None;
         while !self.first_buffered_watermarks.is_empty()
             && (self.first_buffered_watermarks.len() == len
-                || watermark_to_emit.as_ref().map_or(false, |watermark| {
+                || watermark_to_emit.as_ref().is_some_and(|watermark| {
                     watermark == &self.first_buffered_watermarks.peek().unwrap().0.0
                 }))
         {

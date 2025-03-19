@@ -391,6 +391,13 @@ impl InflightDatabaseInfo {
         InflightFragmentInfo::contains_worker(self.fragment_infos(), worker_id)
     }
 
+    pub(crate) fn workers(&self) -> HashSet<WorkerId> {
+        self.fragment_infos()
+            .flat_map(|info| info.actors.values())
+            .cloned()
+            .collect()
+    }
+
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
     }

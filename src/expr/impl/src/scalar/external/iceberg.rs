@@ -104,7 +104,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         ExprError::InvalidParam {
             name: "input type in iceberg_transform",
             reason: format!(
-                "Failed to convert input type to icelake type, got error: {}",
+                "Failed to convert input type to iceberg type, got error: {}",
                 err.as_report()
             )
             .into(),
@@ -128,7 +128,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
     .map_err(|err| ExprError::InvalidParam {
         name: "return type in iceberg_transform",
         reason: format!(
-            "Failed to convert return type to icelake type, got error: {}",
+            "Failed to convert return type to iceberg type, got error: {}",
             err.as_report()
         )
         .into(),

@@ -355,4 +355,19 @@ impl CatalogController {
 
         Ok(job_parallelism)
     }
+
+    pub async fn get_fragment_streaming_job_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<ObjectId> {
+        let inner = self.inner.read().await;
+        let job_id: ObjectId = Fragment::find_by_id(fragment_id)
+            .select_only()
+            .column(fragment::Column::JobId)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+        Ok(job_id)
+    }
 }

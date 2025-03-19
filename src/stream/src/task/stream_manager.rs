@@ -29,12 +29,13 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
+use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode, StreamScanNode, StreamScanType};
-use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
+use risingwave_pb::stream_plan::{StreamNode, StreamScanNode, StreamScanType};
+use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -47,7 +48,6 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
-use super::{unique_executor_id, unique_operator_id};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
@@ -221,11 +221,13 @@ impl LocalStreamManager {
     pub async fn take_receiver(
         &self,
         database_id: DatabaseId,
+        term_id: String,
         ids: UpDownActorIds,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
                 database_id,
+                term_id,
                 ids,
                 result_sender,
             })
@@ -275,7 +277,11 @@ impl LocalBarrierWorker {
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();
-        *self = Self::new(self.actor_manager.clone(), init_request.databases);
+        *self = Self::new(
+            self.actor_manager.clone(),
+            init_request.databases,
+            init_request.term_id,
+        );
     }
 }
 
@@ -544,9 +550,11 @@ impl StreamActorManager {
 
         // Wrap the executor for debug purpose.
         let wrapped = WrapperExecutor::new(
+            operator_id,
             executor,
             actor_context.clone(),
             env.config().developer.enable_executor_row_count,
+            env.config().developer.enable_explain_analyze_stats,
         );
         let executor = (info, wrapped).into();
 
@@ -601,11 +609,11 @@ impl StreamActorManager {
 
     async fn create_actor(
         self: Arc<Self>,
-        actor: StreamActor,
+        actor: BuildActorInfo,
+        fragment_id: FragmentId,
         node: Arc<StreamNode>,
         shared_context: Arc<SharedContext>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
-        upstreams: HashMap<FragmentId, UpstreamActors>,
         local_barrier_manager: LocalBarrierManager,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         {
@@ -613,11 +621,10 @@ impl StreamActorManager {
             let streaming_config = self.env.config().clone();
             let actor_context = ActorContext::create(
                 &actor,
+                fragment_id,
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
-                actor.dispatcher.len(),
                 related_subscriptions,
-                upstreams,
                 self.env.meta_client().clone(),
                 streaming_config,
             );
@@ -626,7 +633,7 @@ impl StreamActorManager {
 
             let (executor, subtasks) = self
                 .create_nodes(
-                    actor.fragment_id,
+                    fragment_id,
                     &node,
                     self.env.clone(),
                     &actor_context,
@@ -639,9 +646,9 @@ impl StreamActorManager {
             let dispatcher = self.create_dispatcher(
                 self.env.clone(),
                 executor,
-                &actor.dispatcher,
+                &actor.dispatchers,
                 actor_id,
-                actor.fragment_id,
+                fragment_id,
                 &shared_context,
             )?;
             let actor = Actor::new(
@@ -660,10 +667,10 @@ impl StreamActorManager {
 impl StreamActorManager {
     pub(super) fn spawn_actor(
         self: &Arc<Self>,
-        actor: StreamActor,
+        actor: BuildActorInfo,
+        fragment_id: FragmentId,
         node: Arc<StreamNode>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
-        upstreams: HashMap<FragmentId, UpstreamActors>,
         current_shared_context: Arc<SharedContext>,
         local_barrier_manager: LocalBarrierManager,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
@@ -676,7 +683,16 @@ impl StreamActorManager {
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
                 let barrier_manager = local_barrier_manager.clone();
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-                let actor = self.clone().create_actor(actor, node, current_shared_context, related_subscriptions, upstreams, barrier_manager.clone()).boxed().and_then(|actor| actor.run()).map(move |result| {
+                let actor = self
+                    .clone()
+                    .create_actor(
+                        actor,
+                        fragment_id,
+                        node,
+                        current_shared_context,
+                        related_subscriptions,
+                        barrier_manager.clone()
+                    ).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
@@ -765,6 +781,7 @@ impl LocalBarrierWorker {
             &mut self.state.current_shared_context,
             database_id,
             &self.actor_manager,
+            &self.term_id,
         )
         .add_actors(new_actor_infos);
     }

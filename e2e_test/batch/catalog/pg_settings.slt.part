@@ -17,6 +17,7 @@ postmaster enable_tracing
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
+postmaster per_database_isolation
 postmaster time_travel_retention_ms
 user application_name
 user backfill_rate_limit
@@ -65,6 +66,8 @@ user streaming_enable_unaligned_join
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_sync_log_store_buffer_size
+user streaming_sync_log_store_pause_duration_ms
 user streaming_use_arrangement_backfill
 user streaming_use_shared_source
 user streaming_use_snapshot_backfill

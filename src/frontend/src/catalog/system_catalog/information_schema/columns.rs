@@ -35,7 +35,10 @@ use risingwave_frontend_macro::system_catalog;
         NULL::integer AS numeric_scale,
         NULL::integer AS datetime_precision,
         c.position AS ordinal_position,
-        'YES' AS is_nullable,
+        CASE
+            WHEN c.is_nullable THEN 'YES'
+            ELSE 'NO'
+        END AS is_nullable,
         CASE
             WHEN c.data_type = 'varchar' THEN 'character varying'
             ELSE c.data_type

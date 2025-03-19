@@ -35,12 +35,23 @@ pub async fn handle_create_aggregate(
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE AGGREGATE");
     }
+
+    let udf_config = handler_args.session.env().udf_config();
+
     // e.g., `language [ python / java / ...etc]`
     let language = match params.language {
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "javascript" => lang,
+                "python" if udf_config.enable_embedded_python_udf => lang,
+                "javascript" if udf_config.enable_embedded_javascript_udf => lang,
+                "python" | "javascript" => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "{} UDF is not enabled in configuration",
+                        lang
+                    ))
+                    .into());
+                }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
