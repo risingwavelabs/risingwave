@@ -569,25 +569,29 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
 }
 
 impl ToSql for JsonbVal {
-    accepts!(JSONB);
+    accepts!(JSON, JSONB);
 
     to_sql_checked!();
 
     fn to_sql(
         &self,
-        _ty: &Type,
+        ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
         Self: Sized,
     {
-        out.put_u8(1);
+        if matches!(*ty, Type::JSONB) {
+            out.put_u8(1);
+        }
         write!(out, "{}", self.0).unwrap();
         Ok(IsNull::No)
     }
 }
 
 impl<'a> FromSql<'a> for JsonbVal {
+    accepts!(JSON, JSONB);
+
     fn from_sql(
         ty: &Type,
         mut raw: &'a [u8],
@@ -620,26 +624,24 @@ impl<'a> FromSql<'a> for JsonbVal {
             }
         })
     }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::JSONB | Type::JSON)
-    }
 }
 
 impl ToSql for JsonbRef<'_> {
-    accepts!(JSONB);
+    accepts!(JSON, JSONB);
 
     to_sql_checked!();
 
     fn to_sql(
         &self,
-        _ty: &Type,
+        ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
         Self: Sized,
     {
-        out.put_u8(1);
+        if matches!(*ty, Type::JSONB) {
+            out.put_u8(1);
+        }
         write!(out, "{}", self.0).unwrap();
         Ok(IsNull::No)
     }
