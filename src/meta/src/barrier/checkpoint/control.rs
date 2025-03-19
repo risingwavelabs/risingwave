@@ -441,14 +441,24 @@ impl CheckpointControl {
 
     pub(crate) fn inflight_infos(
         &self,
-    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
-    {
+    ) -> impl Iterator<
+        Item = (
+            DatabaseId,
+            &InflightSubscriptionInfo,
+            &InflightDatabaseInfo,
+            impl Iterator<Item = &InflightStreamingJobInfo> + '_,
+        ),
+    > + '_ {
         self.databases.iter().flat_map(|(database_id, database)| {
             database.checkpoint_control().map(|database| {
                 (
                     *database_id,
                     &database.state.inflight_subscription_info,
                     &database.state.inflight_graph_info,
+                    database
+                        .creating_streaming_job_controls
+                        .values()
+                        .map(|job| &job.graph_info),
                 )
             })
         })

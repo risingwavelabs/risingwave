@@ -56,7 +56,7 @@ use uuid::Uuid;
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::NodeToCollect;
 use crate::controller::fragment::InflightFragmentInfo;
@@ -111,7 +111,12 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         inflight_infos: impl Iterator<
-            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+            Item = (
+                DatabaseId,
+                &InflightSubscriptionInfo,
+                &InflightDatabaseInfo,
+                impl Iterator<Item = &InflightStreamingJobInfo>,
+            ),
         >,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
@@ -149,7 +154,12 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         inflight_infos: impl Iterator<
-            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+            Item = (
+                DatabaseId,
+                &InflightSubscriptionInfo,
+                &InflightDatabaseInfo,
+                impl Iterator<Item = &InflightStreamingJobInfo>,
+            ),
         >,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
@@ -317,38 +327,49 @@ impl ControlStreamManager {
     fn collect_init_request(
         &self,
         initial_inflight_infos: impl Iterator<
-            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+            Item = (
+                DatabaseId,
+                &InflightSubscriptionInfo,
+                &InflightDatabaseInfo,
+                impl Iterator<Item = &InflightStreamingJobInfo>,
+            ),
         >,
         term_id: String,
     ) -> PbInitRequest {
         PbInitRequest {
             databases: initial_inflight_infos
                 .map(
-                    |(database_id, subscriptions, inflight_info)| PbDatabaseInitialPartialGraph {
-                        database_id: database_id.database_id,
-                        graphs: vec![PbInitialPartialGraph {
-                            partial_graph_id: to_partial_graph_id(None),
-                            subscriptions: subscriptions.into_iter().collect_vec(),
-                            actor_infos: inflight_info
-                                .fragment_infos()
-                                .flat_map(|fragment| {
-                                    fragment.actors.iter().map(|(actor_id, worker_id)| {
-                                        let host_addr = self
-                                            .nodes
-                                            .get(worker_id)
-                                            .expect("worker should exist for inflight actor")
-                                            .worker
-                                            .host
-                                            .clone()
-                                            .expect("should exist");
-                                        ActorInfo {
-                                            actor_id: *actor_id,
-                                            host: Some(host_addr),
-                                        }
+                    |(database_id, subscriptions, inflight_info, creating_job_inflight_info)| {
+                        PbDatabaseInitialPartialGraph {
+                            database_id: database_id.database_id,
+                            graphs: vec![PbInitialPartialGraph {
+                                partial_graph_id: to_partial_graph_id(None),
+                                subscriptions: subscriptions.into_iter().collect_vec(),
+                                actor_infos: inflight_info
+                                    .fragment_infos()
+                                    .chain(
+                                        creating_job_inflight_info
+                                            .flat_map(|job_info| job_info.fragment_infos()),
+                                    )
+                                    .flat_map(|fragment| {
+                                        fragment.actors.iter().map(|(actor_id, worker_id)| {
+                                            let host_addr = self
+                                                .nodes
+                                                .get(worker_id)
+                                                .expect("worker should exist for inflight actor")
+                                                .worker
+                                                .host
+                                                .clone()
+                                                .expect("should exist");
+                                            ActorInfo {
+                                                actor_id: *actor_id,
+                                                host: Some(host_addr),
+                                            }
+                                        })
                                     })
-                                })
-                                .collect(),
-                        }],
+                                    .collect(),
+                            }],
+                        }
                     },
                 )
                 .collect(),

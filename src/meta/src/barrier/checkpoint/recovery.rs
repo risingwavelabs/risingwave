@@ -30,7 +30,7 @@ use crate::MetaResult;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
-use crate::barrier::info::InflightDatabaseInfo;
+use crate::barrier::info::{InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::barrier::worker::{
@@ -398,8 +398,14 @@ pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseRe
 impl DatabaseStatusAction<'_, EnterInitializing> {
     pub(crate) fn inflight_infos(
         &self,
-    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
-    {
+    ) -> impl Iterator<
+        Item = (
+            DatabaseId,
+            &InflightSubscriptionInfo,
+            &InflightDatabaseInfo,
+            impl Iterator<Item = &InflightStreamingJobInfo> + '_,
+        ),
+    > + '_ {
         self.control.inflight_infos()
     }
 
