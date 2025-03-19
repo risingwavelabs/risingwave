@@ -129,11 +129,7 @@ mod new_serde {
     //
     // Recursively construct a new column-aware `Deserializer` for nested fields.
     fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
-        let deserializer = super::Deserializer::new(
-            &struct_def.ids().unwrap().collect_vec(), // TODO: avoid this clone
-            struct_def.types().cloned().collect_vec().into(), // TODO: avoid this clone
-            std::iter::empty(),
-        );
+        let deserializer = super::Deserializer::from_struct(struct_def.clone()); // cloning `StructType` is lightweight
         let encoded_len = data.get_u32_le() as usize;
 
         let (struct_data, remaining) = data.split_at(encoded_len);
@@ -348,17 +344,29 @@ mod data_types {
     /// A trait unifying data types of a row and field types of a struct.
     pub trait DataTypes: Clone {
         fn iter(&self) -> impl Iterator<Item = &DataType>;
+        fn at(&self, index: usize) -> &DataType;
     }
 
-    impl DataTypes for Vec<DataType> {
+    impl<T> DataTypes for T
+    where
+        T: AsRef<[DataType]> + Clone,
+    {
         fn iter(&self) -> impl Iterator<Item = &DataType> {
-            self.as_slice().iter()
+            self.as_ref().iter()
+        }
+
+        fn at(&self, index: usize) -> &DataType {
+            &self.as_ref()[index]
         }
     }
 
     impl DataTypes for StructType {
         fn iter(&self) -> impl Iterator<Item = &DataType> {
             self.types()
+        }
+
+        fn at(&self, index: usize) -> &DataType {
+            self.type_at(index)
         }
     }
 }
@@ -505,12 +513,19 @@ impl<'a> Iterator for EncodedBytes<'a> {
 /// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
 /// Should non-null default values be specified, a new field could be added to Deserializer
 #[derive(Clone)]
-pub struct Deserializer {
+pub struct Deserializer<D: DataTypes = Arc<[DataType]>> {
     required_column_ids: HashMap<i32, usize>,
-    schema: Arc<[DataType]>,
+    data_types: D,
 
     /// A row with default values for each column or `None` if no default value is specified
     default_row: Vec<Datum>,
+}
+
+fn collect_column_ids(column_ids: impl ExactSizeIterator<Item = ColumnId>) -> HashMap<i32, usize> {
+    column_ids
+        .enumerate()
+        .map(|(i, c)| (c.get_id(), i))
+        .collect()
 }
 
 impl Deserializer {
@@ -525,18 +540,29 @@ impl Deserializer {
             default_row[i] = datum;
         }
         Self {
-            required_column_ids: column_ids
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (c.get_id(), i))
-                .collect::<HashMap<_, _>>(),
-            schema,
+            required_column_ids: collect_column_ids(column_ids.iter().copied()),
+            data_types: schema,
             default_row,
         }
     }
 }
 
-impl ValueRowDeserializer for Deserializer {
+impl Deserializer<StructType> {
+    /// Create a new `Deserializer` for the fields of the given struct.
+    ///
+    /// Panic if the struct type does not have field ids.
+    pub fn from_struct(struct_type: StructType) -> Self {
+        let default_row = vec![None; struct_type.len()];
+
+        Self {
+            required_column_ids: collect_column_ids(struct_type.ids().unwrap()),
+            data_types: struct_type,
+            default_row,
+        }
+    }
+}
+
+impl<D: DataTypes> ValueRowDeserializer for Deserializer<D> {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let encoded_bytes = EncodedBytes::new(encoded_bytes)?;
 
@@ -546,7 +572,7 @@ impl ValueRowDeserializer for Deserializer {
             let Some(&decoded_idx) = self.required_column_ids.get(&id) else {
                 continue;
             };
-            let data_type = &self.schema[decoded_idx];
+            let data_type = self.data_types.at(decoded_idx);
 
             let datum = if data.is_empty() {
                 None
