@@ -49,8 +49,8 @@ impl FrontendHummockVersion {
                                 .0
                                 .iter()
                                 .map(|change_log| EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
+                                    new_value: vec![(); change_log.new_value.len()],
+                                    old_value: vec![(); change_log.new_value.len()],
                                     epochs: change_log.epochs.clone(),
                                 })
                                 .collect(),
@@ -79,8 +79,14 @@ impl FrontendHummockVersion {
                                 .0
                                 .iter()
                                 .map(|change_log| PbEpochNewChangeLog {
-                                    old_value: vec![],
-                                    new_value: vec![],
+                                    old_value: vec![
+                                        PbSstableInfo::default();
+                                        change_log.old_value.len()
+                                    ],
+                                    new_value: vec![
+                                        PbSstableInfo::default();
+                                        change_log.new_value.len()
+                                    ],
                                     epochs: change_log.epochs.clone(),
                                 })
                                 .collect(),
@@ -107,8 +113,9 @@ impl FrontendHummockVersion {
                                 .change_logs
                                 .into_iter()
                                 .map(|change_log| EpochNewChangeLogCommon {
-                                    new_value: vec![],
-                                    old_value: vec![],
+                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                    new_value: vec![(); change_log.new_value.len()],
+                                    old_value: vec![(); change_log.old_value.len()],
                                     epochs: change_log.epochs,
                                 })
                                 .collect(),
