@@ -152,28 +152,34 @@ impl ElasticSearchOpenSearchFormatter {
                 })
                 .transpose()?;
             match op {
-                Op::Insert | Op::UpdateInsert => {
+                Op::Insert => {
                     let key = self.key_encoder.encode(rows)?.into_string()?;
-                    let mut modified_col_indices = Vec::new();
-                    if let Some((delete_key, delete_row)) = update_delete_row.take()
-                        && delete_key == key
-                    {
+                    let value = self.value_encoder.encode(rows)?;
+                    result_vec.push(BuildBulkPara {
+                        index: index.to_owned(),
+                        key,
+                        value: Some(value),
+                        mem_size_b: rows.value_estimate_size(),
+                        routing_column,
+                    });
+                }
+                Op::UpdateInsert => {
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
+                    let mut modified_col_indices = Vec::with_capacity(rows.len());
+                    let (delete_key, delete_row) =
+                        update_delete_row.take().expect("update_delete_row is None");
+                    if delete_key == key {
                         delete_row
                             .iter()
                             .enumerate()
                             .zip_eq_debug(rows.iter())
                             .for_each(|((index, delete_column), insert_column)| {
-                                if let Some(insert_column) = insert_column
-                                    && let Some(delete_column) = delete_column
-                                    && insert_column == delete_column
-                                {
+                                if insert_column == delete_column {
                                     // do nothing
                                 } else {
                                     modified_col_indices.push(index);
                                 }
                             });
-                    } else {
-                        modified_col_indices = (0..self.value_encoder.schema().len()).collect();
                     }
                     let value = self
                         .value_encoder
