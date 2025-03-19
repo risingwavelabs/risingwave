@@ -613,6 +613,7 @@ impl StateStoreImpl {
         await_tree_config: Option<await_tree::Config>,
         use_new_object_prefix_strategy: bool,
     ) -> StorageResult<Self> {
+        const KB: usize = 1 << 10;
         const MB: usize = 1 << 20;
 
         let meta_cache = {
@@ -650,11 +651,7 @@ impl StateStoreImpl {
                                     + opts.meta_file_cache_reclaimers / 2,
                             )
                             .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                            .with_flush_io_size(256 * 1024)
-                            .with_flush_io_depth(64)
-                            .with_flush_io_throughput(
-                                opts.meta_file_cache_insert_rate_limit_mb * MB,
-                            ),
+                            .with_blob_index_size(16 * KB),
                     );
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -705,11 +702,7 @@ impl StateStoreImpl {
                                     + opts.data_file_cache_reclaimers / 2,
                             )
                             .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                            .with_flush_io_size(256 * 1024)
-                            .with_flush_io_depth(64)
-                            .with_flush_io_throughput(
-                                opts.data_file_cache_insert_rate_limit_mb * MB,
-                            ),
+                            .with_blob_index_size(16 * KB),
                     );
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
