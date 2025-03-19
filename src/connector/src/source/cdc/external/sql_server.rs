@@ -124,7 +124,7 @@ impl SqlServerExternalTable {
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            type_to_rw_type(col_type, col_name)?,
+                            mssql_type_to_rw_type(col_type, col_name)?,
                         ));
                     }
                 }
@@ -183,7 +183,7 @@ impl SqlServerExternalTable {
     }
 }
 
-fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
+fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
     let dtype = match col_type.to_lowercase().as_str() {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,

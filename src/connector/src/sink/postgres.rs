@@ -154,7 +154,8 @@ impl Sink for PostgresSink {
 
             // Check that names and types match, order of columns doesn't matter.
             {
-                let pg_columns = pg_table.column_descs();
+                let pg_columns: &Vec<risingwave_common::catalog::ColumnDesc> =
+                    pg_table.column_descs();
                 let sink_columns = self.schema.fields();
                 if pg_columns.len() < sink_columns.len() {
                     return Err(SinkError::Config(anyhow!(
@@ -326,7 +327,7 @@ impl PostgresSinkWriter {
 
         // Rewrite schema types for serialization
         let schema_types = {
-            let pg_table = PostgresExternalTable::connect(
+            let name_to_type = PostgresExternalTable::type_mapping(
                 &config.user,
                 &config.password,
                 &config.host,
@@ -339,7 +340,6 @@ impl PostgresSinkWriter {
                 is_append_only,
             )
             .await?;
-            let name_to_type = pg_table.column_name_to_pg_type();
             let mut schema_types = Vec::with_capacity(schema.fields.len());
             for field in &mut schema.fields[..] {
                 let field_name = &field.name;
