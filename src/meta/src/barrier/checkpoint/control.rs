@@ -441,24 +441,14 @@ impl CheckpointControl {
 
     pub(crate) fn inflight_infos(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            DatabaseId,
-            &InflightSubscriptionInfo,
-            &InflightDatabaseInfo,
-            impl Iterator<Item = &InflightStreamingJobInfo> + '_,
-        ),
-    > + '_ {
+    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
+    {
         self.databases.iter().flat_map(|(database_id, database)| {
             database.checkpoint_control().map(|database| {
                 (
                     *database_id,
                     &database.state.inflight_subscription_info,
                     &database.state.inflight_graph_info,
-                    database
-                        .creating_streaming_job_controls
-                        .values()
-                        .flat_map(|job| job.inflight_graph_info()),
                 )
             })
         })
@@ -668,12 +658,12 @@ impl DatabaseCheckpointControl {
         let mut table_ids_to_merge = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
-            if let Some(graph_info) = creating_streaming_job.should_merge_to_upstream() {
+            if creating_streaming_job.should_merge_to_upstream() {
                 table_ids_to_merge.insert(
                     *table_id,
                     (
                         creating_streaming_job.snapshot_backfill_info.clone(),
-                        graph_info.clone(),
+                        creating_streaming_job.graph_info.clone(),
                     ),
                 );
             }

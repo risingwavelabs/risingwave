@@ -45,7 +45,7 @@ pub(crate) struct CreatingStreamingJobControl {
     pub(super) snapshot_backfill_info: SnapshotBackfillInfo,
     backfill_epoch: u64,
 
-    graph_info: InflightStreamingJobInfo,
+    pub(super) graph_info: InflightStreamingJobInfo,
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
@@ -309,18 +309,18 @@ impl CreatingStreamingJobControl {
                 )?;
             }
         }
-        Ok(self.should_merge_to_upstream().is_some())
+        Ok(self.should_merge_to_upstream())
     }
 
-    pub(super) fn should_merge_to_upstream(&self) -> Option<&InflightStreamingJobInfo> {
+    pub(super) fn should_merge_to_upstream(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             ref log_store_progress_tracker,
         } = &self.status
             && log_store_progress_tracker.is_finished()
         {
-            Some(&self.graph_info)
+            true
         } else {
-            None
+            false
         }
     }
 }
@@ -386,13 +386,5 @@ impl CreatingStreamingJobControl {
 
     pub(super) fn is_finished(&self) -> bool {
         self.barrier_control.is_empty() && self.status.is_finishing()
-    }
-
-    pub fn inflight_graph_info(&self) -> Option<&InflightStreamingJobInfo> {
-        match &self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => Some(&self.graph_info),
-            CreatingStreamingJobStatus::Finishing(_) => None,
-        }
     }
 }

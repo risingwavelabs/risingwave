@@ -346,7 +346,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     for worker_id in workers {
                                         if !self.control_stream_manager.contains_worker(worker_id) {
                                             let node = self.active_streaming_nodes.current()[&worker_id].clone();
-                                            self.control_stream_manager.try_add_worker(node, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
+                                            self.control_stream_manager.try_add_worker(node, entering_initializing.inflight_infos(), self.term_id.clone(), &*self.context).await;
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);

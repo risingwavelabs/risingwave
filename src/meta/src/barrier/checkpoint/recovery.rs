@@ -27,15 +27,16 @@ use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
 use crate::MetaResult;
-use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
+use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
+use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
@@ -395,8 +396,11 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
-    pub(crate) fn control(&self) -> &CheckpointControl {
-        &*self.control
+    pub(crate) fn inflight_infos(
+        &self,
+    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
+    {
+        self.control.inflight_infos()
     }
 
     pub(crate) fn enter(
