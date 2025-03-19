@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::{version_checkpoint_path, HummockSstableObjectId, OB
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;
-// use sea_orm::sea_query::IdenList;
 use thiserror_ext::AsReport;
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
@@ -164,8 +163,11 @@ async fn restore_impl(
             &opts.hummock_storage_url,
             &opts.hummock_storage_directory,
         )
-        .await?;
-        tracing::info!("Complete integrity validation.");
+        .await
+        .inspect_err(|_| {
+            tracing::error!("Fail integrity validation.")
+        })?;
+        tracing::info!("Succeed integrity validation.");
     }
 
     let format_version = snapshot.format_version;
