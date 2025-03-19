@@ -19,7 +19,7 @@ use risingwave_expr::aggregate::{
     AggCall, AggregateState, BoxedAggregateFunction, build_retractable,
 };
 
-use super::aggregation::agg_call_filter_res;
+use super::agg_call_filter_res;
 use crate::executor::prelude::*;
 
 pub struct StatelessSimpleAggExecutor {
