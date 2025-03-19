@@ -17,9 +17,9 @@ use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -53,20 +53,18 @@ impl ObserverState for HummockObserverNode {
                 for object in object_group.objects {
                     match object.object_info.unwrap() {
                         PbObjectInfo::Table(table_catalog) => {
-                            assert!(
-                                resp.version > self.version,
-                                "resp version={:?}, current version={:?}",
-                                resp.version,
-                                self.version
-                            );
-
                             self.handle_catalog_notification(resp.operation(), table_catalog);
-
-                            self.version = resp.version;
                         }
                         _ => panic!("error type notification"),
                     };
                 }
+                assert!(
+                    resp.version > self.version,
+                    "resp version={:?}, current version={:?}",
+                    resp.version,
+                    self.version
+                );
+                self.version = resp.version;
             }
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self

@@ -21,7 +21,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use bytes::{BufMut, Bytes};
-use ethnum::{i256, u256, AsI256};
+use ethnum::{AsI256, i256, u256};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
@@ -32,7 +32,7 @@ use to_text::ToText;
 
 use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
-use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
+use crate::types::{Buf, DataType, F64, Scalar, ScalarRef, to_text};
 
 /// A 256-bit signed integer.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]

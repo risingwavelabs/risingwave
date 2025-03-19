@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
@@ -24,15 +24,13 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, Engine, FieldLike, TableId,
-    TableVersionId, DEFAULT_SCHEMA_NAME, INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID,
-    ROWID_PREFIX,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -40,9 +38,9 @@ use risingwave_connector::jvm_runtime::JVM;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
-    ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+    DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
@@ -52,8 +50,8 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
-use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
@@ -64,21 +62,21 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
-use super::create_source::{bind_columns_from_source, CreateSourceType, SqlColumnStrategy};
-use super::{create_sink, create_source, RwPgResponse};
-use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
+use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
+use super::{RwPgResponse, create_sink, create_source};
+use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::table_catalog::{TableVersion, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
-use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
-use crate::error::{bail_bind_error, ErrorCode, Result, RwError};
+use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableVersion};
+use crate::catalog::{ColumnId, DatabaseId, SchemaId, check_column_name_not_reserved};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::handler::HandlerArgs;
 use crate::handler::create_source::{
-    bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
-    handle_addition_columns, UPSTREAM_SOURCE_KEY,
+    UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
+    bind_source_watermark, handle_addition_columns,
 };
 use crate::handler::util::SourceSchemaCompatExt;
-use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
@@ -88,95 +86,8 @@ use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
-/// Column ID generator for a new table or a new version of an existing table to alter.
-#[derive(Debug)]
-pub struct ColumnIdGenerator {
-    /// Existing column names and their IDs and data types.
-    ///
-    /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
-    /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
-    ///
-    /// For a new table, this is empty.
-    pub existing: HashMap<String, (ColumnId, DataType)>,
-
-    /// The next column ID to generate, used for new columns that do not exist in `existing`.
-    pub next_column_id: ColumnId,
-
-    /// The version ID of the table to be created or altered.
-    ///
-    /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
-    /// of the `version_id` field in the original table catalog.
-    pub version_id: TableVersionId,
-}
-
-impl ColumnIdGenerator {
-    /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
-    pub fn new_alter(original: &TableCatalog) -> Self {
-        let existing = original
-            .columns()
-            .iter()
-            .map(|col| {
-                (
-                    col.name().to_owned(),
-                    (col.column_id(), col.data_type().clone()),
-                )
-            })
-            .collect();
-
-        let version = original.version().expect("version field not set");
-
-        Self {
-            existing,
-            next_column_id: version.next_column_id,
-            version_id: version.version_id + 1,
-        }
-    }
-
-    /// Creates a new [`ColumnIdGenerator`] for a new table.
-    pub fn new_initial() -> Self {
-        Self {
-            existing: HashMap::new(),
-            next_column_id: ColumnId::first_user_column(),
-            version_id: INITIAL_TABLE_VERSION_ID,
-        }
-    }
-
-    /// Generates a new [`ColumnId`] for a column with the given field.
-    ///
-    /// Returns an error if the data type of the column has been changed.
-    pub fn generate(&mut self, field: impl FieldLike) -> Result<ColumnId> {
-        if let Some((id, original_type)) = self.existing.get(field.name()) {
-            // Intentionally not using `datatype_equals` here because we want nested types to be
-            // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
-            // of generated columns or downstream jobs.
-            // TODO: support compatible changes on types, typically for `STRUCT` types.
-            //       https://github.com/risingwavelabs/risingwave/issues/19755
-            if original_type == field.data_type() {
-                Ok(*id)
-            } else {
-                bail_not_implemented!(
-                    "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
-                     This is currently not supported, even if it could be a compatible change in external systems.",
-                    field.name(),
-                    original_type,
-                    field.data_type()
-                );
-            }
-        } else {
-            let id = self.next_column_id;
-            self.next_column_id = self.next_column_id.next();
-            Ok(id)
-        }
-    }
-
-    /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
-    pub fn into_version(self) -> TableVersion {
-        TableVersion {
-            version_id: self.version_id,
-            next_column_id: self.next_column_id,
-        }
-    }
-}
+mod col_id_gen;
+pub use col_id_gen::*;
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -185,6 +96,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
+            ColumnOption::Null => {}
+            ColumnOption::NotNull => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
@@ -209,6 +122,7 @@ pub fn bind_sql_columns(
             name,
             data_type,
             collation,
+            options,
             ..
         } = column;
 
@@ -242,29 +156,27 @@ pub fn bind_sql_columns(
             // additional column name may have prefix _rw
             // When converting dropping the connector from table, the additional columns are converted to normal columns and keep the original name.
             // Under this case, we loosen the check for _rw prefix.
-            check_valid_column_name(&name.real_value())?;
+            check_column_name_not_reserved(&name.real_value())?;
         }
 
-        let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
-            fields
-                .iter()
-                .map(bind_struct_field)
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            vec![]
-        };
+        let mut nullable: bool = true;
+        for option in options {
+            if option.option == ColumnOption::NotNull {
+                nullable = false;
+            }
+        }
+
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
                 column_id: ColumnId::placeholder(),
                 name: name.real_value(),
-                field_descs,
-                type_name: "".to_owned(),
                 generated_or_default_column: None,
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::LATEST,
                 system_column: None,
+                nullable,
             },
             is_hidden: false,
         });
@@ -556,6 +468,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+    if with_properties.is_shareable_cdc_connector() {
+        generated_columns_check_for_cdc_table(&column_defs)?;
+        not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
+    }
 
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
@@ -620,7 +536,7 @@ pub(crate) fn gen_create_table_plan(
 ) -> Result<(PlanRef, PbTable)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
@@ -895,7 +811,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (mut columns, pk_column_ids, _row_id_index) =
@@ -1132,13 +1048,16 @@ pub(super) async fn handle_create_table_plan(
         }
 
         (None, Some(cdc_table)) => {
-            sanity_check_for_cdc_table(
+            sanity_check_for_table_on_cdc_source(
                 append_only,
                 &column_defs,
                 &wildcard_idx,
                 &constraints,
                 &source_watermarks,
             )?;
+
+            generated_columns_check_for_cdc_table(&column_defs)?;
+            not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
 
             let session = &handler_args.session;
             let db_name = &session.database();
@@ -1187,36 +1106,14 @@ pub(super) async fn handle_create_table_plan(
                         }
                     }
 
-                    let (mut columns, pk_names) =
+                    let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    let table: ExternalTableImpl = ExternalTableImpl::connect(config)
-                        .await
-                        .context("failed to auto derive table schema")?;
-                    let external_columns: HashMap<&str, &ColumnDesc> = table
-                        .column_descs()
-                        .iter()
-                        .map(|column_desc| (column_desc.name.as_str(), column_desc))
-                        .collect();
-
-                    for col in &mut columns {
-                        let external_column_desc =
-                            *external_columns.get(col.name()).ok_or_else(|| {
-                                ErrorCode::ConnectorError(
-                                    format!(
-                                        "Column '{}' not found in the upstream database",
-                                        col.name()
-                                    )
-                                    .into(),
-                                )
-                            })?;
-                        col.column_desc.generated_or_default_column =
-                            external_column_desc.generated_or_default_column.clone();
-                    }
+                    // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
                 }
             };
@@ -1251,13 +1148,62 @@ pub(super) async fn handle_create_table_plan(
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into())
+            .into());
         }
     };
     Ok((plan, source, table, job_type))
 }
 
-fn sanity_check_for_cdc_table(
+// For both table from cdc source and table with cdc connector
+fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
+    let mut found_generated_column = false;
+    for column in columns {
+        let mut is_generated = false;
+
+        for option_def in &column.options {
+            if let ColumnOption::GeneratedColumns(_) = option_def.option {
+                is_generated = true;
+                break;
+            }
+        }
+
+        if is_generated {
+            found_generated_column = true;
+        } else if found_generated_column {
+            return Err(ErrorCode::NotSupported(
+                "Non-generated column found after a generated column.".into(),
+                "Ensure that all generated columns appear at the end of the cdc table definition."
+                    .into(),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+// For both table from cdc source and table with cdc connector
+fn not_null_check_for_cdc_table(
+    wildcard_idx: &Option<usize>,
+    column_defs: &Vec<ColumnDef>,
+) -> Result<()> {
+    if !wildcard_idx.is_some()
+        && column_defs.iter().any(|col| {
+            col.options
+                .iter()
+                .any(|opt| matches!(opt.option, ColumnOption::NotNull))
+        })
+    {
+        return Err(ErrorCode::NotSupported(
+            "CDC table with NOT NULL constraint is not supported".to_owned(),
+            "Please remove the NOT NULL constraint for columns".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+// Only for table from cdc source
+fn sanity_check_for_table_on_cdc_source(
     append_only: bool,
     column_defs: &Vec<ColumnDef>,
     wildcard_idx: &Option<usize>,
@@ -1296,6 +1242,7 @@ fn sanity_check_for_cdc_table(
         )
         .into());
     }
+
     if append_only {
         return Err(ErrorCode::NotSupported(
             "append only modifier on the table created from a CDC source".into(),
@@ -1470,9 +1417,6 @@ pub async fn create_iceberg_engine_table(
     constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
-    risingwave_common::license::Feature::IcebergEngine
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
     // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
     // 2. create a hummock table
     // 3. create an iceberg sink
@@ -1568,7 +1512,9 @@ pub async fn create_iceberg_engine_table(
                     let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
                         s3_region
                     } else {
-                        bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+                        bail!(
+                            "To create an iceberg engine table with s3 backend, AWS_REGION needed to be set"
+                        );
                     };
                     let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
                     (
@@ -1722,7 +1668,7 @@ pub async fn create_iceberg_engine_table(
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
         let [stmt]: [_; 1] = Parser::parse_sql(&format!(
             "select {} as {}, * from {}",
-            ROWID_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, table_name
+            ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
         ))
         .context("unable to parse query")?
         .try_into()
@@ -1781,7 +1727,9 @@ pub async fn create_iceberg_engine_table(
 
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
-        bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
+        bail!(
+            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+        )
     }
 
     sink_with.insert(
@@ -1912,7 +1860,7 @@ pub async fn generate_stream_graph_for_replace_table(
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict: on_conflict.into(),
-        with_version_column: with_version_column.clone(),
+        with_version_column: with_version_column.as_ref().map(|x| x.real_value()),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
     };
@@ -1974,7 +1922,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 IncludeOption::default(),
                 table_name,
                 resolved_table_name,
@@ -2122,87 +2070,12 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
-        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
     use super::*;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
-
-    struct BrandNewColumn(&'static str);
-    use BrandNewColumn as B;
-
-    impl FieldLike for BrandNewColumn {
-        fn name(&self) -> &str {
-            self.0
-        }
-
-        fn data_type(&self) -> &DataType {
-            unreachable!("for brand new columns, data type will not be accessed")
-        }
-    }
-
-    #[test]
-    fn test_col_id_gen_initial() {
-        let mut gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(1));
-        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(2));
-    }
-
-    #[test]
-    fn test_col_id_gen_alter() {
-        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
-            columns: vec![
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field::with_name(DataType::Float32, "f32"),
-                        1,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field::with_name(DataType::Float64, "f64"),
-                        2,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field::with_name(
-                            StructType::new([("f1", DataType::Int32)]).into(),
-                            "nested",
-                        ),
-                        3,
-                    ),
-                    is_hidden: false,
-                },
-            ],
-            version: Some(TableVersion::new_initial_for_test(ColumnId::new(3))),
-            ..Default::default()
-        });
-
-        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(4));
-        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(5));
-        assert_eq!(
-            gen.generate(Field::new("f32", DataType::Float32)).unwrap(),
-            ColumnId::new(1)
-        );
-
-        // mismatched data type
-        gen.generate(Field::new("f64", DataType::Float32))
-            .unwrap_err();
-
-        // mismatched data type
-        // we require the nested data type to be exactly the same
-        gen.generate(Field::new(
-            "nested",
-            StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
-        ))
-        .unwrap_err();
-
-        assert_eq!(gen.generate(B("v3")).unwrap(), ColumnId::new(6));
-    }
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_table_handler() {
@@ -2228,15 +2101,17 @@ mod tests {
             .collect::<HashMap<&str, DataType>>();
 
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROW_ID_COLUMN_NAME => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],
-            ).into(),
+            )
+            .with_ids([3, 4, 5].map(ColumnId::new))
+            .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[test]
@@ -2293,7 +2168,7 @@ mod tests {
                 let mut columns = bind_sql_columns(&column_defs, false)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
-                    c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();
+                    col_id_gen.generate(c)?;
                 }
 
                 let pk_names =

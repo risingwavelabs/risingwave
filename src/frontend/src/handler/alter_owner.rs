@@ -21,13 +21,13 @@ use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::session::SessionImpl;
 use crate::user::user_catalog::UserCatalog;
-use crate::Binder;
 
 pub fn check_schema_create_privilege(
     session: &Arc<SessionImpl>,
@@ -38,7 +38,7 @@ pub fn check_schema_create_privilege(
         return Ok(());
     }
     if !new_owner.is_super
-        && !new_owner.check_privilege(
+        && !new_owner.has_privilege(
             &grant_privilege::Object::SchemaId(schema_id),
             AclMode::Create,
         )
@@ -162,6 +162,18 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     Object::SchemaId(schema.id())
+                }
+                StatementType::ALTER_CONNECTION => {
+                    let (connection, schema_name) = catalog_reader.get_connection_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
+                    session.check_privilege_for_drop_alter(schema_name, &**connection)?;
+                    if connection.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    Object::ConnectionId(connection.id)
                 }
                 _ => unreachable!(),
             },

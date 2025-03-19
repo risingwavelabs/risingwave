@@ -12,26 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::XmlNode;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::SyncLogStoreNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
+use crate::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{
-    childless_record, infer_synced_kv_log_store_table_catalog_inner, Distill,
+    Distill, childless_record, infer_synced_kv_log_store_table_catalog_inner,
 };
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSyncLogStore {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
+    pub buffer_size: usize,
+    pub pause_duration_ms: usize,
 }
 
 impl StreamSyncLogStore {
@@ -47,13 +49,35 @@ impl StreamSyncLogStore {
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        Self { base, input }
+        let pause_duration_ms = input
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_sync_log_store_pause_duration_ms();
+        let buffer_size = input
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_sync_log_store_buffer_size();
+        Self {
+            base,
+            input,
+            buffer_size,
+            pause_duration_ms,
+        }
     }
 }
 
 impl Distill for StreamSyncLogStore {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamSyncLogStore", vec![])
+        let fields = vec![
+            ("buffer_size", Pretty::display(&self.buffer_size)),
+            (
+                "pause_duration_ms",
+                Pretty::display(&self.pause_duration_ms),
+            ),
+        ];
+        childless_record("StreamSyncLogStore", fields)
     }
 }
 
@@ -76,7 +100,11 @@ impl StreamNode for StreamSyncLogStore {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost()
             .into();
-        NodeBody::SyncLogStore(Box::new(SyncLogStoreNode { log_store_table }))
+        NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
+            log_store_table,
+            pause_duration_ms: self.pause_duration_ms as _,
+            buffer_size: self.buffer_size as _,
+        }))
     }
 }
 

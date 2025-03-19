@@ -15,9 +15,9 @@
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
+use crate::Binder;
 use crate::error::Result;
 use crate::expr::OrderByExpr as BoundOrderByExpr;
-use crate::Binder;
 
 impl Binder {
     /// Bind an `ORDER BY` expression in other places than

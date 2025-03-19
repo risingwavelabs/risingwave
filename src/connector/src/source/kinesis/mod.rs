@@ -20,14 +20,14 @@ pub mod split;
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::connector_common::KinesisCommon;
+use crate::source::SourceProperties;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
-use crate::source::SourceProperties;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 

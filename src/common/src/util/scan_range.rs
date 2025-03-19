@@ -17,12 +17,12 @@ use std::ops::{Bound, RangeBounds};
 
 use itertools::Itertools;
 use paste::paste;
-use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
 use risingwave_pb::batch_plan::ScanRange as PbScanRange;
+use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
 
-use super::sort_util::{cmp_rows, OrderType};
-use crate::hash::table_distribution::TableDistribution;
+use super::sort_util::{OrderType, cmp_rows};
 use crate::hash::VirtualNode;
+use crate::hash::table_distribution::TableDistribution;
 use crate::types::{Datum, ScalarImpl};
 use crate::util::value_encoding::serialize_datum_into;
 

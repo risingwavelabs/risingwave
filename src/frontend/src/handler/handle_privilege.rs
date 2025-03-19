@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
 use risingwave_pb::user::PbGrantPrivilege;
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 
 use super::RwPgResponse;
+use crate::bind_data_type;
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
@@ -150,25 +151,184 @@ fn make_prost_privilege(
                 grant_objs.push(PbObject::SinkId(sink.id.sink_id));
             }
         }
+        GrantObjects::Views(views) => {
+            let db_name = &session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+
+            for name in views {
+                let (schema_name, view_name) =
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (view, _) = reader.get_view_by_name(db_name, schema_path, &view_name)?;
+                grant_objs.push(PbObject::ViewId(view.id));
+            }
+        }
+        GrantObjects::Connections(conns) => {
+            let db_name = &session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+
+            for name in conns {
+                let (schema_name, conn_name) =
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (conn, _) = reader.get_connection_by_name(db_name, schema_path, &conn_name)?;
+                grant_objs.push(PbObject::ConnectionId(conn.id));
+            }
+        }
+        GrantObjects::Subscriptions(subscriptions) => {
+            let db_name = &session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+
+            for name in subscriptions {
+                let (schema_name, sub_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (sub, _) = reader.get_subscription_by_name(db_name, schema_path, &sub_name)?;
+                grant_objs.push(PbObject::SubscriptionId(sub.id.subscription_id));
+            }
+        }
+        GrantObjects::Functions(func_descs) => {
+            let db_name = &session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+
+            for func_desc in func_descs {
+                let (schema_name, func_name) =
+                    Binder::resolve_schema_qualified_name(db_name, func_desc.name)?;
+                let arg_types = match func_desc.args {
+                    Some(args) => {
+                        let mut arg_types = vec![];
+                        for arg in args {
+                            arg_types.push(bind_data_type(&arg.data_type)?);
+                        }
+                        Some(arg_types)
+                    }
+                    None => None,
+                };
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (func, _) = match arg_types {
+                    Some(arg_types) => reader.get_function_by_name_args(
+                        db_name,
+                        schema_path,
+                        &func_name,
+                        &arg_types,
+                    )?,
+                    None => {
+                        let (functions, schema_name) =
+                            reader.get_functions_by_name(db_name, schema_path, &func_name)?;
+                        if functions.len() > 1 {
+                            return Err(ErrorCode::CatalogError(format!(
+                                "function name {func_name:?} is not unique\nHINT: Specify the argument list to select the function unambiguously."
+                            ).into()).into());
+                        }
+                        (
+                            functions.into_iter().next().expect("no functions"),
+                            schema_name,
+                        )
+                    }
+                };
+                grant_objs.push(PbObject::FunctionId(func.id.function_id()));
+            }
+        }
+        GrantObjects::Secrets(secrets) => {
+            let db_name = &session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.user_name();
+
+            for name in secrets {
+                let (schema_name, secret_name) =
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (secret, _) = reader.get_secret_by_name(db_name, schema_path, &secret_name)?;
+                grant_objs.push(PbObject::SecretId(secret.id.secret_id()));
+            }
+        }
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::AllSourcesSchemaId(schema.id()));
+                schema.iter_source().for_each(|source| {
+                    grant_objs.push(PbObject::SourceId(source.id));
+                });
             }
         }
         GrantObjects::AllMviewsInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::AllTablesSchemaId(schema.id()));
+                schema.iter_all_mvs().for_each(|mview| {
+                    grant_objs.push(PbObject::TableId(mview.id().table_id));
+                });
             }
         }
         GrantObjects::AllTablesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::AllDmlRelationsSchemaId(schema.id()));
+                schema.iter_user_table().for_each(|table| {
+                    grant_objs.push(PbObject::TableId(table.id().table_id));
+                });
+            }
+        }
+        GrantObjects::AllSinksInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_sink().for_each(|sink| {
+                    grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+                });
+            }
+        }
+        GrantObjects::AllViewsInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_view().for_each(|view| {
+                    grant_objs.push(PbObject::ViewId(view.id));
+                });
+            }
+        }
+        GrantObjects::AllFunctionsInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_function().for_each(|func| {
+                    grant_objs.push(PbObject::FunctionId(func.id.function_id()));
+                });
+            }
+        }
+        GrantObjects::AllSecretsInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_secret().for_each(|secret| {
+                    grant_objs.push(PbObject::SecretId(secret.id.secret_id()));
+                });
+            }
+        }
+        GrantObjects::AllSubscriptionsInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_subscription().for_each(|sub| {
+                    grant_objs.push(PbObject::SubscriptionId(sub.id.subscription_id));
+                });
+            }
+        }
+        GrantObjects::AllConnectionsInSchema { schemas } => {
+            for schema in schemas {
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schema.iter_connections().for_each(|conn| {
+                    grant_objs.push(PbObject::ConnectionId(conn.id));
+                });
             }
         }
         o => {
@@ -372,11 +532,13 @@ mod tests {
             let user_reader = session.env().user_info_reader();
             let reader = user_reader.read_guard();
             let user_info = reader.get_user_by_name("user1").unwrap();
-            assert!(user_info
-                .grant_privileges
-                .iter()
-                .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
-                .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option)));
+            assert!(
+                user_info
+                    .grant_privileges
+                    .iter()
+                    .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
+                    .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option))
+            );
         }
 
         frontend

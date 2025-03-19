@@ -21,11 +21,11 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Corresponding, SetExpr, SetOperator};
 
-use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{align_types, CorrelatedId, Depth};
+use crate::expr::{CorrelatedId, Depth, align_types};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`(s) via set operators (e.g., union).
@@ -232,7 +232,9 @@ impl Binder {
                 if name2idx.insert(field.name.clone(), idx).is_some() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "Duplicated column name `{}` in a column list of the query in a {} operation. Column list of the query: ({}).",
-                        field.name, op, set_expr.schema().formatted_col_names(),
+                        field.name,
+                        op,
+                        set_expr.schema().formatted_col_names(),
                     )));
                 }
             }
@@ -323,6 +325,8 @@ impl Binder {
                         self.context
                             .cte_to_relation
                             .clone_from(&new_context.cte_to_relation);
+                        self.context.disable_security_invoker =
+                            new_context.disable_security_invoker;
                         let mut right = self.bind_set_expr(*right)?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {

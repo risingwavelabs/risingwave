@@ -22,29 +22,29 @@ use risingwave_sqlparser::ast::{
     DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
 };
 
+use super::RwPgResponse;
 use super::query::{
-    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchPlanFragmenterResult,
+    BatchPlanFragmenterResult, gen_batch_plan_by_statement, gen_batch_plan_fragmenter,
 };
 use super::util::convert_unix_millis_to_logstore_u64;
-use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
-use crate::handler::query::{distribute_execute, local_execute};
 use crate::handler::HandlerArgs;
-use crate::session::cursor_manager::CursorDataChunkStream;
+use crate::handler::query::{distribute_execute, local_execute};
 use crate::session::SessionImpl;
+use crate::session::cursor_manager::CursorDataChunkStream;
 use crate::{Binder, OptimizerContext};
 
 pub async fn handle_declare_cursor(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     stmt: DeclareCursorStatement,
 ) -> Result<RwPgResponse> {
     match stmt.declare_cursor {
         risingwave_sqlparser::ast::DeclareCursor::Query(query) => {
-            handle_declare_query_cursor(handle_args, stmt.cursor_name, query).await
+            handle_declare_query_cursor(handler_args, stmt.cursor_name, query).await
         }
         risingwave_sqlparser::ast::DeclareCursor::Subscription(sub_name, rw_timestamp) => {
             handle_declare_subscription_cursor(
-                handle_args,
+                handler_args,
                 sub_name,
                 stmt.cursor_name,
                 rw_timestamp,
@@ -53,13 +53,13 @@ pub async fn handle_declare_cursor(
         }
     }
 }
-async fn handle_declare_subscription_cursor(
-    handle_args: HandlerArgs,
+pub async fn handle_declare_subscription_cursor(
+    handler_args: HandlerArgs,
     sub_name: ObjectName,
     cursor_name: Ident,
     rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
-    let session = handle_args.session.clone();
+    let session = handler_args.session.clone();
     let subscription = {
         let db_name = &session.database();
         let (sub_schema_name, sub_name) = Binder::resolve_schema_qualified_name(db_name, sub_name)?;
@@ -89,7 +89,7 @@ async fn handle_declare_subscription_cursor(
             start_rw_timestamp,
             subscription.dependent_table_id,
             subscription,
-            &handle_args,
+            &handler_args,
         )
         .await
     {
@@ -122,13 +122,13 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
 }
 
 async fn handle_declare_query_cursor(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     cursor_name: Ident,
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
     let (chunk_stream, fields) =
-        create_stream_for_cursor_stmt(handle_args.clone(), Statement::Query(query)).await?;
-    handle_args
+        create_stream_for_cursor_stmt(handler_args.clone(), Statement::Query(query)).await?;
+    handler_args
         .session
         .get_cursor_manager()
         .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
@@ -137,15 +137,15 @@ async fn handle_declare_query_cursor(
 }
 
 pub async fn handle_bound_declare_query_cursor(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     cursor_name: Ident,
     plan_fragmenter_result: BatchPlanFragmenterResult,
 ) -> Result<RwPgResponse> {
-    let session = handle_args.session.clone();
+    let session = handler_args.session.clone();
     let (chunk_stream, fields) =
         create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?;
 
-    handle_args
+    handler_args
         .session
         .get_cursor_manager()
         .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
@@ -154,12 +154,12 @@ pub async fn handle_bound_declare_query_cursor(
 }
 
 pub async fn create_stream_for_cursor_stmt(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<(CursorDataChunkStream, Vec<Field>)> {
-    let session = handle_args.session.clone();
+    let session = handler_args.session.clone();
     let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handle_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };

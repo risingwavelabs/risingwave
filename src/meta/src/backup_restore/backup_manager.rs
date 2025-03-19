@@ -31,13 +31,13 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
+use crate::MetaResult;
 use crate::backup_restore::meta_snapshot_builder;
 use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::sequence::next_meta_backup_id;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
-use crate::MetaResult;
 
 pub enum BackupJobResult {
     Succeeded,

@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use num_integer::Integer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use tokio::task::JoinHandle;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
@@ -241,7 +241,17 @@ where
                 || self.table_vnode_partition.contains_key(&self.last_table_id)
             {
                 if new_vnode_partition_count.is_some() {
-                    self.split_weight_by_vnode = *new_vnode_partition_count.unwrap();
+                    if (*new_vnode_partition_count.unwrap() as usize) > self.vnode_count {
+                        tracing::warn!(
+                            "vnode partition count {} is larger than vnode count {}",
+                            new_vnode_partition_count.unwrap(),
+                            self.vnode_count
+                        );
+
+                        self.split_weight_by_vnode = 0;
+                    } else {
+                        self.split_weight_by_vnode = *new_vnode_partition_count.unwrap()
+                    };
                 } else {
                     self.split_weight_by_vnode = 0;
                 }
@@ -402,15 +412,15 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
 
     use super::*;
     use crate::compaction_catalog_manager::{
         CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
     };
+    use crate::hummock::DEFAULT_RESTART_INTERVAL;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
-    use crate::hummock::DEFAULT_RESTART_INTERVAL;
 
     #[tokio::test]
     async fn test_empty() {

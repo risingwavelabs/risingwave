@@ -17,8 +17,8 @@ use enum_as_inner::EnumAsInner;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
-use crate::aggregate::AggType;
 use crate::Result;
+use crate::aggregate::AggType;
 
 /// Kind of window functions.
 #[expect(clippy::large_enum_variant)]

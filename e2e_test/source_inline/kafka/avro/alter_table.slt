@@ -76,7 +76,7 @@ SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tab
 ----
 CREATE TABLE t (bar INT, foo CHARACTER VARYING, nested STRUCT<baz INT>, gen_col INT AS bar + 1)
 
-query ? rowsort
+query TTTT rowsort
 select * from t
 ----
 1 ABC NULL 2
@@ -88,7 +88,7 @@ echo '{"foo":"DEF", "bar":2, "nested":{"Nested":{"baz":2}}}' | rpk topic produce
 
 sleep 4s
 
-query ? rowsort
+query TTTT rowsort
 select * from t
 ----
 1 ABC NULL 2
@@ -99,17 +99,22 @@ select * from t
 system ok
 sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"},{"name":"nested","type":["null",{"type":"record","name":"Nested","fields":[{"name":"baz","type":"int"},{"name":"qux","type":"string","default":""}]}],"default":null}]}'
 
-# Refresh table schema should fail
-statement error
+# Since we have already supported altering column type (#20604), this should succeed.
+statement ok
 ALTER TABLE t REFRESH SCHEMA;
+
+system ok
+echo '{"foo":"GHI", "bar":4, "nested":{"Nested":{"baz":5, "qux":"hello"}}}' | rpk topic produce --schema-id=topic avro_alter_table_test
+
+sleep 4s
+
+query TTTT rowsort
+select * from t
 ----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Feature is not yet implemented: The data type of column "nested" has been changed from "struct<baz integer>" to "struct<baz integer, qux character varying>". This is currently not supported, even if it could be a compatible change in external systems.
-No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-
-
+1	ABC	NULL	    2
+2	DEF	(2,)	    3
+4	GHI	(5,hello)	5
+8	XYZ	NULL	    9
 
 # create a new version of schema that removed field bar
 system ok
@@ -141,6 +146,7 @@ select * from t
 ----
 ABC
 DEF
+GHI
 XYZ
 
 statement ok

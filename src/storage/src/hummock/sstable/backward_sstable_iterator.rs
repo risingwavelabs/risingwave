@@ -191,7 +191,7 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
@@ -256,16 +256,16 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_hummock_sdk::key::UserKey;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_with_table_ids,
-        test_key_of, test_value_of, TEST_KEYS_COUNT,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_default_test_sstable,
+        gen_test_sstable_with_table_ids, test_key_of, test_value_of,
     };
 
     #[tokio::test]

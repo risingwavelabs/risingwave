@@ -61,7 +61,7 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
             Err(e) => {
                 return Err(anyhow!(e)
                     .context("fail to create source, please check your config.")
-                    .into())
+                    .into());
             }
         }
     }

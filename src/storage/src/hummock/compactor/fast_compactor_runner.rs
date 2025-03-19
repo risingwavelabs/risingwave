@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -729,9 +729,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                 self.last_key_is_delete = true;
             }
 
-            if self.last_table_id.map_or(true, |last_table_id| {
-                last_table_id != self.last_key.user_key.table_id.table_id
-            }) {
+            if self.last_table_id != Some(self.last_key.user_key.table_id.table_id) {
                 if let Some(last_table_id) = self.last_table_id.take() {
                     self.compaction_statistics
                         .delta_drop_stat

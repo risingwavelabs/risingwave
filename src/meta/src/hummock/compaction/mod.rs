@@ -31,17 +31,17 @@ use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
-use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::compaction_config::CompactionMode;
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
-use super::{check_emergency_state, EmergencyState};
+use super::{EmergencyState, check_emergency_state};
+use crate::MetaOpts;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
-use crate::MetaOpts;
 
 #[derive(Clone)]
 pub struct CompactStatus {

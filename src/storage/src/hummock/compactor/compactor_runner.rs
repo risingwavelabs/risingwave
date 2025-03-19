@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
@@ -28,13 +28,13 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, add_table_stats_map};
 use risingwave_hummock_sdk::{
-    can_concat, compact_task_output_to_string, full_key_can_concat, HummockSstableObjectId,
-    KeyComparator,
+    HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
+    full_key_can_concat,
 };
-use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::LevelType;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -49,8 +49,8 @@ use crate::hummock::compactor::compaction_utils::{
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
-    await_tree_key, fast_compactor_runner, CompactOutput, CompactionFilter, Compactor,
-    CompactorContext,
+    CompactOutput, CompactionFilter, Compactor, CompactorContext, await_tree_key,
+    fast_compactor_runner,
 };
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
@@ -389,13 +389,13 @@ pub async fn compact_with_agent(
 
     tracing::info!(
         "Ready to handle task: {} compact_task_statistics {:?} compression_algorithm {:?}  parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}, {}",
-            compact_task.task_id,
-            compact_task_statistics,
-            compact_task.compression_algorithm,
-            parallelism,
-            task_memory_capacity_with_parallelism,
-            optimize_by_copy_block,
-            compact_task_to_string(&compact_task),
+        compact_task.task_id,
+        compact_task_statistics,
+        compact_task.compression_algorithm,
+        parallelism,
+        task_memory_capacity_with_parallelism,
+        optimize_by_copy_block,
+        compact_task_to_string(&compact_task),
     );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
@@ -405,12 +405,12 @@ pub async fn compact_with_agent(
         .try_require_memory(task_memory_capacity_with_parallelism);
     if memory_detector.is_none() {
         tracing::warn!(
-                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
-                compact_task.task_id,
-                task_memory_capacity_with_parallelism,
-                context.memory_limiter.get_memory_usage(),
-                context.memory_limiter.quota()
-            );
+            "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+            compact_task.task_id,
+            task_memory_capacity_with_parallelism,
+            context.memory_limiter.get_memory_usage(),
+            context.memory_limiter.quota()
+        );
         task_status = TaskStatus::NoAvailMemoryResourceCanceled;
         return (
             compact_done(compact_task, context.clone(), output_ssts, task_status),
@@ -767,9 +767,7 @@ where
             local_stats.skip_multi_version_key_count += 1;
         }
 
-        if last_table_id.map_or(true, |last_table_id| {
-            last_table_id != iter_key.user_key.table_id.table_id
-        }) {
+        if last_table_id != Some(iter_key.user_key.table_id.table_id) {
             if let Some(last_table_id) = last_table_id.take() {
                 table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
             }

@@ -15,13 +15,12 @@
 use std::cmp::min;
 use std::str::from_utf8;
 
-use risingwave_common::types::ScalarImpl;
-use risingwave_connector::source::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 
 /// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
 /// col like 'ABC' => col = 'ABC'

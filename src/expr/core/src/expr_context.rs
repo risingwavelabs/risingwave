@@ -14,7 +14,7 @@
 
 use std::future::Future;
 
-use risingwave_expr::{define_context, Result as ExprResult};
+use risingwave_expr::{Result as ExprResult, define_context};
 use risingwave_pb::plan_common::ExprContext;
 
 // For all execution mode.

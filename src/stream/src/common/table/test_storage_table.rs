@@ -14,18 +14,18 @@
 
 use std::collections::HashSet;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::TableIter;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};

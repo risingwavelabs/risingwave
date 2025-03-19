@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use itertools::{enumerate, Itertools};
-use prometheus::core::{AtomicU64, GenericCounter};
+use itertools::{Itertools, enumerate};
 use prometheus::IntGauge;
+use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::level::Levels;
@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{
 };
 
 use super::compaction::selector::DynamicLevelSelectorCore;
-use super::compaction::{get_compression_algorithm, CompactionDeveloperConfig};
+use super::compaction::{CompactionDeveloperConfig, get_compression_algorithm};
 use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
@@ -485,6 +485,31 @@ pub fn trigger_gc_stat(
         .set(old_version_object_count as _);
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
+    // table change log
+    for (table_id, logs) in &checkpoint.version.table_change_log {
+        let object_count = logs
+            .iter()
+            .map(|l| l.old_value.len() + l.new_value.len())
+            .sum::<usize>();
+        let object_size = logs
+            .iter()
+            .map(|l| {
+                l.old_value
+                    .iter()
+                    .chain(l.new_value.iter())
+                    .map(|s| s.file_size as usize)
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+        metrics
+            .table_change_log_object_count
+            .with_label_values(&[&format!("{table_id}")])
+            .set(object_count as _);
+        metrics
+            .table_change_log_object_size
+            .with_label_values(&[&format!("{table_id}")])
+            .set(object_size as _);
+    }
 }
 
 // Triggers a report on compact_pending_bytes_needed

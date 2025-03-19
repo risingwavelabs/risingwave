@@ -14,9 +14,9 @@
 
 use std::ops::Range;
 
+use super::RowRef;
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
-use super::RowRef;
 use crate::array::{Op, StreamChunk};
 
 impl StreamChunk {

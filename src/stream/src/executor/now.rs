@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::ops::Bound::Unbounded;
-
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::row;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
 use risingwave_expr::expr::{
-    build_func_non_strict, EvalErrorReport, ExpressionBoxExt, InputRefExpression,
-    LiteralExpression, NonStrictExpression,
+    EvalErrorReport, ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
+    build_func_non_strict,
 };
 use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -144,20 +141,7 @@ impl<S: StateStore> NowExecutor<S> {
                     yield Message::Barrier(barrier);
                     // Handle the initial barrier.
                     state_table.init_epoch(first_epoch).await?;
-                    let state_row = {
-                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                            &(Unbounded, Unbounded);
-                        let data_iter = state_table
-                            .iter_with_prefix(row::empty(), sub_range, Default::default())
-                            .await?;
-                        pin_mut!(data_iter);
-                        if let Some(keyed_row) = data_iter.next().await {
-                            Some(keyed_row?)
-                        } else {
-                            None
-                        }
-                    };
-                    last_timestamp = state_row.and_then(|row| row[0].clone());
+                    last_timestamp = state_table.get_from_one_value_table().await?;
                     paused = is_pause_on_startup;
                     initialized = true;
                 } else {
@@ -309,7 +293,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+    use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -390,7 +374,7 @@ mod tests {
         let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(3),
-            test_epoch(2),
+            test_epoch(1),
         ))
         .unwrap();
 
@@ -425,7 +409,7 @@ mod tests {
         drop((tx, now));
         let (tx, mut now) = create_executor(NowMode::UpdateCurrent, &state_store).await;
         tx.send(
-            Barrier::with_prev_epoch_for_test(test_epoch(4), test_epoch(3))
+            Barrier::with_prev_epoch_for_test(test_epoch(4), test_epoch(1))
                 .with_mutation(Mutation::Pause),
         )
         .unwrap();
@@ -610,7 +594,7 @@ mod tests {
 
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(4000),
-            test_epoch(3000),
+            test_epoch(2000),
         ))
         .unwrap();
 

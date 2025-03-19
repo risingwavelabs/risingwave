@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -24,13 +24,13 @@ use risingwave_pb::meta::{
     MetaSnapshot, PbObject, PbObjectGroup, SubscribeResponse, SubscribeType,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tonic::Status;
 
 use crate::controller::SqlMetaStore;
-use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::manager::WorkerKey;
+use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::model::FragmentId;
 
 pub type MessageStatus = Status;
@@ -387,7 +387,7 @@ impl NotificationManagerCore {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
                     let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -400,7 +400,7 @@ impl NotificationManagerCore {
                 sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });

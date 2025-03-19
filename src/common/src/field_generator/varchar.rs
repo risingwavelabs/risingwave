@@ -15,7 +15,7 @@
 use rand::distributions::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::DEFAULT_LENGTH;
 use crate::types::{Datum, Scalar};

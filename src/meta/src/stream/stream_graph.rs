@@ -19,6 +19,6 @@ mod schedule;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use fragment::{
-    fill_snapshot_backfill_epoch, CompleteStreamFragmentGraph, StreamFragmentGraph,
+    CompleteStreamFragmentGraph, StreamFragmentGraph, fill_snapshot_backfill_epoch,
 };
 pub use schedule::Locations;

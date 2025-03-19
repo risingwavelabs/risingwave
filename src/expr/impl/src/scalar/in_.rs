@@ -22,7 +22,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::{build_function, Result};
+use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
 pub struct InExpression {
@@ -115,7 +115,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ToOwnedDatum;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::{build_from_pretty, Expression};
+    use risingwave_expr::expr::{Expression, build_from_pretty};
 
     #[tokio::test]
     async fn test_in_expr() {

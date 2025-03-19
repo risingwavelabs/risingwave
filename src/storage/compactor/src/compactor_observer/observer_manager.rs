@@ -16,9 +16,9 @@ use risingwave_common::license::LicenseManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogManagerRef;
 
 pub struct CompactorObserverNode {
@@ -42,20 +42,18 @@ impl ObserverState for CompactorObserverNode {
                 for object in object_group.objects {
                     match object.object_info.unwrap() {
                         PbObjectInfo::Table(table_catalog) => {
-                            assert!(
-                                resp.version > self.version,
-                                "resp version={:?}, current version={:?}",
-                                resp.version,
-                                self.version
-                            );
-
                             self.handle_catalog_notification(resp.operation(), table_catalog);
-
-                            self.version = resp.version;
                         }
                         _ => panic!("error type notification"),
                     };
                 }
+                assert!(
+                    resp.version > self.version,
+                    "resp version={:?}, current version={:?}",
+                    resp.version,
+                    self.version
+                );
+                self.version = resp.version;
             }
             Info::HummockVersionDeltas(_) => {}
             Info::SystemParams(p) => {

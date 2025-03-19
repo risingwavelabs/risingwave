@@ -15,9 +15,9 @@
 use risingwave_common::catalog::{RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME};
 
 use super::{DefaultBehavior, Merge};
+use crate::PlanRef;
 use crate::optimizer::plan_node::StreamTableScan;
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct RwTimestampValidator {}

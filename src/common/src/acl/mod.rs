@@ -17,7 +17,7 @@
 use std::fmt::Formatter;
 use std::sync::LazyLock;
 
-use enumflags2::{bitflags, make_bitflags, BitFlags};
+use enumflags2::{BitFlags, bitflags, make_bitflags};
 use parse_display::Display;
 use risingwave_pb::user::grant_privilege::PbAction;
 
@@ -95,24 +95,35 @@ pub struct AclModeSet {
     pub modes: BitFlags<AclMode>,
 }
 
-pub static ALL_AVAILABLE_DATABASE_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(|| make_bitflags!(AclMode::{Create | Connect}).into());
-pub static ALL_AVAILABLE_SCHEMA_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(|| make_bitflags!(AclMode::{Create | Usage}).into());
-// Including TABLES and VIEWS
-pub static ALL_AVAILABLE_TABLE_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(|| make_bitflags!(AclMode::{Select | Insert | Update | Delete}).into());
-pub static ALL_AVAILABLE_SOURCE_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
-pub static ALL_AVAILABLE_MVIEW_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
-pub static ALL_AVAILABLE_SINK_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
-pub static ALL_AVAILABLE_SUBSCRIPTION_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(AclModeSet::empty);
-pub static ALL_AVAILABLE_FUNCTION_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(|| BitFlags::from(AclMode::Execute).into());
-pub static ALL_AVAILABLE_CONNECTION_MODES: LazyLock<AclModeSet> =
-    LazyLock::new(|| BitFlags::from(AclMode::Usage).into());
+macro_rules! lazy_acl_modes {
+    ($name:ident, { $($mode:tt)* }) => {
+        pub static $name: LazyLock<AclModeSet> = LazyLock::new(||
+            make_bitflags!(AclMode::{ $($mode)* }).into()
+        );
+    };
+    ($name:ident, readonly) => {
+        pub static $name: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
+    };
+}
+
+lazy_acl_modes!(ALL_AVAILABLE_DATABASE_MODES, { Create | Connect });
+lazy_acl_modes!(ALL_AVAILABLE_SCHEMA_MODES, { Create | Usage });
+lazy_acl_modes!(ALL_AVAILABLE_TABLE_MODES, {
+    Select | Insert | Update | Delete
+});
+lazy_acl_modes!(ALL_AVAILABLE_VIEW_MODES, {
+    Select | Insert | Update | Delete
+});
+lazy_acl_modes!(ALL_AVAILABLE_SOURCE_MODES, readonly);
+lazy_acl_modes!(ALL_AVAILABLE_MVIEW_MODES, readonly);
+lazy_acl_modes!(ALL_AVAILABLE_SINK_MODES, readonly);
+lazy_acl_modes!(ALL_AVAILABLE_SUBSCRIPTION_MODES, readonly);
+lazy_acl_modes!(ALL_AVAILABLE_FUNCTION_MODES, { Execute });
+lazy_acl_modes!(ALL_AVAILABLE_CONNECTION_MODES, { Usage });
+lazy_acl_modes!(ALL_AVAILABLE_SECRET_MODES, { Usage });
 
 impl AclModeSet {
+    #[allow(dead_code)]
     pub fn empty() -> Self {
         Self {
             modes: BitFlags::empty(),

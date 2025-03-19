@@ -25,6 +25,7 @@ impl Planner {
             BoundStatement::Update(u) => self.plan_update(*u),
             BoundStatement::Query(q) => self.plan_query(*q),
             BoundStatement::DeclareCursor(d) => self.plan_query(*d.query),
+            BoundStatement::DeclareSubscriptionCursor(_) => unimplemented!(),
             BoundStatement::FetchCursor(_) => unimplemented!(),
             BoundStatement::CreateView(c) => self.plan_query(*c.query),
         }

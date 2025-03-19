@@ -20,10 +20,10 @@ use bytes::Bytes;
 use pgwire::types::Format;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{CreateSink, DeclareCursor, Query, Statement};
+use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
 use super::query::BoundResult;
-use super::{fetch_cursor, handle, query, HandlerArgs, RwPgResponse};
+use super::{HandlerArgs, RwPgResponse, fetch_cursor, handle, query};
 use crate::error::Result;
 use crate::session::SessionImpl;
 
@@ -112,12 +112,8 @@ pub async fn handle_parse(
         Statement::FetchCursor { .. } => {
             fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await
         }
-        Statement::DeclareCursor { stmt } => {
-            if let DeclareCursor::Query(_) = stmt.declare_cursor {
-                query::handle_parse(handler_args, statement, specific_param_types)
-            } else {
-                bail_not_implemented!("DECLARE SUBSCRIPTION CURSOR with parameters");
-            }
+        Statement::DeclareCursor { .. } => {
+            query::handle_parse(handler_args, statement, specific_param_types)
         }
         Statement::CreateView {
             query,

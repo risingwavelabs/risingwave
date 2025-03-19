@@ -84,7 +84,8 @@ impl Strong {
             | ExprType::QuoteNullable
             | ExprType::IsNotTrue
             | ExprType::IsFalse
-            | ExprType::IsNotFalse => false,
+            | ExprType::IsNotFalse
+            | ExprType::CheckNotNull => false,
             // ANY: This kind of expression is null if and only if at least one of its arguments is null.
             ExprType::Not
             | ExprType::Equal
@@ -191,6 +192,8 @@ impl Strong {
             | ExprType::Acosd
             | ExprType::Atan
             | ExprType::Atan2
+            | ExprType::Atand
+            | ExprType::Atan2d
             | ExprType::Sind
             | ExprType::Cosd
             | ExprType::Cotd
@@ -308,6 +311,7 @@ impl Strong {
             | ExprType::Vnode
             | ExprType::VnodeUser
             | ExprType::TestPaidTier
+            | ExprType::License
             | ExprType::Proctime
             | ExprType::PgSleep
             | ExprType::PgSleepFor
@@ -326,6 +330,7 @@ impl Strong {
             | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
+            | ExprType::HasFunctionPrivilege
             | ExprType::HasAnyColumnPrivilege
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton

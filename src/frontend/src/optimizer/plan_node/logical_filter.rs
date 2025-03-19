@@ -20,12 +20,12 @@ use risingwave_common::types::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::expr::{
-    assert_input_ref, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
+    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, assert_input_ref,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -98,7 +98,6 @@ impl PlanTreeNodeUnary for LogicalFilter {
         Self::new(input, self.predicate().clone())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -228,7 +227,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, Literal};
+    use crate::expr::{Literal, assert_eq_input_ref};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;

@@ -16,8 +16,8 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -66,7 +66,6 @@ impl PlanTreeNodeUnary for LogicalLimit {
         Self::new(core)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

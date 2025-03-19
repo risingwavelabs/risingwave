@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectSetNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{generic, ExprRewritable};
+use super::{ExprRewritable, generic};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
-use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

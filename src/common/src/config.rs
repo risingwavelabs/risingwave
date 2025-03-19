@@ -149,6 +149,10 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
+    pub frontend: FrontendConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
@@ -159,6 +163,10 @@ pub struct RwConfig {
     #[educe(Debug(ignore))]
     #[config_doc(nested)]
     pub system: SystemConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub udf: UdfConfig,
 
     #[serde(flatten)]
     #[config_doc(omitted)]
@@ -630,6 +638,36 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct FrontendConfig {
+    /// Total memory constraints for running queries.
+    #[serde(default = "default::frontend::max_total_query_size_bytes")]
+    pub max_total_query_size_bytes: u64,
+
+    /// A query of size under this threshold will never be rejected due to memory constraints.
+    #[serde(default = "default::frontend::min_single_query_size_bytes")]
+    pub min_single_query_size_bytes: u64,
+
+    /// A query of size exceeding this threshold will always be rejected due to memory constraints.
+    #[serde(default = "default::frontend::max_single_query_size_bytes")]
+    pub max_single_query_size_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct UdfConfig {
+    /// Allow embedded Python UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_python_udf")]
+    pub enable_embedded_python_udf: bool,
+
+    /// Allow embedded JS UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_javascript_udf")]
+    pub enable_embedded_javascript_udf: bool,
+
+    /// Allow embedded WASM UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_wasm_udf")]
+    pub enable_embedded_wasm_udf: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1164,10 +1202,18 @@ pub struct StreamingDeveloperConfig {
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
 
+    /// The maximum number of consecutive barriers allowed in a message when sent between actors.
+    #[serde(default = "default::developer::stream_max_barrier_batch_size")]
+    pub max_barrier_batch_size: u32,
+
     /// Configure the system-wide cache row cardinality of hash join.
     /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
+
+    /// Enable / Disable profiling stats used by `EXPLAIN ANALYZE`
+    #[serde(default = "default::developer::enable_explain_analyze_stats")]
+    pub enable_explain_analyze_stats: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1183,6 +1229,12 @@ pub struct BatchDeveloperConfig {
     /// The size of the channel used for output to exchange/shuffle.
     #[serde(default = "default::developer::batch_output_channel_size")]
     pub output_channel_size: usize,
+
+    #[serde(default = "default::developer::batch_receiver_channel_size")]
+    pub receiver_channel_size: usize,
+
+    #[serde(default = "default::developer::batch_root_stage_channel_size")]
+    pub root_stage_channel_size: usize,
 
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
@@ -1985,6 +2037,14 @@ pub mod default {
             64
         }
 
+        pub fn batch_receiver_channel_size() -> usize {
+            1000
+        }
+
+        pub fn batch_root_stage_channel_size() -> usize {
+            100
+        }
+
         pub fn batch_chunk_size() -> usize {
             1024
         }
@@ -2029,6 +2089,10 @@ pub mod default {
 
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
+        }
+
+        pub fn stream_max_barrier_batch_size() -> u32 {
+            1024
         }
 
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
@@ -2151,6 +2215,10 @@ pub mod default {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
         }
+
+        pub fn enable_explain_analyze_stats() -> bool {
+            true
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -2189,6 +2257,34 @@ pub mod default {
             .into_iter()
             .map(str::to_string)
             .collect()
+        }
+    }
+
+    pub mod frontend {
+        pub fn max_total_query_size_bytes() -> u64 {
+            1024 * 1024 * 1024
+        }
+
+        pub fn min_single_query_size_bytes() -> u64 {
+            1024 * 1024
+        }
+
+        pub fn max_single_query_size_bytes() -> u64 {
+            1024 * 1024 * 1024
+        }
+    }
+
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool {
+            false
+        }
+
+        pub fn enable_embedded_javascript_udf() -> bool {
+            true
+        }
+
+        pub fn enable_embedded_wasm_udf() -> bool {
+            true
         }
     }
 

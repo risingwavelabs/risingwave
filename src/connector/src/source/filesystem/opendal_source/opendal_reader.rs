@@ -24,13 +24,13 @@ use risingwave_common::array::StreamChunk;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 
-use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
+use super::opendal_enumerator::OpendalEnumerator;
 use crate::error::ConnectorResult;
 use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParserConfig};
+use crate::source::filesystem::OpendalFsSplit;
 use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
-use crate::source::filesystem::OpendalFsSplit;
 use crate::source::iceberg::read_parquet_file;
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
@@ -159,9 +159,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             }
         };
 
-        let stream_reader = StreamReader::new(
-            reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-        );
+        let stream_reader = StreamReader::new(reader.map_err(std::io::Error::other));
 
         let mut buf_reader: Pin<Box<dyn AsyncBufRead + Send>> = match compression_format {
             CompressionFormat::Gzip => {

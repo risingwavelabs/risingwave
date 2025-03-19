@@ -15,7 +15,7 @@
 #![feature(btree_cursors)]
 
 use std::cmp::Ordering;
-use std::collections::{btree_map, BTreeMap};
+use std::collections::{BTreeMap, btree_map};
 use std::ops::Bound;
 
 use educe::Educe;

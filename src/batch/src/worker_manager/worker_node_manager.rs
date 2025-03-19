@@ -89,14 +89,14 @@ impl WorkerNodeManager {
     fn list_serving_worker_nodes(&self) -> Vec<WorkerNode> {
         self.list_worker_nodes()
             .into_iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+            .filter(|w| w.property.as_ref().is_some_and(|p| p.is_serving))
             .collect()
     }
 
     fn list_streaming_worker_nodes(&self) -> Vec<WorkerNode> {
         self.list_worker_nodes()
             .into_iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
+            .filter(|w| w.property.as_ref().is_some_and(|p| p.is_streaming))
             .collect()
     }
 
@@ -200,7 +200,9 @@ impl WorkerNodeManager {
             .try_insert(fragment_id, vnode_mapping)
             .is_err()
         {
-            tracing::info!("Previous batch vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl");
+            tracing::info!(
+                "Previous batch vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
+            );
         }
     }
 
@@ -215,7 +217,9 @@ impl WorkerNodeManager {
             .insert(fragment_id, vnode_mapping)
             .is_none()
         {
-            tracing::info!("Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl");
+            tracing::info!(
+                "Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
+            );
         }
     }
 

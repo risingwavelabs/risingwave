@@ -17,7 +17,7 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, new_azblob_operator, read_parquet_file, FileScanBackend,
+    FileScanBackend, extract_bucket_and_file_name, new_azblob_operator, read_parquet_file,
 };
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::plan_node::NodeBody;

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
@@ -20,11 +20,11 @@ use risingwave_sqlparser::ast::{FormatEncodeOptions, ObjectName, Statement};
 use thiserror_ext::AsReport;
 
 use super::alter_table_column::fetch_table_catalog_for_alter;
-use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
+use super::create_source::{SqlColumnStrategy, schema_has_schema_registry};
 use super::util::SourceSchemaCompatExt;
-use super::{get_replace_table_plan, HandlerArgs, RwPgResponse};
-use crate::error::{ErrorCode, Result};
+use super::{HandlerArgs, RwPgResponse, get_replace_table_plan};
 use crate::TableCatalog;
+use crate::error::{ErrorCode, Result};
 
 fn get_format_encode_from_table(table: &TableCatalog) -> Result<Option<FormatEncodeOptions>> {
     let stmt = table.create_sql_ast()?;

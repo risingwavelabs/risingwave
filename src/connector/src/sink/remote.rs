@@ -18,11 +18,11 @@ use std::ops::Deref;
 use std::pin::pin;
 use std::time::Instant;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
-use futures::future::select;
 use futures::TryStreamExt;
+use futures::future::select;
 use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
@@ -30,35 +30,35 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
+use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
 use risingwave_jni_core::{
-    call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
+    JniReceiverType, JniSenderType, JniSinkWriterStreamRequest, call_static_method, gen_class_name,
 };
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Request as SinkRequest, StartSink,
 };
 use risingwave_pb::connector_service::{
-    sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
     PbSinkParam, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata,
     SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema, ValidateSinkRequest,
-    ValidateSinkResponse,
+    ValidateSinkResponse, sink_coordinator_stream_request, sink_coordinator_stream_response,
+    sink_writer_stream_response,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
-    BidiStreamReceiver, BidiStreamSender, SinkCoordinatorStreamHandle, SinkWriterStreamHandle,
-    DEFAULT_BUFFER_SIZE,
+    BidiStreamReceiver, BidiStreamSender, DEFAULT_BUFFER_SIZE, SinkCoordinatorStreamHandle,
+    SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{unbounded_channel, Receiver};
+use tokio::sync::mpsc::{Receiver, unbounded_channel};
 use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
 use super::elasticsearch_opensearch::elasticsearch_converter::{
-    is_remote_es_sink, StreamChunkConverter,
+    StreamChunkConverter, is_remote_es_sink,
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
 use crate::error::ConnectorResult;
@@ -551,6 +551,10 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         .into_log_sinker(metrics))
     }
 
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
@@ -813,8 +817,8 @@ mod test {
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use tokio::sync::mpsc;
 
-    use crate::sink::remote::CoordinatedRemoteSinkWriter;
     use crate::sink::SinkWriter;
+    use crate::sink::remote::CoordinatedRemoteSinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {

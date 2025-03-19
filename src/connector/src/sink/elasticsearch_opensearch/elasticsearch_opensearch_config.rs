@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use url::Url;
 use with_options::WithOptions;
 

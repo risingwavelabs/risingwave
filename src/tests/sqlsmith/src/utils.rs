@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 pub(crate) fn read_file_contents<P: AsRef<Path>>(filepath: P) -> Result<String> {
     std::fs::read_to_string(filepath.as_ref()).map_err(|e| {

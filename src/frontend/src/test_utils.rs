@@ -15,8 +15,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
@@ -25,9 +25,9 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    FunctionId, IndexId, ObjectId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType,
+    DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType, alter_name_request,
+    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -70,6 +70,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
 
+use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
@@ -78,10 +79,9 @@ use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
+use crate::user::UserId;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::user::UserId;
-use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {

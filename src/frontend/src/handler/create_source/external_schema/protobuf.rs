@@ -18,20 +18,11 @@ use super::*;
 
 /// Map a protobuf schema to a relational schema.
 pub async fn extract_protobuf_table_schema(
-    schema: &ProtobufSchema,
+    info: &StreamSourceInfo,
     with_properties: &WithOptionsSecResolved,
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let info = StreamSourceInfo {
-        proto_message_name: schema.message_name.0.clone(),
-        row_schema_location: schema.row_schema_location.0.clone(),
-        use_schema_registry: schema.use_schema_registry,
-        format: FormatType::Plain.into(),
-        row_encode: EncodeType::Protobuf.into(),
-        format_encode_options: format_encode_options.clone(),
-        ..Default::default()
-    };
-    let parser_config = SpecificParserConfig::new(&info, with_properties)?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
     try_consume_string_from_options(format_encode_options, PROTOBUF_MESSAGES_AS_JSONB);
@@ -44,7 +35,7 @@ pub async fn extract_protobuf_table_schema(
     Ok(column_descs
         .into_iter()
         .map(|col| ColumnCatalog {
-            column_desc: col.into(),
+            column_desc: ColumnDesc::from_field_without_column_id(&col),
             is_hidden: false,
         })
         .collect_vec())

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
@@ -80,14 +80,14 @@ impl UserCatalog {
         match object {
             Object::DatabaseId(id) => self.database_acls.entry(id),
             Object::SchemaId(id) => self.schema_acls.entry(id),
-            Object::TableId(id) => self.object_acls.entry(id),
-            Object::SourceId(id) => self.object_acls.entry(id),
-            Object::SinkId(id) => self.object_acls.entry(id),
-            Object::ViewId(id) => self.object_acls.entry(id),
-            Object::FunctionId(_) => {
-                unreachable!("grant privilege on function is not supported yet.")
-            }
-            _ => unreachable!(""),
+            Object::TableId(id)
+            | Object::SourceId(id)
+            | Object::SinkId(id)
+            | Object::ViewId(id)
+            | Object::FunctionId(id)
+            | Object::SubscriptionId(id)
+            | Object::ConnectionId(id)
+            | Object::SecretId(id) => self.object_acls.entry(id),
         }
     }
 
@@ -95,14 +95,14 @@ impl UserCatalog {
         match object {
             Object::DatabaseId(id) => self.database_acls.get(id),
             Object::SchemaId(id) => self.schema_acls.get(id),
-            Object::TableId(id) => self.object_acls.get(id),
-            Object::SourceId(id) => self.object_acls.get(id),
-            Object::SinkId(id) => self.object_acls.get(id),
-            Object::ViewId(id) => self.object_acls.get(id),
-            Object::FunctionId(_) => {
-                unreachable!("grant privilege on function is not supported yet.")
-            }
-            _ => unreachable!("unexpected object type."),
+            Object::TableId(id)
+            | Object::SourceId(id)
+            | Object::SinkId(id)
+            | Object::ViewId(id)
+            | Object::FunctionId(id)
+            | Object::SubscriptionId(id)
+            | Object::ConnectionId(id)
+            | Object::SecretId(id) => self.object_acls.get(id),
         }
     }
 
@@ -164,9 +164,9 @@ impl UserCatalog {
         self.refresh_acl_modes();
     }
 
-    pub fn check_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
+    pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
         self.get_acl(object)
-            .map_or(false, |acl_set| acl_set.has_mode(mode))
+            .is_some_and(|acl_set| acl_set.has_mode(mode))
     }
 
     pub fn check_privilege_with_grant_option(
@@ -196,5 +196,17 @@ impl UserCatalog {
             }
         }
         action_map.values().all(|&found| found)
+    }
+
+    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+        if self.is_super {
+            return true;
+        }
+
+        // `Select` and `Execute` are the minimum required privileges for object visibility.
+        // `Execute` is required for functions.
+        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
+            acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
+        })
     }
 }

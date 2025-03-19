@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, Logical,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject,
-    ToBatch, ToStream,
+    BatchGroupTopN, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream, gen_filter_and_pushdown,
+    generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -172,6 +172,13 @@ impl LogicalTopN {
         ));
         Ok(project.into())
     }
+
+    pub fn clone_with_input_and_prefix(&self, input: PlanRef, prefix: Order) -> Self {
+        let mut core = self.core.clone();
+        core.input = input;
+        core.order = prefix.concat(core.order);
+        core.into()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalTopN {
@@ -185,7 +192,6 @@ impl PlanTreeNodeUnary for LogicalTopN {
         core.into()
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -343,10 +349,10 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::LogicalTopN;
+    use crate::PlanRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{ColPrunable, ColumnPruningContext, LogicalValues};
     use crate::optimizer::property::Order;
-    use crate::PlanRef;
 
     #[tokio::test]
     async fn test_prune_col() {

@@ -16,24 +16,24 @@ use std::cmp::Ordering;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::{join, try_join};
-use futures::{pin_mut, stream, StreamExt};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::for_await;
 use join_row_set::JoinRowSet;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::row::{once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
 use super::row::{DegreeType, EncodedJoinRow};
@@ -41,10 +41,10 @@ use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
+use crate::executor::StreamExecutorError;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::StreamExecutorError;
 use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
@@ -553,7 +553,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// returned.
     ///
     /// Note: This will NOT remove anything from remote storage.
-    pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
+    pub async fn take_state(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
         self.metrics.total_lookup_count += 1;
         let state = if self.inner.contains(key) {
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
@@ -945,7 +945,7 @@ use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
-use crate::executor::prelude::{try_stream, Stream};
+use crate::executor::prelude::{Stream, try_stream};
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.

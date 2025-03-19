@@ -23,16 +23,16 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_read_table_watermarks_impl;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, add_table_stats_map};
 use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarks, WatermarkDirection,
 };
 
 use super::SkipWatermarkState;
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
+use crate::hummock::HummockResult;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 pub struct SkipWatermarkIterator<I, S> {
@@ -79,7 +79,7 @@ impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> SkipWaterma
                 break;
             }
 
-            if self.last_table_id.map_or(true, |last_table_id| {
+            if self.last_table_id.is_none_or(|last_table_id| {
                 last_table_id != self.inner.key().user_key.table_id.table_id
             }) {
                 self.add_last_table_stats();
@@ -341,9 +341,10 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
             {
-                if self.last_table_id.map_or(true, |last_table_id| {
-                    last_table_id != key_table_id.table_id()
-                }) {
+                if self
+                    .last_table_id
+                    .is_none_or(|last_table_id| last_table_id != key_table_id.table_id())
+                {
                     self.last_table_id = Some(key_table_id.table_id());
                     self.last_serde = self
                         .compaction_catalog_agent_ref
@@ -465,9 +466,9 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::row_serde::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey, TableKey, UserKey};
-    use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
     use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, gen_key_from_str};
+    use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 
     use super::PkPrefixSkipWatermarkState;
     use crate::compaction_catalog_manager::{

@@ -15,12 +15,11 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use crate::parser::ConnectorResult;
-use crate::source::iceberg::is_parquet_schema_match_source_schema;
 use crate::source::SourceColumnDesc;
 /// `ParquetParser` is responsible for converting the incoming `record_batch_stream`
 /// into a `streamChunk`.

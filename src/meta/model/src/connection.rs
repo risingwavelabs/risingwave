@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::connection::PbInfo;
 use risingwave_pb::catalog::PbConnection;
-use sea_orm::entity::prelude::*;
+use risingwave_pb::catalog::connection::PbInfo;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionId, ConnectionParams, PrivateLinkService};

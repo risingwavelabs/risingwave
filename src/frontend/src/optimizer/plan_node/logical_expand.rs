@@ -17,8 +17,8 @@ use itertools::Itertools;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamExpand, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -79,7 +79,6 @@ impl PlanTreeNodeUnary for LogicalExpand {
         Self::new(input, self.column_subsets().clone())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

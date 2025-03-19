@@ -18,8 +18,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(more_qualified_paths)]
 #![feature(let_chains)]
-#![feature(hash_extract_if)]
-#![feature(extract_if)]
 #![feature(coroutines)]
 #![feature(iter_from_coroutine)]
 #![feature(proc_macro_hygiene)]

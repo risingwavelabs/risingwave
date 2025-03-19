@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use iceberg::Result;
 use iceberg::spec::DataFile;
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
-use iceberg::Result;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 

@@ -33,9 +33,9 @@ use risingwave_pb::stream_plan::{
 
 use self::rewrite::build_delta_join_without_arrange;
 use crate::error::Result;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::reorganize_elements_id;
-use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
 
 /// The mutable state when building fragment graph.

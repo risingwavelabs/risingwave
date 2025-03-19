@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, align_types};
 
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {

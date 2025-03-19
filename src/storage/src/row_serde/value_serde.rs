@@ -31,8 +31,8 @@ use risingwave_common::util::value_encoding::{
     ValueRowSerdeKind, ValueRowSerializer,
 };
 use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -126,7 +126,7 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
             }
         });
 
-        let serializer = Serializer::new(&column_ids);
+        let serializer = Serializer::new(&column_ids, schema.clone());
         let deserializer = Deserializer::new(&column_ids, schema.into(), column_with_default);
         ColumnAwareSerde {
             serializer,
@@ -146,6 +146,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::ColumnId;
+    use risingwave_common::row::Row;
     use risingwave_common::types::ScalarImpl::*;
     use risingwave_common::util::value_encoding::column_aware_row_encoding;
     use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
@@ -160,7 +161,10 @@ mod tests {
         let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
         let rows = vec![row1, row2, row3];
         let mut array = vec![];
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar],
+        );
         for row in &rows {
             let row_bytes = serializer.serialize(row);
             array.push(row_bytes);
@@ -202,7 +206,10 @@ mod tests {
     fn test_row_decoding() {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let deserializer = column_aware_row_encoding::Deserializer::new(
@@ -281,7 +288,10 @@ mod tests {
             Some(Utf8("abc".into())),
             Some(Utf8("ABC".into())),
         ]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
 
         // no columns is dropped
@@ -303,8 +313,10 @@ mod tests {
             vec![Some(Int16(5)), Some(Utf8("ABC".into()))]
         );
 
-        // drop all columns is now allowed
-        assert!(try_drop_invalid_columns(&row_bytes, &HashSet::new()).is_none());
+        // all columns are dropped
+        let row_bytes_all_dropped = try_drop_invalid_columns(&row_bytes, &HashSet::new()).unwrap();
+        assert_eq!(row_bytes_all_dropped.len(), 5); // 1 byte flag + 4 bytes for length (0)
+        assert_eq!(&row_bytes_all_dropped[1..], [0, 0, 0, 0]);
     }
 
     #[test]
@@ -315,7 +327,10 @@ mod tests {
             Some(Utf8("abc".into())),
             Some(Utf8("ABC".into())),
         ]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
 
         let deserializer = column_aware_row_encoding::Deserializer::new(
@@ -338,7 +353,10 @@ mod tests {
             Some(Utf8("abc".into())),
             Some(Utf8("ABC".into())),
         ]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let serializer = column_aware_row_encoding::Serializer::new(
+            &column_ids,
+            [DataType::Int16, DataType::Varchar, DataType::Varchar],
+        );
         let row_bytes = serializer.serialize(row1);
 
         // default column of ColumnId::new(3)
@@ -360,5 +378,79 @@ mod tests {
                 Some(Int16(5))
             ]
         );
+    }
+
+    #[test]
+    fn test_row_composite_types() {
+        let inner_struct: DataType =
+            StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)])
+                .with_ids([ColumnId::new(11), ColumnId::new(12)])
+                .into();
+        let list = DataType::List(Box::new(inner_struct.clone()));
+        let map = MapType::from_kv(DataType::Varchar, list.clone()).into();
+        let outer_struct = StructType::new([("f1", DataType::Int32), ("map", map)])
+            .with_ids([ColumnId::new(1), ColumnId::new(2)])
+            .into();
+
+        let inner_struct_value = StructValue::new(vec![Some(Int32(6)), Some(Bool(true))]);
+        let list_value =
+            ListValue::from_datum_iter(&inner_struct, [Some(Struct(inner_struct_value))]);
+        let map_value = MapValue::try_from_kv(
+            ListValue::from_datum_iter(&DataType::Varchar, [Some(Utf8("key".into()))]),
+            ListValue::from_datum_iter(&list, [Some(List(list_value))]),
+        )
+        .unwrap();
+        let outer_struct_value = StructValue::new(vec![Some(Int32(5)), Some(Map(map_value))]);
+
+        let datum = Some(Struct(outer_struct_value));
+        let row1 = [datum];
+
+        let column_ids = &[ColumnId::new(0)];
+        let data_types = vec![outer_struct];
+
+        let serializer = column_aware_row_encoding::Serializer::new(column_ids, data_types.clone());
+        let row_bytes = serializer.serialize(row1.clone());
+
+        assert_eq!(
+            row_bytes,
+            [
+                0b10000001, // flag mid WW mid BB
+                1, 0, 0, 0, // column num = 1
+                0, 0, 0, 0,  // column id = 0 "outer"
+                0,  // offset 0 = 0
+                60, // struct length = 60,
+                0, 0, 0, 0b10000001, // recursive col-aware flag
+                2, 0, 0, 0, // field num = 2
+                1, 0, 0, 0, // field id = 1 "f1"
+                2, 0, 0, 0, // field id = 2 "map"
+                0, // offset 1 = 0
+                4, // offset 2 = 4
+                5, 0, 0, 0, // "f1": i32 = 5
+                1, 0, 0, 0, // map length = 1
+                3, 0, 0, 0, // map key string length = 3
+                b'k', b'e', b'y', // map key = "key"
+                1,    // map value is non NULL
+                1, 0, 0, 0, // map value list length = 1
+                1, // map value list element (struct) is non NULL
+                20, 0, 0, 0,          // struct length = 20
+                0b10000001, // recursive col-aware flag
+                2, 0, 0, 0, // field num = 2
+                11, 0, 0, 0, // field id = 11 "f2"
+                12, 0, 0, 0, // field id = 12 "f3"
+                0, // offset 11 = 0
+                4, // offset 12 = 4
+                6, 0, 0, 0, // "f2": i32 = 6
+                1, // "f3": bool = true
+            ]
+        );
+
+        let deserializer = column_aware_row_encoding::Deserializer::new(
+            column_ids,
+            data_types.into(),
+            std::iter::empty(),
+        );
+        let decoded = deserializer.deserialize(&row_bytes).unwrap();
+
+        assert_eq!(OwnedRow::new(decoded), row1.to_owned_row());
     }
 }

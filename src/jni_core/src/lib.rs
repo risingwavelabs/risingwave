@@ -31,17 +31,17 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
 use chrono::{Datelike, NaiveDateTime, Timelike};
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use futures::stream::BoxStream;
+use jni::JNIEnv;
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
     JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
 use jni::sys::{
-    jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
+    JNI_FALSE, JNI_TRUE, jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue,
 };
-use jni::JNIEnv;
 pub use paste::paste;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};

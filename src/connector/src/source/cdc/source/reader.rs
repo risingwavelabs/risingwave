@@ -14,7 +14,7 @@
 
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -22,8 +22,8 @@ use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
-use risingwave_jni_core::{call_static_method, JniReceiverType, OwnedPointer};
+use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
+use risingwave_jni_core::{JniReceiverType, OwnedPointer, call_static_method};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -33,8 +33,8 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
 use crate::source::{
-    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitMetaData,
-    SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream,
 };
 
 pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
@@ -165,7 +165,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
             if !inited {
-                bail!("failed to start cdc connector.\nHINT: increase `cdc_source_wait_streaming_start_timeout` session variable to a large value and retry.");
+                bail!(
+                    "failed to start cdc connector.\nHINT: increase `cdc_source_wait_streaming_start_timeout` session variable to a large value and retry."
+                );
             }
         }
         tracing::info!(?source_id, "cdc connector started");

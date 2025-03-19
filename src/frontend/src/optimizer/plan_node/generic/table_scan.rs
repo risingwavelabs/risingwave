@@ -24,13 +24,13 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::GenericPlanNode;
+use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
-use crate::TableCatalog;
 
 /// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]

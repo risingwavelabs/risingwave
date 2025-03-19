@@ -20,12 +20,12 @@
     - stream_plan
 - sql: |
     select * from generate_series(
-      '2024-06-21 17:36:00'::timestamp, -- `timestamp` type is not supported
+      '2024-06-21 17:36:00'::timestamp, -- `timestamp` is implicitly casted to `timestamptz`
       now(),
       interval '1 hour'
     );
   expected_outputs:
-    - binder_error
+    - stream_plan
 - sql: |
     select * from generate_series(
       now() - interval '1 hour',

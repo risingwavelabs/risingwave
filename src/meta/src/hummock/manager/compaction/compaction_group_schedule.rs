@@ -20,12 +20,12 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::compact_task::ReportTask;
+use risingwave_hummock_sdk::compact_task::{ReportTask, is_compaction_task_expired};
 use risingwave_hummock_sdk::compaction_group::{
-    group_split, StateTableId, StaticCompactionGroupId,
+    StateTableId, StaticCompactionGroupId, group_split,
 };
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
+use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
@@ -33,10 +33,10 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
-use super::{check_emergency_state, CompactionGroupStatistic, EmergencyState};
+use super::{CompactionGroupStatistic, EmergencyState, check_emergency_state};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
-use crate::hummock::manager::{commit_multi_var, HummockManager};
+use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
 use crate::hummock::table_write_throughput_statistic::{
@@ -223,7 +223,13 @@ impl HummockManager {
                 if !can_concat(&[left_last_sst, right_first_sst]) {
                     return Err(Error::CompactionGroup(format!(
                         "invalid merge group_1 {} group_2 {} level_idx {} left_last_sst_id {} right_first_sst_id {} left_obj_id {} right_obj_id {}",
-                        left_group_id, right_group_id, level_idx, left_sst_id, right_sst_id, left_obj_id, right_obj_id
+                        left_group_id,
+                        right_group_id,
+                        level_idx,
+                        left_sst_id,
+                        right_sst_id,
+                        left_obj_id,
+                        right_obj_id
                     )));
                 }
             }
@@ -261,16 +267,18 @@ impl HummockManager {
                     .info()
                     .get(&table_id)
                     .expect("have check exist previously");
-                assert!(new_version_delta
-                    .state_table_info_delta
-                    .insert(
-                        table_id,
-                        PbStateTableInfoDelta {
-                            committed_epoch: info.committed_epoch,
-                            compaction_group_id: target_compaction_group_id,
-                        }
-                    )
-                    .is_none());
+                assert!(
+                    new_version_delta
+                        .state_table_info_delta
+                        .insert(
+                            table_id,
+                            PbStateTableInfoDelta {
+                                committed_epoch: info.committed_epoch,
+                                compaction_group_id: target_compaction_group_id,
+                            }
+                        )
+                        .is_none()
+                );
             }
         });
 
@@ -359,11 +367,11 @@ impl HummockManager {
     /// 1. ssts with `key_range.left` greater than `split_key` will be split to the right group
     /// 2. the sst containing `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.left`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`]
     /// 3. currently only `vnode` 0 and `vnode` max is supported. (Due to the above rule, vnode max will be rewritten as `table_id` + 1, `vnode` 0)
-    ///     `parent_group_id`: the `group_id` to split
-    ///     `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
-    ///     `table_id_to_split`: the `table_id` to split
-    ///     `vnode_to_split`: the `vnode` to split
-    ///     `partition_vnode_count`: the partition count for the single table group if need
+    ///   - `parent_group_id`: the `group_id` to split
+    ///   - `split_table_ids`: the `table_ids` to split, now we still support to split multiple tables to one group at once, pass `split_table_ids` for per `split` operation for checking
+    ///   - `table_id_to_split`: the `table_id` to split
+    ///   - `vnode_to_split`: the `vnode` to split
+    ///   - `partition_vnode_count`: the partition count for the single table group if need
     async fn split_compaction_group_impl(
         &self,
         parent_group_id: CompactionGroupId,
@@ -488,16 +496,18 @@ impl HummockManager {
                     .info()
                     .get(&table_id)
                     .expect("have check exist previously");
-                assert!(new_version_delta
-                    .state_table_info_delta
-                    .insert(
-                        table_id,
-                        PbStateTableInfoDelta {
-                            committed_epoch: info.committed_epoch,
-                            compaction_group_id: new_compaction_group_id,
-                        }
-                    )
-                    .is_none());
+                assert!(
+                    new_version_delta
+                        .state_table_info_delta
+                        .insert(
+                            table_id,
+                            PbStateTableInfoDelta {
+                                committed_epoch: info.committed_epoch,
+                                compaction_group_id: new_compaction_group_id,
+                            }
+                        )
+                        .is_none()
+                );
             }
         });
 
@@ -549,18 +559,11 @@ impl HummockManager {
             .into_iter()
             .for_each(|task_assignment| {
                 if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let input_sst_ids: HashSet<u64> = task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
-                        .collect();
-                    let input_level_ids: Vec<u32> = task
-                        .input_ssts
-                        .iter()
-                        .map(|level| level.level_idx)
-                        .collect();
-                    let need_cancel = !levels.check_sst_ids_exist(&input_level_ids, input_sst_ids);
-                    if need_cancel {
+                    let is_expired = is_compaction_task_expired(
+                        task.compaction_group_version_id,
+                        levels.compaction_group_version_id,
+                    );
+                    if is_expired {
                         canceled_tasks.push(ReportTask {
                             task_id: task.task_id,
                             task_status: TaskStatus::ManualCanceled,
@@ -789,7 +792,13 @@ impl HummockManager {
             .await;
         match ret {
             Ok(split_result) => {
-                tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
+                tracing::info!(
+                    "split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}",
+                    table_id,
+                    parent_group_id,
+                    self.env.opts.partition_vnode_count,
+                    split_result
+                );
             }
             Err(e) => {
                 tracing::info!(
@@ -921,7 +930,11 @@ impl HummockManager {
         if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
-                group.group_id, group.group_size, next_group.group_id, next_group.group_size, size_limit
+                group.group_id,
+                group.group_size,
+                next_group.group_id,
+                next_group.group_size,
+                size_limit
             )));
         }
 

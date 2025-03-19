@@ -13,18 +13,24 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Deref};
 
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{VirtualNode, WorkerSlotId};
+use risingwave_common::hash::{
+    IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat, WorkerSlotId,
+};
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
+use risingwave_pb::meta::table_fragments::{ActorStatus, PbFragment, State};
 use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
@@ -32,11 +38,13 @@ use risingwave_pb::meta::table_parallelism::{
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext, StreamNode,
+};
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
-use crate::stream::{build_actor_connector_splits, SplitAssignment};
+use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -107,7 +115,116 @@ impl From<TableParallelism> for StreamingParallelism {
 
 pub type ActorUpstreams = BTreeMap<FragmentId, HashSet<ActorId>>;
 pub type FragmentActorUpstreams = HashMap<ActorId, ActorUpstreams>;
-pub type StreamActorWithUpstreams = (StreamActor, ActorUpstreams);
+pub type StreamActorWithDispatchers = (StreamActor, Vec<PbDispatcher>);
+pub type StreamActorWithUpDownstreams = (StreamActor, ActorUpstreams, Vec<PbDispatcher>);
+pub type FragmentActorDispatchers = HashMap<FragmentId, HashMap<ActorId, Vec<PbDispatcher>>>;
+
+#[derive(Debug, Clone)]
+pub struct StreamJobFragmentsToCreate {
+    pub inner: StreamJobFragments,
+    pub dispatchers: FragmentActorDispatchers,
+}
+
+impl Deref for StreamJobFragmentsToCreate {
+    type Target = StreamJobFragments;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl StreamJobFragmentsToCreate {
+    pub fn actors_to_create(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            FragmentId,
+            &StreamNode,
+            impl Iterator<Item = (&StreamActor, &Vec<PbDispatcher>, WorkerId)> + '_,
+        ),
+    > + '_ {
+        self.inner.actors_to_create(&self.dispatchers)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StreamActor {
+    pub actor_id: u32,
+    pub fragment_id: u32,
+    pub vnode_bitmap: Option<Bitmap>,
+    pub mview_definition: String,
+    pub expr_context: Option<PbExprContext>,
+}
+
+impl StreamActor {
+    fn to_protobuf(&self, dispatchers: impl Iterator<Item = Dispatcher>) -> PbStreamActor {
+        PbStreamActor {
+            actor_id: self.actor_id,
+            fragment_id: self.fragment_id,
+            dispatcher: dispatchers.collect(),
+            vnode_bitmap: self
+                .vnode_bitmap
+                .as_ref()
+                .map(|bitmap| bitmap.to_protobuf()),
+            mview_definition: self.mview_definition.clone(),
+            expr_context: self.expr_context.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Fragment {
+    pub fragment_id: FragmentId,
+    pub fragment_type_mask: u32,
+    pub distribution_type: PbFragmentDistributionType,
+    pub actors: Vec<StreamActor>,
+    pub state_table_ids: Vec<u32>,
+    pub maybe_vnode_count: Option<u32>,
+    pub nodes: StreamNode,
+}
+
+impl Fragment {
+    pub fn to_protobuf(
+        &self,
+        upstream_fragments: impl Iterator<Item = FragmentId>,
+        dispatchers: Option<&HashMap<ActorId, Vec<Dispatcher>>>,
+    ) -> PbFragment {
+        PbFragment {
+            fragment_id: self.fragment_id,
+            fragment_type_mask: self.fragment_type_mask,
+            distribution_type: self.distribution_type as _,
+            actors: self
+                .actors
+                .iter()
+                .map(|actor| {
+                    actor.to_protobuf(
+                        dispatchers
+                            .and_then(|dispatchers| dispatchers.get(&(actor.actor_id as _)))
+                            .into_iter()
+                            .flatten()
+                            .cloned(),
+                    )
+                })
+                .collect(),
+            state_table_ids: self.state_table_ids.clone(),
+            upstream_fragment_ids: upstream_fragments.collect(),
+            maybe_vnode_count: self.maybe_vnode_count,
+            nodes: Some(self.nodes.clone()),
+        }
+    }
+}
+
+impl VnodeCountCompat for Fragment {
+    fn vnode_count_inner(&self) -> VnodeCount {
+        VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
+    }
+}
+
+impl IsSingleton for Fragment {
+    fn is_singleton(&self) -> bool {
+        matches!(self.distribution_type, FragmentDistributionType::Single)
+    }
+}
 
 /// Fragments of a streaming job. Corresponds to [`PbTableFragments`].
 /// (It was previously called `TableFragments` due to historical reasons.)
@@ -124,7 +241,6 @@ pub struct StreamJobFragments {
 
     /// The table fragments.
     pub fragments: BTreeMap<FragmentId, Fragment>,
-    pub actor_upstreams: BTreeMap<FragmentId, FragmentActorUpstreams>,
 
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
@@ -185,11 +301,27 @@ impl StreamContext {
 }
 
 impl StreamJobFragments {
-    pub fn to_protobuf(&self) -> PbTableFragments {
+    pub fn to_protobuf(
+        &self,
+        fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
+        fragment_dispatchers: &FragmentActorDispatchers,
+    ) -> PbTableFragments {
         PbTableFragments {
             table_id: self.stream_job_id.table_id(),
             state: self.state as _,
-            fragments: self.fragments.clone().into_iter().collect(),
+            fragments: self
+                .fragments
+                .iter()
+                .map(|(id, fragment)| {
+                    (
+                        *id,
+                        fragment.to_protobuf(
+                            fragment_upstreams.get(id).into_iter().flatten().cloned(),
+                            fragment_dispatchers.get(&(*id as _)),
+                        ),
+                    )
+                })
+                .collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
@@ -202,16 +334,14 @@ impl StreamJobFragments {
 }
 
 pub type StreamJobActorsToCreate =
-    HashMap<WorkerId, HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpstreams>)>>;
+    HashMap<WorkerId, HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>>;
 
 impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
     pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        let actor_upstreams = BTreeMap::new();
         Self::new(
             table_id,
             fragments,
-            actor_upstreams,
             &BTreeMap::new(),
             StreamContext::default(),
             TableParallelism::Adaptive,
@@ -224,7 +354,6 @@ impl StreamJobFragments {
     pub fn new(
         stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_upstreams: BTreeMap<FragmentId, FragmentActorUpstreams>,
         actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
@@ -247,7 +376,6 @@ impl StreamJobFragments {
             stream_job_id,
             state: State::Initial,
             fragments,
-            actor_upstreams,
             actor_status,
             actor_splits: HashMap::default(),
             ctx,
@@ -341,7 +469,7 @@ impl StreamJobFragments {
     ) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
-            .filter(move |fragment| check_type(fragment.get_fragment_type_mask()))
+            .filter(move |fragment| check_type(fragment.fragment_type_mask))
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
     }
 
@@ -389,27 +517,21 @@ impl StreamJobFragments {
     pub fn mview_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()
-            .find(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
-            })
+            .find(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0)
             .cloned()
     }
 
     pub fn source_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()
-            .find(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
-            })
+            .find(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0)
             .cloned()
     }
 
     pub fn sink_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()
-            .find(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Sink as u32) != 0
-            })
+            .find(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Sink as u32) != 0)
             .cloned()
     }
 
@@ -427,7 +549,7 @@ impl StreamJobFragments {
 
         for fragment in self.fragments() {
             {
-                if let Some(source_id) = fragment.nodes.as_ref().unwrap().find_stream_source() {
+                if let Some(source_id) = fragment.nodes.find_stream_source() {
                     source_fragments
                         .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
@@ -450,7 +572,7 @@ impl StreamJobFragments {
         for fragment in self.fragments() {
             {
                 if let Some((source_id, upstream_source_fragment_id)) =
-                    fragment.nodes.as_ref().unwrap().find_source_backfill()
+                    fragment.nodes.find_source_backfill()
                 {
                     source_backfill_fragments
                         .entry(source_id as SourceId)
@@ -464,12 +586,12 @@ impl StreamJobFragments {
 
     /// Find the table job's `Union` fragment.
     /// Panics if not found.
-    pub fn union_fragment_for_table(&mut self) -> (&mut Fragment, &mut FragmentActorUpstreams) {
+    pub fn union_fragment_for_table(&mut self) -> &mut Fragment {
         let mut union_fragment_id = None;
         for (fragment_id, fragment) in &self.fragments {
             {
-                if let Some(node) = &fragment.nodes {
-                    visit_stream_node(node, |body| {
+                {
+                    visit_stream_node(&fragment.nodes, |body| {
                         if let NodeBody::Union(_) = body {
                             if let Some(union_fragment_id) = union_fragment_id.as_mut() {
                                 // The union fragment should be unique.
@@ -479,7 +601,7 @@ impl StreamJobFragments {
                             }
                         }
                     })
-                };
+                }
             }
         }
 
@@ -489,10 +611,8 @@ impl StreamJobFragments {
             .fragments
             .get_mut(&union_fragment_id)
             .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id));
-        (
-            union_fragment,
-            self.actor_upstreams.entry(union_fragment_id).or_default(),
-        )
+
+        union_fragment
     }
 
     /// Resolve dependent table
@@ -515,7 +635,7 @@ impl StreamJobFragments {
     pub fn upstream_table_counts(&self) -> HashMap<TableId, usize> {
         let mut table_ids = HashMap::new();
         self.fragments.values().for_each(|fragment| {
-            Self::resolve_dependent_table(fragment.nodes.as_ref().unwrap(), &mut table_ids);
+            Self::resolve_dependent_table(&fragment.nodes, &mut table_ids);
         });
 
         table_ids
@@ -544,56 +664,48 @@ impl StreamJobFragments {
     }
 
     /// Returns the status of actors group by worker id.
-    pub fn active_actors(&self) -> Vec<StreamActorWithUpstreams> {
+    pub fn active_actors(&self) -> Vec<StreamActor> {
         let mut actors = vec![];
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
                 if self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32 {
                     continue;
                 }
-                actors.push((
-                    actor.clone(),
-                    self.actor_upstreams
-                        .get(&fragment.fragment_id)
-                        .and_then(|actor_upstreams| actor_upstreams.get(&actor.actor_id))
-                        .cloned()
-                        .unwrap_or_default(),
-                ));
+                actors.push(actor.clone());
             }
         }
         actors
     }
 
-    pub fn actors_to_create(&self) -> StreamJobActorsToCreate {
-        let mut actor_map: HashMap<_, HashMap<_, (_, Vec<_>)>> = HashMap::new();
-        self.fragments
-            .values()
-            .flat_map(|fragment| {
-                let actor_upstreams = self.actor_upstreams.get(&fragment.fragment_id);
+    fn actors_to_create<'a>(
+        &'a self,
+        fragment_actor_dispatchers: &'a FragmentActorDispatchers,
+    ) -> impl Iterator<
+        Item = (
+            FragmentId,
+            &'a StreamNode,
+            impl Iterator<Item = (&'a StreamActor, &'a Vec<PbDispatcher>, WorkerId)> + 'a,
+        ),
+    > + 'a {
+        self.fragments.values().map(move |fragment| {
+            let actor_dispatchers = fragment_actor_dispatchers.get(&fragment.fragment_id);
+            (
+                fragment.fragment_id,
+                &fragment.nodes,
                 fragment.actors.iter().map(move |actor| {
-                    (
-                        actor,
-                        actor_upstreams
-                            .and_then(|actor_upstreams| actor_upstreams.get(&actor.actor_id)),
-                        fragment,
-                    )
-                })
-            })
-            .for_each(|(actor, actor_upstream, fragment)| {
-                let worker_id = self
-                    .actor_status
-                    .get(&actor.actor_id)
-                    .expect("should exist")
-                    .worker_id() as WorkerId;
-                actor_map
-                    .entry(worker_id)
-                    .or_default()
-                    .entry(fragment.fragment_id)
-                    .or_insert_with(|| (fragment.nodes.clone().unwrap(), vec![]))
-                    .1
-                    .push((actor.clone(), actor_upstream.cloned().unwrap_or_default()));
-            });
-        actor_map
+                    let worker_id = self
+                        .actor_status
+                        .get(&actor.actor_id)
+                        .expect("should exist")
+                        .worker_id() as WorkerId;
+                    static EMPTY_VEC: Vec<PbDispatcher> = Vec::new();
+                    let disptachers = actor_dispatchers
+                        .and_then(|dispatchers| dispatchers.get(&actor.actor_id))
+                        .unwrap_or(&EMPTY_VEC);
+                    (actor, disptachers, worker_id)
+                }),
+            )
+        })
     }
 
     pub fn mv_table_id(&self) -> Option<u32> {
@@ -626,7 +738,7 @@ impl StreamJobFragments {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
             stream_graph_visitor::visit_stream_node_tables_inner(
-                &mut fragment.nodes.clone().unwrap(),
+                &mut fragment.nodes.clone(),
                 internal_tables_only,
                 true,
                 |table, _| {

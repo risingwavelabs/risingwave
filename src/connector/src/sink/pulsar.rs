@@ -23,7 +23,7 @@ use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
@@ -238,8 +238,8 @@ mod opaque_type {
         })
     }
 }
-use opaque_type::may_delivery_future;
 pub use opaque_type::PulsarDeliveryFuture;
+use opaque_type::may_delivery_future;
 
 impl PulsarSinkWriter {
     pub async fn new(
@@ -273,7 +273,7 @@ impl PulsarSinkWriter {
     }
 }
 
-impl<'w> PulsarPayloadWriter<'w> {
+impl PulsarPayloadWriter<'_> {
     async fn send_message(&mut self, message: Message) -> Result<()> {
         let mut success_flag = false;
         let mut connection_err = None;
@@ -330,7 +330,7 @@ impl<'w> PulsarPayloadWriter<'w> {
     }
 }
 
-impl<'w> FormattedSink for PulsarPayloadWriter<'w> {
+impl FormattedSink for PulsarPayloadWriter<'_> {
     type K = String;
     type V = Vec<u8>;
 

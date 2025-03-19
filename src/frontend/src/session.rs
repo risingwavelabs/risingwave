@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -67,9 +67,9 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
-use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -95,18 +95,18 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
-    handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
+    Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
 };
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
 use crate::handler::variable::infer_show_variable;
-use crate::handler::{handle, RwPgResponse};
+use crate::handler::{RwPgResponse, handle};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -114,14 +114,14 @@ use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
-    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
-    GLOBAL_DISTRIBUTED_QUERY_METRICS,
+    DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
+    HummockSnapshotManagerRef, QueryManager,
 };
 use crate::telemetry::FrontendTelemetryCreator;
+use crate::user::UserId;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
-use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
@@ -162,9 +162,11 @@ pub(crate) struct FrontendEnv {
     spill_metrics: Arc<BatchSpillMetrics>,
 
     batch_config: BatchConfig,
+    frontend_config: FrontendConfig,
     #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
+    udf_config: UdfConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -176,6 +178,9 @@ pub(crate) struct FrontendEnv {
 
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
+
+    /// address of the serverless backfill controller.
+    serverless_backfill_controller_addr: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -243,13 +248,16 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            frontend_config: FrontendConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
+            udf_config: UdfConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             spill_metrics: BatchSpillMetrics::for_test(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            serverless_backfill_controller_addr: Default::default(),
         }
     }
 
@@ -484,8 +492,11 @@ impl FrontendEnv {
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
+                frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
+                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
+                udf_config: config.udf,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -550,6 +561,10 @@ impl FrontendEnv {
         self.session_params.read_recursive().clone()
     }
 
+    pub fn sbc_address(&self) -> &String {
+        &self.serverless_backfill_controller_addr
+    }
+
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
@@ -562,8 +577,16 @@ impl FrontendEnv {
         &self.batch_config
     }
 
+    pub fn frontend_config(&self) -> &FrontendConfig {
+        &self.frontend_config
+    }
+
     pub fn streaming_config(&self) -> &StreamingConfig {
         &self.streaming_config
+    }
+
+    pub fn udf_config(&self) -> &UdfConfig {
+        &self.udf_config
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
@@ -923,11 +946,21 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
-                PgResponse::builder(stmt_type)
-                    .notice(format!("relation \"{}\" already exists, skipping", name))
-                    .into(),
-            )),
+            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
+                let is_creating_str = if is_creating {
+                    " but still creating"
+                } else {
+                    ""
+                };
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "relation \"{}\" already exists{}, skipping",
+                            name, is_creating_str
+                        ))
+                        .into(),
+                ))
+            }
             Err(e) => Err(e.into()),
             Ok(_) => Ok(Either::Left(())),
         }
@@ -1005,7 +1038,7 @@ impl SessionImpl {
                         .into(),
                 ))
             } else {
-                Err(CatalogError::Duplicated("function", full_name).into())
+                Err(CatalogError::duplicated("function", full_name).into())
             }
         } else {
             Ok(Either::Left(()))
@@ -1052,6 +1085,13 @@ impl SessionImpl {
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (connection, _) =
             catalog_reader.get_connection_by_name(db_name, schema_path, connection_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            connection.owner(),
+            AclMode::Usage,
+            Object::ConnectionId(connection.id),
+        )])?;
+
         Ok(connection.clone())
     }
 
@@ -1113,6 +1153,13 @@ impl SessionImpl {
                     format!("table \"{}\" does not exist", table_name),
                 )
             })?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            table.owner(),
+            AclMode::Select,
+            Object::TableId(table.id.table_id()),
+        )])?;
+
         Ok(table.clone())
     }
 
@@ -1128,6 +1175,13 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (secret, _) = catalog_reader.get_secret_by_name(db_name, schema_path, secret_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            secret.owner(),
+            AclMode::Create,
+            Object::SecretId(secret.id.secret_id()),
+        )])?;
+
         Ok(secret.clone())
     }
 
@@ -1249,22 +1303,36 @@ impl SessionImpl {
             return Ok(());
         }
 
-        let gen_message = |violated_limit: &ActorCountPerParallelism,
+        let gen_message = |ActorCountPerParallelism {
+                               worker_id_to_actor_count,
+                               hard_limit,
+                               soft_limit,
+                           }: ActorCountPerParallelism,
                            exceed_hard_limit: bool|
          -> String {
             let (limit_type, action) = if exceed_hard_limit {
-                ("critical", "Please scale the cluster before proceeding!")
+                ("critical", "Scale the cluster immediately to proceed.")
             } else {
-                ("recommended", "Scaling the cluster is recommended.")
+                (
+                    "recommended",
+                    "Consider scaling the cluster for optimal performance.",
+                )
             };
             format!(
-                "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
-                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
-                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
-                "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
-                "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
-                "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
-                violated_limit,
+                r#"Actor count per parallelism exceeds the {limit_type} limit.
+
+Depending on your workload, this may overload the cluster and cause performance/stability issues. {action}
+
+HINT:
+- For best practices on managing streaming jobs: https://docs.risingwave.com/operate/manage-a-large-number-of-streaming-jobs
+- To bypass the check (if the cluster load is acceptable): `[ALTER SYSTEM] SET bypass_cluster_limits TO true`.
+  See https://docs.risingwave.com/operate/view-configure-runtime-parameters#how-to-configure-runtime-parameters
+- Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.
+
+DETAILS:
+- hard limit: {hard_limit}
+- soft limit: {soft_limit}
+- worker_id_to_actor_count: {worker_id_to_actor_count:?}"#,
             )
         };
 
@@ -1274,10 +1342,10 @@ impl SessionImpl {
                 cluster_limit::ClusterLimit::ActorCount(l) => {
                     if l.exceed_hard_limit() {
                         return Err(RwError::from(ErrorCode::ProtocolError(gen_message(
-                            &l, true,
+                            l, true,
                         ))));
                     } else if l.exceed_soft_limit() {
-                        self.notice_to_user(gen_message(&l, false));
+                        self.notice_to_user(gen_message(l, false));
                     }
                 }
             }
@@ -1430,7 +1498,7 @@ impl SessionManagerImpl {
                 )));
             }
             let has_privilege =
-                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,

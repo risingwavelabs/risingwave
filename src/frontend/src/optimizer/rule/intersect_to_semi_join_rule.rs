@@ -18,9 +18,9 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalIntersect, LogicalJoin, PlanTreeNode};
-use crate::optimizer::PlanRef;
 
 pub struct IntersectToSemiJoinRule {}
 impl Rule for IntersectToSemiJoinRule {

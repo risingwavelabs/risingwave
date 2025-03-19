@@ -18,7 +18,7 @@ use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{max_column_id, ColumnCatalog};
+use risingwave_common::catalog::{ColumnCatalog, max_column_id};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -36,7 +36,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_source::{bind_columns_from_source, CreateSourceType};
+use crate::handler::create_source::{CreateSourceType, bind_columns_from_source};
 use crate::session::SessionImpl;
 use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
@@ -336,10 +336,10 @@ pub fn alter_definition_format_encode(
 #[cfg(test)]
 pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-    use risingwave_connector::source::DataType;
+    use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_alter_source_with_sr_handler() {
@@ -389,12 +389,14 @@ pub mod tests {
             )"#,
             proto_file.path().to_str().unwrap()
         );
-        assert!(frontend
-            .run_sql(sql)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("the original definition is FORMAT Plain ENCODE Protobuf"));
+        assert!(
+            frontend
+                .run_sql(sql)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("the original definition is FORMAT Plain ENCODE Protobuf")
+        );
 
         let sql = format!(
             r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (

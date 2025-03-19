@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
-    OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, OBJECT_ID_PLACEHOLDER, StreamJobStatus,
+    TableId,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -30,8 +30,8 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, reorganize_elements_id};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
@@ -395,8 +395,6 @@ impl PlanTreeNodeUnary for StreamMaterialize {
             .zip_eq_fast(self.base.schema().fields.iter())
             .for_each(|(a, b)| {
                 assert_eq!(a.data_type, b.data_type);
-                assert_eq!(a.type_name, b.type_name);
-                assert_eq!(a.sub_fields, b.sub_fields);
             });
         assert_eq!(new.plan_base().stream_key(), self.plan_base().stream_key());
         new

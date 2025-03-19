@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
+use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
@@ -194,15 +194,14 @@ impl NotificationServiceImpl {
         Ok((nodes, notification_version))
     }
 
-    async fn get_tables_and_creating_tables_snapshot(
-        &self,
-    ) -> MetaResult<(Vec<Table>, NotificationVersion)> {
+    async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
             .get_inner_read_guard()
             .await;
-        let tables = catalog_guard.list_all_state_tables().await?;
+        let mut tables = catalog_guard.list_all_state_tables().await?;
+        tables.extend(catalog_guard.dropped_tables.values().cloned());
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((tables, notification_version))
     }
@@ -215,7 +214,7 @@ impl NotificationServiceImpl {
     }
 
     async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
-        let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
+        let (tables, catalog_version) = self.get_tables_snapshot().await?;
         let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
 
         Ok(MetaSnapshot {
@@ -306,7 +305,7 @@ impl NotificationServiceImpl {
     }
 
     async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
-        let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
+        let (tables, catalog_version) = self.get_tables_snapshot().await?;
         let hummock_version = self
             .hummock_manager
             .on_current_version(|version| version.into())

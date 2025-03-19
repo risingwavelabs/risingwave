@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::repeat;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -127,7 +126,7 @@ impl FastInsertExecutor {
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
+                let row_id_col = SerialArray::from_iter(std::iter::repeat_n(None, cap));
                 columns.insert(row_id_index, Arc::new(row_id_col.into()))
             }
 
@@ -163,8 +162,9 @@ mod tests {
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::JsonbVal;
     use risingwave_dml::dml_manager::DmlManager;
+    use risingwave_storage::hummock::test_utils::StateStoreReadTestExt;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
+    use risingwave_storage::store::ReadOptions;
     use serde_json::json;
 
     use super::*;

@@ -18,13 +18,14 @@ use risingwave_pb::compactor::{
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
+    GetStreamingStatsRequest, GetStreamingStatsResponse, HeapProfilingRequest,
+    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
+    ProfilingResponse, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
+    TieredCacheTracingResponse,
 };
-use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
@@ -148,6 +149,15 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<TieredCacheTracingResponse>, Status> {
         Err(Status::unimplemented(
             "Tiered Cache Tracing unimplemented in compactor",
+        ))
+    }
+
+    async fn get_profile_stats(
+        &self,
+        _request: Request<GetProfileStatsRequest>,
+    ) -> Result<Response<GetProfileStatsResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Profile Stats unimplemented in compactor",
         ))
     }
 }

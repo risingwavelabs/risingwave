@@ -14,7 +14,7 @@
 
 use num_bigint::{BigInt, Sign};
 
-use super::{bail_uncategorized, AccessResult};
+use super::{AccessResult, bail_uncategorized};
 
 pub fn scaled_bigint_to_rust_decimal(
     value: BigInt,

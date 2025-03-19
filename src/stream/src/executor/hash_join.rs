@@ -24,8 +24,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
+use risingwave_expr::expr::NonStrictExpression;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
@@ -1227,15 +1227,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         } else {
             // check if need state cleaning
             for (column_idx, watermark) in useful_state_clean_columns {
-                if matched_row
-                    .row
-                    .datum_at(*column_idx)
-                    .map_or(false, |scalar| {
-                        scalar
-                            .default_cmp(&watermark.val.as_scalar_ref_impl())
-                            .is_lt()
-                    })
-                {
+                if matched_row.row.datum_at(*column_idx).is_some_and(|scalar| {
+                    scalar
+                        .default_cmp(&watermark.val.as_scalar_ref_impl())
+                        .is_lt()
+                }) {
                     need_state_clean = true;
                     break;
                 }
@@ -1297,7 +1293,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::hash::{Key64, Key128};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -1496,7 +1492,7 @@ mod tests {
                 OrderType::ascending(),
             ],
             &[0, 1, 1],
-            0,
+            1,
         )
         .await;
 

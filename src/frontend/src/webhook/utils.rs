@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use axum::Json;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::Json;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::JsonbVal;
 use risingwave_pb::expr::ExprNode;

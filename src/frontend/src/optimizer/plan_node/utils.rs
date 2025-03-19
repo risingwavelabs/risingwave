@@ -23,8 +23,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
-    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay,
+    OBJECT_ID_PLACEHOLDER, Schema, StreamJobStatus,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
@@ -32,27 +32,27 @@ use risingwave_common::constants::log_store::v2::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::license::Feature;
 use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
 use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf};
+use risingwave_pb::plan_common::{PbAsOf, as_of};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::pretty_config;
+use crate::PlanRef;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
+use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
-use crate::optimizer::StreamScanType;
 use crate::utils::{Condition, IndexSet};
-use crate::PlanRef;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
@@ -461,6 +461,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
         } else {
             false
         }
@@ -505,8 +506,8 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
                         MappedLocalTime::Single(d) => Ok(d.timestamp()),
                         MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
                             Err(anyhow!(format!(
-                                        "failed to parse the timestamp {ts} with the specified time zone {tz}"
-                                    )))
+                                "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                            )))
                         }
                     }
                 })??

@@ -26,8 +26,8 @@ use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
-    mapping_message, mark_chunk, METADATA_STATE_LEN,
+    METADATA_STATE_LEN, compute_bounds, construct_initial_finished_state, create_builder,
+    get_new_pos, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -226,14 +226,16 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
                     let paused =
                         paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
-                    let right_snapshot = pin!(Self::make_snapshot_stream(
-                        &self.upstream_table,
-                        snapshot_read_epoch,
-                        current_pos.clone(),
-                        paused,
-                        &self.rate_limiter,
-                    )
-                    .map(Either::Right));
+                    let right_snapshot = pin!(
+                        Self::make_snapshot_stream(
+                            &self.upstream_table,
+                            snapshot_read_epoch,
+                            current_pos.clone(),
+                            paused,
+                            &self.rate_limiter,
+                        )
+                        .map(Either::Right)
+                    );
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -628,7 +630,7 @@ where
         let mut old_state = vec![None; pk_len + METADATA_STATE_LEN];
         old_state[1..row.len() + 1].clone_from_slice(&row);
         let current_pos = Some((&row[0..pk_len]).into_owned_row());
-        let is_finished = row[pk_len].clone().map_or(false, |d| d.into_bool());
+        let is_finished = row[pk_len].clone().is_some_and(|d| d.into_bool());
         let row_count = row
             .get(pk_len + 1)
             .cloned()

@@ -99,19 +99,11 @@ impl BoolAndUpdatable {
     // state is the number of false values
 
     fn accumulate(&self, state: i64, input: bool) -> i64 {
-        if input {
-            state
-        } else {
-            state + 1
-        }
+        if input { state } else { state + 1 }
     }
 
     fn retract(&self, state: i64, input: bool) -> i64 {
-        if input {
-            state
-        } else {
-            state - 1
-        }
+        if input { state } else { state - 1 }
     }
 
     #[allow(dead_code)] // TODO: support merge

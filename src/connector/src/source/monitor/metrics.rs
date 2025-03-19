@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{exponential_buckets, histogram_opts, Registry};
+use prometheus::{Registry, exponential_buckets, histogram_opts};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };

@@ -17,8 +17,8 @@ use pretty_xmlish::XmlNode;
 use super::generic::DistillUnit;
 use super::utils::Distill;
 use super::{
-    gen_filter_and_pushdown, generic, BatchMaxOneRow, ColPrunable, ExprRewritable, Logical,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    BatchMaxOneRow, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -57,7 +57,6 @@ impl PlanTreeNodeUnary for LogicalMaxOneRow {
         Self::new(core)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

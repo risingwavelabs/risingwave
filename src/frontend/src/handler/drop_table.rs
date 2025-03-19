@@ -24,7 +24,7 @@ use tracing::warn;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::{TableType, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
+use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableType};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -54,7 +54,7 @@ pub async fn handle_drop_table(
                             .into())
                     } else {
                         Err(e.into())
-                    }
+                    };
                 }
             };
 
@@ -157,7 +157,10 @@ pub async fn handle_drop_table(
                         .await
                         .context("failed to purge iceberg table")?;
                 } else {
-                    warn!("Table {} with iceberg engine, but failed to load iceberg table. It might be the warehouse path has been cleared but fail before drop iceberg source", table_name);
+                    warn!(
+                        "Table {} with iceberg engine, but failed to load iceberg table. It might be the warehouse path has been cleared but fail before drop iceberg source",
+                        table_name
+                    );
                 }
                 if !catalog_type.eq_ignore_ascii_case("storage") {
                     iceberg_catalog
@@ -182,7 +185,10 @@ pub async fn handle_drop_table(
                 )
                 .await?;
             } else {
-                warn!("Table {} with iceberg engine but with no source and sink. It might be created partially. Please check it with iceberg catalog", table_name);
+                warn!(
+                    "Table {} with iceberg engine but with no source and sink. It might be created partially. Please check it with iceberg catalog",
+                    table_name
+                );
             }
         }
         Engine::Hummock => {}

@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::BatchTable;
@@ -199,7 +199,9 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 .boxed()
             }
             StreamScanType::SnapshotBackfill => {
-                unreachable!("SnapshotBackfillExecutor is handled specially when in `StreamActorManager::create_nodes_inner`")
+                unreachable!(
+                    "SnapshotBackfillExecutor is handled specially when in `StreamActorManager::create_nodes_inner`"
+                )
             }
             StreamScanType::Unspecified => unreachable!(),
         };

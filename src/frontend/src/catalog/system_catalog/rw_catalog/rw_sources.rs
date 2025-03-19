@@ -16,14 +16,13 @@ use risingwave_common::catalog::SecretId;
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
-use serde_json::{json, Map as JsonMap};
+use serde_json::{Map as JsonMap, json};
 
-use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
-use crate::catalog::CatalogError;
-use crate::error::{Result, RwError};
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::WithOptionsSecResolved;
+use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
+use crate::error::Result;
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 
 #[derive(Fields)]
 struct RwSource {
@@ -60,14 +59,14 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
-    schemas
+    Ok(schemas
         .flat_map(|schema| {
             schema.iter_source().map(|source| {
                 let format_encode_props_with_secrets = WithOptionsSecResolved::new(
                     source.info.format_encode_options.clone(),
                     source.info.format_encode_secret_refs.clone(),
                 );
-                Ok(RwSource {
+                RwSource {
                     id: source.id as i32,
                     name: source.name.clone(),
                     schema_id: schema.id() as i32,
@@ -104,25 +103,25 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         &catalog_reader,
                         &reader.auth_context.database,
                         source.with_properties.clone(),
-                    )?
+                    )
                     .into(),
                     format_encode_options: serialize_props_with_secret(
                         &catalog_reader,
                         &reader.auth_context.database,
                         format_encode_props_with_secrets,
-                    )?
+                    )
                     .into(),
-                })
+                }
             })
         })
-        .collect::<Result<Vec<_>>>()
+        .collect())
 }
 
 pub fn serialize_props_with_secret(
     catalog_reader: &CatalogReadGuard,
     db_name: &str,
     props_with_secret: WithOptionsSecResolved,
-) -> Result<jsonbb::Value> {
+) -> jsonbb::Value {
     let (inner, secret_ref) = props_with_secret.into_parts();
     // if not secret, {"some key": {"type": "plaintext", "value": "xxxx"}}
     // if secret, {"some key": {"type": "secret", "value": {"value": "<secret name>"}}}
@@ -133,16 +132,17 @@ pub fn serialize_props_with_secret(
     }
     for (k, v) in secret_ref {
         let secret = catalog_reader
-            .iter_schemas(db_name)?
-            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)))
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("secret", v.secret_id.to_string()))
-            })?;
+            .iter_schemas(db_name)
+            .unwrap()
+            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)));
+        let secret_name = secret
+            .map(|s| s.name.to_owned())
+            .unwrap_or("not found".to_owned());
         result.insert(
             k,
-            json!({"type": "secret", "value": {"value": secret.name}}),
+            json!({"type": "secret", "value": {"value": secret_name}}),
         );
     }
 
-    Ok(jsonbb::Value::from(serde_json::Value::Object(result)))
+    jsonbb::Value::from(serde_json::Value::Object(result))
 }

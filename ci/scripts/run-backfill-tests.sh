@@ -66,7 +66,7 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  risedev ci-kill-no-dump-logs
+  risedev ci-kill
   wait
 }
 
@@ -319,6 +319,109 @@ test_snapshot_backfill() {
   kill_cluster
 }
 
+test_scale_in() {
+  echo "--- e2e, test_scale_in, 3cn -> 1cn"
+  RUST_LOG=info risedev ci-start ci-3cn-1fe-with-recovery
+  risedev psql-env
+  source .risingwave/config/psql-env
+
+  psql -c "alter system set per_database_isolation = false"
+
+  psql -c "create table t(v1 int); insert into t select * from generate_series(1, 1000); flush"
+  psql -c "set background_ddl=true; set backfill_rate_limit=10; create materialized view m1 as select * from t; flush"
+  internal_table=$(psql -t -c "show internal tables;" | grep -v 'INFO')
+
+  for i in $(seq 1 100000); do
+    sleep 1
+    progress=$(psql -c "select progress from rw_ddl_progress" | grep -o "[0-9]*\.[0-9]*%" |  sed 's/\([0-9]*\)\..*/\1/' )
+    echo "progress ${progress}%"
+
+    if [[ "$progress" -gt 70 ]]; then
+      echo "hit 70% progress, setting backfill_rate_limit=1"
+      psql -c 'alter materialized view m1 set backfill_rate_limit=1;'
+      break
+    fi
+  done
+
+  for i in $(seq 1 100000); do
+    sleep 1
+    progress=$(psql -c "select progress from rw_ddl_progress" | grep -o "[0-9]*\.[0-9]*%" |  sed 's/\([0-9]*\)\..*/\1/' )
+    echo "progress ${progress}%"
+
+    if [[ "$progress" -gt 90 ]]; then
+      echo "hit 90% progress, setting backfill_rate_limit=0"
+      psql -c 'alter materialized view m1 set backfill_rate_limit=0;'
+      result=$(psql -t -c "select count(*) from ${internal_table} where backfill_finished=true;")
+      if [[ "$result" -gt 0 ]]; then
+        echo "some backfill_finished is set, breaking loop"
+        break
+      elif [[ "$result" -eq 0 ]]; then
+        echo "backfill_finished is not set, setting backfill_rate_limit=1"
+        psql -c 'alter materialized view m1 set backfill_rate_limit=1;'
+      fi
+    fi
+  done
+
+  # If jobs are already completed, we can't continue running this test.
+  not_completed=$(psql -t -c "select count(*) from ${internal_table} where backfill_finished=false;")
+  if [[ "$not_completed" -eq 0 ]]; then
+    echo "All jobs are completed, can't continue running this test."
+    exit 0
+  elif [[ "$not_completed" -gt 0 ]]; then
+    echo "Some jobs are not completed, continuing test. Remaining jobs: ${not_completed}"
+  fi
+
+  # First insert a bunch of rows to increase snapshot size.
+  psql -c "insert into t select * from generate_series(1, 100000); flush"
+
+  # Kill old cluster
+  kill_cluster
+
+  # Scale in
+  RUST_LOG=info risedev d ci-1cn-1fe-with-recovery
+
+  for i in $(seq 1 100000); do
+    sleep 1
+    is_recovered=$(psql -t -c "select rw_recovery_status()" | xargs | tr -s ' ')
+    echo "recovery_status: $is_recovered"
+    if [[ "$is_recovered" == "RUNNING" ]]; then
+      break
+    fi
+  done
+
+  # Resume backfill fully
+  psql -c "alter materialized view m1 set backfill_rate_limit=default;"
+
+  # wait for backfill to complete
+  echo "waiting for backfill"
+
+  psql -c "wait"
+
+  # check rows should be 1000 + 100000 = 101000
+  result=$(psql -t -c "select count(*) from m1;")
+  echo "result: $result"
+  if [[ "$result" -eq 101000 ]]; then
+    echo "backfill is successful"
+  else
+    echo "backfill is not successful"
+    exit 1
+  fi
+
+  # kill cluster finish test
+  kill_cluster
+  risedev clean-data
+}
+
+test_cross_db_snapshot_backfill() {
+  echo "--- e2e, cross db snapshot backfill test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/cross_db/cross_db_mv.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
@@ -326,6 +429,10 @@ main() {
   test_replication_with_column_pruning
   test_sink_backfill_recovery
   test_snapshot_backfill
+
+  test_scale_in
+
+  test_cross_db_snapshot_backfill
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then

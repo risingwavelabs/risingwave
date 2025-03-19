@@ -40,8 +40,8 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::MergeIterator;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
@@ -203,12 +203,12 @@ pub enum HummockIteratorUnion<
 }
 
 impl<
-        D: HummockIteratorDirection,
-        I1: HummockIterator<Direction = D>,
-        I2: HummockIterator<Direction = D>,
-        I3: HummockIterator<Direction = D>,
-        I4: HummockIterator<Direction = D>,
-    > HummockIterator for HummockIteratorUnion<D, I1, I2, I3, I4>
+    D: HummockIteratorDirection,
+    I1: HummockIterator<Direction = D>,
+    I2: HummockIterator<Direction = D>,
+    I3: HummockIterator<Direction = D>,
+    I4: HummockIterator<Direction = D>,
+> HummockIterator for HummockIteratorUnion<D, I1, I2, I3, I4>
 {
     type Direction = D;
 
@@ -452,7 +452,7 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
     }
 }
 
-impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
+impl<B: RustIteratorBuilder> HummockIterator for FromRustIterator<'_, B> {
     type Direction = B::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {
