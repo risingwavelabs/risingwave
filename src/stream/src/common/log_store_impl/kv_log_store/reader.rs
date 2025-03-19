@@ -193,8 +193,6 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
 
     align_epoch_on_init: bool,
 
-    rewind_start_offset: Option<u64>,
-
     aligned_range_start: Option<LogStoreReadStateStreamRangeStart>,
 }
 
@@ -225,7 +223,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             identity,
             rewind_delay,
             align_epoch_on_init,
-            rewind_start_offset: None,
             aligned_range_start: None,
         }
     }
@@ -390,7 +387,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
 
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
-        self.rewind_start_offset = start_offset;
         // still consuming persisted state store data
         let persisted_epoch = self
             .truncate_offset
@@ -401,7 +397,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         // Construct the log reader's read stream based on start_offset, aligned_range_start, and persisted_epoch.
         // The priority order is: provided start_offset > aligned_range_start > persisted_epoch.
         let range_start = match (
-            self.rewind_start_offset,
+            start_offset,
             self.aligned_range_start.clone(),
             persisted_epoch,
         ) {
@@ -421,6 +417,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
             self.read_persisted_log_store(range_start).await?,
         );
+        self.rx.rewind(start_offset);
         Ok(())
     }
 
@@ -651,10 +648,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
-        self.rewind_start_offset = None;
         self.aligned_range_start = None;
         self.future_state = KvLogStoreReaderFutureState::Empty;
-        self.rx.rewind(self.rewind_start_offset);
 
         Ok(())
     }
