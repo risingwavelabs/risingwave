@@ -471,7 +471,6 @@ impl ScaleController {
                 Vec<CustomActorInfo>,
             > = HashMap::new();
 
-            let mut expr_contexts = HashMap::new();
             for (
                 _,
                 actor::Model {
@@ -481,7 +480,6 @@ impl ScaleController {
                     splits: _,
                     worker_id,
                     vnode_bitmap,
-                    expr_context,
                     ..
                 },
             ) in actors
@@ -505,8 +503,6 @@ impl ScaleController {
                     .push(actor_info);
 
                 actor_status.insert(actor_id as _, worker_id as WorkerId);
-
-                expr_contexts.insert(actor_id as u32, expr_context);
             }
 
             for (
@@ -548,10 +544,7 @@ impl ScaleController {
                             fragment_id: fragment_id as _,
                             vnode_bitmap,
                             mview_definition: job_definition.to_owned(),
-                            expr_context: expr_contexts
-                                .get(&actor_id)
-                                .cloned()
-                                .map(|expr_context| expr_context.to_protobuf()),
+                            expr_context: Some(related_job.expr_context.to_protobuf()),
                         },
                         dispatcher,
                     ),
