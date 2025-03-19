@@ -136,7 +136,7 @@ select * from iceberg_t1_source order by i1;
 11 11 1111
 
 query I retry 3 backoff 5s
-select * from mv2 order by i1;
+select * from mv2 order by i1, i3;
 ----
 1 1 1
 2 2 2
