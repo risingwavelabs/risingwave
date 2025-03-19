@@ -19,7 +19,6 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -1418,7 +1417,7 @@ impl IcebergSinkCommitter {
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<Option<u64>> {
         if self.is_exactly_once {
-            tracing::info!("Icberg sink coordinator initing");
+            tracing::info!("Iceberg sink coordinator initing");
             if self
                 .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
                 .await?
@@ -1441,7 +1440,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
                     match (
                         committed,
-                        self.is_snapshot_id_valid(&self.config, snapshot_id).await?,
+                        self.is_snapshot_id_in_iceberg(&self.config, snapshot_id)
+                            .await?,
                     ) {
                         (true, _) => {
                             tracing::info!(
@@ -1464,7 +1464,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                             tracing::info!(
                                 "There are files that were not successfully committed; re-commit these files."
                             );
-                            self.re_commit(end_epoch, write_results).await?;
+                            self.re_commit(end_epoch, write_results, snapshot_id)
+                                .await?;
                         }
                     }
 
@@ -1507,7 +1508,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 "schema_id and partition_spec_id should be the same in all write results"
             )));
         }
-        self.commit_iceberg_inner(epoch, write_results, true).await
+        self.commit_iceberg_inner(epoch, write_results, None).await
     }
 }
 
@@ -1517,15 +1518,16 @@ impl IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
+        snapshot_id: i64,
     ) -> Result<()> {
-        tracing::info!("Starting iceberg re_commit in epoch {epoch}.");
+        tracing::info!("Starting iceberg re commit in epoch {epoch}.");
 
         // Skip if no data to commit
         if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
-        self.commit_iceberg_inner(epoch, write_results, false)
+        self.commit_iceberg_inner(epoch, write_results, Some(snapshot_id))
             .await?;
         Ok(())
     }
@@ -1534,9 +1536,13 @@ impl IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
-        is_normal_commit: bool,
+        snapshot_id: Option<i64>,
     ) -> Result<()> {
-        if !is_normal_commit {
+        // If the provided `snapshot_id`` is not None, it indicates that this commit is a re commit
+        // occurring during the recovery phase. In this case, we need to use the `snapshot_id`
+        // that was previously persisted in the system table to commit.
+        let is_first_commit = snapshot_id.is_none();
+        if !is_first_commit {
             tracing::info!("Doing iceberg re commit.");
         }
         self.last_commit_epoch = epoch;
@@ -1574,9 +1580,12 @@ impl IcebergSinkCommitter {
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         let txn = Transaction::new(&self.table);
-        let snapshot_id = txn.generate_unique_snapshot_id();
-
-        if self.is_exactly_once && is_normal_commit {
+        // Only generate new snapshot id when first commit.
+        let snapshot_id = match snapshot_id {
+            Some(previous_snapshot_id) => previous_snapshot_id,
+            None => txn.generate_unique_snapshot_id(),
+        };
+        if self.is_exactly_once && is_first_commit {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
             for each_parallelism_write_result in write_results.clone() {
@@ -1595,12 +1604,6 @@ impl IcebergSinkCommitter {
                 snapshot_id,
             )
             .await?;
-        }
-        if self.is_exactly_once && is_normal_commit {
-            // tracing::info!(
-            //     "Finish write pre_commit data into system table, sleep 10min before commit into iceberg to meet crash."
-            // );
-            // tokio::time::sleep(Duration::from_secs(10 * 60)).await;
         }
 
         let data_files = write_results
@@ -1655,19 +1658,12 @@ impl IcebergSinkCommitter {
         }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        if self.is_exactly_once && is_normal_commit {
-            tracing::info!("Sleep 10min before mark committed");
-            tokio::time::sleep(Duration::from_secs(10 * 60)).await;
-        }
-
         if self.is_exactly_once {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
             tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
 
-            if self.is_exactly_once && is_normal_commit {
-                tracing::info!("Sleep 10min before delete iceberg system table");
-                tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+            if self.is_exactly_once {
                 self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                     .await?;
             }
@@ -1822,7 +1818,7 @@ impl IcebergSinkCommitter {
     /// During pre-commit metadata, we record the `snapshot_id` corresponding to each batch of files.
     /// Therefore, the logic for checking whether all files in this batch are present in Iceberg
     /// has been changed to verifying if their corresponding `snapshot_id` exists in Iceberg.
-    async fn is_snapshot_id_valid(
+    async fn is_snapshot_id_in_iceberg(
         &self,
         iceberg_config: &IcebergConfig,
         snapshot_id: i64,

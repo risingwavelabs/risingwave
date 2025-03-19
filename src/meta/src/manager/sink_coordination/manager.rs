@@ -385,6 +385,7 @@ impl ManagerWorker {
 mod tests {
     use std::future::{Future, poll_fn};
     use std::pin::pin;
+    use std::sync::Arc;
     use std::task::Poll;
 
     use anyhow::anyhow;
@@ -400,10 +401,12 @@ mod tests {
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_rpc_client::CoordinatorStreamHandle;
+    use tokio::sync::mpsc::unbounded_channel;
     use tokio_stream::wrappers::ReceiverStream;
 
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
+    use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
 
     struct MockCoordinator<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError>> {
         context: C,
@@ -467,6 +470,11 @@ mod tests {
             [vec![1u8, 2u8], vec![3u8, 4u8]],
             [vec![5u8, 6u8], vec![7u8, 8u8]],
         ];
+        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
+            let (_sender, receiver) = unbounded_channel();
+
+            async move { Ok((1, receiver)) }.boxed()
+        });
 
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
@@ -475,46 +483,54 @@ mod tests {
                 move |param, new_writer_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
-                    tokio::spawn(async move {
-                        // validate the start request
-                        assert_eq!(param, expected_param);
-                        CoordinatorWorker::execute_coordinator(
-                            param.clone(),
-                            new_writer_rx,
-                            MockCoordinator::new(0, |epoch, metadata_list, count: &mut usize| {
-                                *count += 1;
-                                let mut metadata_list = metadata_list
-                                    .into_iter()
-                                    .map(|metadata| match metadata {
-                                        SinkMetadata {
-                                            metadata:
-                                                Some(Metadata::Serialized(SerializedMetadata {
-                                                    metadata,
-                                                })),
-                                        } => metadata,
-                                        _ => unreachable!(),
-                                    })
-                                    .collect_vec();
-                                metadata_list.sort();
-                                match *count {
-                                    1 => {
-                                        assert_eq!(epoch, epoch1);
-                                        assert_eq!(2, metadata_list.len());
-                                        assert_eq!(metadata[0][0], metadata_list[0]);
-                                        assert_eq!(metadata[0][1], metadata_list[1]);
-                                    }
-                                    2 => {
-                                        assert_eq!(epoch, epoch2);
-                                        assert_eq!(2, metadata_list.len());
-                                        assert_eq!(metadata[1][0], metadata_list[0]);
-                                        assert_eq!(metadata[1][1], metadata_list[1]);
-                                    }
-                                    _ => unreachable!(),
-                                }
-                                Ok(())
-                            }),
-                        )
-                        .await;
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            // validate the start request
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                param.clone(),
+                                new_writer_rx,
+                                MockCoordinator::new(
+                                    0,
+                                    |epoch, metadata_list, count: &mut usize| {
+                                        *count += 1;
+                                        let mut metadata_list =
+                                            metadata_list
+                                                .into_iter()
+                                                .map(|metadata| match metadata {
+                                                    SinkMetadata {
+                                                        metadata:
+                                                            Some(Metadata::Serialized(
+                                                                SerializedMetadata { metadata },
+                                                            )),
+                                                    } => metadata,
+                                                    _ => unreachable!(),
+                                                })
+                                                .collect_vec();
+                                        metadata_list.sort();
+                                        match *count {
+                                            1 => {
+                                                assert_eq!(epoch, epoch1);
+                                                assert_eq!(2, metadata_list.len());
+                                                assert_eq!(metadata[0][0], metadata_list[0]);
+                                                assert_eq!(metadata[0][1], metadata_list[1]);
+                                            }
+                                            2 => {
+                                                assert_eq!(epoch, epoch2);
+                                                assert_eq!(2, metadata_list.len());
+                                                assert_eq!(metadata[1][0], metadata_list[0]);
+                                                assert_eq!(metadata[1][1], metadata_list[1]);
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
                     })
                 }
             });
@@ -634,7 +650,11 @@ mod tests {
         let vnode = build_bitmap(&all_vnode);
 
         let metadata = [vec![1u8, 2u8], vec![3u8, 4u8]];
+        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
+            let (_sender, receiver) = unbounded_channel();
 
+            async move { Ok((1, receiver)) }.boxed()
+        });
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
@@ -642,44 +662,52 @@ mod tests {
                 move |param, new_writer_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
-                    tokio::spawn(async move {
-                        // validate the start request
-                        assert_eq!(param, expected_param);
-                        CoordinatorWorker::execute_coordinator(
-                            param.clone(),
-                            new_writer_rx,
-                            MockCoordinator::new(0, |epoch, metadata_list, count: &mut usize| {
-                                *count += 1;
-                                let mut metadata_list = metadata_list
-                                    .into_iter()
-                                    .map(|metadata| match metadata {
-                                        SinkMetadata {
-                                            metadata:
-                                                Some(Metadata::Serialized(SerializedMetadata {
-                                                    metadata,
-                                                })),
-                                        } => metadata,
-                                        _ => unreachable!(),
-                                    })
-                                    .collect_vec();
-                                metadata_list.sort();
-                                match *count {
-                                    1 => {
-                                        assert_eq!(epoch, epoch1);
-                                        assert_eq!(1, metadata_list.len());
-                                        assert_eq!(metadata[0], metadata_list[0]);
-                                    }
-                                    2 => {
-                                        assert_eq!(epoch, epoch2);
-                                        assert_eq!(1, metadata_list.len());
-                                        assert_eq!(metadata[1], metadata_list[0]);
-                                    }
-                                    _ => unreachable!(),
-                                }
-                                Ok(())
-                            }),
-                        )
-                        .await;
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            // validate the start request
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                param.clone(),
+                                new_writer_rx,
+                                MockCoordinator::new(
+                                    0,
+                                    |epoch, metadata_list, count: &mut usize| {
+                                        *count += 1;
+                                        let mut metadata_list =
+                                            metadata_list
+                                                .into_iter()
+                                                .map(|metadata| match metadata {
+                                                    SinkMetadata {
+                                                        metadata:
+                                                            Some(Metadata::Serialized(
+                                                                SerializedMetadata { metadata },
+                                                            )),
+                                                    } => metadata,
+                                                    _ => unreachable!(),
+                                                })
+                                                .collect_vec();
+                                        metadata_list.sort();
+                                        match *count {
+                                            1 => {
+                                                assert_eq!(epoch, epoch1);
+                                                assert_eq!(1, metadata_list.len());
+                                                assert_eq!(metadata[0], metadata_list[0]);
+                                            }
+                                            2 => {
+                                                assert_eq!(epoch, epoch2);
+                                                assert_eq!(1, metadata_list.len());
+                                                assert_eq!(metadata[1], metadata_list[0]);
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
                     })
                 }
             });
@@ -755,20 +783,29 @@ mod tests {
         let vnode1 = build_bitmap(first);
         let vnode2 = build_bitmap(second);
 
+        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
+            let (_sender, receiver) = unbounded_channel();
+
+            async move { Ok((1, receiver)) }.boxed()
+        });
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 move |param, new_writer_rx| {
                     let expected_param = expected_param.clone();
-                    tokio::spawn(async move {
-                        // validate the start request
-                        assert_eq!(param, expected_param);
-                        CoordinatorWorker::execute_coordinator(
-                            param,
-                            new_writer_rx,
-                            MockCoordinator::new((), |_, _, _| unreachable!()),
-                        )
-                        .await;
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            // validate the start request
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                param,
+                                new_writer_rx,
+                                MockCoordinator::new((), |_, _, _| unreachable!()),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
                     })
                 }
             });
@@ -836,23 +873,33 @@ mod tests {
         };
         let vnode1 = build_bitmap(first);
         let vnode2 = build_bitmap(second);
+        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
+            let (_sender, receiver) = unbounded_channel();
 
+            async move { Ok((1, receiver)) }.boxed()
+        });
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 move |param, new_writer_rx| {
                     let expected_param = expected_param.clone();
-                    tokio::spawn(async move {
-                        // validate the start request
-                        assert_eq!(param, expected_param);
-                        CoordinatorWorker::execute_coordinator(
-                            param,
-                            new_writer_rx,
-                            MockCoordinator::new((), |_, _, _| {
-                                Err(SinkError::Coordinator(anyhow!("failed to commit")))
-                            }),
-                        )
-                        .await;
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        {
+                            async move {
+                                // validate the start request
+                                assert_eq!(param, expected_param);
+                                CoordinatorWorker::execute_coordinator(
+                                    param,
+                                    new_writer_rx,
+                                    MockCoordinator::new((), |_, _, _| {
+                                        Err(SinkError::Coordinator(anyhow!("failed to commit")))
+                                    }),
+                                    subscriber.clone(),
+                                )
+                                .await;
+                            }
+                        }
                     })
                 }
             });
@@ -943,7 +990,11 @@ mod tests {
 
         let metadata_scale_out = [vec![9u8, 10u8], vec![11u8, 12u8], vec![13u8, 14u8]];
         let metadata_scale_in = [vec![13u8, 14u8], vec![15u8, 16u8]];
+        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
+            let (_sender, receiver) = unbounded_channel();
 
+            async move { Ok((1, receiver)) }.boxed()
+        });
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
@@ -955,40 +1006,49 @@ mod tests {
                     let metadata_scale_out = metadata_scale_out.clone();
                     let metadata_scale_in = metadata_scale_in.clone();
                     let expected_param = expected_param.clone();
-                    tokio::spawn(async move {
-                        // validate the start request
-                        assert_eq!(param, expected_param);
-                        CoordinatorWorker::execute_coordinator(
-                            param.clone(),
-                            new_writer_rx,
-                            MockCoordinator::new(0, |epoch, metadata_list, count: &mut usize| {
-                                *count += 1;
-                                let mut metadata_list = metadata_list
-                                    .into_iter()
-                                    .map(|metadata| match metadata {
-                                        SinkMetadata {
-                                            metadata:
-                                                Some(Metadata::Serialized(SerializedMetadata {
-                                                    metadata,
-                                                })),
-                                        } => metadata,
-                                        _ => unreachable!(),
-                                    })
-                                    .collect_vec();
-                                metadata_list.sort();
-                                let (expected_epoch, expected_metadata_list) = match *count {
-                                    1 => (epoch1, metadata[0].as_slice()),
-                                    2 => (epoch2, metadata[1].as_slice()),
-                                    3 => (epoch3, metadata_scale_out.as_slice()),
-                                    4 => (epoch4, metadata_scale_in.as_slice()),
-                                    _ => unreachable!(),
-                                };
-                                assert_eq!(expected_epoch, epoch);
-                                assert_eq!(expected_metadata_list, &metadata_list);
-                                Ok(())
-                            }),
-                        )
-                        .await;
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            // validate the start request
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                param.clone(),
+                                new_writer_rx,
+                                MockCoordinator::new(
+                                    0,
+                                    |epoch, metadata_list, count: &mut usize| {
+                                        *count += 1;
+                                        let mut metadata_list =
+                                            metadata_list
+                                                .into_iter()
+                                                .map(|metadata| match metadata {
+                                                    SinkMetadata {
+                                                        metadata:
+                                                            Some(Metadata::Serialized(
+                                                                SerializedMetadata { metadata },
+                                                            )),
+                                                    } => metadata,
+                                                    _ => unreachable!(),
+                                                })
+                                                .collect_vec();
+                                        metadata_list.sort();
+                                        let (expected_epoch, expected_metadata_list) = match *count
+                                        {
+                                            1 => (epoch1, metadata[0].as_slice()),
+                                            2 => (epoch2, metadata[1].as_slice()),
+                                            3 => (epoch3, metadata_scale_out.as_slice()),
+                                            4 => (epoch4, metadata_scale_in.as_slice()),
+                                            _ => unreachable!(),
+                                        };
+                                        assert_eq!(expected_epoch, epoch);
+                                        assert_eq!(expected_metadata_list, &metadata_list);
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
                     })
                 }
             });
