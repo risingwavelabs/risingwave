@@ -458,7 +458,7 @@ impl CheckpointControl {
                     database
                         .creating_streaming_job_controls
                         .values()
-                        .map(|job| &job.graph_info),
+                        .flat_map(|job| job.inflight_graph_info()),
                 )
             })
         })
@@ -668,12 +668,12 @@ impl DatabaseCheckpointControl {
         let mut table_ids_to_merge = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
-            if creating_streaming_job.should_merge_to_upstream() {
+            if let Some(graph_info) = creating_streaming_job.should_merge_to_upstream() {
                 table_ids_to_merge.insert(
                     *table_id,
                     (
                         creating_streaming_job.snapshot_backfill_info.clone(),
-                        creating_streaming_job.graph_info.clone(),
+                        graph_info.clone(),
                     ),
                 );
             }

@@ -339,22 +339,21 @@ impl ControlStreamManager {
         PbInitRequest {
             databases: initial_inflight_infos
                 .map(
-                    |(database_id, subscriptions, inflight_info, creating_job_inflight_info)| {
-                        PbDatabaseInitialPartialGraph {
-                            database_id: database_id.database_id,
-                            graphs: vec![PbInitialPartialGraph {
-                                partial_graph_id: to_partial_graph_id(None),
-                                subscriptions: subscriptions.into_iter().collect_vec(),
-                                actor_infos: inflight_info
-                                    .fragment_infos()
-                                    .chain(
-                                        creating_job_inflight_info
-                                            .flat_map(|job_info| job_info.fragment_infos()),
-                                    )
+                    |(
+                        database_id,
+                        subscriptions,
+                        database_inflight_info,
+                        creating_job_inflight_info,
+                    )| {
+                        fn actor_infos(
+                            nodes: &HashMap<WorkerId, ControlStreamNode>,
+                            fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
+                        ) -> Vec<ActorInfo> {
+                            {
+                                fragment_infos
                                     .flat_map(|fragment| {
                                         fragment.actors.iter().map(|(actor_id, worker_id)| {
-                                            let host_addr = self
-                                                .nodes
+                                            let host_addr = nodes
                                                 .get(worker_id)
                                                 .expect("worker should exist for inflight actor")
                                                 .worker
@@ -367,8 +366,27 @@ impl ControlStreamManager {
                                             }
                                         })
                                     })
-                                    .collect(),
-                            }],
+                                    .collect()
+                            }
+                        }
+                        let mut graphs = vec![PbInitialPartialGraph {
+                            partial_graph_id: to_partial_graph_id(None),
+                            subscriptions: subscriptions.into_iter().collect_vec(),
+                            actor_infos: actor_infos(
+                                &self.nodes,
+                                database_inflight_info.fragment_infos(),
+                            ),
+                        }];
+                        graphs.extend(creating_job_inflight_info.map(|job| {
+                            PbInitialPartialGraph {
+                                partial_graph_id: to_partial_graph_id(Some(job.job_id)),
+                                subscriptions: vec![],
+                                actor_infos: actor_infos(&self.nodes, job.fragment_infos()),
+                            }
+                        }));
+                        PbDatabaseInitialPartialGraph {
+                            database_id: database_id.database_id,
+                            graphs,
                         }
                     },
                 )
