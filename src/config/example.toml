@@ -98,6 +98,15 @@ meta_hummock_time_travel_sst_info_insert_batch_size = 100
 meta_time_travel_vacuum_interval_sec = 30
 meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
 
+[meta.developer.meta_compute_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_stream_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_frontend_client_config]
+connect_timeout_secs = 5
+
 [meta.meta_store_config]
 max_connections = 10
 min_connections = 1
@@ -119,6 +128,9 @@ batch_output_channel_size = 64
 batch_receiver_channel_size = 1000
 batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+
+[batch.developer.batch_compute_client_config]
+connect_timeout_secs = 5
 
 [streaming]
 in_flight_barrier_nums = 10000
@@ -153,6 +165,9 @@ stream_exchange_connection_pool_size = 1
 stream_enable_auto_schema_change = true
 stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
+
+[streaming.developer.stream_compute_client_config]
+connect_timeout_secs = 5
 
 [storage]
 share_buffers_sync_parallelism = 1
