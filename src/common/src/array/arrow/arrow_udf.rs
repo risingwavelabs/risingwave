@@ -276,6 +276,12 @@ mod tests {
             MapArray
             [
               StructArray
+            -- validity: 
+            [
+              valid,
+              valid,
+              valid,
+            ]
             [
             -- child 0: "key" (Utf8)
             StringArray
@@ -294,6 +300,11 @@ mod tests {
             ],
               null,
               StructArray
+            -- validity: 
+            [
+              valid,
+              valid,
+            ]
             [
             -- child 0: "key" (Utf8)
             StringArray
