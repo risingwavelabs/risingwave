@@ -45,9 +45,7 @@ pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
 use futures::{Stream, StreamExt};
-pub use hummock_meta_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
-};
+pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
@@ -75,18 +73,6 @@ mod meta_client;
 mod sink_coordinate_client;
 mod stream_client;
 
-pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
-pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
-pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
-pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
-pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
-use rw_futures_util::await_future_with_monitor_error_stream;
-pub use sink_coordinate_client::CoordinatorStreamHandle;
-pub use stream_client::{
-    StreamClient, StreamClientPool, StreamClientPoolRef, StreamingControlHandle,
-};
-
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self>;
@@ -99,7 +85,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
         try_join_all(
             repeat(host_addr)
                 .take(size)
-                .map(Self::new_client(host_addr, opts)),
+                .map(|host_addr| Self::new_client(host_addr, opts)),
         )
         .await
         .map(Arc::new)
