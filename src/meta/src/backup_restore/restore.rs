@@ -12,18 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use anyhow::anyhow;
+use futures::TryStreamExt;
+use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::version_checkpoint_path;
+use risingwave_hummock_sdk::{version_checkpoint_path, HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;
+// use sea_orm::sea_query::IdenList;
 use thiserror_ext::AsReport;
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
@@ -85,6 +90,9 @@ pub struct RestoreOpts {
     /// The maximum number of read retry attempts for the object store.
     #[clap(long, default_value_t = 3)]
     pub read_retry_attempts: u64,
+    /// Verify that all referenced objects exist in object store.
+    #[clap(long)]
+    pub validate_integrity: bool,
 }
 
 async fn restore_hummock_version(
@@ -138,22 +146,29 @@ async fn restore_impl(
     };
     let target_id = opts.meta_snapshot_id;
     let snapshot_list = &backup_store.manifest().snapshot_metadata;
-    if !snapshot_list.iter().any(|m| m.id == target_id) {
-        return Err(BackupError::Other(anyhow::anyhow!(
-            "snapshot id {} not found",
-            target_id
-        )));
-    }
 
-    let format_version = match snapshot_list.iter().find(|m| m.id == target_id) {
+    let snapshot = match snapshot_list.iter().find(|m| m.id == target_id) {
         None => {
             return Err(BackupError::Other(anyhow::anyhow!(
                 "snapshot id {} not found",
                 target_id
             )));
         }
-        Some(s) => s.format_version,
+        Some(s) => s,
     };
+
+    if opts.validate_integrity {
+        tracing::info!("Start integrity validation.");
+        validate_integrity(
+            snapshot.ssts.clone(),
+            &opts.hummock_storage_url,
+            &opts.hummock_storage_directory,
+        )
+        .await?;
+        tracing::info!("Complete integrity validation.");
+    }
+
+    let format_version = snapshot.format_version;
     match &meta_store {
         MetaStoreBackendImpl::Sql(m) => {
             if format_version < 2 {
@@ -191,6 +206,7 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
 ) -> BackupResult<()> {
     let target_snapshot = loader.load(target_id).await?;
     if opts.dry_run {
+        tracing::info!("Complete dry run.");
         return Ok(());
     }
     let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
@@ -216,6 +232,55 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
         }
     }
     result
+}
+
+async fn validate_integrity(
+    mut object_ids: HashSet<HummockSstableObjectId>,
+    hummock_storage_url: &str,
+    hummock_storage_directory: &str,
+) -> BackupResult<()> {
+    fn try_get_object_id_from_path(path: &str) -> Option<HummockSstableObjectId> {
+        let split = path.split(&['/', '.']).collect_vec();
+        if split.len() <= 2 {
+            return None;
+        }
+        if split[split.len() - 1] != OBJECT_SUFFIX {
+            return None;
+        }
+        let id = split[split.len() - 2]
+            .parse::<HummockSstableObjectId>()
+            .expect(&format!(
+                "expect valid sst id, got {}",
+                split[split.len() - 2]
+            ));
+        Some(id)
+    }
+    tracing::info!("expect {} objects", object_ids.len());
+    let object_store = Arc::new(
+        build_remote_object_store(
+            hummock_storage_url,
+            Arc::new(ObjectStoreMetrics::unused()),
+            "Version Checkpoint",
+            Arc::new(ObjectStoreConfig::default()),
+        )
+        .await,
+    );
+    let mut iter = object_store.list(hummock_storage_directory).await?;
+    while let Some(obj) = iter.try_next().await? {
+        let Some(obj_id) = try_get_object_id_from_path(&obj.key) else {
+            continue;
+        };
+        if object_ids.remove(&obj_id) && object_ids.is_empty() {
+            break;
+        }
+    }
+    if object_ids.is_empty() {
+        return Ok(());
+    }
+    Err(BackupError::Other(anyhow!(
+        "referenced objects not found in object store: {:?}",
+        object_ids
+    )))
 }
 
 #[cfg(test)]

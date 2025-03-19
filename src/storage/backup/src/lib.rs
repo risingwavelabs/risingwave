@@ -53,6 +53,7 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
+    /// It actually stores object id. Bad naming.
     pub ssts: HashSet<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
