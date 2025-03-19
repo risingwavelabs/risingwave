@@ -291,7 +291,7 @@ pub mod agg_executor {
     use crate::executor::{ActorContext, ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
     /// Generate aggExecuter's schema from `input`, `agg_calls` and `group_key_indices`.
-    /// For [`crate::executor::HashAggExecutor`], the group key indices should be provided.
+    /// For [`HashAggExecutor`], the group key indices should be provided.
     pub fn generate_agg_schema(
         input_ref: &Executor,
         agg_calls: &[AggCall],
