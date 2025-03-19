@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-pub use super::arrow_53::{
+pub use super::arrow_54::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
