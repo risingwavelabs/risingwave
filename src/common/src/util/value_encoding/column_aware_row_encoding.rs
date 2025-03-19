@@ -186,6 +186,7 @@ mod new_serde {
     }
 }
 
+/// When a row has columns no more than this number, we will use stack for some intermediate buffers.
 const COLUMN_ON_STACK: usize = 8;
 
 /// The width of the offset of the encoded data, i.e., how many bytes are used to represent the offset.
@@ -344,18 +345,19 @@ impl RowEncoding {
 mod data_types {
     use crate::types::{DataType, StructType};
 
+    /// A trait unifying data types of a row and field types of a struct.
     pub trait DataTypes: Clone {
-        fn my_iter(&self) -> impl Iterator<Item = &DataType>;
+        fn iter(&self) -> impl Iterator<Item = &DataType>;
     }
 
     impl DataTypes for Vec<DataType> {
-        fn my_iter(&self) -> impl Iterator<Item = &DataType> {
-            self.iter()
+        fn iter(&self) -> impl Iterator<Item = &DataType> {
+            self.as_slice().iter()
         }
     }
 
     impl DataTypes for StructType {
-        fn my_iter(&self) -> impl Iterator<Item = &DataType> {
+        fn iter(&self) -> impl Iterator<Item = &DataType> {
             self.types()
         }
     }
@@ -393,6 +395,9 @@ impl Serializer {
 }
 
 impl Serializer<StructType> {
+    /// Create a new `Serializer` for the fields of the given struct.
+    ///
+    /// Panic if the struct type does not have field ids.
     pub fn from_struct(struct_type: StructType) -> Self {
         Self {
             encoded_column_ids: encode_column_ids(struct_type.ids().unwrap()),
@@ -408,7 +413,7 @@ impl<D: DataTypes> Serializer<D> {
 
     fn serialize_raw<T: Encode>(&self, datums: impl IntoIterator<Item = T>) -> Vec<u8> {
         let mut encoding = RowEncoding::new();
-        encoding.encode(datums, self.data_types.my_iter());
+        encoding.encode(datums, self.data_types.iter());
         self.finish(encoding)
     }
 
