@@ -143,58 +143,65 @@ impl DynamicLevelSelectorCore {
     /// reach. This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706`]
     pub fn calculate_level_base_size(&self, levels: &Levels) -> SelectContext {
         let mut first_non_empty_level = 0;
-        let mut max_level_size = 0;
         let mut ctx = SelectContext::default();
+        let mut lsm_total_size = 0;
 
         for level in &levels.levels {
             if level.total_file_size > 0 && first_non_empty_level == 0 {
                 first_non_empty_level = level.level_idx as usize;
             }
-            max_level_size = std::cmp::max(max_level_size, level.total_file_size);
+            lsm_total_size += level.total_file_size;
         }
 
         ctx.level_max_bytes
             .resize(self.config.max_level as usize + 1, u64::MAX);
 
-        if max_level_size == 0 {
+        if lsm_total_size == 0 {
             // Use the bottommost level.
             ctx.base_level = self.config.max_level as usize;
             return ctx;
         }
 
+        lsm_total_size += levels.l0.total_file_size;
         let base_bytes_max = self.config.max_bytes_for_level_base;
-        let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
 
-        let mut cur_level_size = max_level_size;
+        // The Dynamic Level Compaction strategy, where data is primarily concentrated in the last level, reduces the amount of data in the second-to-last level to improve accuracy.
+        let bottom_level_size = std::cmp::max(
+            levels.levels.last().unwrap().total_file_size,
+            lsm_total_size - (lsm_total_size / self.config.max_bytes_for_level_multiplier),
+        );
+
+        let mut cur_level_size = bottom_level_size;
         for _ in first_non_empty_level..self.config.max_level as usize {
             cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
 
-        let base_level_size = if cur_level_size <= base_bytes_min {
-            // Case 1. If we make target size of last level to be max_level_size,
-            // target size of the first non-empty level would be smaller than
-            // base_bytes_min. We set it be base_bytes_min.
-            ctx.base_level = first_non_empty_level;
-            base_bytes_min + 1
-        } else {
-            ctx.base_level = first_non_empty_level;
-            while ctx.base_level > 1 && cur_level_size > base_bytes_max {
-                ctx.base_level -= 1;
-                cur_level_size /= self.config.max_bytes_for_level_multiplier;
-            }
-            std::cmp::min(base_bytes_max, cur_level_size)
-        };
-
-        let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
-        let mut level_size = base_level_size;
-        for i in ctx.base_level..=self.config.max_level as usize {
-            // Don't set any level below base_bytes_max. Otherwise, the LSM can
-            // assume an hourglass shape where L1+ sizes are smaller than L0. This
-            // causes compaction scoring, which depends on level sizes, to favor L1+
-            // at the expense of L0, which may fill up and stall.
-            ctx.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
-            level_size = (level_size as f64 * level_multiplier) as u64;
+        ctx.base_level = first_non_empty_level;
+        while ctx.base_level > 1 && cur_level_size > base_bytes_max {
+            ctx.base_level -= 1;
+            cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
+
+        let mut smoothed_level_multiplier = 1.0;
+        if ctx.base_level != self.config.max_level as usize {
+            smoothed_level_multiplier = (bottom_level_size as f64 / base_bytes_max as f64)
+                .powf(1.0 / (self.config.max_level as f64 - ctx.base_level as f64));
+        }
+
+        let mut level_size = base_bytes_max as f64;
+        for level_index in ctx.base_level..=self.config.max_level as usize {
+            if level_index > ctx.base_level && level_size > 0_f64 {
+                level_size *= smoothed_level_multiplier;
+            }
+
+            let rounded_level_size = level_size.round();
+            if rounded_level_size > std::f64::MAX {
+                ctx.level_max_bytes[level_index] = std::u64::MAX;
+            } else {
+                ctx.level_max_bytes[level_index] = rounded_level_size as u64;
+            }
+        }
+
         ctx
     }
 
