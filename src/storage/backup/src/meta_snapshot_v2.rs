@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
 use crate::{BackupError, BackupResult};
+
 pub type MetaSnapshotV2 = MetaSnapshot<MetadataV2>;
 
 impl From<serde_json::Error> for BackupError {

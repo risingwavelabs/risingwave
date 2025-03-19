@@ -185,7 +185,7 @@ impl VacuumManager {
         if objects_to_delete.is_empty() {
             return Ok(());
         }
-        let reject = self.backup_manager.list_pinned_ssts();
+        let reject = self.backup_manager.list_pinned_object_ids();
         // Ack these SSTs immediately, because they tend to be pinned for long time.
         // They will be GCed during full GC when they are no longer pinned.
         let to_ack = objects_to_delete
