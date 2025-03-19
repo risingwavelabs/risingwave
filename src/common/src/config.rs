@@ -543,6 +543,21 @@ pub struct MetaDeveloperConfig {
     /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub stream_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct RpcClientConfig {
+    #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1176,6 +1191,9 @@ pub struct StreamingDeveloperConfig {
     /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1206,6 +1224,9 @@ pub struct BatchDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
     exchange_connection_pool_size: Option<u16>,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
 }
 
 macro_rules! define_system_config {
@@ -2159,6 +2180,9 @@ pub mod default {
 
         pub fn switch_jdbc_pg_to_native() -> bool {
             false
+        }
+        pub fn rpc_client_connect_timeout_secs() -> u64 {
+            5
         }
     }
 
