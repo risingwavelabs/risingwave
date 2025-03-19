@@ -578,22 +578,20 @@ dependencies = [
 
 [[package]]
 name = "arrow-flight"
-version = "53.0.0"
+version = "54.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b915fb36d935b969894d7909ad417c67ddeadebbbd57c3c168edf64721a37d31"
+checksum = "c7408f2bf3b978eddda272c7699f439760ebc4ac70feca25fefa82c5b8ce808d"
 dependencies = [
- "arrow-array 53.2.0",
- "arrow-buffer 53.2.0",
- "arrow-cast 53.2.0",
- "arrow-ipc 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-buffer 54.2.1",
+ "arrow-cast 54.2.1",
+ "arrow-ipc 54.2.1",
+ "arrow-schema 54.2.1",
  "base64 0.22.0",
  "bytes",
  "futures",
- "paste",
  "prost 0.13.4",
  "prost-types 0.13.4",
- "tokio",
  "tonic",
 ]
 
@@ -859,16 +857,16 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-flight"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9f5ae23e3833d68bc536f3e744802e2d87db31dc4adbb0541f73bc69cc789a5"
+checksum = "cfebc7d9f6449457b90f6f42ad7864cdec39f97b730e476d9b009c95b5465a1f"
 dependencies = [
- "arrow-array 53.2.0",
+ "arrow-array 54.2.1",
  "arrow-flight",
- "arrow-schema 53.2.0",
- "arrow-select 53.2.0",
+ "arrow-schema 54.2.1",
+ "arrow-select 54.2.1",
  "futures-util",
- "thiserror 1.0.63",
+ "thiserror 2.0.3",
  "tokio",
  "tonic",
  "tracing",
@@ -876,14 +874,14 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-js"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c804d310735f80b04e818b62e83b450f4cf1e246b970ca605ef46f99d4480c1b"
+checksum = "ccef6f74030c63fe5221a8d4f77235ee2e4ebee58fadf3efaa943a090c9bea65"
 dependencies = [
  "anyhow",
- "arrow-array 53.2.0",
- "arrow-buffer 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-buffer 54.2.1",
+ "arrow-schema 54.2.1",
  "atomic-time",
  "futures-util",
  "reqwest 0.12.4",
@@ -899,29 +897,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a946b648352e6226d35801441c3e06b90e3757634ff34f3017b14e019260dfe"
 dependencies = [
  "anyhow",
- "arrow-array 53.2.0",
- "arrow-buffer 53.2.0",
- "arrow-ipc 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-buffer 54.2.1",
+ "arrow-ipc 54.2.1",
+ "arrow-schema 54.2.1",
  "pyo3",
  "pyo3-build-config",
 ]
 
 [[package]]
 name = "arrow-udf-wasm"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ce3bb9df64ed6e1a66d628344f85a79e2a8d124866b3c8587ad1c1f73eb4ae"
+checksum = "ca1738d77eb9707333d75448b9982b9ea03bede1fe39cf29406c69fa0819542f"
 dependencies = [
  "anyhow",
- "arrow-array 53.2.0",
- "arrow-ipc 53.2.0",
- "arrow-schema 53.2.0",
+ "arrow-array 54.2.1",
+ "arrow-ipc 54.2.1",
+ "arrow-schema 54.2.1",
  "async-trait",
  "base64 0.22.0",
  "genawaiter2",
  "itertools 0.14.0",
- "once_cell",
  "tempfile",
  "wasi-common",
  "wasmtime",
@@ -11277,7 +11274,6 @@ version = "2.4.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "arrow-flight",
  "arrow-udf-flight",
  "arrow-udf-js",
  "arrow-udf-python",
