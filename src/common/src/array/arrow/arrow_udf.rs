@@ -276,7 +276,7 @@ mod tests {
             MapArray
             [
               StructArray
-            -- validity: 
+            -- validity:
             [
               valid,
               valid,
@@ -300,7 +300,7 @@ mod tests {
             ],
               null,
               StructArray
-            -- validity: 
+            -- validity:
             [
               valid,
               valid,
@@ -319,9 +319,14 @@ mod tests {
               3,
             ]
             ],
-            ]
-        "#]]
-        .assert_debug_eq(&arrow);
+            ]"#]]
+        .assert_eq(
+            &format!("{:#?}", arrow)
+                .lines()
+                .map(|s| s.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
 
         let rw_array_new = UdfArrowConvert::default()
             .from_map_array(arrow.as_any().downcast_ref().unwrap())
