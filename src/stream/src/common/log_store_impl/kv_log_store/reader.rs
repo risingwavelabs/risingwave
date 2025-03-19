@@ -389,10 +389,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
 }
 
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
-    async fn build_stream_from_start_offset(
-        &mut self,
-        start_offset: Option<u64>,
-    ) -> LogStoreResult<()> {
+    async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
         self.rewind_start_offset = start_offset;
         // still consuming persisted state store data
         let persisted_epoch = self

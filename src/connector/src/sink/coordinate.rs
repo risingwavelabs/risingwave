@@ -92,6 +92,10 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
             .await?;
         self.inner.update_vnode_bitmap(vnode_bitmap).await
     }
+
+    fn rewind_start_offset(&mut self) -> Result<Option<u64>> {
+        Ok(self.log_store_rewind_start_epoch)
+    }
 }
 
 impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> Drop for CoordinatedSinkWriter<W> {

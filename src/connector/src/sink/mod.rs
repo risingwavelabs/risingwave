@@ -657,7 +657,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 }
 
 pub trait SinkLogReader: Send + Sized + 'static {
-    fn build_stream_from_start_offset(
+    fn start_from(
         &mut self,
         start_offset: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
@@ -684,11 +684,11 @@ impl<R: LogReader> SinkLogReader for R {
         <Self as LogReader>::truncate(self, offset)
     }
 
-    fn build_stream_from_start_offset(
+    fn start_from(
         &mut self,
         start_offset: Option<u64>,
     ) -> impl std::future::Future<Output = LogStoreResult<()>> + std::marker::Send {
-        <Self as LogReader>::build_stream_from_start_offset(self, start_offset)
+        <Self as LogReader>::start_from(self, start_offset)
     }
 }
 

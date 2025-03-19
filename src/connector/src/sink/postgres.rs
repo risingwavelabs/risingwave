@@ -523,7 +523,7 @@ impl PostgresSinkWriter {
 #[async_trait]
 impl LogSinker for PostgresSinkWriter {
     async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
-        log_reader.build_stream_from_start_offset(None).await?;
+        log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {

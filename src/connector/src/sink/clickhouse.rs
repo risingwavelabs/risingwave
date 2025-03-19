@@ -556,7 +556,6 @@ impl Sink for ClickHouseSink {
             writer,
             SinkWriterMetrics::new(&writer_param),
             commit_checkpoint_interval,
-            None,
         ))
     }
 }

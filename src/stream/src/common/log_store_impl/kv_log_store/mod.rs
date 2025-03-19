@@ -676,6 +676,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -748,6 +749,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -864,6 +866,7 @@ mod tests {
         test_env.commit_epoch(epoch1).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_id1 = match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -968,6 +971,7 @@ mod tests {
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -1217,6 +1221,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         if !align_init_epoch {
             // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
             // set to true, we won't receive the following commented items.
@@ -1301,6 +1306,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         {
             let mut future = pin!(reader.next_item());
@@ -1470,6 +1476,7 @@ mod tests {
         test_env.commit_epoch(epoch3).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         let chunk_ids = check_reader(
             &mut reader,
@@ -1553,6 +1560,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         let data = [
             (epoch1, Some(&stream_chunk1)),
@@ -1625,7 +1633,7 @@ mod tests {
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
         reader.init().await.unwrap();
-
+        reader.start_from(None).await.unwrap();
         let data = [
             (epoch1, Some(&stream_chunk1)),
             (epoch2, Some(&stream_chunk2)),
@@ -1807,6 +1815,7 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1865,6 +1874,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1933,6 +1943,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [

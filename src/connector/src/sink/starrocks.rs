@@ -331,12 +331,10 @@ impl Sink for StarrocksSink {
             inner,
         )
         .await?;
-        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
             commit_checkpoint_interval,
-            log_store_rewind_start_epoch,
         ))
     }
 

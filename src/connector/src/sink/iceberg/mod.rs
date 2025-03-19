@@ -491,7 +491,6 @@ impl Sink for IcebergSink {
             inner,
         )
         .await?;
-        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
 
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
@@ -502,7 +501,6 @@ impl Sink for IcebergSink {
             writer,
             metrics,
             commit_checkpoint_interval,
-            log_store_rewind_start_epoch,
         ))
     }
 
