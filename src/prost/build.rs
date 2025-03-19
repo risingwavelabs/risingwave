@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "task_service",
         "telemetry",
         "user",
+        "serverless_backfill_controller",
         "secret",
         "frontend_service",
     ];

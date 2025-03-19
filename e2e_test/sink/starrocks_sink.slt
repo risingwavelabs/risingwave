@@ -39,6 +39,38 @@ statement ok
 DROP TABLE t6;
 
 statement ok
+CREATE TABLE agg_table(id int primary key, value string);
+
+statement ok
+CREATE SINK sink_agg_table
+FROM
+    agg_table WITH (
+    connector = 'starrocks',
+    type = 'append-only',
+    force_append_only='true',
+    starrocks.host = 'starrocks-fe-server',
+    starrocks.mysqlport = '9030',
+    starrocks.httpport = '8030',
+    starrocks.user = 'users',
+    starrocks.password = '123456',
+    starrocks.database = 'demo',
+    starrocks.table = 'demo_agg_table',
+    primary_key = 'id'
+);
+
+statement ok
+INSERT INTO agg_table VALUES (1, 'v');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK sink_agg_table;
+
+statement ok
+DROP TABLE agg_table;
+
+statement ok
 CREATE TABLE reserved_words (id int primary key, "order" text, "from" text);
 
 statement ok

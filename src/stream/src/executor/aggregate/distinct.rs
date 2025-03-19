@@ -21,8 +21,9 @@ use risingwave_common::array::{ArrayRef, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::aggregate::AggCall;
 
-use super::{AggCall, GroupKey};
+use super::agg_group::GroupKey;
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::monitor::AggDistinctDedupMetrics;
@@ -395,9 +396,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -436,9 +435,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -487,9 +484,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
             .await
@@ -576,9 +571,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(
                 &ops,
@@ -617,9 +610,7 @@ mod tests {
         );
         let (ops, columns, visibility) = chunk.into_inner();
 
-        let visibilities = std::iter::repeat(visibility)
-            .take(agg_calls.len())
-            .collect_vec();
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
         let visibilities = deduplicater
             .dedup_chunk(
                 &ops,

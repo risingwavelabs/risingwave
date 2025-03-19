@@ -29,8 +29,8 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
+use super::agg_group::{AggStateCacheStats, GroupKey};
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
-use super::{AggStateCacheStats, GroupKey};
 use crate::common::StateTableColumnMapping;
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
@@ -328,11 +328,10 @@ mod tests {
     use risingwave_storage::StateStore;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::MaterializedInputState;
+    use super::*;
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::aggregation::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
 
     fn create_chunk<S: StateStore>(

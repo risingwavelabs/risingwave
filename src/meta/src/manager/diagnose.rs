@@ -580,7 +580,7 @@ impl DiagnoseCommand {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_instant_vector_impl<'a>(&self, s: &mut String, query: &str, labels: Vec<&str>) {
+    async fn write_instant_vector_impl(&self, s: &mut String, query: &str, labels: Vec<&str>) {
         let Some(ref client) = self.prometheus_client else {
             return;
         };

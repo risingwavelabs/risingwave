@@ -180,7 +180,7 @@ fn main() {
         if !(entry
             .path()
             .extension()
-            .map_or(false, |p| p.eq_ignore_ascii_case("yaml")))
+            .is_some_and(|p| p.eq_ignore_ascii_case("yaml")))
         {
             continue;
         }

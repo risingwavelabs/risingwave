@@ -427,14 +427,14 @@ impl ParseTo for CsvInfo {
 
 impl fmt::Display for CsvInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v: Vec<String> = vec![];
         if !self.has_header {
-            v.push(format!(
-                "{}",
-                display_separated(&[Keyword::WITHOUT, Keyword::HEADER], " ")
-            ));
+            write!(f, "WITHOUT HEADER ")?;
         }
-        impl_fmt_display!(delimiter, v, self);
-        v.iter().join(" ").fmt(f)
+        write!(
+            f,
+            "DELIMITED BY {}",
+            AstString((self.delimiter as char).to_string())
+        )?;
+        Ok(())
     }
 }

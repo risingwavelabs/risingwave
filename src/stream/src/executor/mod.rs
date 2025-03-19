@@ -54,8 +54,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
-pub mod agg_common;
-pub mod aggregation;
+pub mod aggregate;
 pub mod asof_join;
 mod backfill;
 mod barrier_recv;
@@ -69,7 +68,6 @@ mod dynamic_filter;
 pub mod error;
 mod expand;
 mod filter;
-mod hash_agg;
 pub mod hash_join;
 mod hop_window;
 mod join;
@@ -86,12 +84,10 @@ mod project_set;
 mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
-mod simple_agg;
 mod sink;
 mod sort;
 mod sort_buffer;
 pub mod source;
-mod stateless_simple_agg;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
@@ -131,7 +127,6 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
-pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
@@ -150,10 +145,8 @@ pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use row_merge::RowMergeExecutor;
-pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
-pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
@@ -389,7 +382,7 @@ impl Barrier {
     /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
-            .map_or(false, |actors| actors.contains(&actor_id))
+            .is_some_and(|actors| actors.contains(&actor_id))
     }
 
     pub fn is_checkpoint(&self) -> bool {

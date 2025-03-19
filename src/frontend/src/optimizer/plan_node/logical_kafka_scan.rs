@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, Schema};
-use risingwave_connector::source::DataType;
+use risingwave_common::types::DataType;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};

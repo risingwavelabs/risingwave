@@ -22,6 +22,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
+use risingwave_pb::meta::object::PbObjectInfo;
+use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
@@ -279,6 +282,7 @@ impl GlobalStreamManager {
                 let version = stream_manager
                     .metadata_manager
                     .wait_streaming_job_finished(
+                        streaming_job.database_id().into(),
                         streaming_job.id() as _,
                     )
                     .await?;
@@ -540,7 +544,7 @@ impl GlobalStreamManager {
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
         {
-            let _ = self
+            let res = self
                 .barrier_scheduler
                 .run_command(
                     database_id,
@@ -551,8 +555,8 @@ impl GlobalStreamManager {
                             .collect(),
                         actors: removed_actors,
                         unregistered_state_table_ids: state_table_ids
-                            .into_iter()
-                            .map(|table_id| TableId::new(table_id as _))
+                            .iter()
+                            .map(|table_id| TableId::new(*table_id as _))
                             .collect(),
                         unregistered_fragment_ids: fragment_ids,
                     },
@@ -561,7 +565,36 @@ impl GlobalStreamManager {
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
+            if res.is_ok() {
+                self.post_dropping_streaming_jobs(state_table_ids).await;
+            }
         }
+    }
+
+    async fn post_dropping_streaming_jobs(
+        &self,
+        state_table_ids: Vec<risingwave_meta_model::TableId>,
+    ) {
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .complete_dropped_tables(state_table_ids.into_iter())
+            .await;
+        let objects = tables
+            .into_iter()
+            .map(|t| PbObject {
+                object_info: Some(PbObjectInfo::Table(t)),
+            })
+            .collect();
+        let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
+        self.env
+            .notification_manager()
+            .notify_hummock(Operation::Delete, group.clone())
+            .await;
+        self.env
+            .notification_manager()
+            .notify_compactor(Operation::Delete, group)
+            .await;
     }
 
     /// Cancel streaming jobs and return the canceled table ids.

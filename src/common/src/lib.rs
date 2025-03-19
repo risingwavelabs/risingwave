@@ -16,7 +16,6 @@
     refining_impl_trait,
     reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
 )]
-#![feature(extract_if)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -37,6 +36,7 @@
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![feature(btree_cursors)]
+#![feature(assert_matches)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -80,6 +80,7 @@ pub use {
     risingwave_license as license,
 };
 pub mod lru;
+pub mod operator;
 pub mod opts;
 pub mod range;
 pub mod row;
