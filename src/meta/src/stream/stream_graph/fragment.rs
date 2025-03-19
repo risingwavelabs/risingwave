@@ -38,7 +38,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, FragmentTypeFlag,
+    DispatchStrategy, DispatcherType, FragmentTypeFlag, PbStreamNode,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
@@ -581,20 +581,26 @@ impl StreamFragmentGraph {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
-    /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
     pub fn collect_snapshot_backfill_info(
         &self,
+    ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
+        Self::collect_snapshot_backfill_info_impl(
+            self.fragments
+                .values()
+                .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask)),
+        )
+    }
+
+    /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
+    pub fn collect_snapshot_backfill_info_impl(
+        fragments: impl IntoIterator<Item = (&PbStreamNode, u32)>,
     ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
         let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
         let mut cross_db_info = SnapshotBackfillInfo {
             upstream_mv_table_id_to_backfill_epoch: Default::default(),
         };
         let mut result = Ok(());
-        for (node, fragment_type_mask) in self
-            .fragments
-            .values()
-            .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask))
-        {
+        for (node, fragment_type_mask) in fragments {
             visit_stream_node_cont(node, |node| {
                 if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
                     let stream_scan_type = StreamScanType::try_from(stream_scan.stream_scan_type)
@@ -614,9 +620,10 @@ impl StreamFragmentGraph {
                                     & (FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
                                     > 0
                             );
-                            cross_db_info
-                                .upstream_mv_table_id_to_backfill_epoch
-                                .insert(TableId::new(stream_scan.table_id), None);
+                            cross_db_info.upstream_mv_table_id_to_backfill_epoch.insert(
+                                TableId::new(stream_scan.table_id),
+                                stream_scan.snapshot_backfill_epoch,
+                            );
 
                             return true;
                         }
@@ -629,7 +636,10 @@ impl StreamFragmentGraph {
                                 (Some(prev_snapshot_backfill_info), true) => {
                                     prev_snapshot_backfill_info
                                         .upstream_mv_table_id_to_backfill_epoch
-                                        .insert(TableId::new(stream_scan.table_id), None);
+                                        .insert(
+                                            TableId::new(stream_scan.table_id),
+                                            stream_scan.snapshot_backfill_epoch,
+                                        );
                                     true
                                 }
                                 (None, false) => true,
@@ -644,7 +654,10 @@ impl StreamFragmentGraph {
                                 if is_snapshot_backfill {
                                     Some(SnapshotBackfillInfo {
                                         upstream_mv_table_id_to_backfill_epoch: HashMap::from_iter(
-                                            [(TableId::new(stream_scan.table_id), None)],
+                                            [(
+                                                TableId::new(stream_scan.table_id),
+                                                stream_scan.snapshot_backfill_epoch,
+                                            )],
                                         ),
                                     })
                                 } else {

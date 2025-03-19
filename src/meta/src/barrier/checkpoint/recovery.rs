@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::mem::{replace, take};
-use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 use futures::FutureExt;
@@ -269,12 +268,7 @@ impl DatabaseRecoveringState {
             DatabaseRecoveringStage::Initializing {
                 initial_barrier_collector,
                 ..
-            } => Some((initial_barrier_collector.database_state(), {
-                static EMPTY_CREATING_JOBS: LazyLock<
-                    HashMap<TableId, CreatingStreamingJobControl>,
-                > = LazyLock::new(HashMap::new);
-                &EMPTY_CREATING_JOBS
-            })),
+            } => Some(initial_barrier_collector.database_state()),
         }
     }
 }
@@ -432,8 +426,9 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             },
         };
         let DatabaseRuntimeInfoSnapshot {
-            database_fragment_info,
+            job_infos,
             mut state_table_committed_epochs,
+            mut state_table_log_epochs,
             subscription_info,
             mut stream_actors,
             mut source_splits,
@@ -442,8 +437,9 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         let result: MetaResult<_> = try {
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
-                database_fragment_info,
+                job_infos,
                 &mut state_table_committed_epochs,
+                &mut state_table_log_epochs,
                 &mut stream_actors,
                 &mut source_splits,
                 &mut background_jobs,

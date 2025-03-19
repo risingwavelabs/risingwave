@@ -18,4 +18,5 @@ mod recovery;
 mod state;
 
 pub(crate) use control::{CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl};
+pub(crate) use creating_job::CreatingStreamingJobControl;
 pub(super) use state::BarrierWorkerState;
