@@ -166,7 +166,9 @@ impl IcebergCommon {
                     let (bucket, _) = {
                         let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if (url.is_err() || is_s3_tables) && (catalog_type == "rest" || catalog_type == "rest_rust") {
+                        if (url.is_err() || is_s3_tables)
+                            && (catalog_type == "rest" || catalog_type == "rest_rust")
+                        {
                             // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
                             // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                             // so we allow it to pass here.
@@ -270,8 +272,10 @@ impl IcebergCommon {
                         java_catalog_configs.insert("scope".to_owned(), scope.clone());
                     }
                     if let Some(rest_signing_region) = &self.rest_signing_region {
-                        java_catalog_configs
-                            .insert("rest.signing-region".to_owned(), rest_signing_region.clone());
+                        java_catalog_configs.insert(
+                            "rest.signing-region".to_owned(),
+                            rest_signing_region.clone(),
+                        );
                     }
                     if let Some(rest_signing_name) = &self.rest_signing_name {
                         java_catalog_configs
@@ -284,17 +288,13 @@ impl IcebergCommon {
                         );
 
                         if let Some(access_key) = &self.access_key {
-                            java_catalog_configs.insert(
-                                "rest.access-key-id".to_owned(),
-                                access_key.clone(),
-                            );
+                            java_catalog_configs
+                                .insert("rest.access-key-id".to_owned(), access_key.clone());
                         }
 
                         if let Some(secret_key) = &self.secret_key {
-                            java_catalog_configs.insert(
-                                "rest.secret-access-key".to_owned(),
-                                secret_key.clone(),
-                            );
+                            java_catalog_configs
+                                .insert("rest.secret-access-key".to_owned(), secret_key.clone());
                         }
                     }
                 }
