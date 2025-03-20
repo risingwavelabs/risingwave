@@ -33,7 +33,6 @@ start_standalone_without_compactor() {
         --role both \
         --meta-address http://127.0.0.1:5690 \
         --config-path src/config/ci-single-node-standalone.toml" \
-…
      --frontend-opts=" \
        --listen-addr 127.0.0.1:4566 \
        --advertise-addr 127.0.0.1:4566 \
