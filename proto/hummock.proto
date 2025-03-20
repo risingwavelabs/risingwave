@@ -73,6 +73,7 @@ message IntraLevelDelta {
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
   uint32 vnode_partition_count = 5;
+  uint64 compaction_group_version_id = 6;
 }
 
 enum CompatibilityVersion {
@@ -187,6 +188,7 @@ message HummockVersion {
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
     repeated uint32 member_table_ids = 5 [deprecated = true];
+    uint64 compaction_group_version_id = 6;
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -376,6 +378,8 @@ message CompactTask {
   map<uint32, TableSchema> table_schemas = 25;
   // Max sub compaction task numbers
   uint32 max_sub_compaction = 26;
+  // The compaction group id when the compaction task is created.
+  uint64 compaction_group_version_id = 27;
 }
 
 message LevelHandler {

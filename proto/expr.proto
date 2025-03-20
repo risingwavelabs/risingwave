@@ -155,7 +155,8 @@ message ExprNode {
     ATANH = 266;
     SINH = 267;
     ACOSD = 268;
-    // skips 268,269,270 so that acosd, atand, atan2d are close to others
+    ATAND = 269;
+    ATAN2D = 270;
     TRUNC = 271;
     LN = 272;
     LOG10 = 273;
@@ -199,6 +200,9 @@ message ExprNode {
     QUOTE_NULLABLE = 331;
     HMAC = 332;
     SECURE_COMPARE = 333;
+
+    // Constraints Check
+    CHECK_NOT_NULL = 350;
 
     // Unary operators
     NEG = 401;
@@ -330,6 +334,7 @@ message ExprNode {
     RW_RECOVERY_STATUS = 2412;
     RW_EPOCH_TO_TS = 2413;
     PG_TABLE_IS_VISIBLE = 2414;
+    HAS_FUNCTION_PRIVILEGE = 2415;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;

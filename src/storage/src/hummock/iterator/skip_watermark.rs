@@ -79,7 +79,7 @@ impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> SkipWaterma
                 break;
             }
 
-            if self.last_table_id.map_or(true, |last_table_id| {
+            if self.last_table_id.is_none_or(|last_table_id| {
                 last_table_id != self.inner.key().user_key.table_id.table_id
             }) {
                 self.add_last_table_stats();
@@ -341,9 +341,10 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             let key_table_id = key.user_key.table_id;
             {
-                if self.last_table_id.map_or(true, |last_table_id| {
-                    last_table_id != key_table_id.table_id()
-                }) {
+                if self
+                    .last_table_id
+                    .is_none_or(|last_table_id| last_table_id != key_table_id.table_id())
+                {
                     self.last_table_id = Some(key_table_id.table_id());
                     self.last_serde = self
                         .compaction_catalog_agent_ref

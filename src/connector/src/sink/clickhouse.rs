@@ -247,7 +247,7 @@ impl ClickHouseEngine {
                     .next()
                     .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
                     .split(',')
-                    .last()
+                    .next_back()
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_owned()))?
                     .trim()
                     .to_owned();
@@ -289,7 +289,7 @@ impl ClickHouseEngine {
                     .next()
                     .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
                     .split(',')
-                    .last()
+                    .next_back()
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_owned()))?
                     .trim()
                     .to_owned();

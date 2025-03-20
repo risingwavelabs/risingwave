@@ -15,7 +15,7 @@
 pub mod parquet_file_handler;
 
 mod metrics;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -252,14 +252,14 @@ pub enum IcebergTimeTravelInfo {
 impl IcebergSplitEnumerator {
     pub fn get_snapshot_id(
         table: &Table,
-        time_traval_info: Option<IcebergTimeTravelInfo>,
+        time_travel_info: Option<IcebergTimeTravelInfo>,
     ) -> ConnectorResult<Option<i64>> {
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             return Ok(None);
         }
 
-        let snapshot_id = match time_traval_info {
+        let snapshot_id = match time_travel_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
                 let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
                     bail!("Cannot find the snapshot id in the iceberg table.");
@@ -350,12 +350,15 @@ impl IcebergSplitEnumerator {
         tracing::debug!("iceberg_table_schema: {:?}", table_schema);
 
         let mut position_delete_files = vec![];
+        let mut position_delete_files_set = HashSet::new();
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
+        let mut equality_delete_files_set = HashSet::new();
         let scan = table
             .scan()
             .with_filter(predicate)
             .snapshot_id(snapshot_id)
+            .with_delete_file_processing_enabled(true)
             .select(require_names)
             .build()
             .map_err(|e| anyhow!(e))?;
@@ -365,16 +368,33 @@ impl IcebergSplitEnumerator {
         #[for_await]
         for task in file_scan_stream {
             let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            for mut delete_file in task.deletes.drain(..) {
+                match delete_file.data_file_content {
+                    iceberg::spec::DataContentType::Data => {
+                        bail!("Data file should not in task deletes");
+                    }
+                    iceberg::spec::DataContentType::EqualityDeletes => {
+                        if equality_delete_files_set.insert(delete_file.data_file_path.clone()) {
+                            equality_delete_files.push(delete_file);
+                        }
+                    }
+                    iceberg::spec::DataContentType::PositionDeletes => {
+                        if position_delete_files_set.insert(delete_file.data_file_path.clone()) {
+                            delete_file.project_field_ids = Vec::default();
+                            position_delete_files.push(delete_file);
+                        }
+                    }
+                }
+            }
             match task.data_file_content {
                 iceberg::spec::DataContentType::Data => {
                     data_files.push(task);
                 }
                 iceberg::spec::DataContentType::EqualityDeletes => {
-                    equality_delete_files.push(task);
+                    bail!("Equality delete files should not be in the data files");
                 }
                 iceberg::spec::DataContentType::PositionDeletes => {
-                    task.project_field_ids = Vec::default();
-                    position_delete_files.push(task);
+                    bail!("Position delete files should not be in the data files");
                 }
             }
         }
@@ -453,6 +473,7 @@ impl IcebergSplitEnumerator {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
+            .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
@@ -462,17 +483,19 @@ impl IcebergSplitEnumerator {
         #[for_await]
         for task in file_scan_stream {
             let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
-            match task.data_file_content {
-                iceberg::spec::DataContentType::Data => {}
-                iceberg::spec::DataContentType::EqualityDeletes => {
-                    if equality_ids.is_empty() {
-                        equality_ids = task.equality_ids;
-                    } else if equality_ids != task.equality_ids {
-                        bail!("The schema of iceberg equality delete file must be consistent");
+            for delete_file in task.deletes {
+                match delete_file.data_file_content {
+                    iceberg::spec::DataContentType::Data => {}
+                    iceberg::spec::DataContentType::EqualityDeletes => {
+                        if equality_ids.is_empty() {
+                            equality_ids = delete_file.equality_ids;
+                        } else if equality_ids != delete_file.equality_ids {
+                            bail!("The schema of iceberg equality delete file must be consistent");
+                        }
                     }
-                }
-                iceberg::spec::DataContentType::PositionDeletes => {
-                    have_position_delete = true;
+                    iceberg::spec::DataContentType::PositionDeletes => {
+                        have_position_delete = true;
+                    }
                 }
             }
         }
@@ -489,10 +512,10 @@ impl IcebergSplitEnumerator {
 
     pub async fn get_delete_parameters(
         &self,
-        time_traval_info: Option<IcebergTimeTravelInfo>,
+        time_travel_info: Option<IcebergTimeTravelInfo>,
     ) -> ConnectorResult<(Vec<String>, bool)> {
         let table = self.config.load_table().await?;
-        let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
+        let snapshot_id = Self::get_snapshot_id(&table, time_travel_info)?;
         if snapshot_id.is_none() {
             return Ok((vec![], false));
         }

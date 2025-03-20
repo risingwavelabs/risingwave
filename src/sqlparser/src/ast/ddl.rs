@@ -247,12 +247,19 @@ pub enum AlterFunctionOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSecretOperation {
     ChangeCredential { new_credential: Value },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AlterFragmentOperation {
+    AlterBackfillRateLimit { rate_limit: i32 },
 }
 
 impl fmt::Display for AlterDatabaseOperation {
@@ -550,6 +557,9 @@ impl fmt::Display for AlterConnectionOperation {
             AlterConnectionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
             }
+            AlterConnectionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
+            }
         }
     }
 }
@@ -592,7 +602,7 @@ impl fmt::Display for AlterColumnOperation {
             AlterColumnOperation::SetDefault { value } => {
                 write!(f, "SET DEFAULT {}", value)
             }
-            AlterColumnOperation::DropDefault {} => {
+            AlterColumnOperation::DropDefault => {
                 write!(f, "DROP DEFAULT")
             }
             AlterColumnOperation::SetDataType { data_type, using } => {
@@ -601,6 +611,16 @@ impl fmt::Display for AlterColumnOperation {
                 } else {
                     write!(f, "SET DATA TYPE {}", data_type)
                 }
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterFragmentOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

@@ -1,0 +1,58 @@
+control substitution on
+
+statement ok
+create table if not exists t(v1 int);
+
+statement ok
+insert into t select * from generate_series(1, 100);
+
+statement ok
+flush;
+
+statement ok
+set background_ddl=true;
+
+skipif parallel
+skipif madsim
+statement ok
+set backfill_rate_limit=0;
+
+statement ok
+create materialized view if not exists m1 as select * from t;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+skipif parallel
+skipif madsim
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+skipif parallel
+skipif madsim
+system ok
+fragment_id=$(PGUSER=root psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev -t -c "select fragment_id from rw_fragments where flags @> ARRAY['STREAM_SCAN']")
+echo "fragment_id:" $fragment_id
+PGUSER=root psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev -c "ALTER FRAGMENT $fragment_id SET RATE_LIMIT = default;"
+
+
+statement ok
+wait;
+
+skipif parallel
+skipif madsim
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+0
+
+statement ok
+DROP MATERIALIZED VIEW m1;
+
+statement ok
+DROP TABLE t;

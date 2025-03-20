@@ -325,6 +325,8 @@ impl Binder {
                         self.context
                             .cte_to_relation
                             .clone_from(&new_context.cte_to_relation);
+                        self.context.disable_security_invoker =
+                            new_context.disable_security_invoker;
                         let mut right = self.bind_set_expr(*right)?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {

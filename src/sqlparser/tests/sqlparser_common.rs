@@ -2927,7 +2927,7 @@ fn parse_recursive_cte() {
             name: Ident::new_unchecked("nums"),
             columns: vec![Ident::new_unchecked("val")],
         },
-        cte_inner: CteInner::Query(cte_query),
+        cte_inner: CteInner::Query(Box::new(cte_query)),
     };
     assert_eq!(with.cte_tables.first().unwrap(), &expected);
 }
@@ -3384,7 +3384,7 @@ fn parse_create_table_on_conflict_with_version_column() {
         } => {
             assert_eq!("t", name.to_string());
             assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
-            assert_eq!(with_version_column, Some("v2".to_owned()));
+            assert_eq!(with_version_column.unwrap().real_value(), "v2");
         }
         _ => unreachable!(),
     }

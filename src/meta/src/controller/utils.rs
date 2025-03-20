@@ -64,6 +64,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use crate::controller::ObjectModel;
+use crate::model::FragmentActorDispatchers;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -896,14 +897,16 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::SinkId(id)
         | PbGrantObject::ViewId(id)
         | PbGrantObject::FunctionId(id)
-        | PbGrantObject::SubscriptionId(id) => *id as _,
+        | PbGrantObject::SubscriptionId(id)
+        | PbGrantObject::ConnectionId(id)
+        | PbGrantObject::SecretId(id) => *id as _,
     }
 }
 
 pub async fn get_fragment_actor_dispatchers<C>(
     db: &C,
     fragment_ids: Vec<FragmentId>,
-) -> MetaResult<HashMap<FragmentId, HashMap<ActorId, Vec<PbDispatcher>>>>
+) -> MetaResult<FragmentActorDispatchers>
 where
     C: ConnectionTrait,
 {
@@ -991,10 +994,12 @@ where
             dist_key_indices.into_u32_array(),
             output_indices.into_u32_array(),
         );
-        let actor_dispatchers_map = actor_dispatchers_map.entry(source_fragment_id).or_default();
+        let actor_dispatchers_map = actor_dispatchers_map
+            .entry(source_fragment_id as _)
+            .or_default();
         for (actor_id, dispatchers) in dispatchers {
             actor_dispatchers_map
-                .entry(actor_id)
+                .entry(actor_id as _)
                 .or_default()
                 .push(dispatchers);
         }

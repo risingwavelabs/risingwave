@@ -30,9 +30,11 @@ use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
 use super::*;
+use crate::executor::aggregate::StatelessSimpleAggExecutor;
 use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::project::ProjectExecutor;
 use crate::executor::test_utils::agg_executor::{
     generate_agg_schema, new_boxed_simple_agg_executor,
 };
