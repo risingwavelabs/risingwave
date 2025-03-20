@@ -19,7 +19,8 @@ use pretty_xmlish::XmlNode;
 use super::utils::{Distill, childless_record};
 use super::{
     BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamProject, ToBatch, ToStream, gen_filter_and_pushdown, generic,
+    PredicatePushdown, StreamMaterializedExprs, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, collect_input_refs};
@@ -253,10 +254,56 @@ impl ToStream for LogicalProject {
         let new_input = self
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        let stream_plan = StreamProject::new(new_logical);
-        required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
+
+        // Extract UDFs to MaterializedExprs operator
+        let (udf_exprs, udf_indices): (Vec<_>, Vec<_>) = self
+            .exprs()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, expr)| {
+                if let ExprImpl::UserDefinedFunction(_) = expr {
+                    Some((expr.clone(), idx))
+                } else {
+                    None
+                }
+            })
+            .unzip();
+
+        let stream_plan = if !udf_exprs.is_empty() {
+            // Create MaterializedExprs for UDFs
+            let mat_exprs_plan: PlanRef =
+                StreamMaterializedExprs::new(new_input.clone(), udf_exprs).into();
+
+            let input_schema_len = new_input.schema().len();
+
+            // Create final expressions list with UDFs replaced by InputRefs
+            let final_exprs = self
+                .exprs()
+                .iter()
+                .enumerate()
+                .map(|(idx, expr)| {
+                    if let ExprImpl::UserDefinedFunction(_) = expr {
+                        // Find the position of this UDF in the udf_indices list
+                        let udf_pos = udf_indices.iter().position(|&i| i == idx).unwrap();
+                        let output_idx = input_schema_len + udf_pos;
+                        let udf_output_type =
+                            mat_exprs_plan.schema().fields[output_idx].data_type.clone();
+                        InputRef::new(output_idx, udf_output_type).into()
+                    } else {
+                        expr.clone()
+                    }
+                })
+                .collect();
+
+            let core = generic::Project::new(final_exprs, mat_exprs_plan);
+            StreamProject::new(core).into()
+        } else {
+            // No UDFs, create a regular StreamProject
+            let core = generic::Project::new(self.exprs().clone(), new_input);
+            StreamProject::new(core).into()
+        };
+
+        required_dist.enforce_if_not_satisfies(stream_plan, &Order::any())
     }
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
@@ -295,6 +342,7 @@ impl ToStream for LogicalProject {
         Ok((proj.into(), out_col_change))
     }
 }
+
 #[cfg(test)]
 mod tests {
 

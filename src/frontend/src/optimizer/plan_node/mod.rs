@@ -969,6 +969,7 @@ mod stream_hop_window;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_materialize;
+mod stream_materialized_exprs;
 mod stream_now;
 mod stream_over_window;
 mod stream_project;
@@ -1094,6 +1095,7 @@ pub use stream_hop_window::StreamHopWindow;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_materialize::StreamMaterialize;
+pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
 pub use stream_over_window::StreamOverWindow;
 pub use stream_project::StreamProject;
@@ -1248,6 +1250,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, RowMerge }
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
+            , { Stream, MaterializedExprs }
         }
     };
 }
@@ -1383,6 +1386,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, RowMerge }
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
+            , { Stream, MaterializedExprs }
         }
     };
 }
