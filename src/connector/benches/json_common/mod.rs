@@ -14,7 +14,7 @@
 
 //! Common utilities shared by JSON parser benchmarks.
 
-use rand::distributions::Alphanumeric;
+use rand::distr::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::{DataType, Date, Timestamp};

@@ -615,7 +615,7 @@ mod tests {
 
         let mut ordered_test_data = (0..10000)
             .map(|i| {
-                let key_op = match rng.gen::<usize>() % 3 {
+                let key_op = match rng.random_range(0..=2) {
                     0 => KeyOp::Insert(Bytes::from("insert")),
                     1 => KeyOp::Delete(Bytes::from("delete")),
                     2 => KeyOp::Update((Bytes::from("old_value"), Bytes::from("new_value"))),

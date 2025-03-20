@@ -309,7 +309,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ops::Bound::{self, *};
 
-    use rand::distributions::Alphanumeric;
+    use rand::distr::Alphanumeric;
     use rand::{Rng, thread_rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};

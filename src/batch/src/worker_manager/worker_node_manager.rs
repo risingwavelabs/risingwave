@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
