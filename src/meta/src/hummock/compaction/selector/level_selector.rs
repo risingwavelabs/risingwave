@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::level::Levels;
+use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compact_task::PbTaskType;
-use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     CompactionSelector, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
@@ -277,6 +277,13 @@ impl DynamicLevelSelectorCore {
         ctx.score_levels
             .resize_with(self.config.max_level as usize + 1, || PickerInfo::default());
 
+        let l0_sub_level_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|level| !handlers[0].is_level_pending_compact(level))
+            .count();
+
         let l0_file_count = levels
             .l0
             .sub_levels
@@ -302,55 +309,13 @@ impl DynamicLevelSelectorCore {
             }
         };
 
-        // trigger l0 compaction when the number of files is too large.
-
-        // The read query at the overlapping level needs to merge all the ssts, so the number of
-        // ssts is the most important factor affecting the read performance, we use file count
-        // to calculate the score
-        let overlapping_file_count = levels
-            .l0
-            .sub_levels
-            .iter()
-            .filter(|level| level.level_type == LevelType::Overlapping)
-            .map(|level| level.table_infos.len())
-            .sum::<usize>();
-        let non_overlapping_file_count = levels
-            .l0
-            .sub_levels
-            .iter()
-            .filter(|level| level.level_type == LevelType::Nonoverlapping)
-            .map(|level| level.table_infos.len())
-            .sum::<usize>();
-        // The read query at the non-overlapping level only selects ssts that match the query
-        // range at each level, so the number of levels is the most important factor affecting
-        // the read performance. At the same time, the size factor is also added to the score
-        // calculation rule to avoid unbalanced compact task due to large size.
-
         // level count limit
-        let non_overlapping_level_count = levels
-            .l0
-            .sub_levels
-            .iter()
-            .filter(|level| level.level_type == LevelType::Nonoverlapping)
-            .count();
-        let non_overlapping_level_score = non_overlapping_level_count as f64
-            / self.config.level0_sub_level_compact_level_count as f64;
-
+        let level_score = l0_sub_level_count as f64
+            / (2.0 * self.config.level0_sub_level_compact_level_count as f64);
         // file count limit
-        let non_overlapping_file_score = non_overlapping_file_count as f64 / 512.0;
-        let intra_compaction_score = non_overlapping_file_score.max(non_overlapping_level_score);
+        let file_score = idle_file_count as f64 / 512.0;
 
-        let base_compaction_score = intra_compaction_score;
-
-        // println!(
-        //     "base_compaction_score: {} intra_compaction_score {} non_overlapping_file_score {} non_overlapping_level_score {}",
-        //     base_compaction_score,
-        //     intra_compaction_score,
-        //     non_overlapping_file_score,
-        //     non_overlapping_level_score
-        // );
-
-        // ctx.score_levels.resize_with(new_len, f);
+        let base_compaction_score = level_score.max(file_score);
 
         // Reduce the level num of l0 non-overlapping sub_level
         ctx.score_levels[0] = PickerInfo {
@@ -398,29 +363,23 @@ impl DynamicLevelSelectorCore {
             prev_level_idx = level_idx;
         }
 
-        let l0_overlapping_score = std::cmp::min(idle_file_count, overlapping_file_count) as f64
-            / self.config.level0_tier_compact_file_number as f64;
-
-        let l0_overlapping_score_ratio = if ctx.score_levels[0].score_ratio >= MIN_SCORE_RATIO {
-            l0_overlapping_score / ctx.score_levels[0].score * ctx.score_levels[0].score_ratio
-                + MIN_SCORE_RATIO
-        } else {
-            l0_overlapping_score
-        };
+        let tier_score_ratio = ctx.score_levels[0].score_ratio;
         ctx.score_levels.push(PickerInfo {
-            score: l0_overlapping_score,
+            score: ctx.score_levels[0].score,
             select_level: 0,
             target_level: 0,
             picker_type: PickerType::Tier,
-            score_ratio: l0_overlapping_score_ratio,
+            score_ratio: tier_score_ratio,
         });
 
+        ctx.score_levels[0].score_ratio += MIN_SCORE_RATIO;
+        let intra_score_ratio = ctx.score_levels[0].score_ratio;
         ctx.score_levels.push(PickerInfo {
-            score: intra_compaction_score,
+            score: ctx.score_levels[0].score,
             select_level: 0,
             target_level: 0,
             picker_type: PickerType::Intra,
-            score_ratio: ctx.score_levels[0].score_ratio,
+            score_ratio: intra_score_ratio,
         });
 
         // priority base compaction score than intra.
@@ -449,8 +408,6 @@ impl DynamicLevelSelectorCore {
                 return a.select_level.cmp(&b.select_level);
             }
         });
-
-        // println!("score_levels: {:?}", ctx.score_levels);
 
         ctx
     }
@@ -884,7 +841,7 @@ pub mod tests {
         let config = CompactionConfigBuilder::new()
             .max_bytes_for_level_base(512 * 2 * 1024 * 1024)
             .max_level(6)
-            .max_bytes_for_level_multiplier(5)
+            .max_bytes_for_level_multiplier(10)
             .max_compaction_bytes(1)
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
@@ -902,18 +859,27 @@ pub mod tests {
             generate_level(6, generate_tables(10..15, 0..1000, 1, 200)),
         ];
 
-        levels[0].total_file_size = 2 * 1024 * 1024 * 1024;
-        levels[1].total_file_size = 2 * 1024 * 1024 * 1024;
-        levels[2].total_file_size = 24 * 1024 * 1024 * 1024;
-        levels[3].total_file_size = 150 * 1024 * 1024 * 1024;
-        levels[4].total_file_size = 1090 * 1024 * 1024 * 1024;
-        levels[5].total_file_size = 1001 * 1024 * 1024 * 1024;
+        // levels[0].total_file_size = 2 * 1024 * 1024 * 1024;
+        // levels[1].total_file_size = 2 * 1024 * 1024 * 1024;
+        // levels[2].total_file_size = 24 * 1024 * 1024 * 1024;
+        // levels[3].total_file_size = 150 * 1024 * 1024 * 1024;
+        // levels[4].total_file_size = 1090 * 1024 * 1024 * 1024;
+        // levels[5].total_file_size = 1001 * 1024 * 1024 * 1024;
+
+        levels[0].total_file_size = 0 * 1024 * 1024 * 1024;
+        levels[1].total_file_size = 0 * 1024 * 1024 * 1024;
+        levels[2].total_file_size = 16 * 1024 * 1024 * 1024;
+        levels[3].total_file_size = 126 * 1024 * 1024 * 1024;
+        levels[4].total_file_size = 256 * 1024 * 1024 * 1024;
+        levels[5].total_file_size = 6 * 1024 * 1024 * 1024;
 
         let mut levels = Levels {
             levels,
             l0: generate_l0_nonoverlapping_sublevels(vec![]),
             ..Default::default()
         };
+
+        levels.l0.total_file_size = 246 * 1024 * 1024 * 1024;
 
         {
             println!("old");
