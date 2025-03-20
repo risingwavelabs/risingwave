@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Op;
+use risingwave_common::array::{Op, RowRef};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -148,21 +148,17 @@ impl<S: StateStore> Inner<S> {
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 // for insertions, append the evaluation results
-                                let output_row = row
+                                for (arr, builder) in eval_result_arrs
                                     .iter()
-                                    .chain(
-                                        eval_result_arrs
-                                            .iter()
-                                            .zip_eq_fast(&mut eval_result_builders)
-                                            .map(|(arr, builder)| {
-                                                let datum_ref =
-                                                    unsafe { arr.value_at_unchecked(row_idx) };
-                                                builder.append(datum_ref);
-                                                datum_ref
-                                            }),
-                                    )
-                                    .collect::<Vec<_>>();
-                                self.state_table.insert(output_row.as_slice());
+                                    .zip_eq_fast(&mut eval_result_builders)
+                                {
+                                    let datum_ref = unsafe { arr.value_at_unchecked(row_idx) };
+                                    builder.append(datum_ref);
+                                }
+
+                                self.state_table.insert(
+                                    row.chain(RowRef::with_columns(&eval_result_arrs, row_idx)),
+                                );
                             }
                             Op::Delete | Op::UpdateDelete => {
                                 // for deletions, append the old evaluation results
