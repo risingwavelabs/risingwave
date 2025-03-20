@@ -208,7 +208,7 @@ impl LevelCompactionPicker {
             let l0_select_tables = input
                 .sstable_infos
                 .iter()
-                .flat_map(|select_tables| select_tables.clone())
+                .flat_map(|(_, select_tables)| select_tables.clone())
                 .collect_vec();
 
             let target_level_ssts = overlap_strategy
@@ -244,7 +244,7 @@ impl LevelCompactionPicker {
             let mut select_level_inputs = input
                 .sstable_infos
                 .into_iter()
-                .map(|table_infos| InputLevel {
+                .map(|(_, table_infos)| InputLevel {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping,
                     table_infos,
