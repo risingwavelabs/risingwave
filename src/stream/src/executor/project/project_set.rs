@@ -85,7 +85,7 @@ impl Debug for ProjectSetExecutor {
 }
 
 impl Execute for ProjectSetExecutor {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }
 }

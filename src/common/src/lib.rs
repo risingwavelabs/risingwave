@@ -37,6 +37,7 @@
 #![feature(register_tool)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
+#![feature(anonymous_lifetime_in_impl_trait)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
