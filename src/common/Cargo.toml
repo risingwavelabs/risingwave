@@ -96,7 +96,7 @@ smallvec = "1"
 speedate = "0.15.0"
 stacker = "0.1"
 static_assertions = "1"
-strum = "0.26"
+strum = "0.27"
 strum_macros = "0.26"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 thiserror = "1"
