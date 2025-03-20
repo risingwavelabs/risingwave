@@ -38,11 +38,11 @@ impl MigrationTrait for Migration {
         );
 
         // In Mysql, The CHAR, VARCHAR and TEXT types are encoded in utf8_general_ci by default, which is not case sensitive but
-        // required in risingwave. Here we need to change the database collate to utf8_bin.
+        // required in risingwave. Here we need to change the database collate to utf8mb4_bin.
         if manager.get_database_backend() == DbBackend::MySql {
             manager
                 .get_connection()
-                .execute_unprepared("ALTER DATABASE COLLATE utf8_bin")
+                .execute_unprepared("ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_bin")
                 .await
                 .expect("failed to set database collate");
         }
