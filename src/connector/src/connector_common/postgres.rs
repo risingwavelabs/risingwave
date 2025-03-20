@@ -20,7 +20,7 @@ use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::types::{DataType, ScalarImpl, StructType};
+use risingwave_common::types::{DataType, StructType};
 use sea_schema::postgres::def::{ColumnType, TableInfo, Type as SeaType};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::Deserialize;
@@ -117,31 +117,9 @@ impl PostgresExternalTable {
         let mut column_descs = vec![];
         for col in &table_schema.columns {
             let data_type = type_to_rw_type(&col.col_type)?;
-            let column_desc = if let Some(ref default_expr) = col.default {
-                // parse the value of "column_default" field in information_schema.columns,
-                // non number data type will be stored as "'value'::type"
-                let val_text = default_expr
-                    .0
-                    .split("::")
-                    .map(|s| s.trim_matches('\''))
-                    .next()
-                    .expect("default value expression");
-
-                match ScalarImpl::from_text(val_text, &data_type) {
-                    Ok(scalar) => ColumnDesc::named_with_default_value(
-                        col.name.clone(),
-                        ColumnId::placeholder(),
-                        data_type.clone(),
-                        Some(scalar),
-                    ),
-                    Err(err) => {
-                        tracing::warn!(error=%err.as_report(), "failed to parse postgres default value expression, only constant is supported");
-                        ColumnDesc::named(col.name.clone(), ColumnId::placeholder(), data_type)
-                    }
-                }
-            } else {
-                ColumnDesc::named(col.name.clone(), ColumnId::placeholder(), data_type)
-            };
+            // Note: we don't resolve the default value expression.
+            let column_desc =
+                ColumnDesc::named(col.name.clone(), ColumnId::placeholder(), data_type);
             {
                 let pg_type = Self::discovered_type_to_pg_type(&col.col_type)?;
                 column_name_to_pg_type.insert(col.name.clone(), pg_type);
