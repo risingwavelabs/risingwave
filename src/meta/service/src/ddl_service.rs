@@ -872,16 +872,16 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
+        let GetTablesRequest {
+            table_ids,
+            include_dropped_tables,
+        } = request.into_inner();
         let ret = self
             .metadata_manager
             .catalog_controller
             .get_table_by_ids(
-                request
-                    .into_inner()
-                    .table_ids
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect(),
+                table_ids.into_iter().map(|id| id as _).collect(),
+                include_dropped_tables,
             )
             .await?;
 
