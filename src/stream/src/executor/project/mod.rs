@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod materialized_exprs;
 mod project_scalar;
 mod project_set;
 
+pub use materialized_exprs::{MaterializedExprsArgs, MaterializedExprsExecutor};
 pub use project_scalar::ProjectExecutor;
 pub use project_set::{ProjectSetExecutor, ProjectSetSelectItem};
