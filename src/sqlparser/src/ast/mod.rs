@@ -43,9 +43,7 @@ pub use self::ddl::{
     ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
     WebhookSourceInfo,
 };
-pub use self::legacy_source::{
-    AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema, get_delimiter,
-};
+pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,

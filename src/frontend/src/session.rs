@@ -328,6 +328,7 @@ impl FrontendEnv {
 
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
+            config.batch.developer.compute_client_config.clone(),
         ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
