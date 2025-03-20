@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::str::FromStr;
 
 use anyhow::Result;
-use rand::distributions::uniform::SampleUniform;
+use rand::distr::uniform::SampleUniform;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;

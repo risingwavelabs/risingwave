@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use chrono::Datelike;
-use rand::distributions::Standard;
+use rand::distr::StandardUniform;
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -37,7 +37,7 @@ pub trait RandValue {
 impl<T> RandValue for T
 where
     T: NativeType,
-    Standard: Distribution<T>,
+    StandardUniform: Distribution<T>,
 {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         rand.gen()
