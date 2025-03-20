@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,30 +36,30 @@ use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
-    CopyFromSlice, TableKeyRange, end_bound_of_prefix, next_key, prefixed_range_with_vnode,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, CopyFromSlice, TableKeyRange,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 
-use crate::StateStore;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use crate::row_serde::{ColumnMapping, find_columns_by_ids};
+use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{
-    NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions,
-    StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
+    PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
+    TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
+use crate::StateStore;
 
-/// [`BatchTableInner`] is the interface accessing relational data in KV(`StateStore`) with
+/// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
 #[derive(Clone)]
-pub struct BatchTableInner<S: StateStore, SD: ValueRowSerde> {
+pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     /// Id for this table.
     table_id: TableId,
 
@@ -107,19 +107,19 @@ pub struct BatchTableInner<S: StateStore, SD: ValueRowSerde> {
     read_prefix_len_hint: usize,
 }
 
-/// `BatchTable` will use [`EitherSerde`] as default so that we can support both versioned and
+/// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
 /// non-versioned tables with the same type.
-pub type BatchTable<S> = BatchTableInner<S, EitherSerde>;
+pub type StorageTable<S> = StorageTableInner<S, EitherSerde>;
 
-impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for BatchTableInner<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BatchTableInner").finish_non_exhaustive()
+        f.debug_struct("StorageTableInner").finish_non_exhaustive()
     }
 }
 
 // init
-impl<S: StateStore> BatchTableInner<S, EitherSerde> {
-    /// Create a  [`BatchTableInner`] given a complete set of `columns` and a partial
+impl<S: StateStore> StorageTableInner<S, EitherSerde> {
+    /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
     /// set of `output_column_ids`.
     /// When reading from the storage table,
     /// the chunks or rows will only contain columns with the given ids (`output_column_ids`).
@@ -327,7 +327,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
     }
 }
 
-impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     pub fn pk_serializer(&self) -> &OrderedRowSerde {
         &self.pk_serializer
     }
@@ -363,13 +363,14 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
     }
 }
 /// Point get
-impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get a single row by point get
     pub async fn get_row(
         &self,
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
+        let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         let read_committed = wait_epoch.is_read_committed();
         self.store
@@ -403,17 +404,9 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
-        let read_snapshot = self
+        if let Some((full_key, value)) = self
             .store
-            .new_read_snapshot(
-                wait_epoch,
-                NewReadSnapshotOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await?;
-        if let Some((full_key, value)) = read_snapshot
-            .get_keyed_row(serialized_pk, read_options)
+            .get_keyed_row(serialized_pk, epoch, read_options)
             .await?
         {
             let row = self.row_serde.deserialize(&value)?;
@@ -509,8 +502,8 @@ mod merge_vnode_stream {
     use risingwave_hummock_sdk::key::TableKey;
 
     use crate::error::StorageResult;
+    use crate::table::merge_sort::{merge_sort, NodePeek};
     use crate::table::KeyedRow;
-    use crate::table::merge_sort::{NodePeek, merge_sort};
 
     pub(super) enum VnodeStreamType<RowSt, KeyedRowSt> {
         Single(RowSt),
@@ -592,7 +585,7 @@ where
 }
 
 /// Iterators
-impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get multiple stream item `StorageResult<OwnedRow>` based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range(
@@ -619,20 +612,9 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             None => self.distribution.vnodes().iter_vnodes().collect_vec(),
         };
 
-        let read_snapshot = self
-            .store
-            .new_read_snapshot(
-                wait_epoch,
-                NewReadSnapshotOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await?;
-
         build_vnode_stream(
             |vnode| {
                 self.iter_vnode_with_encoded_key_range(
-                    &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
                     wait_epoch,
@@ -642,7 +624,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             },
             |vnode| {
                 self.iter_vnode_with_encoded_key_range(
-                    &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
                     wait_epoch,
@@ -658,7 +639,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
 
     async fn iter_vnode_with_encoded_key_range<K: CopyFromSlice>(
         &self,
-        read_snapshot: &S::ReadSnapshot,
         prefix_hint: Option<Bytes>,
         encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
         wait_epoch: HummockReadEpoch,
@@ -692,8 +672,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     true => None,
                     false => Some(Arc::new(self.pk_serializer.clone())),
                 };
-                let iter = BatchTableInnerIterInner::new(
-                    read_snapshot,
+                let iter = StorageTableInnerIterInner::<S, SD>::new(
+                    &self.store,
                     self.mapping.clone(),
                     self.epoch_idx,
                     pk_serializer,
@@ -704,6 +684,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     self.row_serde.clone(),
                     table_key_range,
                     read_options,
+                    wait_epoch,
                 )
                 .await?
                 .into_stream::<K>();
@@ -792,15 +773,22 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
-                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
-                self.table_id, pk_prefix, pk_prefix_indices
-            );
+                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
+                    self.table_id,
+                    pk_prefix,
+                    pk_prefix_indices
+                );
             None
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}",
-            self.table_id, prefix_hint, start_key, end_key, pk_prefix, pk_prefix_indices
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}" ,
+            self.table_id,
+            prefix_hint,
+            start_key,
+            end_key,
+            pk_prefix,
+            pk_prefix_indices
         );
 
         self.iter_with_encoded_key_range(
@@ -821,7 +809,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         schema: Schema,
         chunk_size: usize,
     ) {
-        use futures::{TryStreamExt, pin_mut};
+        use futures::{pin_mut, TryStreamExt};
         use risingwave_common::util::iter_util::ZipEqFast;
 
         pin_mut!(iter);
@@ -923,18 +911,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         } else {
             Unbounded
         };
-        let read_snapshot = self
-            .store
-            .new_read_snapshot(
-                epoch,
-                NewReadSnapshotOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await?;
         Ok(self
             .iter_vnode_with_encoded_key_range::<()>(
-                &read_snapshot,
                 None,
                 (start_bound.as_ref(), Unbounded),
                 epoch,
@@ -945,16 +923,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .map_ok(|(_, row)| row))
     }
 
-    pub async fn next_epoch(&self, epoch: u64) -> StorageResult<u64> {
-        self.store
-            .next_epoch(
-                epoch,
-                NextEpochOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await
-    }
+    .
 
     pub async fn batch_iter_vnode_log(
         &self,
@@ -1016,32 +985,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         .await
     }
 
-    async fn batch_iter_log_inner<K: CopyFromSlice>(
-        &self,
-        start_epoch: u64,
-        end_epoch: HummockReadEpoch,
-        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
-        vnode: VirtualNode,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>>> {
-        let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
-        let read_options = ReadLogOptions {
-            table_id: self.table_id,
-        };
-        let iter = BatchTableInnerIterLogInner::<S, SD>::new(
-            &self.store,
-            self.mapping.clone(),
-            self.row_serde.clone(),
-            table_key_range,
-            read_options,
-            start_epoch,
-            end_epoch,
-        )
-        .await?
-        .into_stream::<K>();
-
-        Ok(iter)
-    }
-
     /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
     /// Returns a stream of `DataChunk` with the provided `chunk_size`
     pub async fn batch_chunk_iter_with_pk_bounds(
@@ -1071,10 +1014,10 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
     }
 }
 
-/// [`BatchTableInnerIterInner`] iterates on the storage table.
-struct BatchTableInnerIterInner<SI: StateStoreIter, SD: ValueRowSerde> {
+/// [`StorageTableInnerIterInner`] iterates on the storage table.
+struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
-    iter: SI,
+    iter: S::Iter,
 
     mapping: Arc<ColumnMapping>,
 
@@ -1098,10 +1041,10 @@ struct BatchTableInnerIterInner<SI: StateStoreIter, SD: ValueRowSerde> {
     output_row_in_key_indices: Vec<usize>,
 }
 
-impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     #[allow(clippy::too_many_arguments)]
-    async fn new<S>(
+    async fn new(
         store: &S,
         mapping: Arc<ColumnMapping>,
         epoch_idx: Option<usize>,
@@ -1113,11 +1056,18 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
         row_deserializer: Arc<SD>,
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> StorageResult<Self>
-    where
-        S: StateStoreRead<Iter = SI>,
-    {
-        let iter = store.iter(table_key_range, read_options).await?;
+        epoch: HummockReadEpoch,
+    ) -> StorageResult<Self> {
+        let raw_epoch = epoch.get_epoch();
+        store
+            .try_wait_epoch(
+                epoch,
+                TryWaitEpochOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
         let iter = Self {
             iter,
             mapping,
@@ -1217,8 +1167,8 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
     }
 }
 
-/// [`BatchTableInnerIterLogInner`] iterates on the storage table.
-struct BatchTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
+/// [`StorageTableInnerIterLogInner`] iterates on the storage table.
+struct StorageTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
     iter: S::ChangeLogIter,
 
@@ -1227,7 +1177,7 @@ struct BatchTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
     row_deserializer: Arc<SD>,
 }
 
-impl<S: StateStore, SD: ValueRowSerde> BatchTableInnerIterLogInner<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     #[allow(clippy::too_many_arguments)]
     async fn new(
