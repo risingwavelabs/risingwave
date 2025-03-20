@@ -119,11 +119,14 @@ impl BarrierWorkerRuntimeInfoSnapshot {
     ) -> MetaResult<()> {
         {
             for fragment in database_info.fragment_infos() {
-                for (actor_id, worker_id) in &fragment.actors {
-                    if !active_streaming_nodes.current().contains_key(worker_id) {
+                for (actor_id, actor) in &fragment.actors {
+                    if !active_streaming_nodes
+                        .current()
+                        .contains_key(&actor.worker_id)
+                    {
                         return Err(anyhow!(
                             "worker_id {} of actor {} do not exist",
-                            worker_id,
+                            actor.worker_id,
                             actor_id
                         )
                         .into());

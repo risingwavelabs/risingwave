@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::WorkerId;
@@ -22,7 +23,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
 use crate::barrier::{BarrierKind, Command, TracedEpoch};
-use crate::controller::fragment::InflightFragmentInfo;
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::model::{ActorId, FragmentId, SubscriptionId};
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,8 @@ pub(crate) enum CommandFragmentChanges {
         HashMap<FragmentId, FragmentId>,
     ),
     Reschedule {
-        new_actors: HashMap<ActorId, WorkerId>,
+        new_actors: HashMap<ActorId, InflightActorInfo>,
+        actor_update_vnode_bitmap: HashMap<ActorId, Bitmap>,
         to_remove: HashSet<ActorId>,
     },
     RemoveFragment,
@@ -197,11 +199,23 @@ impl InflightDatabaseInfo {
                             .try_insert(fragment_id, job_id)
                             .expect("non duplicate");
                     }
-                    CommandFragmentChanges::Reschedule { new_actors, .. } => {
+                    CommandFragmentChanges::Reschedule {
+                        new_actors,
+                        actor_update_vnode_bitmap,
+                        ..
+                    } => {
                         let info = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
-                        for (actor_id, node_id) in &new_actors {
-                            assert!(actors.insert(*actor_id as _, *node_id as _).is_none());
+                        for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
+                            actors
+                                .get_mut(&actor_id)
+                                .expect("should exist")
+                                .vnode_bitmap = Some(new_vnodes);
+                        }
+                        for (actor_id, actor) in new_actors {
+                            actors
+                                .try_insert(actor_id as _, actor)
+                                .expect("non-duplicate");
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}
@@ -358,9 +372,9 @@ impl InflightFragmentInfo {
         infos: impl IntoIterator<Item = &Self>,
     ) -> HashMap<WorkerId, HashSet<ActorId>> {
         let mut ret: HashMap<_, HashSet<_>> = HashMap::new();
-        for (actor_id, worker_id) in infos.into_iter().flat_map(|info| info.actors.iter()) {
+        for (actor_id, actor) in infos.into_iter().flat_map(|info| info.actors.iter()) {
             assert!(
-                ret.entry(*worker_id as WorkerId)
+                ret.entry(actor.worker_id)
                     .or_default()
                     .insert(*actor_id as _)
             )
@@ -381,7 +395,7 @@ impl InflightFragmentInfo {
             fragment
                 .actors
                 .values()
-                .any(|location| (*location as WorkerId) == worker_id)
+                .any(|actor| (actor.worker_id) == worker_id)
         })
     }
 }
@@ -394,7 +408,7 @@ impl InflightDatabaseInfo {
     pub(crate) fn workers(&self) -> HashSet<WorkerId> {
         self.fragment_infos()
             .flat_map(|info| info.actors.values())
-            .cloned()
+            .map(|actor| actor.worker_id)
             .collect()
     }
 
