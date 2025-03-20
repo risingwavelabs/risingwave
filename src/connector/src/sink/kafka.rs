@@ -317,6 +317,26 @@ impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<KafkaSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
+        "allow.auto.create.topics",
+        "batch.num.messages",
+        "batch.size",
+        "client.id",
+        "enable.idempotence",
+        "enable.ssl.certificate.verification",
+        "max.in.flight.requests.per.connection",
+        "message.max.bytes",
+        "message.send.max.retries",
+        "message.timeout.ms",
+        "queue.buffering.max.kbytes",
+        "queue.buffering.max.messages",
+        "queue.buffering.max.ms",
+        "request.required.acks",
+        "retry.backoff.ms",
+        "receive.message.max.bytes",
+        "ssl.endpoint.identification.algorithm",
+        "statistics.interval.ms",
+    ];
     const SINK_NAME: &'static str = KAFKA_SINK;
 
     fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
