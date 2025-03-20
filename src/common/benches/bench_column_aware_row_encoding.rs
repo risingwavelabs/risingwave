@@ -47,10 +47,10 @@ fn bench_column_aware_encoding_16_columns(c: &mut Criterion) {
         DataType::Varchar,
     ]);
     let row = OwnedRow::new(vec![
-        Some(ScalarImpl::Int64(rng.gen())),
-        Some(ScalarImpl::Int64(rng.gen())),
-        Some(ScalarImpl::Int64(rng.gen())),
-        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Int64(rng.random())),
+        Some(ScalarImpl::Int64(rng.random())),
+        Some(ScalarImpl::Int64(rng.random())),
+        Some(ScalarImpl::Int32(rng.random())),
         Some(ScalarImpl::Decimal("1.0".parse().unwrap())),
         Some(ScalarImpl::Decimal("114.514".parse().unwrap())),
         None,
@@ -100,9 +100,9 @@ fn bench_column_aware_encoding_4_columns(c: &mut Criterion) {
         DataType::Varchar,
     ]);
     let row = OwnedRow::new(vec![
-        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Int32(rng.random())),
         Some(ScalarImpl::Utf8("United States".into())),
-        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Int32(rng.random())),
         Some(ScalarImpl::Utf8("No comments".into())),
     ]);
 

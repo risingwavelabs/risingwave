@@ -418,7 +418,7 @@ mod tests {
     use bytes::{BufMut, Bytes, BytesMut};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::{Rng, thread_rng};
+    use rand::{Rng, rng as thread_rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};

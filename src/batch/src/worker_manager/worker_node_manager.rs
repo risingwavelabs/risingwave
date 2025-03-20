@@ -387,7 +387,7 @@ impl WorkerNodeSelector {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .ok_or_else(|| BatchError::EmptyWorkerNodes)
             .map(|w| (*w).clone())
     }

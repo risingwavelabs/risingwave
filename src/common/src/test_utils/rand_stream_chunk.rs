@@ -31,18 +31,18 @@ pub fn gen_legal_stream_chunk(
     for i in 0..chunk_size {
         // SAFETY(value_at_unchecked): the idx is always in bound.
         if unsafe { bitmap.is_set_unchecked(i) } {
-            let op = if append_only || cur_data.is_empty() || rng.gen() {
+            let op = if append_only || cur_data.is_empty() || rng.random() {
                 Op::Insert
             } else {
                 Op::Delete
             };
             ops.push(op);
             if op == Op::Insert {
-                let value = rng.gen::<i32>() as i64;
+                let value = rng.random::<i32>() as i64;
                 data_builder.append(Some(value));
                 cur_data.push(value);
             } else {
-                let idx = rng.gen_range(0..cur_data.len());
+                let idx = rng.random_range(0..cur_data.len());
                 data_builder.append(Some(cur_data[idx]));
                 cur_data.remove(idx);
             }

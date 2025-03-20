@@ -163,7 +163,7 @@ where
             )
             .await
             .with_context(|| format!("failed to create RPC client to {addr}"))?
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .unwrap()
             .clone())
     }

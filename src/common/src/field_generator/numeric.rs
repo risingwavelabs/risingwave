@@ -88,13 +88,13 @@ where
 
     fn generate(&mut self, offset: u64) -> serde_json::Value {
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let result = rng.gen_range(self.min..=self.max);
+        let result = rng.random_range(self.min..=self.max);
         json!(result)
     }
 
     fn generate_datum(&mut self, offset: u64) -> Datum {
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let result = rng.gen_range(self.min..=self.max);
+        let result = rng.random_range(self.min..=self.max);
         Some(result.to_scalar_value())
     }
 }
