@@ -40,6 +40,7 @@ prometheus = "0.13"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = { workspace = true }
+regex = "1.9"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }

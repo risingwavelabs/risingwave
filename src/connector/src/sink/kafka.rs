@@ -318,24 +318,20 @@ impl Sink for KafkaSink {
     type LogSinker = AsyncTruncateLogSinkerOf<KafkaSinkWriter>;
 
     const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
-        "allow.auto.create.topics",
-        "batch.num.messages",
-        "batch.size",
-        "client.id",
-        "enable.idempotence",
-        "enable.ssl.certificate.verification",
-        "max.in.flight.requests.per.connection",
-        "message.max.bytes",
-        "message.send.max.retries",
-        "message.timeout.ms",
-        "queue.buffering.max.kbytes",
-        "queue.buffering.max.messages",
-        "queue.buffering.max.ms",
-        "request.required.acks",
-        "retry.backoff.ms",
-        "receive.message.max.bytes",
-        "ssl.endpoint.identification.algorithm",
-        "statistics.interval.ms",
+        "properties.allow.auto.create.topics",
+        "properties.batch.num.messages",
+        "properties.batch.size",
+        "properties.enable.idempotence",
+        "properties.max.in.flight.requests.per.connection",
+        "properties.message.max.bytes",
+        "properties.message.send.max.retries",
+        "properties.message.timeout.ms",
+        "properties.queue.buffering.max.kbytes",
+        "properties.queue.buffering.max.messages",
+        "properties.queue.buffering.max.ms",
+        "properties.request.required.acks",
+        "properties.retry.backoff.ms",
+        "properties.receive.message.max.bytes",
     ];
     const SINK_NAME: &'static str = KAFKA_SINK;
 

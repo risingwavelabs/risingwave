@@ -17,6 +17,7 @@ use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -1699,24 +1700,21 @@ impl CatalogController {
             }
         };
 
-        let mut definition = sink.definition.clone();
-        for (key, value) in &props {
-            definition = definition.replace(
-                &format!(
-                    "{} = {}",
-                    key,
-                    sink.properties.inner_ref().get(key).unwrap()
-                ),
-                &format!("{} = {}", key, value),
-            );
-        }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props);
 
+        let definition = sink.definition.clone();
+        let entries: &Vec<String> = &new_config
+            .iter()
+            .map(|(k, v)| format!("{} = {}", k, v))
+            .collect();
+        let new_with_definition = format!("WITH ( {} )", entries.join(", "));
+        let re = Regex::new(r"(?i)WITH\s?\([^\)]*\)").unwrap();
+        let new_definition = re.replace_all(&definition, new_with_definition);
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
             properties: Set(risingwave_meta_model::Property(new_config.clone())),
-            definition: Set(definition),
+            definition: Set(new_definition.to_string()),
             ..Default::default()
         };
         active_sink.update(&txn).await?;
