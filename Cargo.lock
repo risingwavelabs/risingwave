@@ -10617,7 +10617,7 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_rt",
  "shell-words",
- "strum 0.26.3",
+ "strum 0.27.1",
  "strum_macros 0.26.4",
  "thiserror-ext",
  "tikv-jemallocator",
@@ -10724,7 +10724,7 @@ dependencies = [
  "speedate",
  "stacker",
  "static_assertions",
- "strum 0.26.3",
+ "strum 0.27.1",
  "strum_macros 0.26.4",
  "sysinfo",
  "tempfile",
@@ -11080,7 +11080,7 @@ dependencies = [
  "simd-json",
  "smallvec",
  "sqlx",
- "strum 0.26.3",
+ "strum 0.27.1",
  "strum_macros 0.26.4",
  "syn 2.0.87",
  "tempfile",
@@ -11631,7 +11631,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "strum 0.26.3",
+ "strum 0.27.1",
  "sync-point",
  "tempfile",
  "thiserror 1.0.63",
@@ -11795,7 +11795,7 @@ dependencies = [
  "risingwave_error",
  "serde",
  "static_assertions",
- "strum 0.26.3",
+ "strum 0.27.1",
  "thiserror 1.0.63",
  "walkdir",
  "workspace-hack",
@@ -14007,6 +14007,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
+dependencies = [
+ "strum_macros 0.27.1",
+]
+
+[[package]]
 name = "strum_macros"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14024,6 +14033,19 @@ name = "strum_macros"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",

@@ -132,7 +132,7 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = { version = "0.14.2", features = ["hints"] }
 smallvec = "1"
 sqlx = { workspace = true }
-strum = "0.26"
+strum = "0.27"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
