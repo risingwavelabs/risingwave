@@ -26,8 +26,9 @@ use super::stream::StreamPlanRef;
 use super::utils::{Distill, TableCatalogBuilder, childless_record, watermark_pretty};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, Stream, StreamNode};
 use crate::catalog::TableCatalog;
-use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, collect_input_refs};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 /// `StreamMaterializedExprs` materializes the results of a set of expressions.
 /// The expressions are evaluated once and the results are stored in a state table,
@@ -90,11 +91,33 @@ impl StreamMaterializedExprs {
                 input_watermark_cols.clone()
             };
 
+        // Create a functional dependency set that includes dependencies from UDF inputs to outputs
+        let input_len = input.schema().len();
+        let output_len = input_len + exprs.len();
+
+        // First, rewrite existing functional dependencies from input
+        let mapping = ColIndexMapping::identity_or_none(input_len, output_len);
+        let mut fd_set =
+            mapping.rewrite_functional_dependency_set(input.functional_dependency().clone());
+
+        // Then, add dependencies from UDF parameters to UDF outputs
+        for (i, expr) in exprs.iter().enumerate() {
+            let output_idx = input_len + i;
+
+            // Create a dependency from all input references in the expression to the output
+            let input_refs = collect_input_refs(input_len, std::iter::once(expr));
+            let input_indices: Vec<_> = input_refs.ones().collect();
+
+            if !input_indices.is_empty() {
+                fd_set.add_functional_dependency_by_column_indices(&input_indices, &[output_idx]);
+            }
+        }
+
         let base = PlanBase::new_stream(
             input.ctx(),
             Self::derive_schema(&input, &exprs),
             input.stream_key().map(|v| v.to_vec()),
-            input.functional_dependency().clone(),
+            fd_set,
             distribution,
             false,
             input.emit_on_window_close(),
@@ -206,22 +229,7 @@ impl PlanTreeNodeUnary for StreamMaterializedExprs {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self {
-            base: PlanBase::new_stream(
-                input.ctx(),
-                Self::derive_schema(&input, &self.exprs),
-                input.stream_key().map(|v| v.to_vec()),
-                input.functional_dependency().clone(),
-                input.distribution().clone(),
-                input.append_only(),
-                input.emit_on_window_close(),
-                input.watermark_columns().clone(),
-                input.columns_monotonicity().clone(),
-            ),
-            input,
-            exprs: self.exprs.clone(),
-            state_clean_col_idx: self.state_clean_col_idx,
-        }
+        Self::new(input, self.exprs.clone())
     }
 }
 impl_plan_tree_node_for_unary! { StreamMaterializedExprs }
