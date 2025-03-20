@@ -27,7 +27,7 @@ use futures::stream::{BoxStream, empty, select_all};
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use rand::{Rng, thread_rng};
+use rand::{Rng, rng as thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
@@ -170,7 +170,7 @@ impl SinkWriter for TestWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
-        if thread_rng().gen_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
             println!("write with err");
             self.store.inner().err_count += 1;
             return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
@@ -305,7 +305,7 @@ impl SimulationTestSource {
     ) -> Self {
         let mut id_list: Vec<i32> = id_list.collect_vec();
         let count = (id_list.len() as f32 * sample_rate) as usize;
-        id_list.shuffle(&mut rand::thread_rng());
+        id_list.shuffle(&mut rand::rng());
         let id_list = id_list[0..count].iter().cloned().collect_vec();
         let mut id_lists = vec![vec![]; source_parallelism];
         for id in &id_list {
