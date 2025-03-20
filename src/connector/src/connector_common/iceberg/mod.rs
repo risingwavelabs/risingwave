@@ -79,9 +79,9 @@ pub struct IcebergCommon {
     /// A Bearer token which will be used for interaction with the server.
     #[serde(rename = "catalog.token")]
     pub token: Option<String>,
-    /// `oauth2.server.uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
     /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
-    #[serde(rename = "catalog.oauth2.server.uri")]
+    #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
     /// Additional scope for OAuth2.
@@ -89,16 +89,16 @@ pub struct IcebergCommon {
     pub scope: Option<String>,
 
     /// The signing region to use when signing requests to the REST catalog.
-    #[serde(rename = "catalog.rest.signing.region")]
+    #[serde(rename = "catalog.rest.signing_region")]
     pub rest_signing_region: Option<String>,
 
     /// The signing name to use when signing requests to the REST catalog.
-    #[serde(rename = "catalog.rest.signing.name")]
+    #[serde(rename = "catalog.rest.signing_name")]
     pub rest_signing_name: Option<String>,
 
     /// Whether to use SigV4 for signing requests to the REST catalog.
     #[serde(
-        rename = "catalog.rest.sigv4.enabled",
+        rename = "catalog.rest.sigv4_enabled",
         default,
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
