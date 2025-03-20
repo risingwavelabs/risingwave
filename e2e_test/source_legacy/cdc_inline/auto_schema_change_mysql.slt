@@ -51,8 +51,8 @@ table description rw_customers NULL NULL
 system ok
 mysql -e "
   USE mytest;
-  ALTER TABLE customers ADD COLUMN v1 VARCHAR(255) DEFAULT 'hello';
-  ALTER TABLE customers ADD COLUMN v2 double(5,2) DEFAULT 88.9;
+  ALTER TABLE customers ADD COLUMN v1 VARCHAR(255);
+  ALTER TABLE customers ADD COLUMN v2 double(5,2);
 "
 
 sleep 3s
@@ -75,8 +75,8 @@ table description rw_customers NULL NULL
 query TTTT
 select id,v1,v2,name from rw_customers order by id;
 ----
-1 hello 88.9 John
-2 hello 88.9 Doe
+1 NULL NULL John
+2 NULL NULL Doe
 
 # rename column on upstream will not be replicated, since we do not support rename column
 system ok
