@@ -10720,6 +10720,7 @@ dependencies = [
  "serde_json",
  "serde_with 3.8.1",
  "smallbitset",
+ "smallvec",
  "speedate",
  "stacker",
  "static_assertions",
