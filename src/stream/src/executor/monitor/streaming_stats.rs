@@ -77,6 +77,8 @@ pub struct StreamingMetrics {
     pub source_output_row_count: LabelGuardedIntCounterVec<4>,
     pub source_split_change_count: LabelGuardedIntCounterVec<4>,
     pub source_backfill_row_count: LabelGuardedIntCounterVec<4>,
+    pub source_input_blocking_time_ns: LabelGuardedIntCounterVec<4>,
+    pub source_backfill_input_blocking_time_ns: LabelGuardedIntCounterVec<4>,
 
     // Sink
     sink_input_row_count: LabelGuardedIntCounterVec<3>,
@@ -248,6 +250,23 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+
+        let source_input_blocking_time_ns = register_guarded_int_counter_vec_with_registry!(
+            "stream_source_input_blocking_time_ns",
+            "Total blocking time (ns) of reading data from upstream",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let source_backfill_input_blocking_time_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_source_backfill_input_blocking_time_ns",
+                "Total blocking time (ns) of reading data from upstream in backfill stage",
+                &["source_id", "source_name", "actor_id", "fragment_id"],
+                registry
+            )
+            .unwrap();
 
         let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
@@ -1093,6 +1112,8 @@ impl StreamingMetrics {
             actor_current_epoch,
             source_output_row_count,
             source_split_change_count,
+            source_input_blocking_time_ns,
+            source_backfill_input_blocking_time_ns,
             source_backfill_row_count,
             sink_input_row_count,
             sink_input_bytes,

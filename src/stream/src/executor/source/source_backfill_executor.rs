@@ -453,6 +453,24 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     &self.actor_ctx.fragment_id.to_string(),
                 ]);
 
+            // the metric measures the time of waiting data from upstream in backfill stage
+            // `input_block_time_start` resets each time when finishing a stream chunk and only reports
+            // when receiving the next stream chunk.
+            // -> the time can contain a barrier message
+            // -> we always overestimate the time taken for waiting data from upstream
+            // `input_block_time_start` also resets when rebuilding the stream reader and resuming the stream
+            let source_backfill_input_blocking_time_ns = self
+                .metrics
+                .source_backfill_input_blocking_time_ns
+                .with_guarded_label_values(&[
+                    &self.source_id.to_string(),
+                    &self.source_name,
+                    &self.actor_ctx.id.to_string(),
+                    &self.actor_ctx.fragment_id.to_string(),
+                ]);
+            let mut input_block_time_start = Instant::now();
+            let mut upstream_chunk_processing_time_ns: Option<u64> = None;
+
             // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
             // milliseconds, considering some other latencies like network and cost in Meta.
             let mut max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
@@ -538,6 +556,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             } else {
                                                 tracing::warn!(command_paused, "unexpected resume");
                                             }
+                                            input_block_time_start = Instant::now();
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
                                             tracing::info!(
@@ -709,11 +728,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 reader.map(Either::Right),
                                                 select_strategy,
                                             );
+                                            input_block_time_start = Instant::now();
                                         }
                                     }
                                 }
                             }
                             Message::Chunk(chunk) => {
+                                let chunk_processing_start = Instant::now();
                                 // We need to iterate over all rows because there might be multiple splits in a chunk.
                                 // Note: We assume offset from the source is monotonically increasing for the algorithm to work correctly.
                                 let mut new_vis = BitmapBuilder::zeroed(chunk.visibility().len());
@@ -730,6 +751,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     let new_chunk = chunk.clone_with_vis(new_vis);
                                     yield Message::Chunk(new_chunk);
                                 }
+
+                                // record the processing time of the upstream chunk
+                                if upstream_chunk_processing_time_ns.is_none() {
+                                    upstream_chunk_processing_time_ns =
+                                        Some(chunk_processing_start.elapsed().as_nanos() as u64);
+                                } else {
+                                    upstream_chunk_processing_time_ns = Some(
+                                        upstream_chunk_processing_time_ns.unwrap()
+                                            + chunk_processing_start.elapsed().as_nanos() as u64,
+                                    );
+                                }
                             }
                             Message::Watermark(_) => {
                                 // Ignore watermark during backfill.
@@ -738,6 +770,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     // backfill
                     Either::Right(msg) => {
+                        source_backfill_input_blocking_time_ns.inc_by({
+                            let time_diff = input_block_time_start.elapsed().as_nanos() as u64;
+                            if let Some(upstream_chunk_processing_time_ns) =
+                                upstream_chunk_processing_time_ns.take()
+                            {
+                                time_diff.saturating_sub(upstream_chunk_processing_time_ns)
+                            } else {
+                                time_diff
+                            }
+                        });
+
                         let chunk = msg?;
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
@@ -783,6 +826,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             yield Message::Chunk(new_chunk);
                             source_backfill_row_count.inc_by(card as u64);
                         }
+                        input_block_time_start = Instant::now();
                     }
                 }
             }

@@ -235,6 +235,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ///
     ///   For source split change, split will not be migrated and we can trim states
     ///   for deleted splits.
+    #[allow(clippy::too_many_arguments)]
     async fn apply_split_change_after_yield_barrier<const BIASED: bool>(
         &mut self,
         barrier_epoch: EpochPair,
@@ -243,6 +244,7 @@ impl<S: StateStore> SourceExecutor<S> {
         target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
         source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
+        input_block_time_start: &mut Instant,
     ) -> StreamExecutorResult<()> {
         {
             source_split_change_count_metrics.inc();
@@ -251,6 +253,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 self.rebuild_stream_reader(source_desc, stream)?;
+                *input_block_time_start = Instant::now();
             }
         }
 
@@ -557,6 +560,16 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_split_change_count
             .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
 
+        // the metric measures the time of waiting data from upstream
+        // `input_block_time_start` resets each time when finishing a stream chunk and only reports
+        // when receiving the next stream chunk. -> the time can contain a barrier message
+        // `input_block_time_start` also resets when rebuilding the stream reader and resuming the stream
+        let source_input_blocking_time_ns = self
+            .metrics
+            .source_input_blocking_time_ns
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+        let mut input_block_time_start = Instant::now();
+
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -589,7 +602,8 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::Resume => {
                                 command_paused = false;
-                                stream.resume_stream()
+                                stream.resume_stream();
+                                input_block_time_start = Instant::now();
                             }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
@@ -636,6 +650,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
+                                    input_block_time_start = Instant::now();
                                 }
                             }
                             _ => {}
@@ -672,6 +687,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             target_splits,
                             should_trim_state,
                             source_split_change_count,
+                            &mut input_block_time_start,
                         )
                         .await?;
                     }
@@ -683,6 +699,9 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
 
                 Either::Right((chunk, latest_state)) => {
+                    source_input_blocking_time_ns
+                        .inc_by(input_block_time_start.elapsed().as_nanos() as u64);
+
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
                         let offset_col = chunk.column_at(offset_idx);
                         task_builder.update_task_on_chunk(offset_col.clone());
@@ -731,6 +750,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);
                     self.try_flush_data().await?;
+                    input_block_time_start = Instant::now();
                 }
             }
         }
