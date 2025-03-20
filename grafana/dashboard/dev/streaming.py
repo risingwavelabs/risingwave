@@ -62,6 +62,24 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_percentage(
+                    "Source Block Time Ratio",
+                    "The ratio of the time that the source is blocked by the upstream to the total time.",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_source_input_blocking_time_ns')}[$__rate_interval]) / 1000000000", "{{source_id}} {{source_name}} (fragment {{fragment_id}})"
+                        ),
+                    ]
+                ),
+                panels.timeseries_percentage(
+                    "Source Backfill Block Time Ratio",
+                    "The ratio of the time that the source backfill is blocked by the upstream to the total time.",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_source_backfill_input_blocking_time_ns')}[$__rate_interval]) / 1000000000", "{{source_id}} {{source_name}} (fragment {{fragment_id}})"
+                        ),
+                    ]
+                ),
                 panels.timeseries_count(
                     "Source Upstream Status",
                     "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
