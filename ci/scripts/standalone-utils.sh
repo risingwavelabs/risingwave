@@ -22,7 +22,7 @@ start_standalone_without_compactor() {
         --sql-endpoint ${RW_SQLITE_DB} \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
         --data-directory hummock_001 \
-        --config-path src/config/ci.toml" \
+        --config-path src/config/ci-single-node-standalone.toml" \
      --compute-opts=" \
         --listen-addr 127.0.0.1:5688 \
         --prometheus-listener-addr 127.0.0.1:1222 \
@@ -32,7 +32,7 @@ start_standalone_without_compactor() {
         --total-memory-bytes 8589934592 \
         --role both \
         --meta-address http://127.0.0.1:5690 \
-        --config-path src/config/ci.toml" \
+        --config-path src/config/ci-single-node-standalone.toml" \
 …
      --frontend-opts=" \
        --listen-addr 127.0.0.1:4566 \
@@ -40,7 +40,7 @@ start_standalone_without_compactor() {
        --prometheus-listener-addr 127.0.0.1:2222 \
        --health-check-listener-addr 127.0.0.1:6786 \
        --meta-addr http://127.0.0.1:5690 \
-       --config-path src/config/ci.toml" >"$1" 2>&1
+       --config-path src/config/ci-single-node-standalone.toml" >"$1" 2>&1
 }
 
 # You can fill up this section by consulting
@@ -57,7 +57,7 @@ start_standalone() {
         --sql-endpoint ${RW_SQLITE_DB} \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
         --data-directory hummock_001 \
-        --config-path src/config/ci.toml" \
+        --config-path src/config/ci-single-node-standalone.toml" \
      --compute-opts=" \
         --listen-addr 127.0.0.1:5688 \
         --prometheus-listener-addr 127.0.0.1:1222 \
@@ -67,20 +67,20 @@ start_standalone() {
         --total-memory-bytes 8589934592 \
         --role both \
         --meta-address http://127.0.0.1:5690 \
-        --config-path src/config/ci.toml" \
+        --config-path src/config/ci-single-node-standalone.toml" \
      --frontend-opts=" \
        --listen-addr 127.0.0.1:4566 \
        --advertise-addr 127.0.0.1:4566 \
        --prometheus-listener-addr 127.0.0.1:2222 \
        --health-check-listener-addr 127.0.0.1:6786 \
        --meta-addr http://127.0.0.1:5690 \
-       --config-path src/config/ci.toml" \
+       --config-path src/config/ci-single-node-standalone.toml" \
      --compactor-opts=" \
          --listen-addr 127.0.0.1:6660 \
          --prometheus-listener-addr 127.0.0.1:1260 \
          --advertise-addr 127.0.0.1:6660 \
          --meta-address http://127.0.0.1:5690 \
-         --config-path src/config/ci.toml" >"$1" 2>&1
+         --config-path src/config/ci-single-node-standalone.toml" >"$1" 2>&1
 }
 
 stop_standalone() {
