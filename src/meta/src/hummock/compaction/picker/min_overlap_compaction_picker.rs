@@ -241,7 +241,7 @@ impl NonOverlapSubLevelPicker {
         levels: &[Level],
         level_handler: &LevelHandler,
         sst: &SstableInfo,
-    ) -> Option<SubLevelSstables> {
+    ) -> SubLevelSstables {
         let mut ret = SubLevelSstables {
             sstable_infos: vec![vec![]; levels.len()],
             ..Default::default()
@@ -252,7 +252,7 @@ impl NonOverlapSubLevelPicker {
 
         // Pay attention to the order here: Make sure to select the lowest sub_level to meet the requirements of base compaction. If you break the assumption of this order, you need to redesign it.
         // TODO: Use binary selection to replace the step algorithm to optimize algorithm complexity
-        'expand_new_level: for (target_index, target_level) in levels.iter().enumerate() {
+        'expand_new_level: for (target_index, target_level) in levels.iter().enumerate().skip(1) {
             if target_level.level_type != LevelType::Nonoverlapping {
                 break;
             }
@@ -348,12 +348,9 @@ impl NonOverlapSubLevelPicker {
                 level_ssts.sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
             });
         } else {
-            // ret.total_file_count = 1;
-            // ret.total_file_size = sst.sst_size;
-            // ret.sstable_infos[0].extend(vec![sst.clone()]);
-
-            ret.total_file_count = 0;
-            ret.total_file_size = 0;
+            ret.total_file_count = 1;
+            ret.total_file_size = sst.sst_size;
+            ret.sstable_infos[0].extend(vec![sst.clone()]);
         }
 
         if self.enable_check_task_level_overlap {
@@ -390,11 +387,7 @@ impl NonOverlapSubLevelPicker {
             }
         }
 
-        if ret.sstable_infos.is_empty() {
-            return None;
-        }
-
-        Some(ret)
+        ret
     }
 
     pub fn pick_l0_multi_non_overlap_level(
@@ -407,29 +400,12 @@ impl NonOverlapSubLevelPicker {
         }
 
         let mut scores = vec![];
-        // To find the sub_level with the most files;
-        let max_files_level_idx = l0
-            .iter()
-            .enumerate()
-            .max_by(|(idx1, levels1), (idx2, levels2)| {
-                levels1
-                    .table_infos
-                    .len()
-                    .cmp(&levels2.table_infos.len())
-                    .then(idx2.cmp(idx1))
-            })
-            .map(|(idx, _)| idx)
-            .unwrap();
-
-        let intervals = &l0[max_files_level_idx].table_infos;
-        for sst in intervals {
+        for sst in &l0[0].table_infos {
             if level_handler.is_pending_compact(&sst.sst_id) {
                 continue;
             }
 
-            if let Some(score) = self.pick_sub_level(l0, level_handler, sst) {
-                scores.push(score);
-            }
+            scores.push(self.pick_sub_level(l0, level_handler, sst));
         }
 
         if scores.is_empty() {
