@@ -498,6 +498,7 @@ message DropConnectionResponse {
 
 message GetTablesRequest {
   repeated uint32 table_ids = 1;
+  bool include_dropped_tables = 2;
 }
 
 message GetTablesResponse {
