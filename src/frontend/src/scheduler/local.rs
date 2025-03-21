@@ -468,20 +468,17 @@ impl LocalQueryExecution {
                     *sources = workers
                         .iter()
                         .enumerate()
-                        .map(|(idx, worker_node)| {
-                            let exchange_source = ExchangeSource {
-                                task_output_id: Some(TaskOutputId {
-                                    task_id: Some(PbTaskId {
-                                        task_id: idx as u64,
-                                        stage_id: exchange_source_stage_id,
-                                        query_id: self.query.query_id.id.clone(),
-                                    }),
-                                    output_id: 0,
+                        .map(|(idx, worker_node)| ExchangeSource {
+                            task_output_id: Some(TaskOutputId {
+                                task_id: Some(PbTaskId {
+                                    task_id: idx as u64,
+                                    stage_id: exchange_source_stage_id,
+                                    query_id: self.query.query_id.id.clone(),
                                 }),
-                                host: Some(worker_node.host.as_ref().unwrap().clone()),
-                                local_execute_plan: Some(Plan(local_execute_plan.clone())),
-                            };
-                            exchange_source
+                                output_id: 0,
+                            }),
+                            host: Some(worker_node.host.as_ref().unwrap().clone()),
+                            local_execute_plan: Some(Plan(local_execute_plan.clone())),
                         })
                         .collect();
                 }
