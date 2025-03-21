@@ -184,7 +184,7 @@ select count(*) from mv3;
 
 # insert large batch of data
 statement ok
-INSERT INTO s1 (i1, i2, i3) select i, i::varchar, i::varchar from generate_series(10001, 20000) as i;
+INSERT INTO s1 (i1, i2, i3) select 1q, i::varchar, i::varchar from generate_series(10001, 20000) as i;
 
 sleep 5s
 
