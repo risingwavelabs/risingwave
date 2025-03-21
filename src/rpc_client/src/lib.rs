@@ -83,8 +83,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
         opts: &RpcClientConfig,
     ) -> Result<Arc<Vec<Self>>> {
         try_join_all(
-            std::iter::repeat_n(host_addr,size)
-                .map(|host_addr| Self::new_client(host_addr, opts)),
+            std::iter::repeat_n(host_addr, size).map(|host_addr| Self::new_client(host_addr, opts)),
         )
         .await
         .map(Arc::new)
