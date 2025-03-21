@@ -164,7 +164,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
-typed-builder = "^0.20"
+typed-builder = "^0.21"
 url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
