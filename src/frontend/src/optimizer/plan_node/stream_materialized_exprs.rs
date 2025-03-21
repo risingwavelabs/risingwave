@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -44,7 +43,7 @@ pub struct StreamMaterializedExprs {
 
 impl Distill for StreamMaterializedExprs {
     fn distill<'a>(&self) -> pretty_xmlish::XmlNode<'a> {
-        let _verbose = self.base.ctx().is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
 
         let schema = self.schema();
         let mut vec = vec![{
@@ -52,13 +51,15 @@ impl Distill for StreamMaterializedExprs {
             let e = Pretty::Array(self.exprs_for_display(schema).iter().map(f).collect());
             ("exprs", e)
         }];
-        if let Some(display_output_watermarks) =
-            watermark_pretty(self.base.watermark_columns(), schema)
+        if let Some(display_output_watermarks) = watermark_pretty(self.watermark_columns(), schema)
         {
             vec.push(("output_watermarks", display_output_watermarks));
         }
-        if let Some(idx) = self.state_clean_col_idx {
-            vec.push(("state_clean_col_idx", Pretty::display(&idx)));
+        if verbose && self.state_clean_col_idx.is_some() {
+            vec.push((
+                "state_clean_col_idx",
+                Pretty::display(&self.state_clean_col_idx.unwrap()),
+            ));
         }
 
         childless_record("StreamMaterializedExprs", vec)
@@ -71,25 +72,15 @@ impl StreamMaterializedExprs {
         let input_watermark_cols = input.watermark_columns();
 
         // Determine if we have a watermark column for state cleaning
-        let (state_clean_col_idx, watermark_col_group) = if !input_watermark_cols.is_empty() {
-            let (idx, group) = input_watermark_cols
+        let state_clean_col_idx = if !input_watermark_cols.is_empty() {
+            let (idx, _) = input_watermark_cols
                 .iter()
                 .next()
                 .expect("Expected at least one watermark column");
-            (Some(idx), Some(group))
+            Some(idx)
         } else {
-            (None, None)
+            None
         };
-
-        let distribution = input.distribution().clone();
-        let output_watermark_cols =
-            if let Some((idx, group)) = state_clean_col_idx.zip(watermark_col_group) {
-                let mut output_cols = input_watermark_cols.clone();
-                output_cols.insert(idx, group);
-                output_cols
-            } else {
-                input_watermark_cols.clone()
-            };
 
         // Create a functional dependency set that includes dependencies from UDF inputs to outputs
         let input_len = input.schema().len();
@@ -118,10 +109,10 @@ impl StreamMaterializedExprs {
             Self::derive_schema(&input, &exprs),
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
-            distribution,
-            false,
+            input.distribution().clone(),
+            input.append_only(),
             input.emit_on_window_close(),
-            output_watermark_cols,
+            input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
 
@@ -166,56 +157,59 @@ impl StreamMaterializedExprs {
             .collect()
     }
 
-    /// Builds a state table catalog with appropriate pk and bloom filter settings
-    fn build_state_table_catalog(&self) -> TableCatalog {
+    /// Builds a state table catalog for `StreamMaterializedExprs`
+    fn build_state_table(&self) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let input_schema = self.input.schema();
         let input_stream_key = self.input.stream_key().expect("Expected stream key");
+        let dist_keys = self.distribution().dist_column_indices().to_vec();
 
-        let mut pk_indices = Vec::new();
-
-        if let Some(clean_col_idx) = self.state_clean_col_idx {
-            let watermark_field = &input_schema.fields[clean_col_idx];
-            let col_idx = catalog_builder.add_column(watermark_field);
-            catalog_builder.add_order_column(col_idx, OrderType::ascending());
-            pk_indices.push(col_idx);
-        }
-
-        for &idx in input_stream_key {
-            if Some(idx) != self.state_clean_col_idx {
-                let field = &input_schema.fields[idx];
-                let col_idx = catalog_builder.add_column(field);
-                catalog_builder.add_order_column(col_idx, OrderType::ascending());
-                pk_indices.push(col_idx);
+        // Add all input columns in their original order
+        let mut watermark_col_idx = None;
+        for (idx, field) in input_schema.fields.iter().enumerate() {
+            let col_idx = catalog_builder.add_column(field);
+            if Some(idx) == self.state_clean_col_idx {
+                watermark_col_idx = Some(col_idx);
             }
         }
 
-        let mut added_cols = FixedBitSet::with_capacity(input_schema.len());
-        for idx in &pk_indices {
-            added_cols.set(*idx, true);
-        }
-
-        for idx in 0..input_schema.len() {
-            if !added_cols.contains(idx) {
-                let field = &input_schema.fields[idx];
-                catalog_builder.add_column(field);
-            }
-        }
-
+        // Add expression result columns
         for expr in &self.exprs {
             let field = Field::with_name(expr.return_type(), "expr_result");
             catalog_builder.add_column(&field);
         }
 
-        let read_prefix_len_hint = if self.state_clean_col_idx.is_some() {
-            1
-        } else {
-            0
-        };
-        let mut catalog = catalog_builder.build(vec![], read_prefix_len_hint);
+        // Add primary key columns
+        let mut watermark_in_pk = false;
+        let mut watermark_pk_index = None;
 
-        if self.state_clean_col_idx.is_some() {
-            catalog.clean_watermark_index_in_pk = Some(0);
+        for (pk_idx, &idx) in input_stream_key.iter().enumerate() {
+            catalog_builder.add_order_column(idx, OrderType::ascending());
+            if Some(idx) == self.state_clean_col_idx {
+                watermark_in_pk = true;
+                watermark_pk_index = Some(pk_idx);
+            }
+        }
+
+        let mut pk_len = input_stream_key.len();
+
+        let clean_watermark_index_in_pk = if let Some(idx) = watermark_col_idx {
+            if !watermark_in_pk && self.state_clean_col_idx.is_some() {
+                catalog_builder.add_order_column(idx, OrderType::ascending());
+                pk_len += 1;
+                Some(input_stream_key.len())
+            } else {
+                watermark_pk_index
+            }
+        } else {
+            None
+        };
+
+        let read_prefix_len_hint = pk_len;
+        let mut catalog = catalog_builder.build(dist_keys, read_prefix_len_hint);
+
+        if let Some(idx) = clean_watermark_index_in_pk {
+            catalog.clean_watermark_index_in_pk = Some(idx);
             catalog.cleaned_by_watermark = true;
         }
 
@@ -236,12 +230,13 @@ impl_plan_tree_node_for_unary! { StreamMaterializedExprs }
 
 impl StreamNode for StreamMaterializedExprs {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        let mut state_table = self.build_state_table_catalog();
-        state_table = state_table.with_id(state.gen_table_id_wrapped());
-
         PbNodeBody::MaterializedExprs(Box::new(MaterializedExprsNode {
             exprs: self.exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
-            state_table: Some(state_table.to_internal_table_prost()),
+            state_table: Some(
+                self.build_state_table()
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
             state_clean_col_idx: self.state_clean_col_idx.map(|idx| idx as u32),
         }))
     }
