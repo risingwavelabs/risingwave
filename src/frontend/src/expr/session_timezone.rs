@@ -206,7 +206,7 @@ impl SessionTimezone {
                     && lit
                         .get_data()
                         .as_ref()
-                        .map_or(true, |v| v.as_utf8().eq_ignore_ascii_case("epoch"))
+                        .is_none_or(|v| v.as_utf8().eq_ignore_ascii_case("epoch"))
                 {
                     // No need to rewrite when field is `null` or `epoch`.
                     // This is optional but avoids false warning in common case.

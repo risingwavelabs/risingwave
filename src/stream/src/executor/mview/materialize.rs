@@ -575,7 +575,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }
     }
 
-    pub async fn handle<'a, S: StateStore>(
+    pub async fn handle<S: StateStore>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
@@ -1953,14 +1953,14 @@ mod tests {
             let len = c.data_chunk().capacity();
             let mut c = StreamChunkMut::from(c);
             for i in 0..len {
-                c.set_vis(i, rng.gen_bool(0.5));
+                c.set_vis(i, rng.random_bool(0.5));
             }
             c.into()
         };
         for _ in 0..row_number {
             let k = (rng.next_u32() % KN) as i32;
             let v = rng.next_u32() as i32;
-            let op = if rng.gen_bool(0.5) {
+            let op = if rng.random_bool(0.5) {
                 Op::Insert
             } else {
                 Op::Delete

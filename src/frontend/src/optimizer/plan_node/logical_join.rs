@@ -498,7 +498,6 @@ impl PlanTreeNodeBinary for LogicalJoin {
         })
     }
 
-    #[must_use]
     fn rewrite_with_left_right(
         &self,
         left: PlanRef,

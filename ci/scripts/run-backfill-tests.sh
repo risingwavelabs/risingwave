@@ -325,6 +325,8 @@ test_scale_in() {
   risedev psql-env
   source .risingwave/config/psql-env
 
+  psql -c "alter system set per_database_isolation = false"
+
   psql -c "create table t(v1 int); insert into t select * from generate_series(1, 1000); flush"
   psql -c "set background_ddl=true; set backfill_rate_limit=10; create materialized view m1 as select * from t; flush"
   internal_table=$(psql -t -c "show internal tables;" | grep -v 'INFO')
@@ -410,6 +412,16 @@ test_scale_in() {
   risedev clean-data
 }
 
+test_cross_db_snapshot_backfill() {
+  echo "--- e2e, cross db snapshot backfill test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/cross_db/cross_db_mv.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
@@ -419,6 +431,8 @@ main() {
   test_snapshot_backfill
 
   test_scale_in
+
+  test_cross_db_snapshot_backfill
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then

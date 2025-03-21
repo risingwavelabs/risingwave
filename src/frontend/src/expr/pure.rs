@@ -267,7 +267,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapInsert
             | Type::MapLength
             | Type::VnodeUser
-            |Type::RwEpochToTs =>
+            | Type::RwEpochToTs
+            | Type::CheckNotNull =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -298,7 +299,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
-            | Type::PgTableIsVisible => self.impure = true,
+            | Type::PgTableIsVisible
+            | Type::HasFunctionPrivilege => self.impure = true,
         }
     }
 }

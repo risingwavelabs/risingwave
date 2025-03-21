@@ -191,7 +191,7 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
@@ -253,6 +253,7 @@ impl SstableIteratorType for BackwardSstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use rand::rng as thread_rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;

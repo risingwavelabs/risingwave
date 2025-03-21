@@ -278,6 +278,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
     // Keep creating mv1, if it's not created.
     loop {
         session.run(SET_BACKGROUND_DDL).await?;
+        session.run(SET_RATE_LIMIT_2).await?;
         session.run("CREATE MATERIALIZED VIEW mv1 as select fact1.v1 from fact1 join fact2 on fact1.v1 = fact2.v1").await?;
         tracing::info!("created mv in background");
         sleep(Duration::from_secs(1)).await;

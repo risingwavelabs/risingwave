@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::replace;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
@@ -33,12 +34,13 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tonic::Status;
 use tracing::{Instrument, debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::rpc::{ControlStreamManager, merge_node_rpc_errors};
-use crate::barrier::schedule::PeriodicBarriers;
+use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
     schedule,
@@ -73,6 +75,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
+    enable_per_database_isolation: bool,
+
     pub(super) context: Arc<C>,
 
     env: MetaSrvEnv,
@@ -90,6 +94,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     sink_manager: SinkCoordinatorManager,
 
     control_stream_manager: ControlStreamManager,
+
+    term_id: String,
 }
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
@@ -124,27 +130,31 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
-        let checkpoint_frequency = env.system_params_reader().await.checkpoint_frequency() as _;
-        let interval =
-            Duration::from_millis(env.system_params_reader().await.barrier_interval_ms() as u64);
+        let reader = env.system_params_reader().await;
+        let checkpoint_frequency = reader.checkpoint_frequency() as _;
+        let enable_per_database_isolation = reader.per_database_isolation();
+        let interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
         let periodic_barriers = PeriodicBarriers::new(interval, checkpoint_frequency);
         tracing::info!(
             "Starting barrier scheduler with: checkpoint_frequency={:?}",
             checkpoint_frequency,
         );
 
+        let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
             enable_recovery,
             periodic_barriers,
             in_flight_barrier_nums,
+            enable_per_database_isolation,
             context,
             env,
-            checkpoint_control: CheckpointControl::default(),
+            checkpoint_control,
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
             sink_manager,
             control_stream_manager,
+            term_id: "uninitialized".into(),
         }
     }
 
@@ -220,7 +230,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, None, RecoveryReason::Bootstrap)
+            self.recovery(paused, RecoveryReason::Bootstrap)
                 .instrument(span)
                 .await;
         }
@@ -280,7 +290,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     info!(?changed_worker, "worker changed");
 
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), &*self.context).await;
+                        self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
                     }
                 }
 
@@ -290,7 +300,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         {
                             self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.periodic_barriers
-                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize);
+                            self.enable_per_database_isolation = p.per_database_isolation();
                         }
                     }
                 }
@@ -326,18 +337,28 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     })
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
+                                self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
                                 if let Some(runtime_info) = self.context.reload_database_runtime_info(database_id).await? {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
+                                    let workers = runtime_info.database_fragment_info.workers();
+                                    for worker_id in workers {
+                                        if !self.control_stream_manager.contains_worker(worker_id) {
+                                            let node = self.active_streaming_nodes.current()[&worker_id].clone();
+                                            self.control_stream_manager.try_add_worker(node, entering_initializing.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                                        }
+                                    }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
                                 } else {
                                     info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
+                                    // mark ready to unblock subsequent request
+                                    self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     entering_initializing.remove();
                                 }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
-                                self.context.mark_ready(Some(entering_running.database_id()));
+                                self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
                                 entering_running.enter();
                             }
                         }
@@ -347,31 +368,48 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
                 (worker_id, resp_result) = self.control_stream_manager.next_response() => {
-                     let resp = match resp_result {
-                        Err(e) => {
-                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) {
-                                let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
-                                let err = merge_node_rpc_errors("get error from control stream", errors);
-                                Self::report_collect_failure(&self.env, &err);
-                                self.failure_recovery(err).await;
-                            }  else {
-                                warn!(worker_id, "no barrier to collect from worker, ignore err");
-                            }
-                            continue;
-                        }
-                        Ok(resp) => resp,
-                    };
                     let result: MetaResult<()> = try {
+                        let resp = match resp_result {
+                            Err(err) => {
+                                let failed_databases = self.checkpoint_control.databases_failed_at_worker_err(worker_id);
+                                if !failed_databases.is_empty() {
+                                    if !self.enable_recovery {
+                                        panic!("control stream to worker {} failed but recovery not enabled: {:?}", worker_id, err.as_report());
+                                    }
+                                    if !self.enable_per_database_isolation {
+                                        Err(err.clone())?;
+                                    }
+                                    Self::report_collect_failure(&self.env, &err);
+                                    for database_id in failed_databases {
+                                        if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                            warn!(worker_id, database_id = database_id.database_id, "database entering recovery on node failure");
+                                            self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
+                                            self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
+                                            // TODO: add log on blocking time
+                                            let output = self.completing_task.wait_completing_task().await?;
+                                            entering_recovery.enter(output, &mut self.control_stream_manager);
+                                        }
+                                    }
+                                }  else {
+                                    warn!(worker_id, "no barrier to collect from worker, ignore err");
+                                }
+                                continue;
+                            }
+                            Ok(resp) => resp,
+                        };
                         match resp {
                             Response::CompleteBarrier(resp) => {
-                                self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)?;
+                                self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager, &mut self.periodic_barriers)?;
                             },
                             Response::ReportDatabaseFailure(resp) => {
                                 if !self.enable_recovery {
                                     panic!("database failure reported but recovery not enabled: {:?}", resp)
                                 }
-                                if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(resp, &mut self.control_stream_manager) {
-                                    let database_id = entering_recovery.database_id();
+                                if !self.enable_per_database_isolation {
+                                        Err(anyhow!("database {} reset", resp.database_id))?;
+                                    }
+                                let database_id = DatabaseId::new(resp.database_id);
+                                if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(database_id = database_id.database_id, "database entering recovery");
                                     self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                     // TODO: add log on blocking time
@@ -395,8 +433,34 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
-                        self.failure_recovery(e).await;
+                    if let Some(failed_databases) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager)
+                        && !failed_databases.is_empty() {
+                        if !self.enable_recovery {
+                            panic!(
+                                "failed to inject barrier for some databases but recovery not enabled: {:?}",
+                                failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec()
+                            );
+                        }
+                        let result: MetaResult<_> = try {
+                            if !self.enable_per_database_isolation {
+                                let errs = failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec();
+                                let err = anyhow!("failed to inject barrier for databases: {:?}", errs);
+                                Err(err)?;
+                            } else {
+                                for (database_id, err) in failed_databases {
+                                    if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                        warn!(%database_id, e = %err.as_report(),"database entering recovery on inject failure");
+                                        self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(err).context("inject barrier failure").into()));
+                                        // TODO: add log on blocking time
+                                        let output = self.completing_task.wait_completing_task().await?;
+                                        entering_recovery.enter(output, &mut self.control_stream_manager);
+                                    }
+                                }
+                            }
+                        };
+                        if let Err(e) = result {
+                            self.failure_recovery(e).await;
+                        }
                     }
                 }
             }
@@ -419,11 +483,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 info!("waiting for completing command to finish in recovery");
                 match join_handle.await {
                     Err(e) => {
-                        warn!(err = ?e.as_report(), "failed to join completing task");
+                        warn!(err = %e.as_report(), "failed to join completing task");
                         true
                     }
                     Ok(Err(e)) => {
-                        warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                        warn!(
+                            err = %e.as_report(),
+                            "failed to complete barrier during clear"
+                        );
                         true
                     }
                     Ok(Ok(hummock_version_stats)) => {
@@ -455,7 +522,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                     Err(e) => {
                         error!(
-                            err = ?e.as_report(),
+                            err = %e.as_report(),
                             "failed to complete barrier during recovery"
                         );
                         break;
@@ -487,13 +554,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 None,
             );
 
-            let reason = RecoveryReason::Failover(err.clone());
+            let reason = RecoveryReason::Failover(err);
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.recovery(false, Some(err), reason)
-                .instrument(span)
-                .await;
+            self.recovery(false, reason).instrument(span).await;
         } else {
             panic!(
                 "a streaming error occurred while recovery is disabled, aborting: {:?}",
@@ -522,7 +587,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // No need to clean dirty tables for barrier recovery,
         // The foreground stream job should cleanup their own tables.
-        self.recovery(false, Some(err), RecoveryReason::Adhoc)
+        self.recovery(false, RecoveryReason::Adhoc)
             .instrument(span)
             .await;
     }
@@ -582,6 +647,9 @@ mod retry_strategy {
 
 pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
+use risingwave_pb::meta::event_log::{Event, EventRecovery};
+
+use crate::barrier::utils::is_valid_after_worker_err;
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
@@ -591,32 +659,51 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(
-        &mut self,
-        is_paused: bool,
-        err: Option<MetaError>,
-        recovery_reason: RecoveryReason,
-    ) {
-        self.context.abort_and_mark_blocked(None, recovery_reason);
+    pub async fn recovery(&mut self, is_paused: bool, recovery_reason: RecoveryReason) {
         // Clear all control streams to release resources (connections to compute nodes) first.
         self.control_stream_manager.clear();
 
-        self.recovery_inner(is_paused, err).await;
-        self.context.mark_ready(None);
+        let reason_str = match &recovery_reason {
+            RecoveryReason::Bootstrap => "bootstrap".to_owned(),
+            RecoveryReason::Failover(err) => {
+                format!("failed over: {}", err.as_report())
+            }
+            RecoveryReason::Adhoc => "adhoc recovery".to_owned(),
+        };
+
+        self.context.abort_and_mark_blocked(None, recovery_reason);
+
+        self.recovery_inner(is_paused, reason_str).await;
+        self.context.mark_ready(MarkReadyOptions::Global {
+            blocked_databases: self.checkpoint_control.recovering_databases().collect(),
+        });
     }
 
-    async fn recovery_inner(&mut self, is_paused: bool, err: Option<MetaError>) {
+    async fn recovery_inner(&mut self, is_paused: bool, recovery_reason: String) {
+        let event_log_manager_ref = self.env.event_log_manager_ref();
+
         tracing::info!("recovery start!");
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_start(recovery_reason.clone()),
+        )]);
+
         let retry_strategy = get_retry_strategy();
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
-        let recovery_timer = GLOBAL_META_METRICS.recovery_latency.start_timer();
+        let recovery_timer = GLOBAL_META_METRICS
+            .recovery_latency
+            .with_label_values(&["global"])
+            .start_timer();
 
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
-            if let Some(err) = &err {
-                self.context.notify_creating_job_failed(err).await;
-            };
+            // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
+            // it holds the reschedule_read_lock and wait for creating job to finish, and caused the following scale_actor fail
+            // to acquire the reschedule_write_lock, and then keep recovering, and then deadlock.
+            // TODO: refactor and fix this hacky implementation.
+            self.context
+                .notify_creating_job_failed(None, recovery_reason.clone())
+                .await;
             let runtime_info_snapshot = self
                 .context
                 .reload_runtime_info()
@@ -636,26 +723,26 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             } = runtime_info_snapshot;
 
             self.sink_manager.reset().await;
+            let term_id = Uuid::new_v4().to_string();
 
             let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
             let reset_start_time = Instant::now();
-            control_stream_manager
+            let unconnected_worker = control_stream_manager
                 .reset(
                     active_streaming_nodes.current(),
+                    term_id.clone(),
                     &*self.context,
                 )
-                .await
-                .inspect_err(|err| {
-                    warn!(error = %err.as_report(), "reset compute nodes failed");
-                })?;
-            info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
+                .await;
+            info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
-            let recovery_result: MetaResult<_> = try {
+            {
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
+                let mut failed_databases = HashSet::new();
                 for (database_id, info) in database_fragment_infos {
-                    control_stream_manager.add_partial_graph(database_id, None)?;
-                    let (node_to_collect, database, prev_epoch) = control_stream_manager.inject_database_initial_barrier(
+                    control_stream_manager.add_partial_graph(database_id, None);
+                    let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         info,
                         &mut state_table_committed_epochs,
@@ -665,7 +752,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         subscription_infos.remove(&database_id).unwrap_or_default(),
                         is_paused,
                         &hummock_version_stats,
-                    )?;
+                    );
+                    let (node_to_collect, database, prev_epoch) = match result {
+                        Ok(info) => {
+                            info
+                        }
+                        Err(e) => {
+                            warn!(%database_id, e = %e.as_report(), "failed to inject database initial barrier");
+                            assert!(failed_databases.insert(database_id), "non-duplicate");
+                            continue;
+                        }
+                    };
                     if !node_to_collect.is_empty() {
                         assert!(collecting_databases.insert(database_id, (node_to_collect, database, prev_epoch)).is_none());
                     } else {
@@ -676,19 +773,51 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 while !collecting_databases.is_empty() {
                     let (worker_id, result) =
                         control_stream_manager.next_response().await;
-                    let resp = result?;
-                    let resp = match resp {
-                        Response::CompleteBarrier(resp) => {
-                            resp
+                    let resp = match result {
+                        Err(e) => {
+                            warn!(worker_id, err = %e.as_report(), "worker node failure during recovery");
+                            for (failed_database_id,_ ) in collecting_databases.extract_if(|_, (node_to_collect, _, _)| {
+                                !is_valid_after_worker_err(node_to_collect, worker_id)
+                            }) {
+                                warn!(%failed_database_id, worker_id, "database failed to recovery in global recovery due to worker node err");
+                                assert!(failed_databases.insert(failed_database_id));
+                            }
+                            continue;
                         }
-                        other => {
-                            return Err(anyhow!("expect Response::CollectBarrier but get {:?}", other).into());
+                        Ok(resp) => {
+                            match resp {
+                                Response::CompleteBarrier(resp) => {
+                                    resp
+                                }
+                                Response::ReportDatabaseFailure(resp) => {
+                                    let database_id = DatabaseId::new(resp.database_id);
+                                    if collecting_databases.remove(&database_id).is_some() {
+                                        warn!(%database_id, worker_id, "database reset during global recovery");
+                                        assert!(failed_databases.insert(database_id));
+                                    } else if collected_databases.remove(&database_id).is_some() {
+                                        warn!(%database_id, worker_id, "database initialized but later reset during global recovery");
+                                        assert!(failed_databases.insert(database_id));
+                                    } else {
+                                        assert!(failed_databases.contains(&database_id));
+                                    }
+                                    continue;
+                                }
+                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetDatabase(_))=> {
+                                    return Err(anyhow!("get unexpected resp {:?}", other).into());
+                                }
+                            }
                         }
                     };
                     let database_id = DatabaseId::new(resp.database_id);
+                    if failed_databases.contains(&database_id) {
+                        assert!(!collecting_databases.contains_key(&database_id));
+                        // ignore the lately arrived collect resp of failed database
+                        continue;
+                    }
+                    assert!(!collected_databases.contains_key(&database_id));
                     let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, *prev_epoch);
-                    assert!(node_to_collect.remove(&worker_id));
+                    assert!(node_to_collect.remove(&worker_id).is_some());
                     if node_to_collect.is_empty() {
                         let (_, database, _) = collecting_databases.remove(&database_id).expect("should exist");
                         assert!(collected_databases.insert(database_id, database).is_none());
@@ -710,34 +839,66 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
-                (
+                if !self.enable_per_database_isolation && !failed_databases.is_empty() {
+                    return Err(anyhow!(
+                        "global recovery failed due to failure of databases {:?}",
+                        failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
+                    );
+                }
+                let checkpoint_control = CheckpointControl::recover(
+                    collected_databases,
+                    failed_databases,
+                    &mut control_stream_manager,
+                    hummock_version_stats,
+                );
+                Ok((
                     active_streaming_nodes,
                     control_stream_manager,
-                    CheckpointControl::new(
-                        collected_databases,
-                        hummock_version_stats,
-                    ),
-                )
-            };
-            if let Err(err) = &recovery_result {
-                tracing::error!(error = %err.as_report(), "recovery failed");
-                GLOBAL_META_METRICS.recovery_failure_cnt.inc();
+                    checkpoint_control,
+                    term_id,
+                ))
             }
-            recovery_result
-        })
+        }.inspect_err(|err: &MetaError| {
+            tracing::error!(error = %err.as_report(), "recovery failed");
+            event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                EventRecovery::global_recovery_failure(recovery_reason.clone(), err.to_report_string()),
+            )]);
+            GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
+        }))
             .instrument(tracing::info_span!("recovery_attempt"))
             .await
             .expect("Retry until recovery success.");
 
-        recovery_timer.observe_duration();
+        let duration = recovery_timer.stop_and_record();
 
         (
             self.active_streaming_nodes,
             self.control_stream_manager,
             self.checkpoint_control,
+            self.term_id,
         ) = new_state;
 
         tracing::info!("recovery success");
+
+        let recovering_databases = self
+            .checkpoint_control
+            .recovering_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+        let running_databases = self
+            .checkpoint_control
+            .running_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_success(
+                recovery_reason.clone(),
+                duration as f32,
+                running_databases,
+                recovering_databases,
+            ),
+        )]);
 
         self.env
             .notification_manager()

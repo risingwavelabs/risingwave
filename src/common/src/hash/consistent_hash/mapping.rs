@@ -183,7 +183,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
                     .tuple_windows()
                     .map(|(a, b)| (b - a) as usize),
             )
-            .flat_map(|(item, c)| std::iter::repeat(item).take(c))
+            .flat_map(|(item, c)| std::iter::repeat_n(item, c))
     }
 
     /// Iterate over all vnode-item pairs in this mapping.
@@ -417,7 +417,7 @@ mod tests {
 
     fn randoms() -> impl Iterator<Item = TestMapping> {
         COUNTS.iter().map(|&count| {
-            let raw = repeat_with(|| rand::thread_rng().gen_range(0..count as u32))
+            let raw = repeat_with(|| rand::rng().random_range(0..count as u32))
                 .take(VirtualNode::COUNT_FOR_TEST)
                 .collect_vec();
             TestMapping::from_expanded(&raw)

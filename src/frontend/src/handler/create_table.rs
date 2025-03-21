@@ -82,6 +82,7 @@ use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -96,6 +97,8 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
+            ColumnOption::Null => {}
+            ColumnOption::NotNull => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
@@ -120,6 +123,7 @@ pub fn bind_sql_columns(
             name,
             data_type,
             collation,
+            options,
             ..
         } = column;
 
@@ -156,6 +160,10 @@ pub fn bind_sql_columns(
             check_column_name_not_reserved(&name.real_value())?;
         }
 
+        let nullable: bool = !options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull));
+
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
@@ -166,6 +174,7 @@ pub fn bind_sql_columns(
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::LATEST,
                 system_column: None,
+                nullable,
             },
             is_hidden: false,
         });
@@ -459,6 +468,16 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
+        not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
+    } else if column_defs.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        // if non-cdc source
+        notice_to_user(
+            "The table contains columns with NOT NULL constraints. Any rows from upstream violating the constraints will be ignored silently.",
+        );
     }
 
     let db_name: &str = &session.database();
@@ -524,7 +543,7 @@ pub(crate) fn gen_create_table_plan(
 ) -> Result<(PlanRef, PbTable)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
@@ -799,7 +818,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (mut columns, pk_column_ids, _row_id_index) =
@@ -1036,13 +1055,16 @@ pub(super) async fn handle_create_table_plan(
         }
 
         (None, Some(cdc_table)) => {
-            sanity_check_for_cdc_table(
+            sanity_check_for_table_on_cdc_source(
                 append_only,
                 &column_defs,
                 &wildcard_idx,
                 &constraints,
                 &source_watermarks,
             )?;
+
+            generated_columns_check_for_cdc_table(&column_defs)?;
+            not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
 
             let session = &handler_args.session;
             let db_name = &session.database();
@@ -1056,8 +1078,6 @@ pub(super) async fn handle_create_table_plan(
             // cdc table cannot be append-only
             let (format_encode, source_name) =
                 Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
-
-            generated_columns_check_for_cdc_table(&column_defs)?;
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
@@ -1141,6 +1161,7 @@ pub(super) async fn handle_create_table_plan(
     Ok((plan, source, table, job_type))
 }
 
+// For both table from cdc source and table with cdc connector
 fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
     let mut found_generated_column = false;
     for column in columns {
@@ -1167,7 +1188,29 @@ fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()>
     Ok(())
 }
 
-fn sanity_check_for_cdc_table(
+// For both table from cdc source and table with cdc connector
+fn not_null_check_for_cdc_table(
+    wildcard_idx: &Option<usize>,
+    column_defs: &Vec<ColumnDef>,
+) -> Result<()> {
+    if !wildcard_idx.is_some()
+        && column_defs.iter().any(|col| {
+            col.options
+                .iter()
+                .any(|opt| matches!(opt.option, ColumnOption::NotNull))
+        })
+    {
+        return Err(ErrorCode::NotSupported(
+            "CDC table with NOT NULL constraint is not supported".to_owned(),
+            "Please remove the NOT NULL constraint for columns".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+// Only for table from cdc source
+fn sanity_check_for_table_on_cdc_source(
     append_only: bool,
     column_defs: &Vec<ColumnDef>,
     wildcard_idx: &Option<usize>,
@@ -1206,6 +1249,7 @@ fn sanity_check_for_cdc_table(
         )
         .into());
     }
+
     if append_only {
         return Err(ErrorCode::NotSupported(
             "append only modifier on the table created from a CDC source".into(),
@@ -1380,9 +1424,6 @@ pub async fn create_iceberg_engine_table(
     constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
-    risingwave_common::license::Feature::IcebergEngine
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
     // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
     // 2. create a hummock table
     // 3. create an iceberg sink
@@ -1826,7 +1867,7 @@ pub async fn generate_stream_graph_for_replace_table(
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict: on_conflict.into(),
-        with_version_column: with_version_column.clone(),
+        with_version_column: with_version_column.as_ref().map(|x| x.real_value()),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
     };
@@ -1888,7 +1929,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 IncludeOption::default(),
                 table_name,
                 resolved_table_name,
@@ -2071,11 +2112,13 @@ mod tests {
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],
-            ).into(),
+            )
+            .with_ids([3, 4, 5].map(ColumnId::new))
+            .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[test]
@@ -2132,7 +2175,7 @@ mod tests {
                 let mut columns = bind_sql_columns(&column_defs, false)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
-                    c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();
+                    col_id_gen.generate(c)?;
                 }
 
                 let pk_names =

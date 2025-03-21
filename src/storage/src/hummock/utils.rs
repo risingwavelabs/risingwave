@@ -383,7 +383,6 @@ pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
     table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
@@ -397,7 +396,7 @@ pub(crate) async fn do_insert_sanity_check(
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    let stored_value = inner.get(key.clone(), epoch, read_options).await?;
+    let stored_value = inner.get(key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
@@ -415,7 +414,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
     table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
@@ -433,7 +431,7 @@ pub(crate) async fn do_delete_sanity_check(
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match inner.get(key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -461,7 +459,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
     table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
@@ -480,7 +477,7 @@ pub(crate) async fn do_update_sanity_check(
         ..Default::default()
     };
 
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match inner.get(key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -638,11 +635,11 @@ pub(crate) async fn wait_for_update(
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
-                let backtrace = if cfg!(debug_assertions) {
-                    format!("{:?}", Backtrace::capture())
-                } else {
-                    "backtrace log not enabled in non-debug mode".into()
-                };
+                // Provide backtrace iff in debug mode for observability.
+                let backtrace = cfg!(debug_assertions)
+                    .then(Backtrace::capture)
+                    .map(tracing::field::display);
+
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
@@ -818,7 +815,7 @@ mod tests {
 
     use futures::FutureExt;
     use futures::future::join_all;
-    use rand::random;
+    use rand::random_range;
 
     use crate::hummock::utils::MemoryLimiter;
 
@@ -862,7 +859,7 @@ mod tests {
             let limiter = memory_limiter.clone();
             let h = tokio::spawn(async move {
                 let mut buffers = vec![];
-                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
+                let mut current_buffer_usage = random_range(2..=9);
                 for _ in 0..1000 {
                     if buffers.len() < current_buffer_usage
                         && let Some(tracker) = limiter.try_require_memory(QUOTA)
@@ -870,7 +867,7 @@ mod tests {
                         buffers.push(tracker);
                     } else {
                         buffers.clear();
-                        current_buffer_usage = (random::<usize>() % 8) + 2;
+                        current_buffer_usage = random_range(2..=9);
                         let req = limiter.require_memory(QUOTA);
                         match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
                             Ok(tracker) => {
@@ -881,7 +878,7 @@ mod tests {
                             }
                         }
                     }
-                    let sleep_time = random::<u64>() % 3 + 1;
+                    let sleep_time = random_range(1..=3);
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 }
             });

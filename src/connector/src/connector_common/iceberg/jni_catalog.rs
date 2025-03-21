@@ -141,10 +141,32 @@ impl Catalog for JniCatalog {
     /// Create a new namespace inside the catalog.
     async fn create_namespace(
         &self,
-        _namespace: &iceberg::NamespaceIdent,
+        namespace: &iceberg::NamespaceIdent,
         _properties: HashMap<String, String>,
     ) -> iceberg::Result<iceberg::Namespace> {
-        todo!()
+        execute_with_jni_env(self.jvm, |env| {
+            let namespace_jstr = if namespace.is_empty() {
+                env.new_string("").unwrap()
+            } else {
+                if namespace.len() > 1 {
+                    bail!("Namespace with more than one level is not supported!")
+                }
+                env.new_string(&namespace[0]).unwrap()
+            };
+
+            call_method!(env, self.java_catalog.as_obj(), {void createNamespace(String)},
+                &namespace_jstr)
+            .with_context(|| format!("Failed to create namespace: {namespace}"))?;
+
+            Ok(Namespace::new(namespace.clone()))
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to create namespace.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Get a namespace information from the catalog.
@@ -153,8 +175,31 @@ impl Catalog for JniCatalog {
     }
 
     /// Check if namespace exists in catalog.
-    async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
-        todo!()
+    async fn namespace_exists(&self, namespace: &NamespaceIdent) -> iceberg::Result<bool> {
+        execute_with_jni_env(self.jvm, |env| {
+            let namespace_jstr = if namespace.is_empty() {
+                env.new_string("").unwrap()
+            } else {
+                if namespace.len() > 1 {
+                    bail!("Namespace with more than one level is not supported!")
+                }
+                env.new_string(&namespace[0]).unwrap()
+            };
+
+            let exists =
+                call_method!(env, self.java_catalog.as_obj(), {boolean namespaceExists(String)},
+                &namespace_jstr)
+                .with_context(|| format!("Failed to check namespace exists: {namespace}"))?;
+
+            Ok(exists)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to check namespace exists.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Drop a namespace from the catalog.

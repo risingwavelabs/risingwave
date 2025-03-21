@@ -19,7 +19,7 @@ use risingwave_pb::expr::expr_node::Type;
 use super::Planner;
 use crate::binder::{BoundUpdate, UpdateProject};
 use crate::error::Result;
-use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate, generic};
 use crate::optimizer::property::{Order, RequiredDist};
@@ -71,7 +71,7 @@ impl Planner {
 
             let old: ExprImpl = InputRef::new(i, data_type.clone()).into();
 
-            let new: ExprImpl = match (update.projects.get(&i)).map(|p| p.offset(old_schema_len)) {
+            let mut new: ExprImpl = match (update.projects.get(&i)).map(|p| p.offset(old_schema_len)) {
                 Some(UpdateProject::Simple(j)) => InputRef::new(j, data_type.clone()).into(),
                 Some(UpdateProject::Composite(j, field)) => FunctionCall::new_unchecked(
                     Type::Field,
@@ -86,6 +86,18 @@ impl Planner {
 
                 None => old.clone(),
             };
+            if !col.nullable() {
+                new = FunctionCall::new_unchecked(
+                    ExprType::CheckNotNull,
+                    vec![
+                        new,
+                        ExprImpl::literal_varchar(col.name().to_owned()),
+                        ExprImpl::literal_varchar(update.table_name.clone()),
+                    ],
+                    data_type.clone(),
+                )
+                .into();
+            }
 
             olds.push(old);
             news.push(new);

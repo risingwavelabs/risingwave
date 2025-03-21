@@ -36,7 +36,7 @@ use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBuffe
 use risingwave_storage::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate, read_filter_for_version,
 };
-use risingwave_storage::hummock::test_utils::gen_dummy_batch;
+use risingwave_storage::hummock::test_utils::*;
 
 use crate::test_utils::prepare_first_valid_version;
 

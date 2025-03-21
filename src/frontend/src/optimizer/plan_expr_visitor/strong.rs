@@ -84,7 +84,8 @@ impl Strong {
             | ExprType::QuoteNullable
             | ExprType::IsNotTrue
             | ExprType::IsFalse
-            | ExprType::IsNotFalse => false,
+            | ExprType::IsNotFalse
+            | ExprType::CheckNotNull => false,
             // ANY: This kind of expression is null if and only if at least one of its arguments is null.
             ExprType::Not
             | ExprType::Equal
@@ -329,6 +330,7 @@ impl Strong {
             | ExprType::RwRecoveryStatus
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
+            | ExprType::HasFunctionPrivilege
             | ExprType::HasAnyColumnPrivilege
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton

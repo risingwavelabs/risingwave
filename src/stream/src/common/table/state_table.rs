@@ -67,7 +67,7 @@ use tracing::{Instrument, trace};
 use crate::cache::cache_may_stale;
 use crate::common::state_cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
-use crate::executor::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// Mostly watermark operators will have inserts (append-only).
 /// So this number should not need to be very large.
@@ -79,7 +79,7 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 macro_rules! insane_mode_discard_point {
     () => {{
         use rand::Rng;
-        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+        if crate::consistency::insane() && rand::rng().random_bool(0.3) {
             return;
         }
     }};
@@ -1377,6 +1377,34 @@ where
         Ok(stream.map_ok(|(_, row)| row))
     }
 
+    /// Get the row from a state table with only 1 row.
+    pub async fn get_from_one_row_table(&self) -> StreamExecutorResult<Option<OwnedRow>> {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+        let stream = self
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await?;
+        pin_mut!(stream);
+
+        if let Some(res) = stream.next().await {
+            let value = res?.into_owned_row();
+            assert!(stream.next().await.is_none());
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get the row from a state table with only 1 row, and the row has only 1 col.
+    ///
+    /// `None` can mean either the row is never persisted, or is a persisted `NULL`,
+    /// which does not matter in the use case.
+    pub async fn get_from_one_value_table(&self) -> StreamExecutorResult<Option<ScalarImpl>> {
+        Ok(self
+            .get_from_one_row_table()
+            .await?
+            .and_then(|row| row[0].clone()))
+    }
+
     pub async fn iter_keyed_row_with_prefix(
         &self,
         pk_prefix: impl Row,
@@ -1488,7 +1516,6 @@ where
         // TODO: provide a trace of useful params.
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
             .await
-            .map_err(StreamExecutorError::from)
     }
 
     #[cfg(test)]

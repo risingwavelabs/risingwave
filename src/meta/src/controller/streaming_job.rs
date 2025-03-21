@@ -50,6 +50,7 @@ use sea_orm::{
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
     RelationTrait, TransactionTrait,
 };
+use thiserror_ext::AsReport;
 
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
@@ -620,21 +621,21 @@ impl CatalogController {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
 
+        let err = if is_cancelled {
+            MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
+        } else {
+            MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
+        };
+        let abort_reason = format!("streaing job aborted {}", err.as_report());
         for tx in inner
             .creating_table_finish_notifier
-            .remove(&job_id)
+            .get_mut(&database_id)
+            .map(|creating_tables| creating_tables.remove(&job_id).into_iter())
             .into_iter()
             .flatten()
+            .flatten()
         {
-            let err = if is_cancelled {
-                MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
-            } else {
-                MetaError::catalog_id_not_found(
-                    "stream job",
-                    format!("streaming job {job_id} failed"),
-                )
-            };
-            let _ = tx.send(Err(err));
+            let _ = tx.send(Err(abort_reason.clone()));
         }
         txn.commit().await?;
 
@@ -1028,11 +1029,16 @@ impl CatalogController {
                 )
                 .await;
         }
-        if let Some(txs) = inner.creating_table_finish_notifier.remove(&job_id) {
-            for tx in txs {
-                let _ = tx.send(Ok(version));
-            }
-        }
+        inner
+            .creating_table_finish_notifier
+            .values_mut()
+            .for_each(|creating_tables| {
+                if let Some(txs) = creating_tables.remove(&job_id) {
+                    for tx in txs {
+                        let _ = tx.send(Ok(version));
+                    }
+                }
+            });
 
         Ok(())
     }
@@ -1148,7 +1154,9 @@ impl CatalogController {
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks.extract_if(|id| *id == sink_id).collect_vec();
+                    let drained = incoming_sinks
+                        .extract_if(.., |id| *id == sink_id)
+                        .collect_vec();
                     debug_assert_eq!(drained, vec![sink_id]);
                 }
 
@@ -1514,6 +1522,50 @@ impl CatalogController {
         Ok(fragment_actors)
     }
 
+    async fn mutate_fragment_by_fragment_id(
+        &self,
+        fragment_id: FragmentId,
+        mut fragment_mutation_fn: impl FnMut(&mut i32, &mut PbStreamNode) -> bool,
+        err_msg: &'static str,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (mut fragment_type_mask, stream_node): (i32, StreamNode) =
+            Fragment::find_by_id(fragment_id)
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentTypeMask,
+                    fragment::Column::StreamNode,
+                ])
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+        let mut pb_stream_node = stream_node.to_protobuf();
+
+        if !fragment_mutation_fn(&mut fragment_type_mask, &mut pb_stream_node) {
+            return Err(MetaError::invalid_parameter(format!(
+                "fragment id {fragment_id}: {}",
+                err_msg
+            )));
+        }
+
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            stream_node: Set(stream_node),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        let fragment_actors = get_fragment_actor_ids(&txn, vec![fragment_id]).await?;
+
+        txn.commit().await?;
+
+        Ok(fragment_actors)
+    }
+
     // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
     // return the actor_ids to be applied
     pub async fn update_backfill_rate_limit_by_job_id(
@@ -1601,6 +1653,47 @@ impl CatalogController {
             };
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")
+            .await
+    }
+
+    pub async fn update_fragment_rate_limit_by_fragment_id(
+        &self,
+        fragment_id: FragmentId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let update_rate_limit = |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+            let mut found = false;
+            if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0
+                || *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0
+                || *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0
+                || *fragment_type_mask & PbFragmentTypeFlag::source_rate_limit_fragments() != 0
+            {
+                visit_stream_node_mut(stream_node, |node| {
+                    if let PbNodeBody::Dml(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    if let PbNodeBody::Sink(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    if let PbNodeBody::StreamCdcScan(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    if let PbNodeBody::StreamScan(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    if let PbNodeBody::SourceBackfill(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                });
+            }
+            found
+        };
+        self.mutate_fragment_by_fragment_id(fragment_id, update_rate_limit, "fragment not found")
             .await
     }
 

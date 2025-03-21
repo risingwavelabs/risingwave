@@ -866,6 +866,14 @@ message RowMergeNode {
 
 message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
+  uint32 pause_duration_ms = 2;
+  uint32 buffer_size = 3;
+}
+
+message MaterializedExprsNode {
+  repeated expr.ExprNode exprs = 1;
+  catalog.Table state_table = 2;
+  optional uint32 state_clean_col_idx = 3;
 }
 
 message StreamNode {
@@ -918,6 +926,7 @@ message StreamNode {
     RowMergeNode row_merge = 146;
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
+    MaterializedExprsNode materialized_exprs = 149;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

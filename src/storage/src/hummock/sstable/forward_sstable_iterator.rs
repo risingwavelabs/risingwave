@@ -370,7 +370,7 @@ impl HummockIterator for SstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
@@ -423,6 +423,7 @@ mod tests {
     use foyer::CacheHint;
     use itertools::Itertools;
     use rand::prelude::*;
+    use rand::rng as thread_rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;

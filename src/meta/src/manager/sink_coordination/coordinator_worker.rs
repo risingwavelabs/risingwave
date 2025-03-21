@@ -96,7 +96,7 @@ impl EpochCommitRequests {
     }
 
     fn can_commit(&self) -> bool {
-        self.committed_bitmap.as_ref().map_or(false, |b| b.all())
+        self.committed_bitmap.as_ref().is_some_and(|b| b.all())
     }
 }
 

@@ -104,6 +104,8 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+use crate::ast::ddl::AlterFragmentOperation;
+
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -241,6 +243,16 @@ impl Parser<'_> {
         let tokens = tokenizer.tokenize_with_location()?;
         let parser = Parser(&tokens);
         Parser::parse_object_name
+            .parse(parser)
+            .map_err(|e| ParserError::ParserError(e.inner().to_string()))
+    }
+
+    /// Parse function description from a string.
+    pub fn parse_function_desc_str(func: &str) -> Result<FunctionDesc, ParserError> {
+        let mut tokenizer = Tokenizer::new(func);
+        let tokens = tokenizer.tokenize_with_location()?;
+        let parser = Parser(&tokens);
+        Parser::parse_function_desc
             .parse(parser)
             .map_err(|e| ParserError::ParserError(e.inner().to_string()))
     }
@@ -1064,10 +1076,7 @@ impl Parser<'_> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
-            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING]
-                .iter()
-                .any(|d| word.keyword == *d)
-            {
+            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING].contains(&word.keyword) {
                 trim_where = Some(self.parse_trim_where()?);
             }
         }
@@ -1244,8 +1253,7 @@ impl Parser<'_> {
                     Keyword::MINUTE,
                     Keyword::SECOND,
                 ]
-                .iter()
-                .any(|d| kw.keyword == *d) =>
+                .contains(&kw.keyword) =>
             {
                 Some(self.parse_date_time_field()?)
             }
@@ -1886,7 +1894,7 @@ impl Parser<'_> {
 
     pub fn peek_nth_any_of_keywords(&mut self, n: usize, keywords: &[Keyword]) -> bool {
         match self.peek_nth_token(n).token {
-            Token::Word(w) => keywords.iter().any(|keyword| *keyword == w.keyword),
+            Token::Word(w) => keywords.contains(&w.keyword),
             _ => false,
         }
     }
@@ -2068,17 +2076,39 @@ impl Parser<'_> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
         let _ = self.parse_keyword(Keyword::WITH);
-        let owner = if self.parse_keyword(Keyword::OWNER) {
-            let _ = self.consume_token(&Token::Eq);
-            Some(self.parse_object_name()?)
-        } else {
-            None
-        };
+
+        let mut owner = None;
+        let mut resource_group = None;
+
+        while let Some(keyword) =
+            self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
+        {
+            match keyword {
+                Keyword::OWNER => {
+                    if owner.is_some() {
+                        parser_err!("duplicate OWNER clause in CREATE DATABASE");
+                    }
+
+                    let _ = self.consume_token(&Token::Eq);
+                    owner = Some(self.parse_object_name()?);
+                }
+                Keyword::RESOURCE_GROUP => {
+                    if resource_group.is_some() {
+                        parser_err!("duplicate RESOURCE_GROUP clause in CREATE DATABASE");
+                    }
+
+                    let _ = self.consume_token(&Token::Eq);
+                    resource_group = Some(self.parse_set_variable()?);
+                }
+                _ => unreachable!(),
+            }
+        }
 
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
             owner,
+            resource_group,
         })
     }
 
@@ -2208,15 +2238,7 @@ impl Parser<'_> {
     ) -> ModalResult<Statement> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
 
-        let name = self.parse_object_name()?;
-        self.expect_token(&Token::LParen)?;
-        let args = if self.peek_token().token == Token::RParen {
-            None
-        } else {
-            Some(self.parse_comma_separated(Parser::parse_function_arg)?)
-        };
-
-        self.expect_token(&Token::RParen)?;
+        let FunctionDesc { name, args } = self.parse_function_desc()?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
             if self.parse_keyword(Keyword::TABLE) {
@@ -2520,12 +2542,12 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<String>> {
+    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<Ident>> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
             self.expect_token(&Token::LParen)?;
             let name = self.parse_identifier_non_reserved()?;
             self.expect_token(&Token::RParen)?;
-            Ok(Some(name.value))
+            Ok(Some(name))
         } else {
             Ok(None)
         }
@@ -3117,9 +3139,11 @@ impl Parser<'_> {
             self.parse_alter_subscription()
         } else if self.parse_keyword(Keyword::SECRET) {
             self.parse_alter_secret()
+        } else if self.parse_word("FRAGMENT") {
+            self.parse_alter_fragment()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
+                "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3738,6 +3762,39 @@ impl Parser<'_> {
         })
     }
 
+    pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
+        let fragment_id = self.parse_literal_uint()? as u32;
+        if !self.parse_keyword(Keyword::SET) {
+            return self.expected("SET after ALTER FRAGMENT");
+        }
+        let rate_limit = self.parse_alter_fragment_rate_limit()?;
+        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        Ok(Statement::AlterFragment {
+            fragment_id,
+            operation,
+        })
+    }
+
+    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<i32> {
+        if !self.parse_word("RATE_LIMIT") {
+            return self.expected("expected RATE_LIMIT after SET");
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(rate_limit)
+    }
+
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> ModalResult<Statement> {
         let table_name = self.parse_object_name()?;
@@ -4295,7 +4352,49 @@ impl Parser<'_> {
             self.expect_token(&Token::RParen)?;
         }
 
-        let statement = self.parse_statement()?;
+        if analyze {
+            fn parse_analyze_target(parser: &mut Parser<'_>) -> ModalResult<Option<AnalyzeTarget>> {
+                if parser.parse_keyword(Keyword::TABLE) {
+                    let table_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Table(table_name)))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Index(index_name)))
+                } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+                    let view_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::MaterializedView(view_name)))
+                } else if parser.parse_keyword(Keyword::INDEX) {
+                    let index_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Index(index_name)))
+                } else if parser.parse_keyword(Keyword::SINK) {
+                    let sink_name = parser.parse_object_name()?;
+                    Ok(Some(AnalyzeTarget::Sink(sink_name)))
+                } else if parser.parse_word("ID") {
+                    let job_id = parser.parse_literal_uint()? as u32;
+                    Ok(Some(AnalyzeTarget::Id(job_id)))
+                } else {
+                    Ok(None)
+                }
+            }
+            if let Some(target) = parse_analyze_target(self)? {
+                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                return Ok(statement);
+            }
+        }
+
+        let statement = match self.parse_statement() {
+            Ok(statement) => statement,
+            error @ Err(_) => {
+                return if analyze {
+                    self.expected_at(
+                        *self,
+                        "SINK, TABLE, MATERIALIZED VIEW, INDEX or a statement after ANALYZE",
+                    )
+                } else {
+                    error
+                };
+            }
+        };
         Ok(Statement::Explain {
             analyze,
             statement: Box::new(statement),
@@ -4384,7 +4483,7 @@ impl Parser<'_> {
         if let Ok(()) = self.expect_token(&Token::LParen) {
             let query = self.parse_query()?;
             self.expect_token(&Token::RParen)?;
-            Ok(CteInner::Query(query))
+            Ok(CteInner::Query(Box::new(query)))
         } else {
             let changelog = self.parse_identifier_non_reserved()?;
             if changelog.to_string().to_lowercase() != "changelog" {
@@ -5210,6 +5309,42 @@ impl Parser<'_> {
             GrantObjects::AllViewsInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::FUNCTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllFunctionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SECRETS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSecretsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::CONNECTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllConnectionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SUBSCRIPTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSubscriptionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             GrantObjects::Mviews(self.parse_comma_separated(Parser::parse_object_name)?)
         } else {
@@ -5220,18 +5355,30 @@ impl Parser<'_> {
                 Keyword::TABLE,
                 Keyword::SOURCE,
                 Keyword::SINK,
-                Keyword::VIEWS,
+                Keyword::VIEW,
+                Keyword::SUBSCRIPTION,
+                Keyword::FUNCTION,
+                Keyword::CONNECTION,
+                Keyword::SECRET,
             ]);
-            let objects = self.parse_comma_separated(Parser::parse_object_name);
-            match object_type {
-                Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
-                Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
-                Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
-                Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
-                Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
-                Some(Keyword::VIEW) => GrantObjects::Views(objects?),
-                Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
-                _ => unreachable!(),
+            if let Some(Keyword::FUNCTION) = object_type {
+                let func_descs = self.parse_comma_separated(Parser::parse_function_desc)?;
+                GrantObjects::Functions(func_descs)
+            } else {
+                let objects = self.parse_comma_separated(Parser::parse_object_name);
+                match object_type {
+                    Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
+                    Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
+                    Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
+                    Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
+                    Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
+                    Some(Keyword::VIEW) => GrantObjects::Views(objects?),
+                    Some(Keyword::SUBSCRIPTION) => GrantObjects::Subscriptions(objects?),
+                    Some(Keyword::CONNECTION) => GrantObjects::Connections(objects?),
+                    Some(Keyword::SECRET) => GrantObjects::Secrets(objects?),
+                    Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
+                    _ => unreachable!(),
+                }
             }
         };
 

@@ -111,8 +111,8 @@ impl CreateSource for DefaultCreateSource {
                                 worker
                                     .host
                                     .as_ref()
-                                    .map_or(false, |h| HostAddr::from(h) == peer_addr)
-                                    && worker.property.as_ref().map_or(false, |p| p.is_serving)
+                                    .is_some_and(|h| HostAddr::from(h) == peer_addr)
+                                    && worker.property.as_ref().is_some_and(|p| p.is_serving)
                             })
                     {
                         let duration = Duration::from_secs(std::cmp::max(
@@ -277,8 +277,8 @@ mod tests {
         let mut proto_sources = vec![];
         let mut source_creators = vec![];
         for _ in 0..2 {
-            let mut rng = rand::thread_rng();
-            let i = rng.gen_range(1..=100000);
+            let mut rng = rand::rng();
+            let i = rng.random_range(1..=100000);
             let chunk = DataChunk::new(vec![I32Array::from_iter([i]).into_ref()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);

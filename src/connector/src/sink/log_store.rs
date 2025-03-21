@@ -766,7 +766,7 @@ impl<F> DeliveryFutureManager<F> {
 
 pub struct DeliveryFutureManagerAddFuture<'a, F>(&'a mut DeliveryFutureManager<F>);
 
-impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'a, F> {
+impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'_, F> {
     /// Add a new future to the latest started written chunk.
     /// The returned bool value indicate whether we have awaited on any previous futures.
     pub async fn add_future_may_await(&mut self, future: F) -> Result<bool, F::Error> {

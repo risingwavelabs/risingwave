@@ -485,6 +485,31 @@ pub fn trigger_gc_stat(
         .set(old_version_object_count as _);
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
+    // table change log
+    for (table_id, logs) in &checkpoint.version.table_change_log {
+        let object_count = logs
+            .iter()
+            .map(|l| l.old_value.len() + l.new_value.len())
+            .sum::<usize>();
+        let object_size = logs
+            .iter()
+            .map(|l| {
+                l.old_value
+                    .iter()
+                    .chain(l.new_value.iter())
+                    .map(|s| s.file_size as usize)
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+        metrics
+            .table_change_log_object_count
+            .with_label_values(&[&format!("{table_id}")])
+            .set(object_count as _);
+        metrics
+            .table_change_log_object_size
+            .with_label_values(&[&format!("{table_id}")])
+            .set(object_size as _);
+    }
 }
 
 // Triggers a report on compact_pending_bytes_needed
