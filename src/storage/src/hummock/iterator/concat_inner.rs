@@ -139,7 +139,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     }
 
     fn is_valid(&self) -> bool {
-        self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.sstable_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

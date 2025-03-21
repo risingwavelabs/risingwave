@@ -67,7 +67,7 @@ use tracing::{Instrument, trace};
 use crate::cache::cache_may_stale;
 use crate::common::state_cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
-use crate::executor::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// Mostly watermark operators will have inserts (append-only).
 /// So this number should not need to be very large.
@@ -1488,7 +1488,6 @@ where
         // TODO: provide a trace of useful params.
         self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
             .await
-            .map_err(StreamExecutorError::from)
     }
 
     #[cfg(test)]

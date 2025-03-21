@@ -191,7 +191,7 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block

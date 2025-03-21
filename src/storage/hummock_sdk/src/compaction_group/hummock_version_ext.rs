@@ -275,7 +275,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         }
         let [parent_levels, cur_levels] = self
             .levels
-            .get_many_mut([&parent_group_id, &group_id])
+            .get_disjoint_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
         // After certain compaction group operation, e.g. split, any ongoing compaction tasks created prior to that should be rejected due to expiration.
         // By incrementing the compaction_group_version_id of the compaction group, and comparing it with the one recorded in compaction task, expired compaction tasks can be identified.
@@ -291,7 +291,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id);
                 sub_level
                     .table_infos
-                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
                         sub_level.total_file_size -= sst_info.sst_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -339,7 +339,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
                     level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -845,7 +845,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
 
         let [parent_levels, cur_levels] = self
             .levels
-            .get_many_mut([&parent_group_id, &group_id])
+            .get_disjoint_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
         // After certain compaction group operation, e.g. split, any ongoing compaction tasks created prior to that should be rejected due to expiration.
         // By incrementing the compaction_group_version_id of the compaction group, and comparing it with the one recorded in compaction task, expired compaction tasks can be identified.
@@ -874,7 +874,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
 
                 sub_level
                     .table_infos
-                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
                         sub_level.total_file_size -= sst_info.sst_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -928,7 +928,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
                     level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
