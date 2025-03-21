@@ -25,7 +25,7 @@ use super::{
     gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, collect_input_refs};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, collect_input_refs};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -257,46 +257,41 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
 
-        // Extract UDFs to MaterializedExprs operator
-        let (udf_exprs, udf_indices): (Vec<_>, Vec<_>) = self
+        // Extract UDFs to `MaterializedExprs` operator
+        let mut udf_field_names = BTreeMap::new();
+        let udf_exprs: Vec<_> = self
             .exprs()
             .iter()
             .enumerate()
             .filter_map(|(idx, expr)| {
                 if let ExprImpl::UserDefinedFunction(_) = expr {
-                    Some((expr.clone(), idx))
+                    if let Some(name) = self.core.field_names.get(&idx) {
+                        udf_field_names.insert(idx, name.clone());
+                    }
+                    Some(expr.clone())
                 } else {
                     None
                 }
             })
-            .unzip();
+            .collect();
 
         let stream_plan = if !udf_exprs.is_empty() {
-            // Create MaterializedExprs for UDFs
-            let mut field_names = BTreeMap::new();
-            for (i, idx) in udf_indices.iter().enumerate() {
-                if let Some(name) = self.core.field_names.get(idx) {
-                    field_names.insert(i, name.clone());
-                }
-            }
+            // Create `MaterializedExprs` for UDFs
             let mat_exprs_plan: PlanRef =
-                StreamMaterializedExprs::new(new_input.clone(), udf_exprs, field_names).into();
+                StreamMaterializedExprs::new(new_input.clone(), udf_exprs, udf_field_names).into();
 
-            let input_schema_len = new_input.schema().len();
+            let input_len = new_input.schema().len();
+            let mut udf_pos = 0;
 
-            // Create final expressions list with UDFs replaced by InputRefs
+            // Create final expressions list with UDFs replaced by `InputRef`s
             let final_exprs = self
                 .exprs()
                 .iter()
-                .enumerate()
-                .map(|(idx, expr)| {
+                .map(|expr| {
                     if let ExprImpl::UserDefinedFunction(_) = expr {
-                        // Find the position of this UDF in the udf_indices list
-                        let udf_pos = udf_indices.iter().position(|&i| i == idx).unwrap();
-                        let output_idx = input_schema_len + udf_pos;
-                        let udf_output_type =
-                            mat_exprs_plan.schema().fields[output_idx].data_type.clone();
-                        InputRef::new(output_idx, udf_output_type).into()
+                        let output_idx = input_len + udf_pos;
+                        udf_pos += 1;
+                        InputRef::new(output_idx, expr.return_type()).into()
                     } else {
                         expr.clone()
                     }
@@ -306,7 +301,7 @@ impl ToStream for LogicalProject {
             let core = generic::Project::new(final_exprs, mat_exprs_plan);
             StreamProject::new(core).into()
         } else {
-            // No UDFs, create a regular StreamProject
+            // No UDFs, create a regular `StreamProject`
             let core = generic::Project::new(self.exprs().clone(), new_input);
             StreamProject::new(core).into()
         };
@@ -325,7 +320,7 @@ impl ToStream for LogicalProject {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
-        // Add missing columns of input_pk into the select list.
+        // Add missing columns of `input_pk` into the select list.
         let input_pk = input.expect_stream_key();
         let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
