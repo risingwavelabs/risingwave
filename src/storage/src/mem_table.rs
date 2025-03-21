@@ -418,7 +418,7 @@ mod tests {
     use bytes::{BufMut, Bytes, BytesMut};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::{Rng, thread_rng};
+    use rand::{Rng, rng as thread_rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -615,7 +615,7 @@ mod tests {
 
         let mut ordered_test_data = (0..10000)
             .map(|i| {
-                let key_op = match rng.gen::<usize>() % 3 {
+                let key_op = match rng.random_range(0..=2) {
                     0 => KeyOp::Insert(Bytes::from("insert")),
                     1 => KeyOp::Delete(Bytes::from("delete")),
                     2 => KeyOp::Update((Bytes::from("old_value"), Bytes::from("new_value"))),

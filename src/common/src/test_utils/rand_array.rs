@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use chrono::Datelike;
-use rand::distributions::Standard;
+use rand::distr::StandardUniform;
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -37,19 +37,19 @@ pub trait RandValue {
 impl<T> RandValue for T
 where
     T: NativeType,
-    Standard: Distribution<T>,
+    StandardUniform: Distribution<T>,
 {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        rand.gen()
+        rand.random()
     }
 }
 
 impl RandValue for Box<str> {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let len = rand.gen_range(1..=10);
-        // `rand.gen:::<char>` create a random Unicode scalar value.
+        let len = rand.random_range(1..=10);
+        // `rand.random:::<char>` create a random Unicode scalar value.
         (0..len)
-            .map(|_| rand.gen::<char>())
+            .map(|_| rand.random::<char>())
             .collect::<String>()
             .into_boxed_str()
     }
@@ -57,9 +57,9 @@ impl RandValue for Box<str> {
 
 impl RandValue for Box<[u8]> {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let len = rand.gen_range(1..=10);
+        let len = rand.random_range(1..=10);
         (0..len)
-            .map(|_| rand.gen::<char>())
+            .map(|_| rand.random::<char>())
             .collect::<String>()
             .into_bytes()
             .into()
@@ -68,15 +68,15 @@ impl RandValue for Box<[u8]> {
 
 impl RandValue for Decimal {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        Decimal::try_from((rand.gen::<u32>() as f64) + 0.1f64).unwrap()
+        Decimal::try_from((rand.random::<u32>() as f64) + 0.1f64).unwrap()
     }
 }
 
 impl RandValue for Interval {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let months = rand.gen_range(0..100);
-        let days = rand.gen_range(0..200);
-        let usecs = rand.gen_range(0..100_000);
+        let months = rand.random_range(0..100);
+        let days = rand.random_range(0..200);
+        let usecs = rand.random_range(0..100_000);
         Interval::from_month_day_usec(months, days, usecs)
     }
 }
@@ -85,17 +85,17 @@ impl RandValue for Date {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let max_day = chrono::NaiveDate::MAX.num_days_from_ce();
         let min_day = chrono::NaiveDate::MIN.num_days_from_ce();
-        let days = rand.gen_range(min_day..=max_day);
+        let days = rand.random_range(min_day..=max_day);
         Date::with_days_since_ce(days).unwrap()
     }
 }
 
 impl RandValue for Time {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let hour = rand.gen_range(0..24);
-        let min = rand.gen_range(0..60);
-        let sec = rand.gen_range(0..60);
-        let nano = rand.gen_range(0..1_000_000_000);
+        let hour = rand.random_range(0..24);
+        let min = rand.random_range(0..60);
+        let sec = rand.random_range(0..60);
+        let nano = rand.random_range(0..1_000_000_000);
         Time::from_hms_nano_uncheck(hour, min, sec, nano)
     }
 }
@@ -108,13 +108,13 @@ impl RandValue for Timestamp {
 
 impl RandValue for Timestamptz {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        Timestamptz::from_micros(rand.gen())
+        Timestamptz::from_micros(rand.random())
     }
 }
 
 impl RandValue for bool {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        rand.gen::<bool>()
+        rand.random::<bool>()
     }
 }
 
@@ -147,7 +147,7 @@ impl RandValue for StructValue {
 
 impl RandValue for ListValue {
     fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
-        ListValue::from_iter([rand.gen::<i16>()])
+        ListValue::from_iter([rand.random::<i16>()])
     }
 }
 
@@ -168,7 +168,7 @@ where
 {
     let mut builder = A::Builder::new(size);
     for _ in 0..size {
-        let is_null = rand.gen_bool(null_ratio);
+        let is_null = rand.random_bool(null_ratio);
         if is_null {
             builder.append_null();
         } else {

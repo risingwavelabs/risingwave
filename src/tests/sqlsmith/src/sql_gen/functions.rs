@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use rand::Rng;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_frontend::expr::ExprType;
 use risingwave_sqlparser::ast::{
@@ -27,7 +27,7 @@ use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<R: Rng> SqlGenerator<'_, R> {
     pub fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        match self.rng.gen_bool(0.1) {
+        match self.rng.random_bool(0.1) {
             true => self.gen_special_func(ret, context),
             false => self.gen_fixed_func(ret, context),
         }
@@ -41,7 +41,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_special_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         use DataType as T;
         match ret {
-            T::Varchar => match self.rng.gen_range(0..=4) {
+            T::Varchar => match self.rng.random_range(0..=4) {
                 0 => self.gen_case(ret, context),
                 1 => self.gen_coalesce(ret, context),
                 2 => self.gen_concat(context),
@@ -50,7 +50,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 _ => unreachable!(),
             },
             T::Bytea => self.gen_decode(context),
-            _ => match self.rng.gen_bool(0.5) {
+            _ => match self.rng.random_bool(0.5) {
                 true => self.gen_case(ret, context),
                 false => self.gen_coalesce(ret, context),
             },
@@ -81,7 +81,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_case(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        let n = self.rng.gen_range(1..4);
+        let n = self.rng.random_range(1..4);
         Expr::Case {
             operand: None,
             conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean, context),
@@ -92,7 +92,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_coalesce(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         let non_null = self.gen_expr(ret, context);
-        let position = self.rng.gen_range(0..10);
+        let position = self.rng.random_range(0..10);
         let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
         args[position] = non_null;
         Expr::Function(make_simple_func("coalesce", &args))
@@ -110,10 +110,10 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
-        let n = self.rng.gen_range(1..4);
+        let n = self.rng.random_range(1..4);
         (0..n)
             .map(|_| {
-                if self.rng.gen_bool(0.1) {
+                if self.rng.random_bool(0.1) {
                     self.gen_explicit_cast(&DataType::Varchar, context)
                 } else {
                     self.gen_expr(&DataType::Varchar, context)

@@ -350,7 +350,7 @@ mod tests {
         order_types: Vec<OrderType>,
     ) -> (StateTable<MemoryStateStore>, StateTableColumnMapping) {
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
-        let table_id = TableId::new(rand::thread_rng().gen());
+        let table_id = TableId::new(rand::rng().random());
         let columns = upstream_columns
             .iter()
             .map(|col_idx| input_schema[*col_idx].data_type())
@@ -846,8 +846,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut rng = rand::thread_rng();
-        let insert_values: Vec<i32> = (0..10000).map(|_| rng.gen()).collect_vec();
+        let mut rng = rand::rng();
+        let insert_values: Vec<i32> = (0..10000).map(|_| rng.random()).collect_vec();
         let delete_values: HashSet<_> = insert_values
             .iter()
             .choose_multiple(&mut rng, 1000)

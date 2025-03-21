@@ -746,7 +746,7 @@ impl StreamChunk {
             let mut rng = SmallRng::from_seed([0; 32]);
             let mut ops = vec![];
             for _ in 0..chunk_size {
-                ops.push(if rng.gen_bool(inserts_percent) {
+                ops.push(if rng.random_bool(inserts_percent) {
                     Op::Insert
                 } else {
                     Op::Delete

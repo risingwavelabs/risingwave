@@ -17,8 +17,6 @@
 use anyhow::bail;
 use itertools::Itertools;
 use rand::Rng;
-#[cfg(madsim)]
-use rand_chacha::ChaChaRng;
 use similar::{ChangeTag, TextDiff};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
