@@ -1500,6 +1500,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(
             &mut reader,
             [
@@ -1516,6 +1517,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(
             &mut reader,
             [
@@ -1534,6 +1536,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
         assert_eq!(0, chunk_ids.len());
 
@@ -1577,6 +1580,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1587,6 +1591,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1601,6 +1606,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[2..].iter()).await;
         assert_eq!(1, chunk_ids.len());
 
@@ -1656,6 +1662,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
         assert_eq!(4, chunk_ids.len());
 
@@ -1666,6 +1673,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
         assert_eq!(4, chunk_ids.len());
 
@@ -1673,6 +1681,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[2..].iter()).await;
         assert_eq!(3, chunk_ids.len());
 
@@ -1680,6 +1689,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch3 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[3..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1690,6 +1700,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(
             &mut reader,
             [(epoch4, None), (epoch5, Some(&stream_chunk5))].iter(),
@@ -1701,6 +1712,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch4 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids =
             check_reader_last_unsealed(&mut reader, [(epoch5, Some(&stream_chunk5))].iter()).await;
         assert_eq!(1, chunk_ids.len());
@@ -1712,6 +1724,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, empty()).await;
         assert!(chunk_ids.is_empty());
     }
