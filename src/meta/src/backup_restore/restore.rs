@@ -73,6 +73,15 @@ pub struct RestoreOpts {
     /// The maximum number of read retry attempts for the object store.
     #[clap(long, default_value_t = 3)]
     pub read_retry_attempts: u64,
+    #[clap(long, default_value_t = false)]
+    /// When enabled, some system parameters of in the restored meta store will be overwritten.
+    /// Specifically, system parameters `state_store`, `data_directory`, `backup_storage_url` and `backup_storage_directory` will be overwritten
+    /// with the specified opts `hummock_storage_url`, `hummock_storage_directory`, `overwrite_backup_storage_url` and `overwrite_backup_storage_directory`.
+    pub overwrite_hummock_storage_endpoint: bool,
+    #[clap(long, required = false)]
+    pub overwrite_backup_storage_url: Option<String>,
+    #[clap(long, required = false)]
+    pub overwrite_backup_storage_directory: Option<String>,
 }
 
 async fn restore_hummock_version(
@@ -163,12 +172,33 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
     loader: L,
     writer: W,
 ) -> BackupResult<()> {
+    // Validate parameters.
+    if opts.overwrite_hummock_storage_endpoint
+        && (opts.overwrite_backup_storage_url.is_none()
+            || opts.overwrite_backup_storage_directory.is_none())
+    {
+        return Err(BackupError::Other(anyhow::anyhow!("overwrite_hummock_storage_endpoint, overwrite_backup_storage_url, overwrite_backup_storage_directory must be set simultaneously".to_owned())));
+    }
+
+    // Restore meta store.
     let target_snapshot = loader.load(target_id).await?;
     if opts.dry_run {
         return Ok(());
     }
     let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
     writer.write(target_snapshot).await?;
+    if opts.overwrite_hummock_storage_endpoint {
+        writer
+            .overwrite(
+                &format!("hummock+{}", opts.hummock_storage_url),
+                &opts.hummock_storage_directory,
+                opts.overwrite_backup_storage_url.as_ref().unwrap(),
+                opts.overwrite_backup_storage_directory.as_ref().unwrap(),
+            )
+            .await?;
+    }
+
+    // Restore object store.
     restore_hummock_version(
         &opts.hummock_storage_url,
         &opts.hummock_storage_directory,

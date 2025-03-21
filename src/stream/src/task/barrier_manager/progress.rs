@@ -30,22 +30,22 @@ type ConsumedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows),
     DoneConsumingUpstreamTableOrSource(ConsumedRows),
-    ConsumingLogStore { pending_barrier_num: usize },
+    ConsumingLogStore { pending_epoch_lag: u64 },
     DoneConsumingLogStore,
 }
 
 impl BackfillState {
     pub fn to_pb(self, actor_id: ActorId) -> PbCreateMviewProgress {
-        let (done, consumed_epoch, consumed_rows, pending_barrier_num) = match self {
+        let (done, consumed_epoch, consumed_rows, pending_epoch_lag) = match self {
             BackfillState::ConsumingUpstreamTableOrSource(consumed_epoch, consumed_rows) => {
                 (false, consumed_epoch, consumed_rows, 0)
             }
             BackfillState::DoneConsumingUpstreamTableOrSource(consumed_rows) => {
                 (true, 0, consumed_rows, 0)
             } // unused field for done
-            BackfillState::ConsumingLogStore {
-                pending_barrier_num,
-            } => (false, 0, 0, pending_barrier_num as _),
+            BackfillState::ConsumingLogStore { pending_epoch_lag } => {
+                (false, 0, 0, pending_epoch_lag)
+            }
             BackfillState::DoneConsumingLogStore => (true, 0, 0, 0),
         };
         PbCreateMviewProgress {
@@ -53,7 +53,7 @@ impl BackfillState {
             done,
             consumed_epoch,
             consumed_rows,
-            pending_barrier_num,
+            pending_epoch_lag,
         }
     }
 }
@@ -71,12 +71,10 @@ impl Display for BackfillState {
             BackfillState::DoneConsumingUpstreamTableOrSource(rows) => {
                 write!(f, "DoneConsumingUpstreamTable(rows: {})", rows)
             }
-            BackfillState::ConsumingLogStore {
-                pending_barrier_num,
-            } => {
+            BackfillState::ConsumingLogStore { pending_epoch_lag } => {
                 write!(
                     f,
-                    "ConsumingLogStore(pending_barrier_num: {pending_barrier_num})"
+                    "ConsumingLogStore(pending_epoch_lag: {pending_epoch_lag})"
                 )
             }
             BackfillState::DoneConsumingLogStore => {
@@ -272,7 +270,7 @@ impl CreateMviewProgressReporter {
     pub(crate) fn update_create_mview_log_store_progress(
         &mut self,
         epoch: EpochPair,
-        pending_barrier_num: usize,
+        pending_epoch_lag: u64,
     ) {
         assert_matches!(
             self.state,
@@ -283,9 +281,7 @@ impl CreateMviewProgressReporter {
         );
         self.update_inner(
             epoch,
-            BackfillState::ConsumingLogStore {
-                pending_barrier_num,
-            },
+            BackfillState::ConsumingLogStore { pending_epoch_lag },
         );
     }
 

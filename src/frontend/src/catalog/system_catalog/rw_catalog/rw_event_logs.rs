@@ -64,6 +64,7 @@ fn event_type(e: &Event) -> String {
         Event::WorkerNodePanic(_) => "WORKER_NODE_PANIC",
         Event::AutoSchemaChangeFail(_) => "AUTO_SCHEMA_CHANGE_FAIL",
         Event::SinkFail(_) => "SINK_FAIL",
+        Event::Recovery(e) => e.event_type(),
     }
     .into()
 }

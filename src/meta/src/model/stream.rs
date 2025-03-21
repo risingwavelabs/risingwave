@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Deref};
 
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{
     IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat, WorkerSlotId,
@@ -36,10 +37,9 @@ use risingwave_pb::meta::table_parallelism::{
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
-use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbStreamActor, PbStreamContext, StreamActor, StreamNode,
+    Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -115,62 +115,102 @@ impl From<TableParallelism> for StreamingParallelism {
 
 pub type ActorUpstreams = BTreeMap<FragmentId, HashSet<ActorId>>;
 pub type FragmentActorUpstreams = HashMap<ActorId, ActorUpstreams>;
-pub type StreamActorWithUpstreams = (StreamActor, ActorUpstreams);
+pub type StreamActorWithDispatchers = (StreamActor, Vec<PbDispatcher>);
+pub type StreamActorWithUpDownstreams = (StreamActor, ActorUpstreams, Vec<PbDispatcher>);
+pub type FragmentActorDispatchers = HashMap<FragmentId, HashMap<ActorId, Vec<PbDispatcher>>>;
+
+#[derive(Debug, Clone)]
+pub struct StreamJobFragmentsToCreate {
+    pub inner: StreamJobFragments,
+    pub dispatchers: FragmentActorDispatchers,
+}
+
+impl Deref for StreamJobFragmentsToCreate {
+    type Target = StreamJobFragments;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl StreamJobFragmentsToCreate {
+    pub fn actors_to_create(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            FragmentId,
+            &StreamNode,
+            impl Iterator<Item = (&StreamActor, &Vec<PbDispatcher>, WorkerId)> + '_,
+        ),
+    > + '_ {
+        self.inner.actors_to_create(&self.dispatchers)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StreamActor {
+    pub actor_id: u32,
+    pub fragment_id: u32,
+    pub vnode_bitmap: Option<Bitmap>,
+    pub mview_definition: String,
+    pub expr_context: Option<PbExprContext>,
+}
+
+impl StreamActor {
+    fn to_protobuf(&self, dispatchers: impl Iterator<Item = Dispatcher>) -> PbStreamActor {
+        PbStreamActor {
+            actor_id: self.actor_id,
+            fragment_id: self.fragment_id,
+            dispatcher: dispatchers.collect(),
+            vnode_bitmap: self
+                .vnode_bitmap
+                .as_ref()
+                .map(|bitmap| bitmap.to_protobuf()),
+            mview_definition: self.mview_definition.clone(),
+            expr_context: self.expr_context.clone(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Fragment {
     pub fragment_id: FragmentId,
     pub fragment_type_mask: u32,
     pub distribution_type: PbFragmentDistributionType,
-    pub actors: Vec<PbStreamActor>,
+    pub actors: Vec<StreamActor>,
     pub state_table_ids: Vec<u32>,
     pub maybe_vnode_count: Option<u32>,
     pub nodes: StreamNode,
 }
 
 impl Fragment {
-    pub fn from_protobuf(value: PbFragment) -> Self {
-        Self {
-            fragment_id: value.fragment_id,
-            fragment_type_mask: value.fragment_type_mask,
-            distribution_type: PbFragmentDistributionType::try_from(value.distribution_type)
-                .unwrap(),
-            actors: value.actors,
-            state_table_ids: value.state_table_ids,
-            maybe_vnode_count: value.maybe_vnode_count,
-            nodes: value.nodes.unwrap(),
-        }
-    }
-
-    pub fn to_protobuf(&self, upstream_fragments: impl Iterator<Item = FragmentId>) -> PbFragment {
+    pub fn to_protobuf(
+        &self,
+        upstream_fragments: impl Iterator<Item = FragmentId>,
+        dispatchers: Option<&HashMap<ActorId, Vec<Dispatcher>>>,
+    ) -> PbFragment {
         PbFragment {
             fragment_id: self.fragment_id,
             fragment_type_mask: self.fragment_type_mask,
             distribution_type: self.distribution_type as _,
-            actors: self.actors.clone(),
+            actors: self
+                .actors
+                .iter()
+                .map(|actor| {
+                    actor.to_protobuf(
+                        dispatchers
+                            .and_then(|dispatchers| dispatchers.get(&(actor.actor_id as _)))
+                            .into_iter()
+                            .flatten()
+                            .cloned(),
+                    )
+                })
+                .collect(),
             state_table_ids: self.state_table_ids.clone(),
             upstream_fragment_ids: upstream_fragments.collect(),
             maybe_vnode_count: self.maybe_vnode_count,
             nodes: Some(self.nodes.clone()),
         }
-    }
-
-    pub fn dispatches(
-        &self,
-    ) -> HashMap<risingwave_meta_model::FragmentId, stream_plan::DispatchStrategy> {
-        self.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as _;
-                let strategy = d.as_strategy();
-                (fragment_id, strategy)
-            })
-            .collect()
-    }
-
-    pub fn get_actors(&self) -> &[PbStreamActor] {
-        self.actors.as_slice()
     }
 }
 
@@ -264,6 +304,7 @@ impl StreamJobFragments {
     pub fn to_protobuf(
         &self,
         fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
+        fragment_dispatchers: &FragmentActorDispatchers,
     ) -> PbTableFragments {
         PbTableFragments {
             table_id: self.stream_job_id.table_id(),
@@ -274,8 +315,10 @@ impl StreamJobFragments {
                 .map(|(id, fragment)| {
                     (
                         *id,
-                        fragment
-                            .to_protobuf(fragment_upstreams.get(id).into_iter().flatten().cloned()),
+                        fragment.to_protobuf(
+                            fragment_upstreams.get(id).into_iter().flatten().cloned(),
+                            fragment_dispatchers.get(&(*id as _)),
+                        ),
                     )
                 })
                 .collect(),
@@ -291,7 +334,7 @@ impl StreamJobFragments {
 }
 
 pub type StreamJobActorsToCreate =
-    HashMap<WorkerId, HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpstreams>)>>;
+    HashMap<WorkerId, HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>>;
 
 impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
@@ -634,16 +677,18 @@ impl StreamJobFragments {
         actors
     }
 
-    pub fn actors_to_create(
-        &self,
+    fn actors_to_create<'a>(
+        &'a self,
+        fragment_actor_dispatchers: &'a FragmentActorDispatchers,
     ) -> impl Iterator<
         Item = (
             FragmentId,
-            &StreamNode,
-            impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
+            &'a StreamNode,
+            impl Iterator<Item = (&'a StreamActor, &'a Vec<PbDispatcher>, WorkerId)> + 'a,
         ),
-    > + '_ {
+    > + 'a {
         self.fragments.values().map(move |fragment| {
+            let actor_dispatchers = fragment_actor_dispatchers.get(&fragment.fragment_id);
             (
                 fragment.fragment_id,
                 &fragment.nodes,
@@ -653,7 +698,11 @@ impl StreamJobFragments {
                         .get(&actor.actor_id)
                         .expect("should exist")
                         .worker_id() as WorkerId;
-                    (actor, worker_id)
+                    static EMPTY_VEC: Vec<PbDispatcher> = Vec::new();
+                    let disptachers = actor_dispatchers
+                        .and_then(|dispatchers| dispatchers.get(&actor.actor_id))
+                        .unwrap_or(&EMPTY_VEC);
+                    (actor, disptachers, worker_id)
                 }),
             )
         })

@@ -60,6 +60,7 @@ use crate::optimizer::plan_node::{LogicalSource, PartitionComputeInfo, StreamPro
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
@@ -158,7 +159,6 @@ pub async fn gen_sink_plan(
             bound,
         )
     };
-    session.check_privileges_for_query(&bound)?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
@@ -249,6 +249,16 @@ pub async fn gen_sink_plan(
                     ))));
                 }
             }
+        }
+        if target_table_catalog
+            .columns()
+            .iter()
+            .any(|col| !col.nullable())
+        {
+            notice_to_user(format!(
+                "The target table `{}` contains columns with NOT NULL constraints. Any sinked rows violating the constraints will be ignored silently.",
+                target_table_catalog.name(),
+            ));
         }
     }
 

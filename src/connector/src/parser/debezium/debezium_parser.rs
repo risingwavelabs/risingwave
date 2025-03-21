@@ -125,15 +125,16 @@ impl DebeziumParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
+        let meta = writer.source_meta();
         // tombetone messages are handled implicitly by these accessors
         let key_accessor = match (key, self.props.ignore_key) {
             (None, false) => None,
-            (Some(data), false) => Some(self.key_builder.generate_accessor(data).await?),
+            (Some(data), false) => Some(self.key_builder.generate_accessor(data, meta).await?),
             (_, true) => None,
         };
         let payload_accessor = match payload {
             None => None,
-            Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
+            Some(data) => Some(self.payload_builder.generate_accessor(data, meta).await?),
         };
         let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 
@@ -194,14 +195,14 @@ mod tests {
 
     use risingwave_common::catalog::{CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
-    use risingwave_common::types::Timestamptz;
+    use risingwave_common::types::{DataType, Timestamptz};
     use risingwave_pb::plan_common::{
         AdditionalColumn, AdditionalColumnTimestamp, additional_column,
     };
 
     use super::*;
     use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
-    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts};
+    use crate::source::{ConnectorProperties, SourceCtrlOpts};
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {

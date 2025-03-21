@@ -244,6 +244,7 @@ message AlterOwnerRequest {
     uint32 schema_id = 5;
     uint32 database_id = 6;
     uint32 subscription_id = 7;
+    uint32 connection_id = 8;
   }
   uint32 owner_id = 20;
 }
@@ -497,6 +498,7 @@ message DropConnectionResponse {
 
 message GetTablesRequest {
   repeated uint32 table_ids = 1;
+  bool include_dropped_tables = 2;
 }
 
 message GetTablesResponse {

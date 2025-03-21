@@ -16,24 +16,28 @@ use std::sync::Arc;
 
 use either::Either;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_system_schema};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
 use crate::binder::relation::BoundShareInput;
-use crate::binder::{Binder, Relation};
+use crate::binder::{BindFor, Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
-use crate::catalog::{CatalogError, IndexCatalog, TableId};
+use crate::catalog::{CatalogError, DatabaseId, IndexCatalog, TableId};
+use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::user::UserId;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
@@ -125,7 +129,7 @@ impl Binder {
                         self.temporary_source_manager.get_source(table_name)
                     // don't care about the database and schema
                     {
-                        self.resolve_source_relation(&source_catalog.clone(), as_of)
+                        self.resolve_source_relation(&source_catalog.clone(), as_of, true)?
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
                         .get_created_table_by_name(db_name, schema_path, table_name)
@@ -135,7 +139,7 @@ impl Binder {
                         self.catalog
                             .get_source_by_name(db_name, schema_path, table_name)
                     {
-                        self.resolve_source_relation(&source_catalog.clone(), as_of)
+                        self.resolve_source_relation(&source_catalog.clone(), as_of, false)?
                     } else if let Ok((view_catalog, _)) =
                         self.catalog
                             .get_view_by_name(db_name, schema_path, table_name)
@@ -173,8 +177,11 @@ impl Binder {
                                     self.temporary_source_manager.get_source(table_name)
                                 // don't care about the database and schema
                                 {
-                                    return Ok(self
-                                        .resolve_source_relation(&source_catalog.clone(), as_of));
+                                    return self.resolve_source_relation(
+                                        &source_catalog.clone(),
+                                        as_of,
+                                        true,
+                                    );
                                 } else if let Some(table_catalog) = schema
                                     .get_created_table_or_any_internal_table_by_name(table_name)
                                 {
@@ -186,8 +193,11 @@ impl Binder {
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {
-                                    return Ok(self
-                                        .resolve_source_relation(&source_catalog.clone(), as_of));
+                                    return self.resolve_source_relation(
+                                        &source_catalog.clone(),
+                                        as_of,
+                                        false,
+                                    );
                                 } else if let Some(view_catalog) =
                                     schema.get_view_by_name(table_name)
                                 {
@@ -206,6 +216,47 @@ impl Binder {
         Ok(ret)
     }
 
+    pub(crate) fn check_privilege(
+        &self,
+        object: PbObject,
+        database_id: DatabaseId,
+        mode: AclMode,
+        owner: UserId,
+    ) -> Result<()> {
+        // security invoker is disabled for view, ignore privilege check.
+        if self.context.disable_security_invoker {
+            return Ok(());
+        }
+
+        match self.bind_for {
+            BindFor::Stream | BindFor::Batch => {
+                if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
+                    if user.is_super || user.id == owner {
+                        return Ok(());
+                    }
+                    if !user.has_privilege(&object, mode) {
+                        return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                    }
+
+                    // check CONNECT privilege for cross-db access
+                    if self.database_id != database_id
+                        && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
+                    {
+                        return Err(
+                            PermissionDenied("Do not have CONNECT privilege".to_owned()).into()
+                        );
+                    }
+                } else {
+                    return Err(PermissionDenied("Session user is invalid".to_owned()).into());
+                }
+            }
+            BindFor::Ddl | BindFor::System => {
+                // do nothing.
+            }
+        }
+        Ok(())
+    }
+
     fn resolve_table_relation(
         &mut self,
         table_catalog: Arc<TableCatalog>,
@@ -218,7 +269,14 @@ impl Binder {
             .iter()
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
+        self.check_privilege(
+            PbObject::TableId(table_id.table_id),
+            table_catalog.database_id,
+            AclMode::Select,
+            table_catalog.owner,
+        )?;
         self.included_relations.insert(table_id);
+
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
 
         let table = BoundBaseTable {
@@ -235,10 +293,19 @@ impl Binder {
         &mut self,
         source_catalog: &SourceCatalog,
         as_of: Option<AsOf>,
-    ) -> (Relation, Vec<(bool, Field)>) {
+        is_temporary: bool,
+    ) -> Result<(Relation, Vec<(bool, Field)>)> {
         debug_assert_column_ids_distinct(&source_catalog.columns);
+        if !is_temporary {
+            self.check_privilege(
+                PbObject::SourceId(source_catalog.id),
+                source_catalog.database_id,
+                AclMode::Select,
+                source_catalog.owner,
+            )?;
+        }
         self.included_relations.insert(source_catalog.id.into());
-        (
+        Ok((
             Relation::Source(Box::new(BoundSource {
                 catalog: source_catalog.clone(),
                 as_of,
@@ -248,13 +315,22 @@ impl Binder {
                 .iter()
                 .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
                 .collect_vec(),
-        )
+        ))
     }
 
     fn resolve_view_relation(
         &mut self,
         view_catalog: &ViewCatalog,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
+        if !view_catalog.is_system_view() {
+            self.check_privilege(
+                PbObject::ViewId(view_catalog.id),
+                view_catalog.database_id,
+                AclMode::Select,
+                view_catalog.owner,
+            )?;
+        }
+
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
         let Statement::Query(query) = ast
@@ -264,7 +340,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query(*query).map_err(|e| {
+        let query = self.bind_query_for_view(*query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,
@@ -319,7 +395,6 @@ impl Binder {
         &mut self,
         schema_name: Option<&str>,
         table_name: &str,
-        alias: Option<TableAlias>,
     ) -> Result<BoundBaseTable> {
         let db_name = &self.db_name;
         let schema_path = self.bind_schema_path(schema_name);
@@ -338,7 +413,7 @@ impl Binder {
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
             table_name.to_owned(),
-            alias,
+            None,
         )?;
 
         Ok(BoundBaseTable {
@@ -349,19 +424,8 @@ impl Binder {
         })
     }
 
-    pub(crate) fn resolve_dml_table<'a>(
-        &'a self,
-        schema_name: Option<&str>,
-        table_name: &str,
-        is_insert: bool,
-    ) -> Result<&'a TableCatalog> {
-        let db_name = &self.db_name;
-        let schema_path = self.bind_schema_path(schema_name);
-
-        let (table, _schema_name) =
-            self.catalog
-                .get_created_table_by_name(db_name, schema_path, table_name)?;
-
+    pub(crate) fn check_for_dml(table: &TableCatalog, is_insert: bool) -> Result<()> {
+        let table_name = &table.name;
         match table.table_type() {
             TableType::Table => {}
             TableType::Index => {
@@ -391,6 +455,6 @@ impl Binder {
             .into());
         }
 
-        Ok(table)
+        Ok(())
     }
 }

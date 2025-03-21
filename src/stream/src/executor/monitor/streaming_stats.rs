@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
 
 use prometheus::{
     Histogram, IntCounter, IntGauge, Registry, exponential_buckets, histogram_opts,
@@ -36,6 +37,7 @@ use risingwave_connector::sink::catalog::SinkId;
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
 };
+use crate::executor::monitor::in_mem_stats::{Count, CountMap};
 use crate::executor::prelude::ActorId;
 use crate::task::FragmentId;
 
@@ -45,6 +47,12 @@ pub struct StreamingMetrics {
 
     // Executor metrics (disabled by default)
     pub executor_row_count: RelabeledGuardedIntCounterVec<3>,
+
+    // Profiling Metrics:
+    // Aggregated per operator rather than per actor.
+    // These are purely in-memory, never collected by prometheus.
+    pub mem_stream_node_output_row_count: CountMap,
+    pub mem_stream_node_output_blocking_duration_ms: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_execution_time: LabelGuardedGaugeVec<1>,
@@ -213,6 +221,9 @@ impl StreamingMetrics {
         )
         .unwrap()
         .relabel_debug_1(level);
+
+        let stream_node_output_row_count = CountMap::new();
+        let stream_node_output_blocking_duration_ms = CountMap::new();
 
         let source_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
@@ -1063,6 +1074,8 @@ impl StreamingMetrics {
         Self {
             level,
             executor_row_count,
+            mem_stream_node_output_row_count: stream_node_output_row_count,
+            mem_stream_node_output_blocking_duration_ms: stream_node_output_blocking_duration_ms,
             actor_execution_time,
             actor_scheduled_duration,
             actor_scheduled_cnt,
@@ -1529,6 +1542,25 @@ impl StreamingMetrics {
                 .with_guarded_label_values(label_list),
         }
     }
+
+    pub fn new_profile_metrics(
+        &self,
+        operator_id: u64,
+        enable_profiling: bool,
+    ) -> ProfileMetricsImpl {
+        if enable_profiling {
+            ProfileMetricsImpl::ProfileMetrics(ProfileMetrics {
+                stream_node_output_row_count: self
+                    .mem_stream_node_output_row_count
+                    .new_or_get_counter(operator_id),
+                stream_node_output_blocking_duration_ms: self
+                    .mem_stream_node_output_blocking_duration_ms
+                    .new_or_get_counter(operator_id),
+            })
+        } else {
+            ProfileMetricsImpl::NoopProfileMetrics
+        }
+    }
 }
 
 pub(crate) struct ActorInputMetrics {
@@ -1621,4 +1653,49 @@ pub struct OverWindowMetrics {
     pub over_window_accessed_entry_count: LabelGuardedIntCounter<3>,
     pub over_window_compute_count: LabelGuardedIntCounter<3>,
     pub over_window_same_output_count: LabelGuardedIntCounter<3>,
+}
+
+pub enum ProfileMetricsImpl {
+    NoopProfileMetrics,
+    ProfileMetrics(ProfileMetrics),
+}
+
+pub struct ProfileMetrics {
+    pub stream_node_output_row_count: Count,
+    pub stream_node_output_blocking_duration_ms: Count,
+}
+
+pub trait ProfileMetricsExt {
+    fn inc_row_count(&self, count: u64);
+    fn inc_blocking_duration_ms(&self, duration: u64);
+}
+
+impl ProfileMetricsExt for ProfileMetrics {
+    fn inc_row_count(&self, count: u64) {
+        self.stream_node_output_row_count
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    fn inc_blocking_duration_ms(&self, duration_ms: u64) {
+        self.stream_node_output_blocking_duration_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
+    }
+}
+
+impl ProfileMetricsExt for ProfileMetricsImpl {
+    fn inc_row_count(&self, count: u64) {
+        match self {
+            ProfileMetricsImpl::NoopProfileMetrics => {}
+            ProfileMetricsImpl::ProfileMetrics(metrics) => metrics.inc_row_count(count),
+        }
+    }
+
+    fn inc_blocking_duration_ms(&self, duration: u64) {
+        match self {
+            ProfileMetricsImpl::NoopProfileMetrics => {}
+            ProfileMetricsImpl::ProfileMetrics(metrics) => {
+                metrics.inc_blocking_duration_ms(duration)
+            }
+        }
+    }
 }

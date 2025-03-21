@@ -7,7 +7,8 @@ sys.path.append(p)
 
 from jsonmerge import merge
 
-from common import *
+from dashboard.common import *
+from dashboard.dev import generate_panels
 
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Ecy3uV1nz")
@@ -22,6 +23,7 @@ panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
 
+<<<<<<< HEAD
 def section_actor_info(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -4765,6 +4767,8 @@ def section_alert_overview(panels):
         ),
     ]
 
+=======
+>>>>>>> 95441a6c216ff7edbc215a4211a9b373e95583a5
 templating_list = []
 if dynamic_source_enabled:
     templating_list.append(
@@ -4915,34 +4919,5 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     refresh="",
-    panels=[
-        *section_actor_info(panels),
-        *section_cluster_node(panels),
-        *section_recovery_node(panels),
-        *section_streaming(panels),
-        *section_streaming_cdc(panels),
-        *section_streaming_actors(panels),
-        *section_streaming_actors_tokio(panels),
-        *section_streaming_exchange(panels),
-        *section_streaming_errors(panels),
-        *section_batch(panels),
-        *section_hummock_read(panels),
-        *section_hummock_write(panels),
-        *section_compaction(panels),
-        *section_object_storage(panels),
-        *section_hummock_tiered_cache(panels),
-        *section_hummock_manager(panels),
-        *section_backup_manager(panels),
-        *section_grpc_meta_catalog_service(panels),
-        *section_grpc_meta_cluster_service(panels),
-        *section_grpc_meta_stream_manager(panels),
-        *section_frontend(panels),
-        *section_memory_manager(panels),
-        *section_sink_metrics(panels),
-        *section_kafka_metrics(panels),
-        *section_network_connection(panels),
-        *section_iceberg_metrics(panels),
-        *section_udf(panels),
-        *section_alert_overview(panels),
-    ],
+    panels=generate_panels(panels),
 ).auto_panel_ids()

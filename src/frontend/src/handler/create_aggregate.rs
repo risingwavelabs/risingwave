@@ -15,7 +15,7 @@
 use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
-use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
+use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::Function;
 use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_sqlparser::ast::DataType as AstDataType;
@@ -35,12 +35,23 @@ pub async fn handle_create_aggregate(
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE AGGREGATE");
     }
+
+    let udf_config = handler_args.session.env().udf_config();
+
     // e.g., `language [ python / java / ...etc]`
     let language = match params.language {
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "javascript" => lang,
+                "python" if udf_config.enable_embedded_python_udf => lang,
+                "javascript" if udf_config.enable_embedded_javascript_udf => lang,
+                "python" | "javascript" => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "{} UDF is not enabled in configuration",
+                        lang
+                    ))
+                    .into());
+                }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -105,7 +116,7 @@ pub async fn handle_create_aggregate(
     };
 
     let create_fn = risingwave_expr::sig::find_udf_impl(&language, None, link)?.create_fn;
-    let output = create_fn(CreateFunctionOptions {
+    let output = create_fn(CreateOptions {
         kind: UdfKind::Aggregate,
         name: &function_name,
         arg_names: &arg_names,
@@ -127,12 +138,14 @@ pub async fn handle_create_aggregate(
         return_type: Some(return_type.into()),
         language,
         runtime,
-        identifier: Some(output.identifier),
+        name_in_runtime: Some(output.name_in_runtime),
         link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        is_async: None,
+        is_batched: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

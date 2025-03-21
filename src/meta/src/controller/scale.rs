@@ -25,8 +25,8 @@ use risingwave_meta_model::prelude::{
     Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    ActorId, ConnectorSplits, FragmentId, ObjectId, VnodeBitmap, actor, fragment,
-    fragment_relation, sink, source, streaming_job, table,
+    ConnectorSplits, FragmentId, ObjectId, VnodeBitmap, actor, fragment, fragment_relation, sink,
+    source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -40,6 +40,7 @@ use sea_orm::{
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
+use crate::model::ActorId;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
@@ -405,7 +406,7 @@ impl CatalogController {
 
         let actors: HashMap<_, _> = actors
             .into_iter()
-            .map(|actor| (actor.actor_id, actor))
+            .map(|actor| (actor.actor_id as _, actor))
             .collect();
 
         let fragments: HashMap<FragmentId, _> = fragments
@@ -501,7 +502,7 @@ impl CatalogController {
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
         #[sea_orm(entity = "Actor")]
         pub struct PartialActor {
-            pub actor_id: ActorId,
+            pub actor_id: risingwave_meta_model::ActorId,
             pub fragment_id: FragmentId,
             pub status: ActorStatus,
             pub splits: Option<ConnectorSplits>,

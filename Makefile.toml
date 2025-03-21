@@ -158,7 +158,7 @@ alias = "logs"
 
 [tasks.logs]
 category = "RiseDev - Start/Stop"
-description = "Open logs with VSCode or dump in console"
+description = "Open logs with VSCode"
 script = '''
 #!/usr/bin/env bash
 
@@ -166,17 +166,6 @@ code "${PREFIX_LOG}" 2> /dev/null
 if [[ $? -eq 0 ]]; then
   exit 0
 fi
-
-for out_file in ${PREFIX_LOG}/*.log
-do
-  echo "~~~ Dump log file $out_file"
-  echo ""
-  cat "$out_file" | tail -n 300
-done
-
-echo ""
-echo ""
-echo ""
 '''
 
 
@@ -288,7 +277,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 4000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 8192 )) ; then
     echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -1185,7 +1174,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.28.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.30.2", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1327,15 +1316,10 @@ env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
-[tasks.ci-kill-no-dump-logs]
-category = "RiseDev - CI"
-dependencies = ["k", "check-logs", "wait-processes-exit"]
-description = "Kill cluster and check logs, do not dump logs"
-
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
-description = "Kill cluster, dump logs and check logs"
+dependencies = ["k", "check-logs", "wait-processes-exit"]
+description = "Kill cluster and check logs"
 
 [tasks.wait-processes-exit]
 category = "Misc"

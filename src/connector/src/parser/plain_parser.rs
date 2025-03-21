@@ -107,7 +107,7 @@ impl PlainParser {
                         .transaction_meta_builder
                         .as_mut()
                         .expect("expect transaction metadata access builder")
-                        .generate_accessor(data)
+                        .generate_accessor(data, writer.source_meta())
                         .await?;
                     return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props)
                     {
@@ -122,7 +122,7 @@ impl PlainParser {
                         .schema_change_builder
                         .as_mut()
                         .expect("expect schema change access builder")
-                        .generate_accessor(data)
+                        .generate_accessor(data, writer.source_meta())
                         .await?;
 
                     return match parse_schema_change(
@@ -150,17 +150,18 @@ impl PlainParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
+        let meta = writer.source_meta();
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key
             && let Some(key_builder) = self.key_builder.as_mut()
         {
             // key is optional in format plain
-            row_op.with_key(key_builder.generate_accessor(data).await?);
+            row_op.with_key(key_builder.generate_accessor(data, meta).await?);
         }
         if let Some(data) = payload {
             // the data part also can be an empty vec
-            row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data, meta).await?);
         }
 
         writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
@@ -512,6 +513,7 @@ mod tests {
                                         },
                                         version: Pr13707,
                                         system_column: None,
+                                        nullable: true,
                                     },
                                     is_hidden: false,
                                 },
@@ -527,6 +529,7 @@ mod tests {
                                         },
                                         version: Pr13707,
                                         system_column: None,
+                                        nullable: true,
                                     },
                                     is_hidden: false,
                                 },
@@ -542,6 +545,7 @@ mod tests {
                                         },
                                         version: Pr13707,
                                         system_column: None,
+                                        nullable: true,
                                     },
                                     is_hidden: false,
                                 },

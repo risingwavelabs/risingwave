@@ -205,7 +205,7 @@ pub(crate) struct LogStoreStateWriter<'a, S: LocalStateStore> {
     written_vnodes: Option<BitmapBuilder>,
 }
 
-impl<'a, S: LocalStateStore> LogStoreStateWriter<'a, S> {
+impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
     pub(crate) fn write_chunk(
         &mut self,
         chunk: &StreamChunk,

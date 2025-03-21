@@ -65,10 +65,11 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
 use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
 
@@ -88,7 +89,9 @@ enum BindFor {
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
+    user: UserInfoReadGuard,
     db_name: String,
+    database_id: DatabaseId,
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
@@ -253,13 +256,13 @@ impl UdfContext {
 ///    will record the target type as infer type for that parameter(call `record_infer_type`). If the
 ///    parameter has been inferred, the cast function will act as a normal cast.
 /// 4. After bind finished:
-///     (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
+///    (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
 ///    occur in the query. `export` will return error if there is a kind of
 ///    parameter. This rule is compatible with PostgreSQL
-///     (b) parameter is None means that it's a unknown type. The user didn't specify it
+///    (b) parameter is None means that it's a unknown type. The user didn't specify it
 ///    and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
 ///    compatible with PostgreSQL.
-///     (c) parameter is Some means that it's a known type.
+///    (c) parameter is Some means that it's a known type.
 #[derive(Clone, Debug)]
 pub struct ParameterTypes(Arc<RwLock<HashMap<u64, Option<DataType>>>>);
 
@@ -328,7 +331,9 @@ impl Binder {
     ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
+            user: session.env().user_info_reader().read_guard(),
             db_name: session.database(),
+            database_id: session.database_id(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
@@ -430,6 +435,7 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -450,6 +456,7 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
