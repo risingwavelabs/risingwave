@@ -51,8 +51,8 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
-    StreamFragmentGraph as StreamFragmentGraphProto,
+    BackfillOrderStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode,
+    PbStreamFragmentGraph, StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use thiserror_ext::AsReport;
@@ -60,7 +60,7 @@ use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{BackfillOrderState, BarrierManagerRef};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
@@ -1614,10 +1614,18 @@ impl DdlController {
         }
     }
 
+    fn build_backfill_order_control(
+        &self,
+        strategy: BackfillOrderStrategy,
+    ) -> Option<BackfillOrderState> {
+        None
+    }
+
     /// Builds the actor graph:
     /// - Add the upstream fragments to the fragment graph
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
+    /// - Construct the fragment level backfill order control.
     pub(crate) async fn build_stream_job(
         &self,
         stream_ctx: StreamContext,
@@ -1631,7 +1639,10 @@ impl DdlController {
         let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
-        // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
+        // 1. Fragment Level ordering graph
+        let fragment_backfill_ordering = fragment_graph.create_fragment_backfill_ordering();
+
+        // 2. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
         let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
@@ -1691,7 +1702,7 @@ impl DdlController {
             Some(resource_group) => resource_group,
         };
 
-        // 2. Build the actor graph.
+        // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
         let parallelism = self.resolve_stream_parallelism(
@@ -1728,7 +1739,7 @@ impl DdlController {
         } = actor_graph_builder.generate_graph(&self.env, &stream_job, expr_context)?;
         assert!(merge_updates.is_empty());
 
-        // 3. Build the table fragments structure that will be persisted in the stream manager,
+        // 4. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
