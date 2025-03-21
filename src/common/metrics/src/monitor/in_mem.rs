@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains data structures for in-memory monitoring.
+//! It is intentionally decoupled from Prometheus.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -24,7 +27,7 @@ pub type Count = Arc<AtomicU64>;
 pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
 
 impl CountMap {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let inner = Arc::new(RwLock::new(HashMap::new()));
         #[cfg(all(not(test), not(madsim)))]
         {
@@ -41,7 +44,7 @@ impl CountMap {
         CountMap(inner)
     }
 
-    pub(crate) fn new_or_get_counter(&self, id: u64) -> Count {
+    pub fn new_or_get_counter(&self, id: u64) -> Count {
         {
             let map = self.0.read();
             if let Some(counter) = map.get(&id) {
