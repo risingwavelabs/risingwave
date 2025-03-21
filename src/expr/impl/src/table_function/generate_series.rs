@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use num_traits::One;
 use risingwave_common::types::{CheckedAdd, Decimal, Interval, IsNegative, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
-use risingwave_expr::{ExprError, Result, capture_context, function};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("generate_series(int4, int4) -> setof int4")]
 #[function("generate_series(int8, int8) -> setof int8")]
@@ -75,16 +75,23 @@ fn generate_series_timestamptz_at_zone(
     generate_series_timestamptz_impl(time_zone, start, stop, step)
 }
 
-#[capture_context(TIME_ZONE)]
 fn generate_series_timestamptz_impl(
     time_zone: &str,
     start: Timestamptz,
     stop: Timestamptz,
     step: Interval,
-) -> Result<impl Iterator<Item = Timestamptz>> {
+) -> Result<impl Iterator<Item = Timestamptz> + use<>> {
     let time_zone =
         Timestamptz::lookup_time_zone(time_zone).map_err(crate::scalar::time_zone_err)?;
     range_generic::<_, _, _, true>(start, stop, step, time_zone)
+}
+fn generate_series_timestamptz_impl_captured(
+    start: Timestamptz,
+    stop: Timestamptz,
+    step: Interval,
+) -> Result<impl Iterator<Item = Timestamptz>> {
+    TIME_ZONE::try_with(|time_zone| generate_series_timestamptz_impl(time_zone, start, stop, step))
+        .flatten()
 }
 
 #[function("range(int4, int4) -> setof int4")]
