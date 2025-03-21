@@ -23,10 +23,15 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
+
 echo "--- starting risingwave cluster"
-mkdir -p .risingwave/log
+PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
 risedev ci-start ci-iceberg-test
-sleep 1
 
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
@@ -57,6 +62,8 @@ poetry run python main.py -t ./test_case/iceberg_connection.toml
 echo "--- Running benchmarks"
 poetry run python main.py -t ./benches/predicate_pushdown.toml
 
-echo "--- Kill cluster"
-cd ../../
-risedev ci-kill
+echo "--- Running iceberg engine tests"
+risedev slt './e2e_test/iceberg/test_case/pure_slt/iceberg_engine.slt'
+
+echo "--- Legacy test"
+risedev slt './e2e_test/iceberg/test_case/pure_slt/iceberg_sink.slt'

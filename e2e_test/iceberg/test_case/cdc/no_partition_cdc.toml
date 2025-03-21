@@ -1,6 +1,17 @@
-init_sqls = []
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.demo_table',
+    '''
+    CREATE TABLE demo_db.demo_table (
+    id int,
+    name string,
+    description string
+    ) USING iceberg
+    TBLPROPERTIES ('format-version'='2');
+    '''
+]
 
-slt = ''
+slt = 'test_case/cdc/load.slt'
 
 verify_schema = ['int','string','string']
 

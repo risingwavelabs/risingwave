@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -e
+
+# assume this runs in e2e_test/iceberg
+commands_dir="$(dirname "$0")"
+iceberg_dir="${commands_dir}/../iceberg"
+cd "${iceberg_dir}"
+
+ICEBERG_VERSION=1.4.3
+SPARK_VERSION=3.4.4
+
+PACKAGES="org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:$ICEBERG_VERSION,org.apache.hadoop:hadoop-aws:3.3.2"
+PACKAGES="$PACKAGES,org.apache.spark:spark-connect_2.12:$SPARK_VERSION"
+
+SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
+
+if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ]; then
+    wget --no-verbose https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
+    tar -xzf $SPARK_FILE --no-same-owner
+fi
+
+# TODO: avoid hardcoded config
+# TODO: maybe pyspark is more handy for scripting
+DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.2
+./spark-${SPARK_VERSION}-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
+    --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
+    --conf spark.sql.catalog.demo.type=hadoop \
+    --conf spark.sql.catalog.demo.warehouse=s3a://icebergdata/ \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
+    --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
+    --S \
+    "$@"

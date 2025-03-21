@@ -1,3 +1,10 @@
+system ok
+sparksql --e "
+DROP TABLE IF EXISTS demo.demo_db.e2e_demo_table PURGE;
+DROP TABLE IF EXISTS demo.demo_db.e2e_auto_create_table PURGE;
+CREATE TABLE demo.demo_db.e2e_demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');
+"
+
 statement ok
 set sink_decouple = false;
 
@@ -27,7 +34,7 @@ CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
     connector = 'iceberg',
     type = 'upsert',
     primary_key = 'v1',
-    warehouse.path = 's3a://iceberg',
+    warehouse.path = 's3a://icebergdata',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.access.key = secret iceberg_s3_access_key,
     s3.secret.key = secret iceberg_s3_secret_key,
@@ -41,7 +48,7 @@ CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
 statement ok
 CREATE SOURCE iceberg_demo_source WITH (
     connector = 'iceberg',
-    warehouse.path = 's3a://iceberg',
+    warehouse.path = 's3a://icebergdata',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.access.key = secret iceberg_s3_access_key,
     s3.secret.key = secret iceberg_s3_secret_key,
@@ -57,7 +64,7 @@ CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
     connector = 'iceberg',
     type = 'upsert',
     primary_key = 'v1',
-    warehouse.path = 's3a://hummock001',
+    warehouse.path = 's3a://icebergdata',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.access.key = secret iceberg_s3_access_key,
     s3.secret.key = secret iceberg_s3_secret_key,
@@ -74,7 +81,7 @@ CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
 statement ok
 CREATE SOURCE iceberg_e2e_auto_create_table WITH (
     connector = 'iceberg',
-    warehouse.path = 's3a://hummock001',
+    warehouse.path = 's3a://icebergdata',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.access.key = secret iceberg_s3_access_key,
     s3.secret.key = secret iceberg_s3_secret_key,
@@ -91,7 +98,7 @@ INSERT INTO t6 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2')
 statement ok
 FLUSH;
 
-sleep 20s
+sleep 5s
 
 query I
 select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
@@ -129,3 +136,19 @@ DROP SOURCE iceberg_e2e_auto_create_table;
 
 statement ok
 DROP TABLE t6 cascade;
+
+# check sink destination iceberg
+system ok
+sparksql --e "SELECT * FROM demo.demo_db.e2e_demo_table ORDER BY v1;" 2>/dev/null | tail -n +2
+----
+1	50	1-50
+2	2	2-2
+3	2	3-2
+5	2	5-2
+8	2	8-2
+13	2	13-2
+21	2	21-2
+
+
+system ok
+sparksql --e "drop table demo.demo_db.e2e_demo_table;"
