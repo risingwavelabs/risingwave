@@ -566,6 +566,7 @@ mod tests {
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -1097,7 +1098,9 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
@@ -2026,7 +2029,9 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
@@ -2164,6 +2169,7 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         match reader1.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
@@ -2179,6 +2185,7 @@ mod tests {
             _ => unreachable!(),
         }
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         match reader2.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
