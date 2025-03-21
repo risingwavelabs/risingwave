@@ -87,7 +87,7 @@ impl Array for BoolArray {
     type RefItem<'a> = bool;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> bool {
-        self.data.is_set_unchecked(idx)
+        unsafe { self.data.is_set_unchecked(idx) }
     }
 
     fn len(&self) -> usize {

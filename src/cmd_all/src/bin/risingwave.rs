@@ -238,7 +238,8 @@ fn standalone(opts: StandaloneOpts) -> ! {
 /// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) -> ! {
     if env::var(TELEMETRY_CLUSTER_TYPE).is_err() {
-        env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE);
+        // safety: single-threaded now.
+        unsafe { env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE) };
     }
     let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)

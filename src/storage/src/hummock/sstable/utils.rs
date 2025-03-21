@@ -23,11 +23,11 @@ use xxhash_rust::xxh64;
 use super::{HummockError, HummockResult};
 
 unsafe fn read_u64(ptr: *const u8) -> u64 {
-    ptr::read_unaligned(ptr as *const u64)
+    unsafe { ptr::read_unaligned(ptr as *const u64) }
 }
 
 unsafe fn read_u32(ptr: *const u8) -> u32 {
-    ptr::read_unaligned(ptr as *const u32)
+    unsafe { ptr::read_unaligned(ptr as *const u32) }
 }
 
 #[inline]

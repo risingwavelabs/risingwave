@@ -1063,7 +1063,7 @@ pub async fn build_remote_object_store(
 fn get_retry_strategy(
     config: &ObjectStoreConfig,
     operation_type: OperationType,
-) -> impl Iterator<Item = Duration> {
+) -> impl Iterator<Item = Duration> + use<> {
     let attempts = get_retry_attempts_by_type(config, operation_type);
     ExponentialBackoff::from_millis(config.retry.req_backoff_interval_ms)
         .max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))

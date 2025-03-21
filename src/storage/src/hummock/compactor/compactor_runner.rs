@@ -161,7 +161,7 @@ impl CompactorRunner {
         &self,
         task_progress: Arc<TaskProgress>,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-    ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
+    ) -> HummockResult<impl HummockIterator<Direction = Forward> + use<>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
             .context

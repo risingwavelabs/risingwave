@@ -318,10 +318,8 @@ fn parse_column_aliases() {
     let sql = "SELECT a.col + 1 AS newname FROM foo AS a";
     let select = verified_only_select(sql);
     if let SelectItem::ExprWithAlias {
-        expr: Expr::BinaryOp {
-            ref op, ref right, ..
-        },
-        ref alias,
+        expr: Expr::BinaryOp { op, right, .. },
+        alias,
     } = only(&select.projection)
     {
         assert_eq!(&BinaryOperator::Plus, op);
@@ -2846,7 +2844,7 @@ fn parse_ctes() {
     let sql = &format!("SELECT ({})", with);
     let select = verified_only_select(sql);
     match expr_from_projection(only(&select.projection)) {
-        Expr::Subquery(ref subquery) => {
+        Expr::Subquery(subquery) => {
             assert_ctes_in_select(&cte_sqls, subquery.as_ref());
         }
         _ => panic!("expected subquery"),

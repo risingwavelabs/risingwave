@@ -287,47 +287,32 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
 impl<const N: usize> LabelGuardedIntCounterVec<N> {
     pub fn test_int_counter_vec() -> Self {
         let registry = prometheus::Registry::new();
-        register_guarded_int_counter_vec_with_registry!(
-            "test",
-            "test",
-            &gen_test_label::<N>(),
-            &registry
-        )
-        .unwrap()
+        let labels = gen_test_label::<N>();
+        register_guarded_int_counter_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 
 impl<const N: usize> LabelGuardedIntGaugeVec<N> {
     pub fn test_int_gauge_vec() -> Self {
         let registry = prometheus::Registry::new();
-        register_guarded_int_gauge_vec_with_registry!(
-            "test",
-            "test",
-            &gen_test_label::<N>(),
-            &registry
-        )
-        .unwrap()
+        let labels = gen_test_label::<N>();
+        register_guarded_int_gauge_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 
 impl<const N: usize> LabelGuardedGaugeVec<N> {
     pub fn test_gauge_vec() -> Self {
         let registry = prometheus::Registry::new();
-        register_guarded_gauge_vec_with_registry!("test", "test", &gen_test_label::<N>(), &registry)
-            .unwrap()
+        let labels = gen_test_label::<N>();
+        register_guarded_gauge_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 
 impl<const N: usize> LabelGuardedHistogramVec<N> {
     pub fn test_histogram_vec() -> Self {
         let registry = prometheus::Registry::new();
-        register_guarded_histogram_vec_with_registry!(
-            "test",
-            "test",
-            &gen_test_label::<N>(),
-            &registry
-        )
-        .unwrap()
+        let labels = gen_test_label::<N>();
+        register_guarded_histogram_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 

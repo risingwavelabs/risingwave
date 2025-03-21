@@ -136,8 +136,10 @@ impl Array for MapArray {
     type RefItem<'a> = MapRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        let list = self.inner.raw_value_at_unchecked(idx);
-        MapRef::new_unchecked(list)
+        unsafe {
+            let list = self.inner.raw_value_at_unchecked(idx);
+            MapRef::new_unchecked(list)
+        }
     }
 
     fn len(&self) -> usize {

@@ -947,8 +947,10 @@ mod tests {
                 }
 
                 unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-                    let g = Global;
-                    g.deallocate(ptr, layout)
+                    unsafe {
+                        let g = Global;
+                        g.deallocate(ptr, layout)
+                    }
                 }
             }
 

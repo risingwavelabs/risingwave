@@ -22,7 +22,7 @@ use crate::{EnvParam, execute_and_catch};
 
 const TARGET: &str = "risingwave_connector_node";
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEvent(
     env: EnvParam<'_>,
     thread_name: JString<'_>,
@@ -76,7 +76,7 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEventEnabled(
     env: EnvParam<'_>,
     level: jint,

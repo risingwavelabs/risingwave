@@ -120,7 +120,7 @@ impl ActiveStreamingWorkerNodes {
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
-        let ret = loop {
+        loop {
             let notification = self
                 .rx
                 .recv()
@@ -201,9 +201,7 @@ impl ActiveStreamingWorkerNodes {
                     continue;
                 }
             }
-        };
-
-        ret
+        }
     }
 
     #[cfg(debug_assertions)]

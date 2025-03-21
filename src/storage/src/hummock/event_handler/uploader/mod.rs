@@ -690,10 +690,10 @@ impl TableUnsyncData {
         impl Iterator<Item = (LocalInstanceId, Vec<UploaderImm>)> + '_,
         Option<(
             WatermarkDirection,
-            impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)>,
+            impl Iterator<Item = (HummockEpoch, Vec<VnodeWatermark>)> + use<>,
             WatermarkSerdeType,
         )>,
-        impl Iterator<Item = UploadingTaskId>,
+        impl Iterator<Item = UploadingTaskId> + use<>,
         BTreeMap<HummockEpoch, ()>,
     ) {
         if let Some(prev_epoch) = self.max_sync_epoch() {

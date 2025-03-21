@@ -191,9 +191,11 @@ mod row_ref {
         }
 
         unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-            self.columns
-                .get_unchecked(index)
-                .value_at_unchecked(self.idx)
+            unsafe {
+                self.columns
+                    .get_unchecked(index)
+                    .value_at_unchecked(self.idx)
+            }
         }
 
         fn len(&self) -> usize {

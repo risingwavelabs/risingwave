@@ -94,7 +94,7 @@ impl PostgresExternalTable {
             });
 
         if *ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull {
-            if let Some(ref root_cert) = ssl_root_cert {
+            if let Some(root_cert) = ssl_root_cert {
                 options = options.ssl_root_cert(root_cert.as_str());
             }
         }

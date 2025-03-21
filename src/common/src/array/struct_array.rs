@@ -271,7 +271,7 @@ impl StructArray {
     /// # Safety
     /// The caller must ensure that the index is within bounds.
     pub unsafe fn field_at_unchecked(&self, index: usize) -> &ArrayRef {
-        self.children.get_unchecked(index)
+        unsafe { self.children.get_unchecked(index) }
     }
 
     #[cfg(test)]
@@ -414,9 +414,13 @@ impl<'a> StructRef<'a> {
     /// # Safety
     /// The caller must ensure that the index is within bounds.
     pub unsafe fn field_at_unchecked(&self, i: usize) -> DatumRef<'a> {
-        match self {
-            StructRef::Indexed { arr, idx } => arr.field_at_unchecked(i).value_at_unchecked(*idx),
-            StructRef::ValueRef { val } => val.fields.get_unchecked(i).to_datum_ref(),
+        unsafe {
+            match self {
+                StructRef::Indexed { arr, idx } => {
+                    arr.field_at_unchecked(i).value_at_unchecked(*idx)
+                }
+                StructRef::ValueRef { val } => val.fields.get_unchecked(i).to_datum_ref(),
+            }
         }
     }
 
@@ -531,7 +535,7 @@ impl Row for StructRef<'_> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.field_at_unchecked(index)
+        unsafe { self.field_at_unchecked(index) }
     }
 
     fn len(&self) -> usize {

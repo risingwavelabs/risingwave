@@ -159,7 +159,7 @@ impl TroublemakerExecutor {
             .map(|(op, row)| {
                 let mut data = row.into_inner();
 
-                for (datum, gen) in data
+                for (datum, r#gen) in data
                     .iter_mut()
                     .zip_eq_fast(vars.field_generators.iter_mut())
                 {
@@ -171,9 +171,9 @@ impl TroublemakerExecutor {
                             *datum = None;
                         }
                         3 => {
-                            *datum = gen
+                            *datum = r#gen
                                 .as_mut()
-                                .and_then(|gen| gen.generate_datum(rand::random()))
+                                .and_then(|r#gen| r#gen.generate_datum(rand::random()))
                                 .or(datum.take());
                         }
                         _ => unreachable!(),

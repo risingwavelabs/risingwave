@@ -44,10 +44,12 @@ impl<R1: Row, R2: Row> Row for Chain<R1, R2> {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        if index < self.r1.len() {
-            self.r1.datum_at_unchecked(index)
-        } else {
-            self.r2.datum_at_unchecked(index - self.r1.len())
+        unsafe {
+            if index < self.r1.len() {
+                self.r1.datum_at_unchecked(index)
+            } else {
+                self.r2.datum_at_unchecked(index - self.r1.len())
+            }
         }
     }
 

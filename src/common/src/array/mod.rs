@@ -221,10 +221,12 @@ pub trait Array:
     /// Retrieve a reference to value without checking the index boundary.
     #[inline]
     unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.raw_value_at_unchecked(idx))
-        } else {
-            None
+        unsafe {
+            if !self.is_null_unchecked(idx) {
+                Some(self.raw_value_at_unchecked(idx))
+            } else {
+                None
+            }
         }
     }
 
@@ -263,7 +265,7 @@ pub trait Array:
     /// The unchecked version of `is_null`, ignore index out of bound check. It is
     /// the caller's responsibility to ensure the index is valid.
     unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
-        !self.null_bitmap().is_set_unchecked(idx)
+        unsafe { !self.null_bitmap().is_set_unchecked(idx) }
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
@@ -410,7 +412,7 @@ macro_rules! impl_convert {
                     /// Panics if type mismatches.
                     pub fn [<as_ $suffix_name>](&self) -> &$array {
                         match self {
-                            Self::$variant_name(ref array) => array,
+                            Self::$variant_name(array) => array,
                             other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
                         }
                     }
@@ -610,9 +612,11 @@ impl ArrayImpl {
     ///
     /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
     pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
-        dispatch_array_variants!(self, inner, {
-            inner.value_at_unchecked(idx).map(ScalarRefImpl::from)
-        })
+        unsafe {
+            dispatch_array_variants!(self, inner, {
+                inner.value_at_unchecked(idx).map(ScalarRefImpl::from)
+            })
+        }
     }
 
     pub fn set_bitmap(&mut self, bitmap: Bitmap) {

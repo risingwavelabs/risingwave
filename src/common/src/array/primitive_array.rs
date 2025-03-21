@@ -217,7 +217,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type RefItem<'a> = T;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        *self.data.get_unchecked(idx)
+        unsafe { *self.data.get_unchecked(idx) }
     }
 
     fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {

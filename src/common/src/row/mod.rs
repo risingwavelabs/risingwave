@@ -220,7 +220,7 @@ macro_rules! deref_forward_row {
         }
 
         unsafe fn datum_at_unchecked(&self, index: usize) -> crate::types::DatumRef<'_> {
-            (**self).datum_at_unchecked(index)
+            unsafe { (**self).datum_at_unchecked(index) }
         }
 
         fn len(&self) -> usize {
@@ -306,7 +306,7 @@ macro_rules! impl_slice_row {
 
         #[inline]
         unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-            self.get_unchecked(index).to_datum_ref()
+            unsafe { self.get_unchecked(index).to_datum_ref() }
         }
 
         #[inline]
@@ -343,9 +343,11 @@ impl<R: Row> Row for Option<R> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        match self {
-            Some(row) => row.datum_at_unchecked(index),
-            None => EMPTY.datum_at_unchecked(index),
+        unsafe {
+            match self {
+                Some(row) => row.datum_at_unchecked(index),
+                None => EMPTY.datum_at_unchecked(index),
+            }
         }
     }
 
@@ -397,7 +399,7 @@ impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        either::for_both!(self, row => row.datum_at_unchecked(index))
+        unsafe { either::for_both!(self, row => row.datum_at_unchecked(index)) }
     }
 
     fn len(&self) -> usize {
