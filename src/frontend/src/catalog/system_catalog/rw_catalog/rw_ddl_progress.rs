@@ -38,7 +38,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
         .map(|progress| progress.id as u32)
         .collect_vec();
 
-    let tables = reader.meta_client.get_tables(&table_ids).await?;
+    let tables = reader.meta_client.get_tables(&table_ids, false).await?;
 
     let ddl_progress = ddl_progresses
         .into_iter()
