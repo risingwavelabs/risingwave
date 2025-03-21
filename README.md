@@ -79,12 +79,12 @@ RisingWave is designed to be easier to use and more cost-efficient:
 * **Expressive SQL:** Supports structured, semi-structured, and unstructured data with a familiar SQL dialect.
 * **No manual state tuning:** Eliminates complex state management configurations.
 
-### S3 as primary storage  
+### S3 as primary storage
 
-RisingWave stores tables, materialized views, and internal states of stream processing jobs in S3 (or equivalent object storage), providing:  
-- **High performance:** Optimized for complex queries, including joins and time windowing.  
-- **Fast recovery:** Restores from system failures within seconds.  
-- **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.  
+RisingWave stores tables, materialized views, and internal states of stream processing jobs in S3 (or equivalent object storage), providing:
+- **High performance:** Optimized for complex queries, including joins and time windowing.
+- **Fast recovery:** Restores from system failures within seconds.
+- **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.
 
 ### Elastic disk cache
 
