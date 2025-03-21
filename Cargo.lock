@@ -6286,7 +6286,7 @@ dependencies = [
  "serde_repr",
  "serde_with 3.8.1",
  "tokio",
- "typed-builder 0.20.0",
+ "typed-builder 0.20.1",
  "url",
  "uuid",
  "zstd 0.13.2",
@@ -6305,7 +6305,7 @@ dependencies = [
  "log",
  "serde_json",
  "tokio",
- "typed-builder 0.20.0",
+ "typed-builder 0.20.1",
  "uuid",
 ]
 
@@ -6325,7 +6325,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tokio",
- "typed-builder 0.20.0",
+ "typed-builder 0.20.1",
  "uuid",
 ]
 
@@ -11110,7 +11110,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "typed-builder 0.20.0",
+ "typed-builder 0.21.0",
  "url",
  "urlencoding",
  "uuid",
@@ -15160,11 +15160,20 @@ dependencies = [
 
 [[package]]
 name = "typed-builder"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e14ed59dc8b7b26cacb2a92bad2e8b1f098806063898ab42a3bd121d7d45e75"
+checksum = "cd9d30e3a08026c78f246b173243cf07b3696d274debd26680773b6773c2afc7"
 dependencies = [
- "typed-builder-macro 0.20.0",
+ "typed-builder-macro 0.20.1",
+]
+
+[[package]]
+name = "typed-builder"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce63bcaf7e9806c206f7d7b9c1f38e0dce8bb165a80af0898161058b19248534"
+dependencies = [
+ "typed-builder-macro 0.21.0",
 ]
 
 [[package]]
@@ -15191,9 +15200,20 @@ dependencies = [
 
 [[package]]
 name = "typed-builder-macro"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "560b82d656506509d43abe30e0ba64c56b1953ab3d4fe7ba5902747a7a3cedd5"
+checksum = "3c36781cc0e46a83726d9879608e4cf6c2505237e263a8eb8c24502989cfdb28"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "typed-builder-macro"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60d8d828da2a3d759d3519cdf29a5bac49c77d039ad36d0782edadbf9cd5415b"
 dependencies = [
  "proc-macro2",
  "quote",
