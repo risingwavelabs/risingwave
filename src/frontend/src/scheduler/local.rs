@@ -497,7 +497,7 @@ impl LocalQueryExecution {
             PlanNodeType::BatchSeqScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::RowSeqScan(ref mut scan_node) => {
+                    NodeBody::RowSeqScan(scan_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_table()
@@ -519,7 +519,7 @@ impl LocalQueryExecution {
             PlanNodeType::BatchLogSeqScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::LogRowSeqScan(ref mut scan_node) => {
+                    NodeBody::LogRowSeqScan(scan_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_table()
@@ -539,7 +539,7 @@ impl LocalQueryExecution {
             PlanNodeType::BatchFileScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::FileScan(ref mut file_scan_node) => {
+                    NodeBody::FileScan(file_scan_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_file()
@@ -559,7 +559,7 @@ impl LocalQueryExecution {
             PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::Source(ref mut source_node) => {
+                    NodeBody::Source(source_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_source()
@@ -582,7 +582,7 @@ impl LocalQueryExecution {
             PlanNodeType::BatchIcebergScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::IcebergScan(ref mut iceberg_scan_node) => {
+                    NodeBody::IcebergScan(iceberg_scan_node) => {
                         if let Some(partition) = partition {
                             let partition = partition
                                 .into_source()

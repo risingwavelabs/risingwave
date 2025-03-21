@@ -197,7 +197,7 @@ impl LogStoreBufferInner {
     }
 
     fn add_truncate_offset(&mut self, (epoch, seq_id): ReaderTruncationOffsetType) {
-        if let Some((prev_epoch, ref mut prev_seq_id)) = self.truncation_list.back_mut()
+        if let Some((prev_epoch, prev_seq_id)) = self.truncation_list.back_mut()
             && *prev_epoch == epoch
         {
             *prev_seq_id = seq_id;

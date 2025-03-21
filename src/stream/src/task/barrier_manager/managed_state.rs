@@ -1127,7 +1127,7 @@ impl PartialGraphManagedBarrierState {
             ),
         };
 
-        if let Some(BarrierState { ref inner, .. }) =
+        if let Some(&mut BarrierState { ref inner, .. }) =
             self.epoch_barrier_state_map.get_mut(&barrier.epoch.prev)
         {
             {
