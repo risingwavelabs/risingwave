@@ -345,8 +345,8 @@ pub async fn read_parquet_file(
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
     > = parquet_parser.into_stream(
         record_batch_stream,
-        parquet_source_skip_row_count_metrics,
         file_source_input_row_count_metrics,
+        parquet_source_skip_row_count_metrics,
     );
     Ok(msg_stream)
 }

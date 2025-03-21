@@ -110,8 +110,9 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     Some(self.parser_config.common.rw_columns.clone()),
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
-                    Some(parquet_source_skip_row_count_metrics),
+                    
                     Some(file_source_input_row_count.clone()),
+                    Some(parquet_source_skip_row_count_metrics),
                 )
                 .await?;
             } else {
