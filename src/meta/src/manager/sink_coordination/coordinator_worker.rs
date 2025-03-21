@@ -280,33 +280,71 @@ impl CoordinatorWorker {
                 .can_commit()
             {
                 let (epoch, requests) = self.pending_epochs.pop_first().expect("non-empty");
-                let (committted_epoch, _rw_futures_utilrx) =
+
+                // Get the latest committed_epoch and the receiver
+                let (committed_epoch, mut rw_futures_utilrx) =
                     subscriber(self.handle_manager.param.sink_id).await?;
-                // TODO: measure commit time
-                let start_time = Instant::now();
-                if epoch <= committted_epoch {
-                    run_future_with_periodic_fn(
-                        coordinator.commit(epoch, requests.metadatas),
-                        Duration::from_secs(5),
-                        || {
-                            warn!(
-                                elapsed = ?start_time.elapsed(),
-                                sink_id = self.handle_manager.param.sink_id.sink_id,
-                                "committing"
-                            );
-                        },
+
+                // Check if we can commit immediately, we can only commit when current epoch is successfully checkpointed.
+                if committed_epoch >= epoch {
+                    self.commit_in_epoch(
+                        &mut coordinator,
+                        epoch,
+                        requests,
+                        self.handle_manager.param.sink_id.sink_id,
                     )
-                    .await
-                    .map_err(|e| anyhow!(e))?;
-                    self.handle_manager.ack_commit(epoch, requests.handle_ids)?;
+                    .await?;
                 } else {
+                    // Process subsequent messages
                     tracing::info!(
-                        "Wait for the committed epoch {} to rise to the current committed epoch {}",
-                        committted_epoch,
+                        "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
+                        committed_epoch,
                         epoch
                     );
+
+                    while let Some(next_epoch) = rw_futures_utilrx.recv().await {
+                        tracing::info!("Received next epoch: {}", next_epoch);
+                        // If next_epoch meets the condition, execute commit immediately
+                        if next_epoch >= epoch {
+                            self.commit_in_epoch(
+                                &mut coordinator,
+                                epoch,
+                                requests,
+                                self.handle_manager.param.sink_id.sink_id,
+                            )
+                            .await?;
+                            break;
+                        }
+                    }
                 }
             }
         }
+    }
+
+    // Function to handle the commit logic
+    async fn commit_in_epoch(
+        &mut self,
+        coordinator: &mut impl SinkCommitCoordinator,
+        epoch: u64,
+        requests: EpochCommitRequests,
+        sink_id: u32, // Assuming SinkId is the type for sink_id
+    ) -> anyhow::Result<()> {
+        // TODO: measure commit time
+        let start_time: Instant = Instant::now();
+        run_future_with_periodic_fn(
+            async { coordinator.commit(epoch, requests.metadatas).await },
+            Duration::from_secs(5),
+            || {
+                warn!(
+                    elapsed = ?start_time.elapsed(),
+                    sink_id = sink_id,
+                    "committing"
+                );
+            },
+        )
+        .await
+        .map_err(|e| anyhow!(e))?;
+        self.handle_manager.ack_commit(epoch, requests.handle_ids)?;
+        Ok(())
     }
 }
