@@ -66,7 +66,6 @@ impl PlanTreeNodeUnary for LogicalLimit {
         Self::new(core)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

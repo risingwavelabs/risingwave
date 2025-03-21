@@ -301,8 +301,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -1006,7 +1007,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
-        if ops.len() == 0 {
+        if ops.is_empty() {
             return Ok(());
         }
         let write_batch_size = chunk.estimated_heap_size();
@@ -1356,7 +1357,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
         let txn = Transaction::new(&self.table);
         let mut append_action = txn
-            .fast_append(None, vec![])
+            .fast_append(None, None, vec![])
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         append_action
             .add_data_files(data_files)
@@ -1366,7 +1367,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             SinkError::Iceberg(anyhow!(err))
         })?;
         let table = tx
-            .commit_dyn(self.catalog.as_ref())
+            .commit(self.catalog.as_ref())
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.table = table;
@@ -1446,9 +1447,7 @@ fn check_compatibility(
             | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
                 let mut schema_fields = HashMap::new();
                 get_fields(our_field_type, field.data_type(), &mut schema_fields)
-                    .map_or(true, |fields| {
-                        check_compatibility(schema_fields, &fields).unwrap()
-                    })
+                    .is_none_or(|fields| check_compatibility(schema_fields, &fields).unwrap())
             }
             // validate nested structs
             (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
@@ -1735,6 +1734,9 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

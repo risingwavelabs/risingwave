@@ -83,7 +83,6 @@ impl PlanTreeNodeUnary for LogicalShare {
         Self::new(input)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

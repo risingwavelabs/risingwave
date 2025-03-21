@@ -42,7 +42,6 @@ use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
-use crate::executor::error::StreamExecutorError;
 
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
@@ -83,7 +82,6 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         self.state_table
             .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
-            .map_err(StreamExecutorError::from)
     }
 
     /// this method should only be used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
