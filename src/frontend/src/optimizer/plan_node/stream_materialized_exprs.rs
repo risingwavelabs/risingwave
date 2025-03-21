@@ -34,7 +34,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 /// `StreamMaterializedExprs` materializes the results of a set of expressions.
 /// The expressions are evaluated once and the results are stored in a state table,
 /// avoiding re-evaluation for delete operations.
-/// Particularly useful for expensive operations like UDFs.
+/// Particularly useful for expensive or non-deterministic expressions like UDF calls.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterializedExprs {
     pub base: PlanBase<Stream>,
