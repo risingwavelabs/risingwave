@@ -182,6 +182,27 @@ select count(*) from mv3;
 ----
 18
 
+# insert large batch of data
+statement ok
+INSERT INTO s1 (i1, i2, i3) select i, i::varchar, i::varchar from generate_series(1, 1000000) as i;
+
+sleep 5s
+
+query I
+select count(*) from iceberg_t1_source;
+----
+1000014
+
+query I retry 3 backoff 5s
+select count(*) from mv2;
+----
+1000018
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+1000018
+
 # TODO: also test compaction
 
 statement ok

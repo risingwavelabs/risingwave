@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Bound;
 
 use anyhow::Context;
@@ -28,7 +27,7 @@ use risingwave_common::catalog::{
     TableId,
 };
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::{JsonbVal, ScalarRef, Serial};
+use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
@@ -55,6 +54,17 @@ pub struct IcebergFetchExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 }
 
+/// Fetched data from 1 [`FileScanTask`], along with states for checkpointing.
+///
+/// Currently 1 `FileScanTask` -> 1 `ChunksWithState`.
+/// Later after we support reading part of a file, we will support 1 `FileScanTask` -> n `ChunksWithState`.
+struct ChunksWithState {
+    chunks: Vec<StreamChunk>,
+    data_file_path: String,
+    #[expect(dead_code)]
+    last_read_pos: Datum,
+}
+
 impl<S: StateStore> IcebergFetchExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -76,7 +86,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, Vec<StreamChunk>>,
+        stream: &mut StreamReaderWithPause<BIASED, ChunksWithState>,
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
@@ -125,7 +135,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         Ok(())
     }
 
-    #[try_stream(ok = Vec<StreamChunk>, error = StreamExecutorError)]
+    #[try_stream(ok = ChunksWithState, error = StreamExecutorError)]
     async fn build_batched_stream_reader(
         _column_ids: Vec<ColumnId>,
         _source_ctx: SourceContext,
@@ -133,6 +143,16 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         batch: Vec<FileScanTask>,
         _rate_limit_rps: Option<u32>,
     ) {
+        let file_path_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_PATH_COLUMN_NAME)
+            .unwrap();
+        let file_pos_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
+            .unwrap();
         // let (stream, _) = source_desc
         //     .source
         //     .build_stream(batch, column_ids, Arc::new(source_ctx), false)
@@ -156,7 +176,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 task,
                 IcebergScanOpts {
                     batch_size: 1024,
-                    need_seq_num: true,
+                    need_seq_num: true, /* TODO: this column is not needed. But need to support col pruning in frontend to remove it. */
                     need_file_path_and_pos: true,
                 },
                 None,
@@ -167,8 +187,20 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     chunk,
                 ));
             }
-            // We yield one chunk for each file now, because iceberg-rs doesn't support read part of a file now.
-            yield chunks;
+            // We yield once for each file now, because iceberg-rs doesn't support read part of a file now.
+            let last_chunk = chunks.last().unwrap();
+            let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
+            let data_file_path = last_row
+                .datum_at(file_path_idx)
+                .unwrap()
+                .into_utf8()
+                .to_owned();
+            let last_read_pos = last_row.datum_at(file_pos_idx).unwrap().to_owned_datum();
+            yield ChunksWithState {
+                chunks,
+                data_file_path,
+                last_read_pos,
+            };
         }
     }
 
@@ -238,7 +270,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         state_store_handler.init_epoch(first_epoch).await?;
 
         let mut splits_on_fetch: usize = 0;
-        let mut stream = StreamReaderWithPause::<true, Vec<StreamChunk>>::new(
+        let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
             upstream,
             stream::pending().boxed(),
         );
@@ -351,52 +383,18 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             }
                         }
                         // StreamChunk from FsSourceReader, and the reader reads only one file.
-                        Either::Right(chunks) => {
-                            for chunk in chunks {
-                                println!(
-                                    "chunk:\n {:}, file_path_idx: {}, file_pos_idx: {}",
-                                    chunk.to_pretty(),
-                                    file_path_idx,
-                                    file_pos_idx
-                                );
-                                // let mapping =
-                                //     get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
-                                //         .unwrap();
-                                let mut mapping = HashMap::new();
-                                // All rows (including those visible or invisible) will be used to update the source offset.
-                                // TODO: maybe we can get offset separately, instead of in the chunk.
-                                for i in 0..chunk.capacity() {
-                                    let (_, row, _) = chunk.row_at(i);
-                                    let file_path: Arc<str> =
-                                        row.datum_at(file_path_idx).unwrap().into_utf8().into();
-                                    let file_pos = row.datum_at(file_pos_idx).unwrap().into_int64();
-                                    mapping.insert(file_path, file_pos.to_owned());
-                                }
-                                debug_assert_eq!(mapping.len(), 1);
-                                if let Some((file_path, _file_pos)) = mapping.into_iter().next() {
-                                    let row = state_store_handler
-                                        .get(&file_path)
-                                        .await?
-                                        .expect("The fs_split should be in the state table.");
-                                    let _fs_split: FileScanTask = match row.datum_at(1) {
-                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                            serde_json::from_value(
-                                                jsonb_ref.to_owned_scalar().take(),
-                                            )
-                                            .with_context(|| {
-                                                format!("invalid state: {:?}", jsonb_ref)
-                                            })?
-                                        }
-                                        _ => unreachable!(),
-                                    };
+                        Either::Right(ChunksWithState {
+                            chunks,
+                            data_file_path,
+                            last_read_pos: _,
+                        }) => {
+                            // TODO: support persist progress after supporting reading part of a file.
+                            if true {
+                                splits_on_fetch -= 1;
+                                state_store_handler.delete(&data_file_path).await?;
+                            }
 
-                                    // TODO: support persist progress after supporting reading part of a file.
-                                    if true {
-                                        splits_on_fetch -= 1;
-                                        state_store_handler.delete(&file_path).await?;
-                                    }
-                                }
-
+                            for chunk in &chunks {
                                 let chunk = prune_additional_cols(
                                     &chunk,
                                     file_path_idx,
