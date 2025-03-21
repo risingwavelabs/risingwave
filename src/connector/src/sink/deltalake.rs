@@ -380,6 +380,10 @@ impl Sink for DeltaLakeSink {
         Ok(())
     }
 
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
@@ -577,12 +581,12 @@ mod test {
     use maplit::btreemap;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
     use crate::sink::SinkCommitCoordinator;
     use crate::sink::deltalake::DeltaLakeSinkCommitter;
     use crate::sink::writer::SinkWriter;
-    use crate::source::DataType;
 
     #[tokio::test]
     async fn test_deltalake() {

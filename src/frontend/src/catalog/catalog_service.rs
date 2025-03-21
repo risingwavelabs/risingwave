@@ -215,7 +215,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: u32,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()>;
@@ -560,12 +560,12 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: u32,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(table_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 

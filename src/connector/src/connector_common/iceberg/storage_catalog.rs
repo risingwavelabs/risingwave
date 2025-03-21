@@ -18,7 +18,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use iceberg::io::{
-    FileIO, GCS_CREDENTIALS_JSON, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+    FileIO, GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID,
+    S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
@@ -38,16 +39,18 @@ pub enum StorageCatalogConfig {
 #[derive(Clone, Debug, TypedBuilder)]
 pub struct StorageCatalogS3Config {
     warehouse: String,
-    access_key: String,
-    secret_key: String,
+    access_key: Option<String>,
+    secret_key: Option<String>,
     endpoint: Option<String>,
     region: Option<String>,
+    enable_config_load: Option<bool>,
 }
 
 #[derive(Clone, Debug, TypedBuilder)]
 pub struct StorageCatalogGcsConfig {
     warehouse: String,
-    credential: String,
+    credential: Option<String>,
+    enable_config_load: Option<bool>,
 }
 
 /// File system catalog.
@@ -61,24 +64,32 @@ impl StorageCatalog {
     pub fn new(config: StorageCatalogConfig) -> Result<Self> {
         let (warehouse, file_io) = match config {
             StorageCatalogConfig::S3(config) => {
-                let mut file_io_builder = FileIO::from_path(&config.warehouse)?
-                    .with_prop(S3_ACCESS_KEY_ID, &config.access_key)
-                    .with_prop(S3_SECRET_ACCESS_KEY, &config.secret_key);
-                file_io_builder = if let Some(endpoint) = &config.endpoint {
-                    file_io_builder.with_prop(S3_ENDPOINT, endpoint)
-                } else {
-                    file_io_builder
+                let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
+                if let Some(access_key) = &config.access_key {
+                    file_io_builder = file_io_builder.with_prop(S3_ACCESS_KEY_ID, access_key)
                 };
-                file_io_builder = if let Some(region) = &config.region {
-                    file_io_builder.with_prop(S3_REGION, region)
-                } else {
-                    file_io_builder
+                if let Some(secret_key) = &config.secret_key {
+                    file_io_builder = file_io_builder.with_prop(S3_SECRET_ACCESS_KEY, secret_key)
                 };
+                if let Some(endpoint) = &config.endpoint {
+                    file_io_builder = file_io_builder.with_prop(S3_ENDPOINT, endpoint)
+                }
+                if let Some(region) = &config.region {
+                    file_io_builder = file_io_builder.with_prop(S3_REGION, region)
+                }
+                let enable_config_load = config.enable_config_load.unwrap_or(false);
+                file_io_builder = file_io_builder
+                    .with_prop(S3_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
             StorageCatalogConfig::Gcs(config) => {
-                let file_io_builder = FileIO::from_path(&config.warehouse)?
-                    .with_prop(GCS_CREDENTIALS_JSON, &config.credential);
+                let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
+                if let Some(credential) = &config.credential {
+                    file_io_builder = file_io_builder.with_prop(GCS_CREDENTIALS_JSON, credential)
+                };
+                let enable_config_load = config.enable_config_load.unwrap_or(false);
+                file_io_builder = file_io_builder
+                    .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
         };
@@ -186,16 +197,16 @@ impl Catalog for StorageCatalog {
         &self,
         _parent: Option<&NamespaceIdent>,
     ) -> iceberg::Result<Vec<NamespaceIdent>> {
-        todo!()
+        return Ok(vec![]);
     }
 
     /// Create a new namespace inside the catalog.
     async fn create_namespace(
         &self,
-        _namespace: &iceberg::NamespaceIdent,
+        namespace: &iceberg::NamespaceIdent,
         _properties: HashMap<String, String>,
     ) -> iceberg::Result<iceberg::Namespace> {
-        todo!()
+        Ok(iceberg::Namespace::new(namespace.clone()))
     }
 
     /// Get a namespace information from the catalog.
@@ -205,7 +216,7 @@ impl Catalog for StorageCatalog {
 
     /// Check if namespace exists in catalog.
     async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
-        todo!()
+        Ok(false)
     }
 
     /// Drop a namespace from the catalog.
@@ -215,7 +226,8 @@ impl Catalog for StorageCatalog {
 
     /// List tables from namespace.
     async fn list_tables(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
-        todo!()
+        // FIXME: the iceberg `file_io` doesn't provide enough api to list files in a directory.
+        Ok(vec![])
     }
 
     async fn update_namespace(

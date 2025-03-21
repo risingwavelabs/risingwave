@@ -45,7 +45,7 @@ pub async fn extract_json_table_schema(
                 .await?
                 .into_iter()
                 .map(|col| ColumnCatalog {
-                    column_desc: col.into(),
+                    column_desc: ColumnDesc::from_field_without_column_id(&col),
                     is_hidden: false,
                 })
                 .collect_vec(),

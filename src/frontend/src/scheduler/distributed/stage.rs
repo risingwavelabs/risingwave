@@ -264,7 +264,7 @@ impl StageExecution {
 
     pub async fn is_scheduled(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Running { .. } | StageState::Completed)
+        matches!(*s, StageState::Running | StageState::Completed)
     }
 
     pub async fn is_pending(&self) -> bool {
@@ -641,7 +641,14 @@ impl StageRunner {
         };
 
         // Notify QueryRunner to poll chunk from result_rx.
-        let (result_tx, result_rx) = tokio::sync::mpsc::channel(100);
+        let (result_tx, result_rx) = tokio::sync::mpsc::channel(
+            self.ctx
+                .session
+                .env()
+                .batch_config()
+                .developer
+                .root_stage_channel_size,
+        );
         self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 
@@ -1130,7 +1137,7 @@ impl StageRunner {
     }
 
     fn mask_failed_serving_worker(&self, worker: &WorkerNode) {
-        if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
+        if !worker.property.as_ref().is_some_and(|p| p.is_serving) {
             return;
         }
         let duration = Duration::from_secs(std::cmp::max(

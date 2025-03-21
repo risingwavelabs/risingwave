@@ -452,7 +452,7 @@ impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
     }
 }
 
-impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
+impl<B: RustIteratorBuilder> HummockIterator for FromRustIterator<'_, B> {
     type Direction = B::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {

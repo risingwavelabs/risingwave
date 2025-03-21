@@ -107,6 +107,9 @@ BigQueryConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
   - name: r#type
     field_type: String
     required: true
@@ -190,6 +193,9 @@ DeltaLakeConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
   - name: gcs.service.account
     field_type: String
     required: false
@@ -282,6 +288,9 @@ DynamoDbConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
   - name: dynamodb.max_batch_item_nums
     field_type: usize
     required: false
@@ -446,7 +455,7 @@ IcebergConfig:
     required: false
   - name: warehouse.path
     field_type: String
-    comments: Path of iceberg warehouse, only applicable in storage catalog.
+    comments: Path of iceberg warehouse.
     required: false
   - name: glue.id
     field_type: String
@@ -456,9 +465,7 @@ IcebergConfig:
     required: false
   - name: catalog.name
     field_type: String
-    comments: |-
-      Catalog name, can be omitted for storage catalog, but
-      must be set for other catalogs.
+    comments: Catalog name, default value is risingwave.
     required: false
   - name: catalog.uri
     field_type: String
@@ -483,10 +490,10 @@ IcebergConfig:
       token for accessing iceberg catalog, only applicable in rest catalog.
       A Bearer token which will be used for interaction with the server.
     required: false
-  - name: catalog.oauth2-server-uri
+  - name: catalog.oauth2_server_uri
     field_type: String
     comments: |-
-      `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+      `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
       Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
     required: false
   - name: catalog.scope
@@ -495,13 +502,26 @@ IcebergConfig:
       scope for accessing iceberg catalog, only applicable in rest catalog.
       Additional scope for OAuth2.
     required: false
+  - name: catalog.rest.signing_region
+    field_type: String
+    comments: The signing region to use when signing requests to the REST catalog.
+    required: false
+  - name: catalog.rest.signing_name
+    field_type: String
+    comments: The signing name to use when signing requests to the REST catalog.
+    required: false
+  - name: catalog.rest.sigv4_enabled
+    field_type: bool
+    comments: Whether to use SigV4 for signing requests to the REST catalog.
+    required: false
+    default: Default::default
   - name: s3.path.style.access
     field_type: bool
     required: false
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load currently is used by iceberg engine.
+    comments: enable config load.
     required: false
     default: Default::default
   - name: primary_key
@@ -524,6 +544,10 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: commit_retry_num
+    field_type: u32
+    required: false
+    default: '8'
 KafkaConfig:
   fields:
   - name: topic
@@ -778,6 +802,9 @@ KafkaConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
 KinesisSinkConfig:
   fields:
   - name: stream
@@ -1059,6 +1086,9 @@ PulsarConfig:
     required: false
     alias:
     - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
   - name: properties.batch.size
     field_type: u32
     required: false

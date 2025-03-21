@@ -241,7 +241,17 @@ where
                 || self.table_vnode_partition.contains_key(&self.last_table_id)
             {
                 if new_vnode_partition_count.is_some() {
-                    self.split_weight_by_vnode = *new_vnode_partition_count.unwrap();
+                    if (*new_vnode_partition_count.unwrap() as usize) > self.vnode_count {
+                        tracing::warn!(
+                            "vnode partition count {} is larger than vnode count {}",
+                            new_vnode_partition_count.unwrap(),
+                            self.vnode_count
+                        );
+
+                        self.split_weight_by_vnode = 0;
+                    } else {
+                        self.split_weight_by_vnode = *new_vnode_partition_count.unwrap()
+                    };
                 } else {
                     self.split_weight_by_vnode = 0;
                 }

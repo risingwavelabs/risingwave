@@ -223,7 +223,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         name: "table description".into(),
         r#type: relname,
         is_hidden: None,
-        description: description.map(Into::into),
+        description,
     });
 
     // TODO: table name and description as title of response

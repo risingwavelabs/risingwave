@@ -104,6 +104,9 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
     type Reader = BoundedInMemLogStoreReader;
     type Writer = BoundedInMemLogStoreWriter;
 
+    const ALLOW_REWIND: bool = false;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = false;
+
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
         let (item_tx, item_rx) = channel(self.bound);
@@ -241,8 +244,8 @@ impl LogReader for BoundedInMemLogStoreReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
-        Ok((false, None))
+    async fn rewind(&mut self) -> LogStoreResult<()> {
+        Err(anyhow!("should not call rewind on it"))
     }
 }
 

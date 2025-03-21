@@ -62,7 +62,6 @@ impl SliceLen for Parser<'_> {
 impl<'a> StreamIsPartial for Parser<'a> {
     type PartialState = <&'a [TokenWithLocation] as StreamIsPartial>::PartialState;
 
-    #[must_use]
     #[inline(always)]
     fn complete(&mut self) -> Self::PartialState {
         self.0.complete()
@@ -132,6 +131,14 @@ impl<'a> Stream for Parser<'a> {
     fn raw(&self) -> &dyn std::fmt::Debug {
         // We customized the `Debug` implementation in the wrapper, so don't return `self.0` here.
         self
+    }
+
+    fn peek_token(&self) -> Option<Self::Token> {
+        self.0.peek_token()
+    }
+
+    fn peek_slice(&self, offset: usize) -> Self::Slice {
+        Parser(self.0.peek_slice(offset))
     }
 }
 

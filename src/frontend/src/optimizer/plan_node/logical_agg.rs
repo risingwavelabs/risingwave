@@ -1133,7 +1133,6 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .into()
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

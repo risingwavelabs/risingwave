@@ -147,6 +147,21 @@ impl LogicalScan {
 
     /// Return indexes can satisfy the required order.
     pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
+        self.indexes_satisfy_order_with_prefix(required_order, &HashSet::new())
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Return indexes can satisfy the required order.
+    /// The `prefix` refers to optionally matching columns of the index
+    /// It is unordered initially.
+    /// If any are used, we will return the fixed `Order` prefix.
+    pub fn indexes_satisfy_order_with_prefix(
+        &self,
+        required_order: &Order,
+        prefix: &HashSet<ColumnOrder>,
+    ) -> Vec<(&Rc<IndexCatalog>, Order)> {
         let output_col_map = self
             .output_col_idx()
             .iter()
@@ -155,30 +170,50 @@ impl LogicalScan {
             .map(|(id, col)| (col, id))
             .collect::<BTreeMap<_, _>>();
         let unmatched_idx = output_col_map.len();
-        self.indexes()
-            .iter()
-            .filter(|idx| {
-                let s2p_mapping = idx.secondary_to_primary_mapping();
-                Order {
-                    column_orders: idx
-                        .index_table
-                        .pk()
-                        .iter()
-                        .map(|idx_item| {
-                            let idx = match s2p_mapping.get(&idx_item.column_index) {
-                                Some(col_idx) => {
-                                    *output_col_map.get(col_idx).unwrap_or(&unmatched_idx)
-                                }
-                                // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
-                                None => unmatched_idx,
-                            };
-                            ColumnOrder::new(idx, idx_item.order_type)
-                        })
-                        .collect(),
+        let mut index_catalog_and_orders = vec![];
+        for index in self.indexes() {
+            let s2p_mapping = index.secondary_to_primary_mapping();
+            let index_orders: Vec<ColumnOrder> = index
+                .index_table
+                .pk()
+                .iter()
+                .map(|idx_item| {
+                    let idx = match s2p_mapping.get(&idx_item.column_index) {
+                        Some(col_idx) => *output_col_map.get(col_idx).unwrap_or(&unmatched_idx),
+                        // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
+                        None => unmatched_idx,
+                    };
+                    ColumnOrder::new(idx, idx_item.order_type)
+                })
+                .collect();
+
+            let mut index_orders_iter = index_orders.into_iter().peekable();
+
+            // First check the prefix
+            let fixed_prefix = {
+                let mut fixed_prefix = vec![];
+                loop {
+                    match index_orders_iter.peek() {
+                        Some(index_col_order) if prefix.contains(index_col_order) => {
+                            let index_col_order = index_orders_iter.next().unwrap();
+                            fixed_prefix.push(index_col_order);
+                        }
+                        _ => break,
+                    }
                 }
-                .satisfies(required_order)
-            })
-            .collect()
+                Order {
+                    column_orders: fixed_prefix,
+                }
+            };
+
+            let remaining_orders = Order {
+                column_orders: index_orders_iter.collect(),
+            };
+            if remaining_orders.satisfies(required_order) {
+                index_catalog_and_orders.push((index, fixed_prefix));
+            }
+        }
+        index_catalog_and_orders
     }
 
     /// If the index can cover the scan, transform it to the index scan.
@@ -404,7 +439,7 @@ impl PredicatePushdown for LogicalScan {
         }
         let non_pushable_predicate: Vec<_> = predicate
             .conjunctions
-            .extract_if(|expr| {
+            .extract_if(.., |expr| {
                 if expr.count_nows() > 0 {
                     true
                 } else {

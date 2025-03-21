@@ -132,15 +132,14 @@ pub struct IcebergConnection {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
-    /// Path of iceberg warehouse, only applicable in storage catalog.
+    /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
     /// Catalog id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
     pub glue_id: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
@@ -154,14 +153,30 @@ pub struct IcebergConnection {
     /// A Bearer token which will be used for interaction with the server.
     #[serde(rename = "catalog.token")]
     pub token: Option<String>,
-    /// `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
     /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
-    #[serde(rename = "catalog.oauth2-server-uri")]
+    #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
     /// Additional scope for OAuth2.
     #[serde(rename = "catalog.scope")]
     pub scope: Option<String>,
+
+    /// The signing region to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_region")]
+    pub rest_signing_region: Option<String>,
+
+    /// The signing name to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_name")]
+    pub rest_signing_name: Option<String>,
+
+    /// Whether to use SigV4 for signing requests to the REST catalog.
+    #[serde(
+        rename = "catalog.rest.sigv4_enabled",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub rest_sigv4_enabled: Option<bool>,
 
     #[serde(
         rename = "s3.path.style.access",
@@ -182,12 +197,13 @@ impl Connection for IcebergConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
         let info = match &self.warehouse_path {
             Some(warehouse_path) => {
+                let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                 let url = Url::parse(warehouse_path);
-                if url.is_err()
-                    && let Some(catalog_type) = &self.catalog_type
-                    && catalog_type == "rest"
+                if (url.is_err() || is_s3_tables)
+                    && matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust"))
                 {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
+                    // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                     // so we allow it to pass here.
                     None
                 } else {
@@ -204,9 +220,7 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if let Some(catalog_type) = &self.catalog_type
-                    && catalog_type == "rest"
-                {
+                if matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust")) {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
@@ -270,6 +284,9 @@ impl Connection for IcebergConnection {
             token: self.token.clone(),
             oauth2_server_uri: self.oauth2_server_uri.clone(),
             scope: self.scope.clone(),
+            rest_signing_region: self.rest_signing_region.clone(),
+            rest_signing_name: self.rest_signing_name.clone(),
+            rest_sigv4_enabled: self.rest_sigv4_enabled,
             path_style_access: self.path_style_access,
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),

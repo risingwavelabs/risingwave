@@ -126,8 +126,4 @@ impl Sink for OpenSearchSink {
             risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => Ok(false),
         }
     }
-
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        Err(SinkError::Coordinator(anyhow!("no coordinator")))
-    }
 }

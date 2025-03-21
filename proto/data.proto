@@ -69,6 +69,13 @@ message DataType {
   repeated DataType field_type = 6;
   // Name of the fields if it is a struct type. For other types it will be empty.
   repeated string field_names = 7;
+  // Id of the fields if it is a struct type. Used in serialization for nested-schema evolution purposes.
+  //
+  // Empty if either:
+  // - it is not a struct type
+  // - it is not within a table schema (`ColumnDesc`)
+  // - it was persisted in an old version.
+  repeated int32 field_ids = 8;
 }
 
 message StructArrayData {

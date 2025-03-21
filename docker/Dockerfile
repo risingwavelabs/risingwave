@@ -3,7 +3,7 @@ FROM ubuntu:24.04 AS base
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config curl
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config curl git
 
 FROM base AS rust-base
 
@@ -28,10 +28,10 @@ COPY rust-toolchain rust-toolchain
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
-  && rustup set profile minimal \
+  && rustup toolchain install --profile minimal \
   && rustup show \
   && rustup component add rustfmt \
-  && rustup target add wasm32-wasi
+  && rustup target add wasm32-wasip1
 
 RUN cargo install flamegraph
 RUN cargo install addr2line --features bin --bin addr2line
@@ -77,8 +77,8 @@ ENV OPENSSL_STATIC=1
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features all-udf && \
   mkdir -p /risingwave/bin && \
-    mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
-    mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
+  mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
+  mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
   cp ./target/${CARGO_PROFILE}/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
@@ -122,7 +122,7 @@ FROM base AS risingwave
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
 RUN apt-get update && apt-get -y install linux-tools-generic \
-    && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
+  && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat less rustup \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/

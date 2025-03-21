@@ -30,6 +30,7 @@ pub struct DatabaseCatalog {
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
     pub owner: u32,
+    pub resource_group: String,
 }
 
 impl DatabaseCatalog {
@@ -133,6 +134,7 @@ impl From<&PbDatabase> for DatabaseCatalog {
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
             owner: db.owner,
+            resource_group: db.resource_group.clone(),
         }
     }
 }

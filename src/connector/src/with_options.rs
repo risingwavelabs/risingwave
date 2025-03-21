@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
+use std::time::Duration;
 
 use risingwave_pb::secret::PbSecretRef;
 
@@ -73,6 +75,7 @@ impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for crate::source::filesystem::file_common::CompressionFormat {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
+impl<T> WithOptions for PhantomData<T> {}
 
 pub trait Get {
     fn get(&self, key: &str) -> Option<&String>;
@@ -111,6 +114,14 @@ pub trait WithPropertiesExt: Get + Sized {
             return false;
         };
         connector == MYSQL_CDC_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn get_sync_call_timeout(&self) -> Option<Duration> {
+        const SYNC_CALL_TIMEOUT_KEY: &str = "properties.sync.call.timeout"; // only from kafka props, add more if needed
+        self.get(SYNC_CALL_TIMEOUT_KEY)
+            // ignore the error is ok here, because we will parse the field again when building the properties and has more precise error message
+            .and_then(|s| duration_str::parse_std(s).ok())
     }
 
     #[inline(always)]

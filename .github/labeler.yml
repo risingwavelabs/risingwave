@@ -54,3 +54,15 @@ labels:
 - label: "ci/run-e2e-iceberg-tests"
   files:
   - ".*iceberg.*"
+
+# S3 source tests
+- label: "ci/run-s3-source-tests"
+  files:
+  - "src\\/connector\\/src\\/source\\/filesystem.*"
+  - ".*fs_fetch.*"
+  - ".*fs_list.*"
+- label: "ci/main-cron/run-selected"
+  files:
+  - "src\\/connector\\/src\\/source\\/filesystem.*"
+  - ".*fs_fetch.*"
+  - ".*fs_list.*"

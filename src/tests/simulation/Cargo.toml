@@ -25,7 +25,7 @@ paste = "1"
 pin-project = "1.1"
 pretty_assertions = "1"
 rand = { workspace = true }
-rand_chacha = { version = "0.3.1" }
+rand_chacha = { version = "0.9" }
 rdkafka = { workspace = true }
 risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }
@@ -45,7 +45,7 @@ risingwave_sqlsmith = { workspace = true }
 serde = "1.0.188"
 serde_derive = "1.0.188"
 serde_json = "1.0.107"
-sqllogictest = "0.27.1"
+sqllogictest = "0.28.0"
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }

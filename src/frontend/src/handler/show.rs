@@ -363,19 +363,31 @@ pub async fn handle_show_object(
     }
 
     let catalog_reader = session.env().catalog_reader();
+    let user_reader = session.env().user_info_reader();
 
     let names = match command {
         ShowObject::Table { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_user_table().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_user_table_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::InternalTable { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
-                    .iter_internal_table()
+                    .iter_internal_table_with_acl(current_user)
                     .map(|t| t.name.clone())
                     .collect()
             })
@@ -386,28 +398,56 @@ pub async fn handle_show_object(
             .get_all_schema_names(&session.database())?,
         ShowObject::View { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_view().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_view_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::MaterializedView { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_created_mvs().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_created_mvs_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::Source { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             let mut sources = iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_source().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_source_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             });
             sources.extend(session.temporary_source_manager().keys());
             sources
         }
         ShowObject::Sink { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_sink().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_sink_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::Subscription { schema } => {

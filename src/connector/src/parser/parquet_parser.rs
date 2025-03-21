@@ -11,24 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::future::IntoFuture;
 use std::sync::Arc;
 
-use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 
 use crate::parser::ConnectorResult;
-use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
-use crate::source::filesystem::opendal_source::{OpendalGcs, OpendalPosixFs, OpendalS3};
-use crate::source::iceberg::is_parquet_schema_match_source_schema;
-use crate::source::reader::desc::SourceDesc;
-use crate::source::{ConnectorProperties, SourceColumnDesc};
+use crate::source::SourceColumnDesc;
 /// `ParquetParser` is responsible for converting the incoming `record_batch_stream`
 /// into a `streamChunk`.
 #[derive(Debug)]
@@ -57,12 +49,28 @@ impl ParquetParser {
         record_batch_stream: parquet::arrow::async_reader::ParquetRecordBatchStream<
             tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
+        file_source_input_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                4,
+            >,
+        >,
+        parquet_source_skip_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                4,
+            >,
+        >,
     ) {
         #[for_await]
         for record_batch in record_batch_stream {
             let record_batch: RecordBatch = record_batch?;
             // Convert each record batch into a stream chunk according to user defined schema.
-            let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(record_batch)?;
+            let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(
+                record_batch,
+                file_source_input_row_count_metrics.clone(),
+                parquet_source_skip_row_count_metrics.clone(),
+            )?;
 
             yield chunk;
         }
@@ -95,75 +103,76 @@ impl ParquetParser {
     fn convert_record_batch_to_stream_chunk(
         &mut self,
         record_batch: RecordBatch,
+        file_source_input_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                4,
+            >,
+        >,
+        parquet_source_skip_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                4,
+            >,
+        >,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
         let column_size = self.rw_columns.len();
         let mut chunk_columns = Vec::with_capacity(self.rw_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
+
         for source_column in self.rw_columns.clone() {
             match source_column.column_type {
                 crate::source::SourceColumnType::Normal => {
-                    match source_column.is_hidden_addition_col {
-                        false => {
-                            let rw_data_type: &risingwave_common::types::DataType =
-                                &source_column.data_type;
-                            let rw_column_name = &source_column.name;
+                    let rw_data_type: &risingwave_common::types::DataType =
+                        &source_column.data_type;
+                    let rw_column_name = &source_column.name;
 
-                            if let Some(parquet_column) =
-                                record_batch.column_by_name(rw_column_name)
-                                && is_parquet_schema_match_source_schema(
-                                    parquet_column.data_type(),
-                                    rw_data_type,
-                                )
-                            {
-                                let arrow_field = IcebergArrowConvert
-                                    .to_arrow_field(rw_column_name, rw_data_type)?;
-                                let array_impl = IcebergArrowConvert
-                                    .array_from_arrow_array(&arrow_field, parquet_column)?;
-                                let column = Arc::new(array_impl);
-                                chunk_columns.push(column);
-                            } else {
-                                // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
-                                let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
-
-                                array_builder.append_n_null(record_batch.num_rows());
-                                let res = array_builder.finish();
-                                let column = Arc::new(res);
-                                chunk_columns.push(column);
-                            }
-                        }
-                        // handle hidden columns, for file source, the hidden columns are only `Offset` and `Filename`
-                        true => {
-                            if let Some(additional_column_type) =
-                                &source_column.additional_column.column_type
-                            {
-                                match additional_column_type{
-                                risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) =>{
-                                    let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    for _ in 0..record_batch.num_rows(){
+                    if let Some(parquet_column) = record_batch.column_by_name(rw_column_name)
+                        && is_parquet_schema_match_source_schema(
+                            parquet_column.data_type(),
+                            rw_data_type,
+                        )
+                    {
+                        let arrow_field =
+                            IcebergArrowConvert.to_arrow_field(rw_column_name, rw_data_type)?;
+                        let array_impl = IcebergArrowConvert
+                            .array_from_arrow_array(&arrow_field, parquet_column)?;
+                        chunk_columns.push(Arc::new(array_impl));
+                    } else {
+                        // Handle additional columns, for file source, the additional columns are offset and file name;
+                        // for columns defined in the user schema but not present in the parquet file, fill with null.
+                        let column = if let Some(additional_column_type) =
+                            &source_column.additional_column.column_type
+                        {
+                            match additional_column_type {
+                                risingwave_pb::plan_common::additional_column::ColumnType::Offset(_) => {
+                                    let mut array_builder = ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    for _ in 0..record_batch.num_rows() {
                                         let datum: Datum = Some(ScalarImpl::Utf8((self.offset).to_string().into()));
                                         self.inc_offset();
                                         array_builder.append(datum);
                                     }
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-
-                                },
+                                    Arc::new(array_builder.finish())
+                                }
                                 risingwave_pb::plan_common::additional_column::ColumnType::Filename(_) => {
-                                    let mut array_builder =
-                                    ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
-                                    let datum: Datum =  Some(ScalarImpl::Utf8(self.file_name.clone().into()));
+                                    let mut array_builder = ArrayBuilderImpl::with_type(column_size, source_column.data_type.clone());
+                                    let datum: Datum = Some(ScalarImpl::Utf8(self.file_name.clone().into()));
                                     array_builder.append_n(record_batch.num_rows(), datum);
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-                                },
-                                _ => unreachable!()
+                                    Arc::new(array_builder.finish())
+                                }
+                                _ => unreachable!(),
                             }
+                        } else {
+                            // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
+                            let mut array_builder =
+                                ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
+                            array_builder.append_n_null(record_batch.num_rows());
+                            if let Some(metrics) = parquet_source_skip_row_count_metrics.clone() {
+                                metrics.inc_by(record_batch.num_rows() as u64);
                             }
-                        }
+                            Arc::new(array_builder.finish())
+                        };
+                        chunk_columns.push(column);
                     }
                 }
                 crate::source::SourceColumnType::RowId => {
@@ -175,95 +184,17 @@ impl ParquetParser {
                     let column = Arc::new(res);
                     chunk_columns.push(column);
                 }
-                // The following fields is only used in CDC source
+                // The following fields are only used in CDC source
                 crate::source::SourceColumnType::Offset | crate::source::SourceColumnType::Meta => {
                     unreachable!()
                 }
             }
         }
+        if let Some(metrics) = file_source_input_row_count_metrics {
+            metrics.inc_by(record_batch.num_rows() as u64);
+        }
 
         let data_chunk = DataChunk::new(chunk_columns.clone(), record_batch.num_rows());
         Ok(data_chunk.into())
     }
-}
-
-/// Retrieves the total number of rows in the specified Parquet file.
-///
-/// This function constructs an `OpenDAL` operator using the information
-/// from the provided `source_desc`. It then accesses the metadata of the
-/// Parquet file to determine and return the total row count.
-///
-/// # Arguments
-///
-/// * `file_name` - The parquet file name.
-/// * `source_desc` - A struct or type containing the necessary information
-///                   to construct the `OpenDAL` operator.
-///
-/// # Returns
-///
-/// Returns the total number of rows in the Parquet file as a `usize`.
-pub async fn get_total_row_nums_for_parquet_file(
-    parquet_file_name: &str,
-    source_desc: SourceDesc,
-) -> ConnectorResult<usize> {
-    let total_row_num = match source_desc.source.config {
-        ConnectorProperties::Gcs(prop) => {
-            let connector: OpendalEnumerator<OpendalGcs> =
-                OpendalEnumerator::new_gcs_source(*prop)?;
-            let mut reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
-        }
-        ConnectorProperties::OpendalS3(prop) => {
-            let connector: OpendalEnumerator<OpendalS3> =
-                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
-            let mut reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
-        }
-
-        ConnectorProperties::PosixFs(prop) => {
-            let connector: OpendalEnumerator<OpendalPosixFs> =
-                OpendalEnumerator::new_posix_fs_source(*prop)?;
-            let mut reader = connector
-                .op
-                .reader_with(parquet_file_name)
-                .into_future()
-                .await?
-                .into_futures_async_read(..)
-                .await?
-                .compat();
-            reader
-                .get_metadata()
-                .await
-                .map_err(anyhow::Error::from)?
-                .file_metadata()
-                .num_rows()
-        }
-        other => bail!("Unsupported source: {:?}", other),
-    };
-    Ok(total_row_num as usize)
 }

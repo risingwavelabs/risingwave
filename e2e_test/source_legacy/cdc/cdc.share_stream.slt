@@ -173,6 +173,19 @@ create table orders_test (
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
 
+# invalid not null
+statement error CDC table with NOT NULL constraint is not supported
+create table orders_test (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int NOT NULL,
+   order_status smallint NOT NULL,
+   next_order_id int as order_id + 1,
+   PRIMARY KEY (order_id)
+) from mysql_mytest table 'mytest.orders';
+
 statement ok
 create table orders_test (
    order_id int,
@@ -215,17 +228,19 @@ statement ok
 INSERT INTO test_my_default_value VALUES (2, 'jack');
 
 query II
-select * from test_my_default_value;
+select * from test_my_default_value order by id asc;
 ----
-2 jack Shanghai
+1 bugen Shanghai
+2 jack NULL
 
 statement ok
 INSERT INTO test_my_default_value_disorderd (id) VALUES (2);
 
 query II
-select * from test_my_default_value_disorderd;
+select * from test_my_default_value_disorderd order by id asc;
 ----
-Shanghai 2
+Shanghai 1
+NULL 2
 
 statement ok
 create table kt1 (*) from mysql_source table 'kdb.kt1';
@@ -676,33 +691,35 @@ CREATE TABLE test_pg_default_value (
     name varchar,
     city varchar,
     PRIMARY KEY (id)
-) FROM pg_source TABLE 'public.test_default_value';
+) FROM pg_source TABLE 'public.test_pg_default_value';
 
 statement ok
 CREATE TABLE test_pg_default_value_disorderd (
     city varchar,
     id int,
     PRIMARY KEY (id)
-) FROM pg_source TABLE 'public.test_default_value';
+) FROM pg_source TABLE 'public.test_pg_default_value';
 
 statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
-INSERT INTO test_pg_default_value VALUES (1, 'noris');
+INSERT INTO test_pg_default_value VALUES (2, 'jack');
 
 query II
-select * from test_pg_default_value;
+select * from test_pg_default_value order by id asc;
 ----
-1 noris Shanghai
+1 bugen Shanghai
+2 jack NULL
 
 statement ok
-INSERT INTO test_pg_default_value_disorderd (id) VALUES (1);
+INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
 
 query II
-select * from test_pg_default_value_disorderd;
+select * from test_pg_default_value_disorderd order by id asc;
 ----
 Shanghai 1
+NULL 2
 
 ### BEGIN reset the password to the original one
 onlyif can-use-recover

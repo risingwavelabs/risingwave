@@ -452,11 +452,21 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             language: value.0.language,
             runtime: value.0.runtime,
             link: value.0.link,
-            identifier: value.0.identifier,
+            name_in_runtime: value.0.name_in_runtime,
             body: value.0.body,
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            is_async: value
+                .0
+                .options
+                .as_ref()
+                .and_then(|o| o.0.get("async").map(|v| v == "true")),
+            is_batched: value
+                .0
+                .options
+                .as_ref()
+                .and_then(|o| o.0.get("batch").map(|v| v == "true")),
         }
     }
 }

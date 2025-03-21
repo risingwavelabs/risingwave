@@ -23,28 +23,20 @@ cfg_if::cfg_if! {
     }
 }
 
-use std::collections::HashSet;
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::sync::Arc;
 
-use futures::{StreamExt, pin_mut};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
-use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
-use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
-use crate::executor::error::StreamExecutorError;
-
-const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
 pub struct SourceStateTableHandler<S: StateStore> {
     state_table: StateTable<S>,
@@ -83,75 +75,6 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         self.state_table
             .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
-            .map_err(StreamExecutorError::from)
-    }
-
-    /// this method should only be used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
-    pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
-        let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
-            COMPLETE_SPLIT_PREFIX,
-        ))));
-        let next = next_key(COMPLETE_SPLIT_PREFIX.as_bytes());
-        let end = Bound::Excluded(row::once(Some(Self::string_to_scalar(
-            String::from_utf8(next).unwrap(),
-        ))));
-
-        // all source executor has vnode id zero
-        let iter = self
-            .state_table
-            .iter_with_vnode(VirtualNode::ZERO, &(start, end), PrefetchOptions::default())
-            .await?;
-
-        let mut set = HashSet::new();
-        pin_mut!(iter);
-        while let Some(keyed_row) = iter.next().await {
-            let row = keyed_row?;
-            if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
-                let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                let fs = split
-                    .as_s3()
-                    .unwrap_or_else(|| panic!("split {:?} is not fs", split));
-                if fs.offset == fs.size {
-                    let split_id = split.id();
-                    set.insert(split_id);
-                }
-            }
-        }
-        Ok(set)
-    }
-
-    async fn set_complete(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
-        let row = [
-            Some(Self::string_to_scalar(format!(
-                "{}{}",
-                COMPLETE_SPLIT_PREFIX,
-                key.deref()
-            ))),
-            Some(ScalarImpl::Jsonb(value)),
-        ];
-        if let Some(prev_row) = self.get(key).await? {
-            self.state_table.delete(prev_row);
-        }
-        self.state_table.insert(row);
-        Ok(())
-    }
-
-    /// set all complete
-    /// can only used by [`LegacyFsSourceExecutor`](super::LegacyFsSourceExecutor)
-    pub(crate) async fn set_all_complete(
-        &mut self,
-        states: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<()> {
-        if states.is_empty() {
-            // TODO should be a clear Error Code
-            bail!("states should not be null");
-        } else {
-            for split in states {
-                self.set_complete(split.id(), split.encode_to_json())
-                    .await?;
-            }
-        }
-        Ok(())
     }
 
     pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
@@ -263,6 +186,7 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
                     ..Default::default()
                 }),
                 column_id,
+                nullable: true,
                 ..Default::default()
             }),
             is_hidden: false,

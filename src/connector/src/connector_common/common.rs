@@ -96,6 +96,8 @@ pub struct AwsAuthProps {
     pub external_id: Option<String>,
     #[serde(rename = "aws.profile", alias = "profile")]
     pub profile: Option<String>,
+    #[serde(rename = "aws.msk.signer_timeout_sec")]
+    pub msk_signer_timeout_sec: Option<u64>,
 }
 
 impl AwsAuthProps {
@@ -591,6 +593,7 @@ impl KinesisCommon {
             arn: self.assume_role_arn.clone(),
             external_id: self.assume_role_external_id.clone(),
             profile: Default::default(),
+            msk_signer_timeout_sec: Default::default(),
         };
         let aws_config = config.build_config().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);

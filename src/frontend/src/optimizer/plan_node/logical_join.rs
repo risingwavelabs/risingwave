@@ -193,6 +193,10 @@ impl LogicalJoin {
         self.core.is_full_out()
     }
 
+    pub fn is_asof_join(&self) -> bool {
+        self.join_type() == JoinType::AsofInner || self.join_type() == JoinType::AsofLeftOuter
+    }
+
     pub fn output_indices_are_trivial(&self) -> bool {
         self.output_indices() == &(0..self.internal_column_num()).collect_vec()
     }
@@ -249,21 +253,30 @@ impl LogicalJoin {
         &self,
         predicate: EqJoinPredicate,
         logical_join: generic::Join<PlanRef>,
-    ) -> Option<BatchLookupJoin> {
+    ) -> Result<Option<BatchLookupJoin>> {
         match logical_join.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
-            _ => return None,
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {}
+            _ => return Ok(None),
         };
 
         // Index selection for index join.
         let right = self.right();
         // Lookup Join only supports basic tables on the join's right side.
-        let logical_scan: &LogicalScan = right.as_logical_scan()?;
+        let logical_scan: &LogicalScan = if let Some(logical_scan) = right.as_logical_scan() {
+            logical_scan
+        } else {
+            return Ok(None);
+        };
 
         let mut result_plan = None;
         // Lookup primary table.
         if let Some(lookup_join) =
-            self.to_batch_lookup_join(predicate.clone(), logical_join.clone())
+            self.to_batch_lookup_join(predicate.clone(), logical_join.clone())?
         {
             result_plan = Some(lookup_join);
         }
@@ -278,7 +291,7 @@ impl LogicalJoin {
 
                 // Lookup covered index.
                 if let Some(lookup_join) =
-                    that.to_batch_lookup_join(predicate.clone(), new_logical_join)
+                    that.to_batch_lookup_join(predicate.clone(), new_logical_join)?
                 {
                     match &result_plan {
                         None => result_plan = Some(lookup_join),
@@ -295,7 +308,7 @@ impl LogicalJoin {
             }
         }
 
-        result_plan
+        Ok(result_plan)
     }
 
     /// Try to convert logical join into batch lookup join.
@@ -303,15 +316,24 @@ impl LogicalJoin {
         &self,
         predicate: EqJoinPredicate,
         logical_join: generic::Join<PlanRef>,
-    ) -> Option<BatchLookupJoin> {
+    ) -> Result<Option<BatchLookupJoin>> {
         match logical_join.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
-            _ => return None,
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter => {}
+            _ => return Ok(None),
         };
 
         let right = self.right();
         // Lookup Join only supports basic tables on the join's right side.
-        let logical_scan: &LogicalScan = right.as_logical_scan()?;
+        let logical_scan: &LogicalScan = if let Some(logical_scan) = right.as_logical_scan() {
+            logical_scan
+        } else {
+            return Ok(None);
+        };
         let table_desc = logical_scan.table_desc().clone();
         let output_column_ids = logical_scan.output_column_ids();
 
@@ -337,7 +359,7 @@ impl LogicalJoin {
 
         // Distributed lookup join can't support lookup table with a singleton distribution.
         if shortest_prefix_len == 0 {
-            return None;
+            return Ok(None);
         }
 
         // Reorder the join equal predicate to match the order key.
@@ -356,7 +378,7 @@ impl LogicalJoin {
             }
         }
         if reorder_idx.len() < shortest_prefix_len {
-            return None;
+            return Ok(None);
         }
         let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
@@ -403,7 +425,7 @@ impl LogicalJoin {
         // We discovered that we cannot use a lookup join after pulling up the predicate
         // from one side and simplifying the condition. Let's use some other join instead.
         if !new_predicate.has_eq() {
-            return None;
+            return Ok(None);
         }
 
         // Rewrite the join output indices and all output indices referred to the old scan need to
@@ -432,7 +454,17 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Some(BatchLookupJoin::new(
+        let asof_desc = self
+            .is_asof_join()
+            .then(|| {
+                Self::get_inequality_desc_from_predicate(
+                    predicate.other_cond().clone(),
+                    left_schema_len,
+                )
+            })
+            .transpose()?;
+
+        Ok(Some(BatchLookupJoin::new(
             new_logical_join,
             new_predicate,
             table_desc,
@@ -440,7 +472,8 @@ impl LogicalJoin {
             lookup_prefix_len,
             false,
             as_of,
-        ))
+            asof_desc,
+        )))
     }
 
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
@@ -465,7 +498,6 @@ impl PlanTreeNodeBinary for LogicalJoin {
         })
     }
 
-    #[must_use]
     fn rewrite_with_left_right(
         &self,
         left: PlanRef,
@@ -1357,7 +1389,7 @@ impl LogicalJoin {
         logical_join.right = logical_join.right.to_batch()?;
 
         Ok(self
-            .to_batch_lookup_join(predicate, logical_join)
+            .to_batch_lookup_join(predicate, logical_join)?
             .expect("Fail to convert to lookup join")
             .into())
     }
@@ -1390,26 +1422,26 @@ impl LogicalJoin {
         ))
     }
 
-    /// Convert the logical `AsOf` join to a Hash join + a Group top 1.
-    fn to_batch_asof_join(
+    /// Convert the logical join to a Hash join.
+    fn to_batch_hash_join(
         &self,
         logical_join: generic::Join<PlanRef>,
         predicate: EqJoinPredicate,
     ) -> Result<PlanRef> {
         use super::batch::prelude::*;
 
-        if predicate.eq_keys().is_empty() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires at least 1 equal condition".to_owned(),
-            )
-            .into());
-        }
-
         let left_schema_len = logical_join.left.schema().len();
-        let asof_desc =
-            Self::get_inequality_desc_from_predicate(predicate.non_eq_cond(), left_schema_len)?;
+        let asof_desc = self
+            .is_asof_join()
+            .then(|| {
+                Self::get_inequality_desc_from_predicate(
+                    predicate.other_cond().clone(),
+                    left_schema_len,
+                )
+            })
+            .transpose()?;
 
-        let batch_join = BatchHashJoin::new(logical_join, predicate, Some(asof_desc));
+        let batch_join = BatchHashJoin::new(logical_join, predicate, asof_desc);
         Ok(batch_join.into())
     }
 
@@ -1467,9 +1499,7 @@ impl ToBatch for LogicalJoin {
         let ctx = self.base.ctx();
         let config = ctx.session_ctx().config();
 
-        if self.join_type() == JoinType::AsofInner || self.join_type() == JoinType::AsofLeftOuter {
-            self.to_batch_asof_join(logical_join, predicate)
-        } else if predicate.has_eq() {
+        if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
                 return Err(ErrorCode::InternalError(format!(
                     "Join eq keys are not aligned for predicate: {predicate:?}"
@@ -1480,12 +1510,16 @@ impl ToBatch for LogicalJoin {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),
-                ) {
+                )? {
                     return Ok(lookup_join.into());
                 }
             }
-
-            Ok(BatchHashJoin::new(logical_join, predicate, None).into())
+            self.to_batch_hash_join(logical_join, predicate)
+        } else if self.is_asof_join() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "AsOf join requires at least 1 equal condition".to_owned(),
+            )
+            .into());
         } else {
             // Convert to Nested-loop Join for non-equal joins
             Ok(BatchNestedLoopJoin::new(logical_join).into())

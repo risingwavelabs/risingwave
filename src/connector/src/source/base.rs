@@ -44,6 +44,7 @@ use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
+use super::pulsar::source::PulsarMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -274,7 +275,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -446,6 +447,13 @@ pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.
 pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
+pub type BoxSourceChunkWithStateStream =
+    BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
+
+/// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.
+pub type BoxStreamingFileSourceChunkStream =
+    BoxStream<'static, crate::error::ConnectorResult<Option<StreamChunk>>>;
 
 // Manually expand the trait alias to improve IDE experience.
 pub trait SourceChunkStream:
@@ -731,7 +739,7 @@ impl SplitImpl {
     }
 }
 
-pub type DataType = risingwave_common::types::DataType;
+use risingwave_common::types::DataType;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -777,6 +785,7 @@ impl SourceMessage {
 pub enum SourceMeta {
     Kafka(KafkaMeta),
     Kinesis(KinesisMeta),
+    Pulsar(PulsarMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),

@@ -40,6 +40,7 @@ use plotters::series::{LineSeries, PointSeries};
 use plotters::style::{IntoFont, RED, WHITE};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnId;
+use risingwave_common::types::DataType;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::parser::{
     EncodingProperties, ParserConfig, ProtocolProperties, SpecificParserConfig,
@@ -59,7 +60,7 @@ use risingwave_connector::source::datagen::{
     DatagenProperties, DatagenSplitEnumerator, DatagenSplitReader,
 };
 use risingwave_connector::source::{
-    Column, DataType, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
+    Column, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
 };
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
@@ -131,8 +132,8 @@ impl LogReader for MockRangeLogReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
-        Ok((false, None))
+    async fn rewind(&mut self) -> LogStoreResult<()> {
+        Err(anyhow!("should not call rewind"))
     }
 }
 

@@ -54,9 +54,8 @@ impl Rule for PullUpHopRule {
         let (new_left, left_time_col, left_window_slide, left_window_size, left_window_offset) =
             if let Some(hop) = left.as_logical_hop_window()
                 && left_input_index_on_condition.iter().all(|&index| {
-                    hop.output_window_start_col_idx()
-                        .map_or(true, |v| index != v)
-                        && hop.output_window_end_col_idx().map_or(true, |v| index != v)
+                    (hop.output_window_start_col_idx() != Some(index))
+                        && (hop.output_window_end_col_idx() != Some(index))
                 })
                 && join_type != JoinType::RightAnti
                 && join_type != JoinType::RightSemi
@@ -91,9 +90,8 @@ impl Rule for PullUpHopRule {
         let (new_right, right_time_col, right_window_slide, right_window_size, right_window_offset) =
             if let Some(hop) = right.as_logical_hop_window()
                 && right_input_index_on_condition.iter().all(|&index| {
-                    hop.output_window_start_col_idx()
-                        .map_or(true, |v| index != v)
-                        && hop.output_window_end_col_idx().map_or(true, |v| index != v)
+                    hop.output_window_start_col_idx() != Some(index)
+                        && hop.output_window_end_col_idx() != Some(index)
                 })
                 && join_type != JoinType::LeftAnti
                 && join_type != JoinType::LeftSemi

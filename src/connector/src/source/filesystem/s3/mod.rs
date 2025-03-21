@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod enumerator;
-use std::collections::HashMap;
 
-pub use enumerator::LegacyS3SplitEnumerator;
-
-use crate::source::filesystem::file_common::CompressionFormat;
-mod source;
 use serde::Deserialize;
-pub use source::LegacyS3FileReader;
 
-use crate::connector_common::AwsAuthProps;
-use crate::source::filesystem::LegacyFsSplit;
-use crate::source::{SourceProperties, UnknownFields};
+use crate::source::SourceProperties;
+use crate::source::filesystem::file_common::CompressionFormat;
+use crate::source::util::dummy::{
+    DummyProperties, DummySourceReader, DummySplit, DummySplitEnumerator,
+};
 
+/// Refer to [`crate::source::OPENDAL_S3_CONNECTOR`].
 pub const LEGACY_S3_CONNECTOR: &str = "s3";
 
 /// These are supported by both `s3` and `s3_v2` (opendal) sources.
@@ -46,50 +43,23 @@ pub struct S3PropertiesCommon {
     pub compression_format: CompressionFormat,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
-pub struct LegacyS3Properties {
-    #[serde(flatten)]
-    pub common: S3PropertiesCommon,
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyS3;
 
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
-}
+/// Note: legacy s3 source is fully deprecated since v2.4.0.
+/// The properties and enumerator are kept, so that meta can start normally.
+pub type LegacyS3Properties = DummyProperties<LegacyS3>;
 
-impl From<S3PropertiesCommon> for LegacyS3Properties {
-    fn from(common: S3PropertiesCommon) -> Self {
-        Self {
-            common,
-            unknown_fields: HashMap::new(),
-        }
-    }
-}
+/// Note: legacy s3 source is fully deprecated since v2.4.0.
+/// The properties and enumerator are kept, so that meta can start normally.
+pub type LegacyS3SplitEnumerator = DummySplitEnumerator<LegacyS3>;
+
+pub type LegacyFsSplit = DummySplit<LegacyS3>;
 
 impl SourceProperties for LegacyS3Properties {
     type Split = LegacyFsSplit;
     type SplitEnumerator = LegacyS3SplitEnumerator;
-    type SplitReader = LegacyS3FileReader;
+    type SplitReader = DummySourceReader<LegacyS3>;
 
     const SOURCE_NAME: &'static str = LEGACY_S3_CONNECTOR;
-}
-
-impl UnknownFields for LegacyS3Properties {
-    fn unknown_fields(&self) -> HashMap<String, String> {
-        self.unknown_fields.clone()
-    }
-}
-
-impl From<&LegacyS3Properties> for AwsAuthProps {
-    fn from(props: &LegacyS3Properties) -> Self {
-        let props = &props.common;
-        Self {
-            region: Some(props.region_name.clone()),
-            endpoint: props.endpoint_url.clone(),
-            access_key: props.access.clone(),
-            secret_key: props.secret.clone(),
-            session_token: Default::default(),
-            arn: Default::default(),
-            external_id: Default::default(),
-            profile: Default::default(),
-        }
-    }
 }

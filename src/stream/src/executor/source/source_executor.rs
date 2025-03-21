@@ -13,14 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::TryStreamExt;
-use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::{ColumnId, TableId};
@@ -32,8 +28,8 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData, WaitCheckpointTask,
+    ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
+    StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -41,17 +37,13 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
-use tracing::Instrument;
 
 use super::executor_core::StreamSourceCore;
-use super::{
-    apply_rate_limit, barrier_to_message_stream, get_split_offset_col_idx,
-    get_split_offset_mapping_from_chunk, prune_additional_cols,
-};
+use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
-use crate::executor::source::get_infinite_backoff_strategy;
+use crate::executor::source::reader_stream::StreamReaderBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
@@ -100,6 +92,23 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
+    fn stream_reader_builder(&self, source_desc: SourceDesc) -> StreamReaderBuilder {
+        StreamReaderBuilder {
+            source_desc,
+            rate_limit: self.rate_limit_rps,
+            source_id: self.stream_source_core.as_ref().unwrap().source_id,
+            source_name: self
+                .stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
+            is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
+            actor_ctx: self.actor_ctx.clone(),
+            reader_stream: None,
+        }
+    }
+
     async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
         source_reader: SourceReader,
@@ -119,26 +128,6 @@ impl<S: StateStore> SourceExecutor<S> {
             source_reader,
             building_task: initial_task,
         }))
-    }
-
-    /// If `seek_to_latest` is true, will also return the latest splits after seek.
-    pub async fn build_stream_source_reader(
-        &self,
-        source_desc: &SourceDesc,
-        state: ConnectorState,
-        seek_to_latest: bool,
-    ) -> StreamExecutorResult<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> {
-        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
-        let (stream, res) = source_desc
-            .source
-            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
-
-        Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            res.latest_splits,
-        ))
     }
 
     /// build the source column ids and the source context which will be used to build the source stream
@@ -240,17 +229,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// - `should_trim_state`: whether to trim state for dropped splits.
     ///
-    ///    For scaling, the connector splits can be migrated to other actors, but
-    ///    won't be added or removed. Actors should not trim states for splits that
-    ///    are moved to other actors.
+    ///   For scaling, the connector splits can be migrated to other actors, but
+    ///   won't be added or removed. Actors should not trim states for splits that
+    ///   are moved to other actors.
     ///
-    ///    For source split change, split will not be migrated and we can trim states
-    ///    for deleted splits.
+    ///   For source split change, split will not be migrated and we can trim states
+    ///   for deleted splits.
     async fn apply_split_change_after_yield_barrier<const BIASED: bool>(
         &mut self,
         barrier_epoch: EpochPair,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
         source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
@@ -261,7 +250,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .update_state_if_changed(barrier_epoch, target_splits, should_trim_state)
                 .await?
             {
-                self.rebuild_stream_reader(source_desc, stream).await?;
+                self.rebuild_stream_reader(source_desc, stream)?;
             }
         }
 
@@ -355,10 +344,10 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     /// Rebuild stream if there is a err in stream
-    async fn rebuild_stream_reader_from_error<const BIASED: bool>(
+    fn rebuild_stream_reader_from_error<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
@@ -375,13 +364,13 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.fragment_id.to_string(),
         ]);
 
-        self.rebuild_stream_reader(source_desc, stream).await
+        self.rebuild_stream_reader(source_desc, stream)
     }
 
-    async fn rebuild_stream_reader<const BIASED: bool>(
+    fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
         let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
@@ -393,12 +382,11 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         // Replace the source reader with a new one of the new state.
-        let (reader, _) = self
-            .build_stream_source_reader(source_desc, Some(target_state.clone()), false)
-            .await?;
-        let reader = reader.map_err(StreamExecutorError::connector_error);
+        let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
+        let reader_stream =
+            reader_stream_builder.into_retry_stream(Some(target_state.clone()), false);
 
-        stream.replace_data_stream(reader);
+        stream.replace_data_stream(reader_stream);
 
         Ok(())
     }
@@ -465,6 +453,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 Vec::default()
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
+        let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
 
         yield Message::Barrier(first_barrier);
 
@@ -485,9 +474,6 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         core.split_state_store.init_epoch(first_epoch).await?;
-        // initial_dispatch_num is 0 means the source executor doesn't have downstream jobs
-        // and is newly created
-        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
         {
             let committed_reader = core
                 .split_state_store
@@ -518,132 +504,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
 
-        let mut received_resume_during_build = false;
-        let mut barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-
+        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let mut reader_stream_builder = self.stream_reader_builder(source_desc.clone());
+        let mut latest_splits = None;
         // Build the source stream reader.
-        let (source_chunk_reader, latest_splits) = if is_uninitialized {
-            tracing::info!("source uninitialized, build source stream reader w/o retry.");
-            let (source_chunk_reader, latest_splits) = self
-                .build_stream_source_reader(
-                    &source_desc,
-                    recover_state,
-                    // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
-                    // It's highly probable that the work of scanning historical data cannot be shared,
-                    // so don't waste work on it.
-                    // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
-                    // Note that shared CDC source is special. It already starts from latest.
-                    self.is_shared_non_cdc,
-                )
-                .instrument_await("source_build_reader")
+        if is_uninitialized {
+            let create_split_reader_result = reader_stream_builder
+                .fetch_latest_splits(recover_state.clone(), self.is_shared_non_cdc)
                 .await?;
-            (
-                source_chunk_reader.map_err(StreamExecutorError::connector_error),
-                latest_splits,
-            )
-        } else {
-            tracing::info!("source initialized, build source stream reader with retry.");
-            // Build the source stream reader with retry during recovery.
-            // We only build source stream reader with retry during recovery,
-            // because we can rely on the persisted source states to recover the source stream
-            // and can avoid the potential race with "seek to latest"
-            // https://github.com/risingwavelabs/risingwave/issues/19681#issuecomment-2532183002
-            let mut reader_and_splits: Option<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> =
-                None;
-            let source_reader = source_desc.source.clone();
-            let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc);
-            let source_ctx = Arc::new(source_ctx);
-            let mut build_source_stream_fut = Box::pin(async move {
-                let backoff = get_infinite_backoff_strategy();
-                tokio_retry::Retry::spawn(backoff, || async {
-                    match source_reader
-                        .build_stream(
-                            recover_state.clone(),
-                            column_ids.clone(),
-                            source_ctx.clone(),
-                            false,  // not need to seek to latest since source state is initialized
-                        )
-                        .await {
-                        Ok((stream, res)) => Ok((stream, res.latest_splits)),
-                        Err(e) => {
-                            tracing::warn!(error = %e.as_report(), "failed to build source stream, retrying...");
-                            Err(e)
-                        }
-                    }
-                })
-                    .instrument(tracing::info_span!("build_source_stream_with_retry"))
-                    .await
-                    .expect("Retry build source stream until success.")
-            });
-
-            // loop to create source stream until success
-            loop {
-                if let Some(barrier) = build_source_stream_and_poll_barrier(
-                    &mut barrier_stream,
-                    &mut reader_and_splits,
-                    &mut build_source_stream_fut,
-                )
-                .await?
-                {
-                    if let Message::Barrier(barrier) = barrier {
-                        if let Some(mutation) = barrier.mutation.as_deref() {
-                            match mutation {
-                                Mutation::Throttle(actor_to_apply) => {
-                                    if let Some(new_rate_limit) =
-                                        actor_to_apply.get(&self.actor_ctx.id)
-                                        && *new_rate_limit != self.rate_limit_rps
-                                    {
-                                        tracing::info!(
-                                            "updating rate limit from {:?} to {:?}",
-                                            self.rate_limit_rps,
-                                            *new_rate_limit
-                                        );
-
-                                        // update the rate limit option, we will apply the rate limit
-                                        // when we finish building the source stream.
-                                        self.rate_limit_rps = *new_rate_limit;
-                                    }
-                                }
-                                Mutation::Resume => {
-                                    // We record the Resume mutation here and postpone the resume of the source stream
-                                    // after we have successfully built the source stream.
-                                    received_resume_during_build = true;
-                                }
-                                _ => {
-                                    // ignore other mutations and output a warn log
-                                    tracing::warn!(
-                                    "Received a mutation {:?} to be ignored, because we only handle Throttle and Resume before
-                                    finish building source stream.",
-                                    mutation
-                                );
-                                }
-                            }
-                        }
-
-                        // bump state store epoch
-                        let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
-                        yield Message::Barrier(barrier);
-                    } else {
-                        unreachable!(
-                            "Only barrier message is expected when building source stream."
-                        );
-                    }
-                } else {
-                    assert!(reader_and_splits.is_some());
-                    tracing::info!("source stream created successfully");
-                    break;
-                }
-            }
-            let (source_chunk_reader, latest_splits) =
-                reader_and_splits.expect("source chunk reader and splits must be created");
-
-            (
-                apply_rate_limit(source_chunk_reader, self.rate_limit_rps)
-                    .boxed()
-                    .map_err(StreamExecutorError::connector_error),
-                latest_splits,
-            )
-        };
+            latest_splits = create_split_reader_result.latest_splits;
+        }
 
         if let Some(latest_splits) = latest_splits {
             // make sure it is written to state table later.
@@ -656,12 +526,15 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        let mut stream =
-            StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+            barrier_stream,
+            reader_stream_builder
+                .into_retry_stream(recover_state, is_uninitialized && self.is_shared_non_cdc),
+        );
         let mut command_paused = false;
 
         // - If the first barrier requires us to pause on startup, pause the stream.
-        if is_pause_on_startup && !received_resume_during_build {
+        if is_pause_on_startup {
             tracing::info!("source paused on startup");
             stream.pause_stream();
             command_paused = true;
@@ -687,8 +560,7 @@ impl<S: StateStore> SourceExecutor<S> {
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
-                self.rebuild_stream_reader_from_error(&source_desc, &mut stream, msg.unwrap_err())
-                    .await?;
+                self.rebuild_stream_reader_from_error(&source_desc, &mut stream, msg.unwrap_err())?;
                 continue;
             };
 
@@ -763,8 +635,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     );
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
-                                    self.rebuild_stream_reader(&source_desc, &mut stream)
-                                        .await?;
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
                             }
                             _ => {}
@@ -811,14 +682,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     unreachable!();
                 }
 
-                Either::Right(chunk) => {
+                Either::Right((chunk, latest_state)) => {
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
                         let offset_col = chunk.column_at(offset_idx);
                         task_builder.update_task_on_chunk(offset_col.clone());
                     }
-                    // TODO: confirm when split_offset_mapping is None
-                    let split_offset_mapping =
-                        get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused.
                         // Currently we can guarantee the
@@ -839,31 +707,24 @@ impl<S: StateStore> SourceExecutor<S> {
                             as u128
                             * WAIT_BARRIER_MULTIPLE_TIMES;
                     }
-                    if let Some(mapping) = split_offset_mapping {
-                        let state: HashMap<_, _> = mapping
-                            .iter()
-                            .flat_map(|(split_id, offset)| {
-                                self.stream_source_core
-                                    .as_mut()
-                                    .unwrap()
-                                    .latest_split_info
-                                    .get_mut(split_id)
-                                    .map(|original_split_impl| {
-                                        original_split_impl.update_in_place(offset.clone())?;
-                                        Ok::<_, anyhow::Error>((
-                                            split_id.clone(),
-                                            original_split_impl.clone(),
-                                        ))
-                                    })
-                            })
-                            .try_collect()?;
 
-                        self.stream_source_core
+                    latest_state.iter().for_each(|(split_id, new_split_impl)| {
+                        if let Some(split_impl) = self
+                            .stream_source_core
                             .as_mut()
                             .unwrap()
-                            .updated_splits_in_epoch
-                            .extend(state);
-                    }
+                            .latest_split_info
+                            .get_mut(split_id)
+                        {
+                            *split_impl = new_split_impl.clone();
+                        }
+                    });
+
+                    self.stream_source_core
+                        .as_mut()
+                        .unwrap()
+                        .updated_splits_in_epoch
+                        .extend(latest_state);
 
                     source_output_row_count.inc_by(chunk.cardinality() as u64);
                     let chunk =
@@ -900,29 +761,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             yield Message::Barrier(barrier);
-        }
-    }
-}
-
-async fn build_source_stream_and_poll_barrier(
-    barrier_stream: &mut BoxStream<'static, StreamExecutorResult<Message>>,
-    reader_and_splits: &mut Option<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)>,
-    build_future: &mut Pin<
-        Box<impl Future<Output = (BoxSourceChunkStream, Option<Vec<SplitImpl>>)>>,
-    >,
-) -> StreamExecutorResult<Option<Message>> {
-    if reader_and_splits.is_some() {
-        return Ok(None);
-    }
-
-    tokio::select! {
-        biased;
-        build_ret = &mut *build_future => {
-            *reader_and_splits = Some(build_ret);
-            Ok(None)
-        }
-        msg = barrier_stream.next() => {
-            msg.transpose()
         }
     }
 }

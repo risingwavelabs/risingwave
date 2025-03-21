@@ -14,19 +14,18 @@
 
 use std::sync::Arc;
 
-use futures::future::try_join_all;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::PbFragmentTypeFlag;
-use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
+use crate::MetaResult;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
+use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
@@ -34,7 +33,6 @@ use crate::barrier::{
 };
 use crate::hummock::CommitEpochInfo;
 use crate::stream::SourceChange;
-use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
@@ -60,9 +58,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
     }
 
-    fn mark_ready(&self, database_id: Option<DatabaseId>) {
-        self.scheduled_barriers.mark_ready(database_id);
-        if database_id.is_none() {
+    fn mark_ready(&self, options: MarkReadyOptions) {
+        let is_global = matches!(&options, MarkReadyOptions::Global { .. });
+        self.scheduled_barriers.mark_ready(options);
+        if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
     }
@@ -71,8 +70,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         command.post_collect(self).await
     }
 
-    async fn notify_creating_job_failed(&self, err: &MetaError) {
-        self.metadata_manager.notify_finish_failed(err).await
+    async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
+        self.metadata_manager
+            .notify_finish_failed(database_id, err)
+            .await
     }
 
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
@@ -106,34 +107,6 @@ impl GlobalBarrierWorkerContextImpl {
 }
 
 impl CommandContext {
-    pub async fn wait_epoch_commit(
-        &self,
-        barrier_manager_context: &GlobalBarrierWorkerContextImpl,
-    ) -> MetaResult<()> {
-        let table_id = self.table_ids_to_commit.iter().next().cloned();
-        // try wait epoch on an existing random table id
-        let Some(table_id) = table_id else {
-            // no need to wait epoch when there is no table id
-            return Ok(());
-        };
-        let futures = self.node_map.values().map(|worker_node| async {
-            let client = barrier_manager_context
-                .env
-                .stream_client_pool()
-                .get(worker_node)
-                .await?;
-            let request = WaitEpochCommitRequest {
-                epoch: self.barrier_info.prev_epoch(),
-                table_id: table_id.table_id,
-            };
-            client.wait_epoch_commit(request).await
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
-    }
-
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(
@@ -148,17 +121,9 @@ impl CommandContext {
 
             Command::Throttle(_) => {}
 
-            Command::Pause(reason) => {
-                if let PausedReason::ConfigChange = reason {
-                    // After the `Pause` barrier is collected and committed, we must ensure that the
-                    // storage version with this epoch is synced to all compute nodes before the
-                    // execution of the next command of `Update`, as some newly created operators
-                    // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(barrier_manager_context).await?;
-                }
-            }
+            Command::Pause => {}
 
-            Command::Resume(_) => {}
+            Command::Resume => {}
 
             Command::SourceChangeSplit(split_assignment) => {
                 barrier_manager_context
@@ -201,7 +166,7 @@ impl CommandContext {
                             .metadata_manager
                             .catalog_controller
                             .post_collect_job_fragments(
-                                new_fragments.stream_job_id().table_id as _,
+                                new_fragments.stream_job_id.table_id as _,
                                 new_fragments.actor_ids(),
                                 dispatchers,
                                 init_split_assignment,
@@ -322,7 +287,7 @@ impl CommandContext {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        new_fragments.stream_job_id().table_id as _,
+                        new_fragments.stream_job_id.table_id as _,
                         new_fragments.actor_ids(),
                         dispatchers,
                         init_split_assignment,

@@ -146,7 +146,7 @@ where
     }
 }
 
-impl<'a, TXN, T> ValTransaction<TXN> for VarTransaction<'a, T>
+impl<TXN, T> ValTransaction<TXN> for VarTransaction<'_, T>
 where
     T: Transactional<TXN> + PartialEq,
 {
@@ -502,8 +502,8 @@ impl<K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'_, 
     }
 }
 
-impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
-    for BTreeMapEntryTransaction<'a, K, V>
+impl<K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
+    for BTreeMapEntryTransaction<'_, K, V>
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)

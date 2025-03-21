@@ -38,7 +38,7 @@ macro_rules! for_all_metadata_models_v2 {
             {compaction_configs, risingwave_meta_model::compaction_config},
             {actors, risingwave_meta_model::actor},
             {clusters, risingwave_meta_model::cluster},
-            {actor_dispatchers, risingwave_meta_model::actor_dispatcher},
+            {fragment_relation, risingwave_meta_model::fragment_relation},
             {catalog_versions, risingwave_meta_model::catalog_version},
             {connections, risingwave_meta_model::connection},
             {databases, risingwave_meta_model::database},

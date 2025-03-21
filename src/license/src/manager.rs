@@ -16,7 +16,7 @@ use std::num::NonZeroUsize;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
@@ -25,7 +25,7 @@ use crate::LicenseKeyRef;
 /// License tier.
 ///
 /// Each enterprise [`Feature`](super::Feature) is available for a specific tier and above.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
     /// Free tier.
@@ -43,7 +43,7 @@ pub enum Tier {
 ///
 /// The issuer must be `prod.risingwave.com` in production, and can be `test.risingwave.com` in
 /// development. This will be validated when refreshing the license key.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Issuer {
     #[serde(rename = "prod.risingwave.com")]
     Prod,
@@ -62,7 +62,7 @@ pub enum Issuer {
 /// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
 /// other than directly checking the content of the license.
 // TODO(license): Shall we add a version field?
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct License {
     /// Subject of the license.

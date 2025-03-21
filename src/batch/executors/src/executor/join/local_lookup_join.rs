@@ -42,6 +42,7 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
 
+use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::{
     AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
@@ -400,6 +401,11 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
 
         let chunk_size = source.context().get_config().developer.chunk_size;
 
+        let asof_desc = lookup_join_node
+            .asof_desc
+            .map(|desc| AsOfDesc::from_protobuf(&desc))
+            .transpose()?;
+
         let worker_nodes = lookup_join_node.get_worker_nodes();
         let worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode> = worker_nodes
             .iter()
@@ -447,6 +453,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             chunk_size,
+            asof_desc,
             identity: identity.clone(),
             shutdown_rx: source.shutdown_rx().clone(),
             mem_ctx: source.context().create_executor_mem_context(&identity),
@@ -470,6 +477,7 @@ struct LocalLookupJoinExecutorArgs {
     schema: Schema,
     output_indices: Vec<usize>,
     chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
     identity: String,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
@@ -494,6 +502,7 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             schema: self.schema,
             output_indices: self.output_indices,
             chunk_size: self.chunk_size,
+            asof_desc: self.asof_desc,
             identity: self.identity,
             shutdown_rx: self.shutdown_rx,
             mem_ctx: self.mem_ctx,
@@ -597,6 +606,7 @@ mod tests {
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
+            asof_desc: None,
             identity: "TestLookupJoinExecutor".to_owned(),
             shutdown_rx: ShutdownToken::empty(),
             mem_ctx: MemoryContext::none(),

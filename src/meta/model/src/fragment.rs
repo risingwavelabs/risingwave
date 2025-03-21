@@ -30,6 +30,7 @@ pub struct Model {
     /// Specifically, `Merge` nodes' `upstream_actor_id` will be filled. (See `compose_fragment`)
     pub stream_node: StreamNode,
     pub state_table_ids: I32Array,
+    #[deprecated]
     pub upstream_fragment_id: I32Array,
     pub vnode_count: i32,
 }
@@ -66,8 +67,6 @@ impl From<PbFragmentDistributionType> for DistributionType {
 pub enum Relation {
     #[sea_orm(has_many = "super::actor::Entity")]
     Actor,
-    #[sea_orm(has_many = "super::actor_dispatcher::Entity")]
-    ActorDispatcher,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::JobId",
@@ -81,12 +80,6 @@ pub enum Relation {
 impl Related<super::actor::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Actor.def()
-    }
-}
-
-impl Related<super::actor_dispatcher::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ActorDispatcher.def()
     }
 }
 

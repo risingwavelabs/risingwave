@@ -30,7 +30,7 @@ use super::{
     RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME, USER_COLUMN_ID_OFFSET,
 };
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};
-use crate::types::{DataType, StructType};
+use crate::types::DataType;
 use crate::util::value_encoding::DatumToProtoExt;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
@@ -123,6 +123,10 @@ pub struct ColumnDesc {
     /// Currently the system column is used for `_rw_timestamp` only and is generated at runtime,
     /// so this field is not persisted.
     pub system_column: Option<SystemColumn>,
+    /// Whether the column is nullable.
+    /// If a column is not nullable, BatchInsert/BatchUpdate operations will throw an error when NULL is inserted/updated into.
+    /// The row contains NULL for this column will be ignored when streaming data into the table.
+    pub nullable: bool,
 }
 
 impl ColumnDesc {
@@ -140,6 +144,7 @@ impl ColumnDesc {
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::LATEST,
             system_column: None,
+            nullable: true,
         }
     }
 
@@ -199,25 +204,8 @@ impl ColumnDesc {
             additional_column_type: 0, // deprecated
             additional_column: Some(self.additional_column.clone()),
             version: self.version as i32,
+            nullable: self.nullable,
         }
-    }
-
-    // TODO(struct): deprecate and use `named` instead
-    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
-        Self::named(name, ColumnId::new(column_id), data_type)
-    }
-
-    pub fn new_struct(
-        name: &str,
-        column_id: i32,
-        _type_name: &str,
-        fields: Vec<ColumnDesc>,
-    ) -> Self {
-        // TODO(struct): assign type name to the struct once supported
-        let data_type =
-            StructType::new(fields.iter().map(|f| (&f.name, f.data_type.clone()))).into();
-
-        Self::named(name, ColumnId::new(column_id), data_type)
     }
 
     pub fn from_field_with_column_id(field: &Field, id: i32) -> Self {
@@ -225,7 +213,7 @@ impl ColumnDesc {
     }
 
     pub fn from_field_without_column_id(field: &Field) -> Self {
-        Self::from_field_with_column_id(field, 0)
+        Self::from_field_with_column_id(field, ColumnId::placeholder().into())
     }
 
     pub fn is_generated(&self) -> bool {
@@ -253,6 +241,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             additional_column,
             version,
             system_column: None,
+            nullable: prost.nullable,
         }
     }
 }
@@ -329,6 +318,11 @@ impl ColumnCatalog {
     /// Get a reference to the column desc's data type.
     pub fn data_type(&self) -> &DataType {
         &self.column_desc.data_type
+    }
+
+    /// Get nullable info of the column.
+    pub fn nullable(&self) -> bool {
+        self.column_desc.nullable
     }
 
     /// Get the column desc's column id.
@@ -516,30 +510,30 @@ pub mod tests {
 
     use crate::catalog::ColumnDesc;
     use crate::test_prelude::*;
-    use crate::types::DataType;
+    use crate::types::{DataType, StructType};
 
     pub fn build_prost_desc() -> PbColumnDesc {
-        let city = vec![
-            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
-            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
-        ];
-        let country = vec![
-            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            PbColumnDesc::new_struct("country.city", 4, ".test.City", city),
-        ];
-        PbColumnDesc::new_struct("country", 5, ".test.Country", country)
+        let city = DataType::from(StructType::new([
+            ("country.city.address", DataType::Varchar),
+            ("country.city.zipcode", DataType::Varchar),
+        ]));
+        let country = DataType::from(StructType::new([
+            ("country.address", DataType::Varchar),
+            ("country.city", city),
+        ]));
+        PbColumnDesc::new(country.to_protobuf(), "country", 5)
     }
 
     pub fn build_desc() -> ColumnDesc {
-        let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 2),
-            ColumnDesc::new_atomic(DataType::Varchar, "country.city.zipcode", 3),
-        ];
-        let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1),
-            ColumnDesc::new_struct("country.city", 4, ".test.City", city),
-        ];
-        ColumnDesc::new_struct("country", 5, ".test.Country", country)
+        let city = StructType::new([
+            ("country.city.address", DataType::Varchar),
+            ("country.city.zipcode", DataType::Varchar),
+        ]);
+        let country = StructType::new([
+            ("country.address", DataType::Varchar),
+            ("country.city", city.into()),
+        ]);
+        ColumnDesc::named("country", 5.into(), country.into())
     }
 
     #[test]

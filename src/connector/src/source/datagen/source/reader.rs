@@ -18,6 +18,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use risingwave_common::types::DataType;
 use risingwave_common_estimate_size::EstimateSize;
 use thiserror_ext::AsReport;
 
@@ -28,8 +29,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    BoxSourceChunkStream, Column, DataType, SourceContextRef, SourceMessage, SplitId,
-    SplitMetaData, SplitReader, into_chunk_stream,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
+    SplitReader, into_chunk_stream,
 };
 
 pub struct DatagenSplitReader {

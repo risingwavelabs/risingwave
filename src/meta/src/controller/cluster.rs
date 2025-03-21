@@ -931,11 +931,8 @@ impl ClusterControllerInner {
         let mut streaming_workers = self.list_active_streaming_workers().await?;
 
         let unschedulable_workers: HashSet<_> = streaming_workers
-            .extract_if(|worker| {
-                worker
-                    .property
-                    .as_ref()
-                    .map_or(false, |p| p.is_unschedulable)
+            .extract_if(.., |worker| {
+                worker.property.as_ref().is_some_and(|p| p.is_unschedulable)
             })
             .map(|w| w.id)
             .collect();

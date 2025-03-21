@@ -126,8 +126,11 @@ drop table "T2"
 statement error
 create table C1 (c1 varchar(5));
 
-statement error
+statement ok
 create table t (v1 int not null);
+
+statement ok
+drop table t;
 
 statement error
 create table t (v1 varchar collate "en_US");

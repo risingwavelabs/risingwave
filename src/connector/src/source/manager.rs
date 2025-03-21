@@ -130,6 +130,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             description: _,
             version: _,
             system_column: _,
+            nullable: _,
         }: &ColumnDesc,
     ) -> Self {
         if let Some(option) = generated_or_default_column {
@@ -182,6 +183,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             description: None,
             version: ColumnDescVersion::LATEST,
             system_column: None,
+            nullable: true,
         }
     }
 }

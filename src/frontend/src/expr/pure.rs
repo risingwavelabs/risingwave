@@ -138,6 +138,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Acosd
             | Type::Atan
             | Type::Atan2
+            | Type::Atand
+            | Type::Atan2d
             | Type::Sqrt
             | Type::Cbrt
             | Type::Sign
@@ -265,7 +267,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapInsert
             | Type::MapLength
             | Type::VnodeUser
-            |Type::RwEpochToTs =>
+            | Type::RwEpochToTs
+            | Type::CheckNotNull =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -276,6 +279,7 @@ impl ExprVisitor for ImpureAnalyzer {
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
             | Type::TestPaidTier
+            | Type::License
             | Type::Proctime
             | Type::PgSleep
             | Type::PgSleepFor
@@ -295,7 +299,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
-            | Type::PgTableIsVisible => self.impure = true,
+            | Type::PgTableIsVisible
+            | Type::HasFunctionPrivilege => self.impure = true,
         }
     }
 }

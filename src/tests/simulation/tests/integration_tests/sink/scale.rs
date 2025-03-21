@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use rand::{Rng, thread_rng};
+use rand::{Rng, rng as thread_rng};
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
@@ -45,7 +45,7 @@ async fn scale_and_check(
         cluster.reschedule(plan).await?;
         let after_count = test_sink.store.id_count();
         sleep(Duration::from_secs(10)).await;
-        if thread_rng().gen_bool(0.5) {
+        if thread_rng().random_bool(0.5) {
             sleep(Duration::from_secs(10)).await;
             let before_kill_count = test_sink.store.id_count();
             cluster.kill_node(&KillOpts::ALL).await;

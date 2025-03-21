@@ -98,6 +98,47 @@ select count(*) from rw_catalog.rw_ddl_progress;
 statement ok
 drop table t;
 
+################### Test background_ddl
+
+statement ok
+create table t (v1 int);
+
+statement ok
+insert into t select * from generate_series(1, 100);
+
+statement ok
+set backfill_rate_limit=0;
+
+statement ok
+set background_ddl=true;
+
+# Initial create MV
+statement ok
+create materialized view if not exists m1 as select * from t;
+
+statement ok
+flush;
+
+# Should not error out
+statement ok
+create materialized view if not exists m1 as select * from t;
+
+statement ok
+create materialized view if not exists m1 as select * from t;
+
+sleep 1s
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop table t;
+
+################### Cleanup
+
+statement ok
+set backfill_rate_limit=default;
+
 statement ok
 SET BACKGROUND_DDL=false;
 

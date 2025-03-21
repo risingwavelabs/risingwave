@@ -26,7 +26,7 @@ use risingwave_common::types::{
     Timestamptz, ToOwnedDatum,
 };
 
-pub use self::schema::{MapHandling, ResolvedAvroSchema, avro_schema_to_column_descs};
+pub use self::schema::{MapHandling, ResolvedAvroSchema, avro_schema_to_fields};
 use super::utils::scaled_bigint_to_rust_decimal;
 use super::{Access, AccessError, AccessResult, bail_uncategorized, uncategorized};
 use crate::decoder::avro::schema::avro_schema_to_struct_field_name;
@@ -81,10 +81,10 @@ impl<'a> AvroParseOptionsInner<'a> {
     ///
     /// Cases: (FIXME: Is this precise?)
     /// - If both `type_expected` and schema are provided, it will check both strictly.
-    /// - If only `type_expected` is provided, it will try to match the value type and the
-    ///    `type_expected`, converting the value if possible.
+    /// - If only `type_expected` is provided, it will try to match the value type
+    ///   and the `type_expected`, converting the value if possible.
     /// - If only value is provided (without schema and `type_expected`),
-    ///     the `DataType` will be inferred.
+    ///   the `DataType` will be inferred.
     fn convert_to_datum<'b>(
         &self,
         unresolved_schema: &'a Schema,

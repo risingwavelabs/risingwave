@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::mem::take;
 use std::ops::Bound::Unbounded;
 use std::ops::{Bound, RangeBounds};
@@ -25,12 +25,13 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
+use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 #[derive(Debug)]
 struct CreatingStreamingJobEpochState {
     epoch: u64,
-    node_to_collect: HashSet<WorkerId>,
+    node_to_collect: NodeToCollect,
     resps: Vec<BarrierCompleteResponse>,
     is_checkpoint: bool,
     enqueue_time: Instant,
@@ -87,10 +88,10 @@ impl CreatingStreamingJobBarrierControl {
         self.inflight_barrier_queue.len()
     }
 
-    pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
+    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
         self.inflight_barrier_queue
-            .values()
-            .any(|state| state.node_to_collect.contains(&worker_id))
+            .values_mut()
+            .all(|state| is_valid_after_worker_err(&mut state.node_to_collect, worker_id))
     }
 
     fn latest_epoch(&self) -> Option<u64> {
@@ -113,7 +114,7 @@ impl CreatingStreamingJobBarrierControl {
     pub(super) fn enqueue_epoch(
         &mut self,
         epoch: u64,
-        node_to_collect: HashSet<WorkerId>,
+        node_to_collect: NodeToCollect,
         is_checkpoint: bool,
     ) {
         debug!(
@@ -162,7 +163,7 @@ impl CreatingStreamingJobBarrierControl {
             .inflight_barrier_queue
             .get_mut(&epoch)
             .expect("should exist");
-        assert!(state.node_to_collect.remove(&worker_id));
+        assert!(state.node_to_collect.remove(&worker_id).is_some());
         state.resps.push(resp);
         while let Some((_, state)) = self.inflight_barrier_queue.first_key_value()
             && state.node_to_collect.is_empty()

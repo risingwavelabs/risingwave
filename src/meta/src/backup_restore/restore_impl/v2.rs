@@ -20,7 +20,7 @@ use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
-use sea_orm::DbErr;
+use sea_orm::{DbErr, EntityTrait};
 
 use crate::backup_restore::restore_impl::{Loader, Writer};
 use crate::controller::SqlMetaStore;
@@ -143,7 +143,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.streaming_jobs.clone(), db).await?;
         insert_models(metadata.fragments.clone(), db).await?;
         insert_models(metadata.actors.clone(), db).await?;
-        insert_models(metadata.actor_dispatchers.clone(), db).await?;
+        insert_models(metadata.fragment_relation.clone(), db).await?;
         insert_models(metadata.connections.clone(), db).await?;
         insert_models(metadata.sources.clone(), db).await?;
         insert_models(metadata.tables.clone(), db).await?;
@@ -158,6 +158,37 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.secrets.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
+        Ok(())
+    }
+
+    async fn overwrite(
+        &self,
+        new_storage_url: &str,
+        new_storage_dir: &str,
+        new_backup_url: &str,
+        new_backup_dir: &str,
+    ) -> BackupResult<()> {
+        use sea_orm::ActiveModelTrait;
+        let kvs = [
+            ("state_store", new_storage_url),
+            ("data_directory", new_storage_dir),
+            ("backup_storage_url", new_backup_url),
+            ("backup_storage_directory", new_backup_dir),
+        ];
+        for (k, v) in kvs {
+            let Some(model) = risingwave_meta_model::system_parameter::Entity::find_by_id(k)
+                .one(&self.meta_store.conn)
+                .await
+                .map_err(map_db_err)?
+            else {
+                return Err(BackupError::MetaStorage(
+                    anyhow::anyhow!("{k} not found in system_parameter table").into(),
+                ));
+            };
+            let mut kv: risingwave_meta_model::system_parameter::ActiveModel = model.into();
+            kv.value = sea_orm::ActiveValue::Set(v.to_owned());
+            kv.update(&self.meta_store.conn).await.map_err(map_db_err)?;
+        }
         Ok(())
     }
 }
@@ -175,7 +206,6 @@ macro_rules! for_all_auto_increment {
             {"user", users, user_id},
             {"user_privilege", user_privileges, id},
             {"actor", actors, actor_id},
-            {"actor_dispatcher", actor_dispatchers, id},
             {"fragment", fragments, fragment_id},
             {"object_dependency", object_dependencies, id}
         )

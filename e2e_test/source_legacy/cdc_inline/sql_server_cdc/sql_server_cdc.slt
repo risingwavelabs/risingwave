@@ -171,7 +171,7 @@ CREATE TABLE shared_orders (
 )  from mssql_source table 'orders';
 
 # invalid table name
-statement error Sql Server table 'dbo'.'wrong_orders' not found
+statement error Sql Server table 'dbo'.'wrong_orders' doesn't exist
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -183,7 +183,7 @@ CREATE TABLE shared_orders (
 )  from mssql_source table 'mydb.dbo.wrong_orders';
 
 # invalid schema name
-statement error Sql Server table 'wrong_dbo'.'orders' not found
+statement error Sql Server table 'wrong_dbo'.'orders' doesn't exist
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -295,7 +295,7 @@ CREATE TABLE shared_sqlserver_all_data_types (
     PRIMARY KEY (id)
 ) from mssql_source table 'mydb.dbo.sqlserver_all_data_types';
 
-statement error Sql Server table 'UpperSchema'.'UpperTable' not found in 'mydb'
+statement error Sql Server table 'UpperSchema'.'UpperTable' doesn't exist in 'mydb'
 CREATE TABLE upper_table (
     "ID" INT,
     "Name" VARCHAR,
@@ -309,7 +309,7 @@ CREATE TABLE upper_table (
     PRIMARY KEY ("ID")
 )  from upper_mssql_source table 'UpperDB.UpperSchema.UpperTable';
 
-statement error Sql Server table 'upperSchema'.'upperTable' not found in 'UpperDB'
+statement error Sql Server table 'upperSchema'.'upperTable' doesn't exist in 'UpperDB'
 CREATE TABLE upper_table (
     "ID" INT,
     "Name" VARCHAR,

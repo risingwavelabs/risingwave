@@ -3,31 +3,31 @@
 
 statement ok
 create function int_42() returns int
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 statement ok
 create function gcd(int, int) returns int
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 statement ok
 create function gcd(int, int, int) returns int
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 statement ok
 create function extract_tcp_info(bytea) returns struct<src_addr varchar, dst_addr varchar, src_port smallint, dst_port smallint>
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 statement ok
 create function decimal_add(decimal, decimal) returns decimal
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 statement ok
 create function jsonb_access(jsonb, int) returns jsonb
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 statement ok
 create function series(int) returns table (x int)
-language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasi/release/udf.wasm';
+language wasm using link 'fs://e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm';
 
 query I
 select int_42();

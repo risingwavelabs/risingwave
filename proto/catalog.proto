@@ -326,7 +326,8 @@ message Function {
   data.DataType return_type = 6;
   string language = 7;
   optional string link = 8;
-  optional string identifier = 10;
+  // The function name in the runtime / on the remote side that is bound to the UDF created in RisingWave.
+  optional string name_in_runtime = 10;
   // The source code of the function.
   optional string body = 14;
   // The zstd-compressed binary of the function.
@@ -336,6 +337,9 @@ message Function {
   optional string runtime = 18;
   reserved 19;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 20;
+  optional bool is_batched = 21;
 
   oneof kind {
     ScalarFunction scalar = 11;

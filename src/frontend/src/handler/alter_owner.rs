@@ -38,7 +38,7 @@ pub fn check_schema_create_privilege(
         return Ok(());
     }
     if !new_owner.is_super
-        && !new_owner.check_privilege(
+        && !new_owner.has_privilege(
             &grant_privilege::Object::SchemaId(schema_id),
             AclMode::Create,
         )
@@ -162,6 +162,18 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     Object::SchemaId(schema.id())
+                }
+                StatementType::ALTER_CONNECTION => {
+                    let (connection, schema_name) = catalog_reader.get_connection_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
+                    session.check_privilege_for_drop_alter(schema_name, &**connection)?;
+                    if connection.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    Object::ConnectionId(connection.id)
                 }
                 _ => unreachable!(),
             },

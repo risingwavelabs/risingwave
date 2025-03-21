@@ -114,7 +114,7 @@ impl HummockManager {
     ) -> Result<Vec<StateTableId>> {
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
-            if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
+            if internal_tables.extract_if(.., |t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
@@ -710,14 +710,13 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
-    use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::controller::SqlMetaStore;
     use crate::hummock::commit_multi_var;
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::model::StreamJobFragments;
+    use crate::model::{Fragment, StreamJobFragments};
 
     #[tokio::test]
     async fn test_inner() {

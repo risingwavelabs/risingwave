@@ -10,11 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use winnow::combinator::{Context, separated, trace};
-use winnow::error::{AddContext, ContextError, StrContext};
+use winnow::combinator::impls::Context;
+use winnow::combinator::{separated, trace};
+use winnow::error::{AddContext, ContextError, ErrMode, ParserError, StrContext};
 use winnow::stream::{Stream, StreamIsPartial};
 use winnow::token::any;
-use winnow::{PResult, Parser, Stateful};
+use winnow::{ModalResult, Parser, Stateful};
 
 use crate::ast::{Ident, ObjectName};
 use crate::keywords::{self, Keyword};
@@ -46,7 +47,7 @@ impl<S> TokenStream for S where
 /// Consume any token.
 ///
 /// If you need to consume a specific token, use [`Token::?`][Token] directly, which already implements [`Parser`].
-fn token<S>(input: &mut S) -> PResult<TokenWithLocation>
+fn token<S>(input: &mut S) -> ModalResult<TokenWithLocation>
 where
     S: TokenStream,
 {
@@ -56,7 +57,7 @@ where
 /// Consume a keyword.
 ///
 /// If you need to consume a specific keyword, use [`Keyword::?`][Keyword] directly, which already implements [`Parser`].
-pub fn keyword<S>(input: &mut S) -> PResult<Keyword>
+pub fn keyword<S>(input: &mut S) -> ModalResult<Keyword>
 where
     S: TokenStream,
 {
@@ -71,11 +72,11 @@ where
     .parse_next(input)
 }
 
-impl<I> Parser<I, TokenWithLocation, ContextError> for Token
+impl<I> Parser<I, TokenWithLocation, ErrMode<ContextError>> for Token
 where
     I: TokenStream,
 {
-    fn parse_next(&mut self, input: &mut I) -> PResult<TokenWithLocation, ContextError> {
+    fn parse_next(&mut self, input: &mut I) -> ModalResult<TokenWithLocation, ContextError> {
         trace(
             format_args!("token {}", self.clone()),
             token.verify(move |t: &TokenWithLocation| t.token == *self),
@@ -84,11 +85,11 @@ where
     }
 }
 
-impl<I> Parser<I, Keyword, ContextError> for Keyword
+impl<I> Parser<I, Keyword, ErrMode<ContextError>> for Keyword
 where
     I: TokenStream,
 {
-    fn parse_next(&mut self, input: &mut I) -> PResult<Keyword, ContextError> {
+    fn parse_next(&mut self, input: &mut I) -> ModalResult<Keyword, ContextError> {
         trace(
             format_args!("keyword {}", self.clone()),
             token.verify_map(move |t| match &t.token {
@@ -101,7 +102,7 @@ where
 }
 
 /// Consume an identifier that is not a reserved keyword.
-fn identifier_non_reserved<S>(input: &mut S) -> PResult<Ident>
+fn identifier_non_reserved<S>(input: &mut S) -> ModalResult<Ident>
 where
     S: TokenStream,
 {
@@ -117,7 +118,7 @@ where
 }
 
 /// Consume an 'single-quoted string'.
-pub fn single_quoted_string<S>(input: &mut S) -> PResult<String>
+pub fn single_quoted_string<S>(input: &mut S) -> ModalResult<String>
 where
     S: TokenStream,
 {
@@ -130,7 +131,7 @@ where
 }
 
 /// Consume an $$ dollar-quoted string $$.
-pub fn dollar_quoted_string<S>(input: &mut S) -> PResult<String>
+pub fn dollar_quoted_string<S>(input: &mut S) -> ModalResult<String>
 where
     S: TokenStream,
 {
@@ -145,7 +146,7 @@ where
 /// Consume an object name.
 ///
 /// FIXME: Object name is extremely complex, we only handle a subset here.
-fn object_name<S>(input: &mut S) -> PResult<ObjectName>
+fn object_name<S>(input: &mut S) -> ModalResult<ObjectName>
 where
     S: TokenStream,
 {
@@ -157,13 +158,14 @@ where
 /// Accept a subparser contains a given state.
 ///
 /// The state will be constructed using [`Default::default()`].
-fn with_state<S, State, O, ParseNext>(mut parse_next: ParseNext) -> impl Parser<S, O, ContextError>
+fn with_state<S, State, O, ParseNext, E>(mut parse_next: ParseNext) -> impl Parser<S, O, E>
 where
     S: TokenStream,
     State: Default,
-    ParseNext: Parser<Stateful<S, State>, O, ContextError>,
+    ParseNext: Parser<Stateful<S, State>, O, E>,
+    E: ParserError<S>,
 {
-    move |input: &mut S| -> PResult<O> {
+    move |input: &mut S| -> winnow::Result<O, E> {
         let state = State::default();
         let input2 = std::mem::take(input);
         let mut stateful = Stateful {
@@ -185,6 +187,7 @@ pub trait ParserExt<I, O, E>: Parser<I, O, E> {
         Self: Sized,
         I: Stream,
         E: AddContext<I, StrContext>,
+        E: ParserError<I>,
     {
         self.context(StrContext::Expected(
             winnow::error::StrContextValue::Description(expected),

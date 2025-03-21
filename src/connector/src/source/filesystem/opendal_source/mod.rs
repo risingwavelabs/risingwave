@@ -36,7 +36,9 @@ use crate::source::{SourceProperties, UnknownFields};
 
 pub const AZBLOB_CONNECTOR: &str = "azblob";
 pub const GCS_CONNECTOR: &str = "gcs";
-// The new s3_v2 will use opendal.
+/// The new `s3_v2` will use opendal.
+/// Note: user uses `connector='s3'`, which is converted to `connector='s3_v2'` in frontend (in `validate_compatibility`).
+/// If user inputs `connector='s3_v2'`, it will be rejected.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 

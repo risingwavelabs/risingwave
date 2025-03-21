@@ -10,10 +10,10 @@ anchors:
         run: rw-build-env
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
+        propagate-environment: true
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
-        propagate-environment: true
 
   - sql-backend: &sql-backend
       matrix:
@@ -159,7 +159,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
@@ -280,7 +280,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 70
+    timeout_in_minutes: 90
     retry: *auto-retry
 
   - label: "integration test (madsim) - recovery"
@@ -381,7 +381,7 @@ steps:
 
   - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 75m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 135m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -391,13 +391,13 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 80
+    timeout_in_minutes: 140
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 75m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 90m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -407,16 +407,16 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 80
+    timeout_in_minutes: 95
     retry: *auto-retry
 
-  - label: "end-to-end iceberg sink test (release)"
-    key: "e2e-iceberg-sink-test"
-    command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
+  - label: "end-to-end iceberg test (release)"
+    key: "e2e-iceberg-test"
+    command: "ci/scripts/e2e-iceberg-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-iceberg-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -424,22 +424,6 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 9
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg sink v2 test (release)"
-    key: "e2e-iceberg-sink-v2-test"
-    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-iceberg-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-v2-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 17
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"

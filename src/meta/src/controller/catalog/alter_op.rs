@@ -451,6 +451,15 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
                 objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
+            ObjectType::Connection => {
+                let connection = Connection::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
+                objects.push(PbObjectInfo::Connection(
+                    ObjectModel(connection, obj).into(),
+                ));
+            }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };
 

@@ -756,7 +756,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .extract_if(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(.., |output| actor_ids.contains(&output.actor_id()))
             .count();
         self.cur = self.cur.min(self.outputs.len() - 1);
     }
@@ -947,7 +947,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .extract_if(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(.., |output| actor_ids.contains(&output.actor_id()))
             .count();
     }
 

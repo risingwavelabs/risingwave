@@ -1,0 +1,175 @@
+control substitution on
+
+system ok
+rpk topic create 'dbserver1.inventory.t'
+
+system ok
+sr_register dbserver1.inventory.t-key AVRO <<EOF
+{
+  "type": "record",
+  "name": "Key",
+  "namespace": "dbserver1.inventory.t",
+  "fields": [
+    {
+      "name": "f1",
+      "type": "int"
+    },
+    {
+      "name": "f3",
+      "type": "long"
+    }
+  ],
+  "connect.name": "dbserver1.inventory.t.Key"
+}
+EOF
+
+system ok
+sr_register dbserver1.inventory.t-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Envelope",
+  "namespace": "dbserver1.inventory.t",
+  "fields": [
+    {
+      "name": "before",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "Value",
+          "fields": [
+            {
+              "name": "f1",
+              "type": "int"
+            },
+            {
+              "name": "f2",
+              "type": [
+                "null",
+                "string"
+              ],
+              "default": null
+            },
+            {
+              "name": "f3",
+              "type": "long"
+            }
+          ],
+          "connect.name": "dbserver1.inventory.t.Value"
+        }
+      ],
+      "default": null
+    },
+    {"name":"after","type":["null","Value"],"default":null},
+    {"name":"source","type":{"type":"record","name":"Source","namespace":"io.debezium.connector.postgresql","fields":[{"name":"version","type":"string"},{"name":"connector","type":"string"},{"name":"name","type":"string"},{"name":"ts_ms","type":"long"},{"name":"snapshot","type":[{"type":"string","connect.version":1,"connect.parameters":{"allowed":"true,last,false,incremental"},"connect.default":"false","connect.name":"io.debezium.data.Enum"},"null"],"default":"false"},{"name":"db","type":"string"},{"name":"sequence","type":["null","string"],"default":null},{"name":"ts_us","type":["null","long"],"default":null},{"name":"ts_ns","type":["null","long"],"default":null},{"name":"schema","type":"string"},{"name":"table","type":"string"},{"name":"txId","type":["null","long"],"default":null},{"name":"lsn","type":["null","long"],"default":null},{"name":"xmin","type":["null","long"],"default":null}],"connect.name":"io.debezium.connector.postgresql.Source"}},
+    {"name":"transaction","type":["null",{"type":"record","name":"block","namespace":"event","fields":[{"name":"id","type":"string"},{"name":"total_order","type":"long"},{"name":"data_collection_order","type":"long"}],"connect.version":1,"connect.name":"event.block"}],"default":null},
+    {"name":"op","type":"string"},
+    {"name":"ts_ms","type":["null","long"],"default":null},
+    {"name":"ts_us","type":["null","long"],"default":null},
+    {"name":"ts_ns","type":["null","long"],"default":null}
+  ]
+}
+EOF
+
+system ok
+rpk topic produce --schema-key-id=topic --schema-id=topic -f '%k %v\n' dbserver1.inventory.t <<EOF
+{"f1":1,"f3":3} {"before":null,"after":{"dbserver1.inventory.t.Value":{"f1":1,"f2":{"string":"zxc"},"f3":3}},"source":{"version":"2.7.4.Final","connector":"postgresql","name":"dbserver1","ts_ms":1740989137107,"snapshot":{"string":"false"},"db":"test","sequence":{"string":"[\"28875024\",\"29156768\"]"},"ts_us":{"long":1740989137107480},"ts_ns":{"long":1740989137107480000},"schema":"inventory","table":"t","txId":{"long":820},"lsn":{"long":29156768},"xmin":null},"transaction":null,"op":"c","ts_ms":{"long":1740989137572},"ts_us":{"long":1740989137572365},"ts_ns":{"long":1740989137572365000}}
+EOF
+
+statement ok
+create table v1 with (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'dbserver1.inventory.t') format debezium encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+# In the upstream PostgreSQL: `alter table inventory.t add column f4 varchar not null default '99';`
+
+system ok
+sr_register dbserver1.inventory.t-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Envelope",
+  "namespace": "dbserver1.inventory.t",
+  "fields": [
+    {
+      "name": "before",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "Value",
+          "fields": [
+            {
+              "name": "f1",
+              "type": "int"
+            },
+            {
+              "name": "f2",
+              "type": [
+                "null",
+                "string"
+              ],
+              "default": null
+            },
+            {
+              "name": "f3",
+              "type": "long"
+            },
+            {
+              "name": "f4",
+              "type": {
+                "type": "string",
+                "connect.default": "99"
+              },
+              "default": "99"
+            }
+          ],
+          "connect.name": "dbserver1.inventory.t.Value"
+        }
+      ],
+      "default": null
+    },
+    {"name":"after","type":["null","Value"],"default":null},
+    {"name":"source","type":{"type":"record","name":"Source","namespace":"io.debezium.connector.postgresql","fields":[{"name":"version","type":"string"},{"name":"connector","type":"string"},{"name":"name","type":"string"},{"name":"ts_ms","type":"long"},{"name":"snapshot","type":[{"type":"string","connect.version":1,"connect.parameters":{"allowed":"true,last,false,incremental"},"connect.default":"false","connect.name":"io.debezium.data.Enum"},"null"],"default":"false"},{"name":"db","type":"string"},{"name":"sequence","type":["null","string"],"default":null},{"name":"ts_us","type":["null","long"],"default":null},{"name":"ts_ns","type":["null","long"],"default":null},{"name":"schema","type":"string"},{"name":"table","type":"string"},{"name":"txId","type":["null","long"],"default":null},{"name":"lsn","type":["null","long"],"default":null},{"name":"xmin","type":["null","long"],"default":null}],"connect.name":"io.debezium.connector.postgresql.Source"}},
+    {"name":"transaction","type":["null",{"type":"record","name":"block","namespace":"event","fields":[{"name":"id","type":"string"},{"name":"total_order","type":"long"},{"name":"data_collection_order","type":"long"}],"connect.version":1,"connect.name":"event.block"}],"default":null},
+    {"name":"op","type":"string"},
+    {"name":"ts_ms","type":["null","long"],"default":null},
+    {"name":"ts_us","type":["null","long"],"default":null},
+    {"name":"ts_ns","type":["null","long"],"default":null}
+  ]
+}
+EOF
+
+system ok
+rpk topic produce --schema-key-id=topic --schema-id=topic -f '%k %v\n' dbserver1.inventory.t <<EOF
+{"f3":4,"f1":3} {"before":null,"after":{"dbserver1.inventory.t.Value":{"f1":3,"f2":{"string":"asd"},"f3":4,"f4":"42"}},"source":{"version":"2.7.4.Final","connector":"postgresql","name":"dbserver1","ts_ms":1740989269753,"snapshot":{"string":"false"},"db":"test","sequence":{"string":"[\"29157056\",\"29198592\"]"},"ts_us":{"long":1740989269753302},"ts_ns":{"long":1740989269753302000},"schema":"inventory","table":"t","txId":{"long":822},"lsn":{"long":29198592},"xmin":null},"transaction":null,"op":"c","ts_ms":{"long":1740989269899},"ts_us":{"long":1740989269899925},"ts_ns":{"long":1740989269899925000}}
+EOF
+
+statement ok
+create table v2 with (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'dbserver1.inventory.t') format debezium encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+sleep 3s
+
+query TTT rowsort
+select * from v1;
+----
+1 zxc 3
+3 asd 4
+
+query TTT rowsort
+select * from v2;
+----
+1 zxc 3 99
+3 asd 4 42
+
+statement ok
+drop table v2;
+
+statement ok
+drop table v1;
+
+system ok
+rpk sr subject delete 'dbserver1.inventory.t-value' && rpk sr subject delete 'dbserver1.inventory.t-value' --permanent
+
+system ok
+rpk sr subject delete 'dbserver1.inventory.t-key' && rpk sr subject delete 'dbserver1.inventory.t-key' --permanent
+
+system ok
+rpk topic delete 'dbserver1.inventory.t'

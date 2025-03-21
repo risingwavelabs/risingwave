@@ -12,24 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor,
-    actor_dispatcher, connection, database, fragment, function, index, object, object_dependency,
-    schema, secret, sink, source, streaming_job, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId, SchemaId,
+    SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database,
+    fragment, fragment_relation, function, index, object, object_dependency, schema, secret, sink,
+    source, streaming_job, subscription, table, user, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -42,7 +45,7 @@ use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
-use risingwave_pb::stream_plan::PbFragmentTypeFlag;
+use risingwave_pb::stream_plan::{PbDispatcher, PbDispatcherType, PbFragmentTypeFlag};
 use risingwave_pb::user::grant_privilege::{
     PbAction, PbActionWithGrantOption, PbObject as PbGrantObject,
 };
@@ -61,6 +64,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use crate::controller::ObjectModel;
+use crate::model::FragmentActorDispatchers;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -279,14 +283,6 @@ pub struct PartialActorLocation {
     pub status: ActorStatus,
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
-#[sea_orm(entity = "Actor")]
-pub struct PartialActorSplits {
-    pub actor_id: ActorId,
-    pub fragment_id: FragmentId,
-    pub splits: Option<ConnectorSplits>,
-}
-
 #[derive(FromQueryResult)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
@@ -294,7 +290,6 @@ pub struct FragmentDesc {
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub state_table_ids: I32Array,
-    pub upstream_fragment_id: I32Array,
     pub parallelism: i64,
     pub vnode_count: i32,
     pub stream_node: StreamNode,
@@ -902,31 +897,283 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::SinkId(id)
         | PbGrantObject::ViewId(id)
         | PbGrantObject::FunctionId(id)
-        | PbGrantObject::SubscriptionId(id) => *id as _,
-        _ => unreachable!("invalid object type: {:?}", object),
+        | PbGrantObject::SubscriptionId(id)
+        | PbGrantObject::ConnectionId(id)
+        | PbGrantObject::SecretId(id) => *id as _,
     }
 }
 
-pub async fn get_actor_dispatchers<C>(
+pub async fn get_fragment_actor_dispatchers<C>(
     db: &C,
-    actor_ids: Vec<ActorId>,
-) -> MetaResult<HashMap<ActorId, Vec<actor_dispatcher::Model>>>
+    fragment_ids: Vec<FragmentId>,
+) -> MetaResult<FragmentActorDispatchers>
 where
     C: ConnectionTrait,
 {
-    let actor_dispatchers = ActorDispatcher::find()
-        .filter(actor_dispatcher::Column::ActorId.is_in(actor_ids))
+    type FragmentActorInfo = (DistributionType, Arc<HashMap<ActorId, Option<Bitmap>>>);
+    let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
+    let get_fragment_actors = |fragment_id: FragmentId| async move {
+        let result: MetaResult<FragmentActorInfo> = try {
+            let mut fragment_actors = Fragment::find_by_id(fragment_id)
+                .find_with_related(Actor)
+                .filter(actor::Column::Status.eq(ActorStatus::Running))
+                .all(db)
+                .await?;
+            if fragment_actors.is_empty() {
+                return Err(anyhow!("failed to find fragment: {}", fragment_id).into());
+            }
+            assert_eq!(
+                fragment_actors.len(),
+                1,
+                "find multiple fragment {:?}",
+                fragment_actors
+            );
+            let (fragment, actors) = fragment_actors.pop().unwrap();
+            (
+                fragment.distribution_type,
+                Arc::new(
+                    actors
+                        .into_iter()
+                        .map(|actor| {
+                            (
+                                actor.actor_id,
+                                actor
+                                    .vnode_bitmap
+                                    .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
+                            )
+                        })
+                        .collect(),
+                ),
+            )
+        };
+        result
+    };
+    let fragment_relations = FragmentRelation::find()
+        .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
         .all(db)
         .await?;
 
-    let mut actor_dispatchers_map = HashMap::new();
-    for actor_dispatcher in actor_dispatchers {
-        actor_dispatchers_map
-            .entry(actor_dispatcher.actor_id)
-            .or_insert_with(Vec::new)
-            .push(actor_dispatcher);
+    let mut actor_dispatchers_map: HashMap<_, HashMap<_, Vec<_>>> = HashMap::new();
+    for fragment_relation::Model {
+        source_fragment_id,
+        target_fragment_id,
+        dispatcher_type,
+        dist_key_indices,
+        output_indices,
+    } in fragment_relations
+    {
+        let (source_fragment_distribution, source_fragment_actors) = {
+            let (distribution, actors) = {
+                match fragment_actor_cache.entry(source_fragment_id) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        entry.insert(get_fragment_actors(source_fragment_id).await?)
+                    }
+                }
+            };
+            (*distribution, actors.clone())
+        };
+        let (target_fragment_distribution, target_fragment_actors) = {
+            let (distribution, actors) = {
+                match fragment_actor_cache.entry(target_fragment_id) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        entry.insert(get_fragment_actors(target_fragment_id).await?)
+                    }
+                }
+            };
+            (*distribution, actors.clone())
+        };
+        let dispatchers = compose_dispatchers(
+            source_fragment_distribution,
+            &source_fragment_actors,
+            target_fragment_id,
+            target_fragment_distribution,
+            &target_fragment_actors,
+            dispatcher_type,
+            dist_key_indices.into_u32_array(),
+            output_indices.into_u32_array(),
+        );
+        let actor_dispatchers_map = actor_dispatchers_map
+            .entry(source_fragment_id as _)
+            .or_default();
+        for (actor_id, dispatchers) in dispatchers {
+            actor_dispatchers_map
+                .entry(actor_id as _)
+                .or_default()
+                .push(dispatchers);
+        }
     }
     Ok(actor_dispatchers_map)
+}
+
+fn compose_dispatchers(
+    source_fragment_distribution: DistributionType,
+    source_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
+    target_fragment_id: FragmentId,
+    target_fragment_distribution: DistributionType,
+    target_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
+    dispatcher_type: DispatcherType,
+    dist_key_indices: Vec<u32>,
+    output_indices: Vec<u32>,
+) -> HashMap<ActorId, PbDispatcher> {
+    match dispatcher_type {
+        DispatcherType::Hash => {
+            let dispatcher = PbDispatcher {
+                r#type: PbDispatcherType::from(dispatcher_type) as _,
+                dist_key_indices: dist_key_indices.clone(),
+                output_indices: output_indices.clone(),
+                hash_mapping: Some(
+                    ActorMapping::from_bitmaps(
+                        &target_fragment_actors
+                            .iter()
+                            .map(|(actor_id, bitmap)| {
+                                (
+                                    *actor_id as _,
+                                    bitmap
+                                        .clone()
+                                        .expect("downstream hash dispatch must have distribution"),
+                                )
+                            })
+                            .collect(),
+                    )
+                    .to_protobuf(),
+                ),
+                dispatcher_id: target_fragment_id as _,
+                downstream_actor_id: target_fragment_actors
+                    .keys()
+                    .map(|actor_id| *actor_id as _)
+                    .collect(),
+            };
+            source_fragment_actors
+                .keys()
+                .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
+                .collect()
+        }
+        DispatcherType::Broadcast | DispatcherType::Simple => {
+            let dispatcher = PbDispatcher {
+                r#type: PbDispatcherType::from(dispatcher_type) as _,
+                dist_key_indices: dist_key_indices.clone(),
+                output_indices: output_indices.clone(),
+                hash_mapping: None,
+                dispatcher_id: target_fragment_id as _,
+                downstream_actor_id: target_fragment_actors
+                    .keys()
+                    .map(|actor_id| *actor_id as _)
+                    .collect(),
+            };
+            source_fragment_actors
+                .keys()
+                .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
+                .collect()
+        }
+        DispatcherType::NoShuffle => resolve_no_shuffle_actor_dispatcher(
+            source_fragment_distribution,
+            source_fragment_actors,
+            target_fragment_distribution,
+            target_fragment_actors,
+        )
+        .into_iter()
+        .map(|(upstream_actor_id, downstream_actor_id)| {
+            (
+                upstream_actor_id,
+                PbDispatcher {
+                    r#type: PbDispatcherType::NoShuffle as _,
+                    dist_key_indices: dist_key_indices.clone(),
+                    output_indices: output_indices.clone(),
+                    hash_mapping: None,
+                    dispatcher_id: target_fragment_id as _,
+                    downstream_actor_id: vec![downstream_actor_id as _],
+                },
+            )
+        })
+        .collect(),
+    }
+}
+
+/// return (`upstream_actor_id` -> `downstream_actor_id`)
+pub fn resolve_no_shuffle_actor_dispatcher(
+    source_fragment_distribution: DistributionType,
+    source_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
+    target_fragment_distribution: DistributionType,
+    target_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
+) -> Vec<(ActorId, ActorId)> {
+    assert_eq!(source_fragment_distribution, target_fragment_distribution);
+    assert_eq!(
+        source_fragment_actors.len(),
+        target_fragment_actors.len(),
+        "no-shuffle should have equal upstream downstream actor count: {:?} {:?}",
+        source_fragment_actors,
+        target_fragment_actors
+    );
+    match source_fragment_distribution {
+        DistributionType::Single => {
+            let assert_singleton = |bitmap: &Option<Bitmap>| {
+                assert!(
+                    bitmap.as_ref().map(|bitmap| bitmap.all()).unwrap_or(true),
+                    "not singleton: {:?}",
+                    bitmap
+                );
+            };
+            assert_eq!(
+                source_fragment_actors.len(),
+                1,
+                "singleton distribution actor count not 1: {:?}",
+                source_fragment_distribution
+            );
+            assert_eq!(
+                target_fragment_actors.len(),
+                1,
+                "singleton distribution actor count not 1: {:?}",
+                target_fragment_distribution
+            );
+            let (source_actor_id, bitmap) = source_fragment_actors.iter().next().unwrap();
+            assert_singleton(bitmap);
+            let (target_actor_id, bitmap) = target_fragment_actors.iter().next().unwrap();
+            assert_singleton(bitmap);
+            vec![(*source_actor_id, *target_actor_id)]
+        }
+        DistributionType::Hash => {
+            let target_fragment_actors: HashMap<_, _> = target_fragment_actors
+                .iter()
+                .map(|(actor_id, bitmap)| {
+                    let bitmap = bitmap
+                        .as_ref()
+                        .expect("hash distribution should have bitmap");
+                    let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
+                    (first_vnode, (*actor_id, bitmap))
+                })
+                .collect();
+            source_fragment_actors
+                .iter()
+                .map(|(source_actor_id, bitmap)| {
+                    let bitmap = bitmap
+                        .as_ref()
+                        .expect("hash distribution should have bitmap");
+                    let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
+                    let (target_actor_id, target_bitmap) =
+                        target_fragment_actors.get(&first_vnode).unwrap_or_else(|| {
+                            panic!(
+                                "cannot find matched target actor: {} {:?} {:?} {:?}",
+                                source_actor_id,
+                                first_vnode,
+                                source_fragment_actors,
+                                target_fragment_actors
+                            );
+                        });
+                    assert_eq!(
+                        bitmap,
+                        *target_bitmap,
+                        "cannot find matched target actor due to bitmap mismatch: {} {:?} {:?} {:?}",
+                        source_actor_id,
+                        first_vnode,
+                        source_fragment_actors,
+                        target_fragment_actors
+                    );
+                    (*source_actor_id, *target_actor_id)
+                }).collect()
+        }
+    }
 }
 
 /// `get_fragment_mappings` returns the fragment vnode mappings of the given job.

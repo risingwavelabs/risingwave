@@ -95,7 +95,7 @@ impl Expression for CaseExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         for WhenClause { when, then } in &self.when_clauses {
-            if when.eval_row(input).await?.map_or(false, |w| w.into_bool()) {
+            if when.eval_row(input).await?.is_some_and(|w| w.into_bool()) {
                 return then.eval_row(input).await;
             }
         }

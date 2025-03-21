@@ -186,12 +186,12 @@ pub trait LogReader: Send + Sized + 'static {
     /// Reset the log reader to after the latest truncate offset
     ///
     /// The return flag means whether the log store support rewind
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: Send + 'static {
+    const ALLOW_REWIND: bool;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool;
     type Reader: LogReader;
     type Writer: LogWriter;
 
@@ -226,9 +226,7 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind()
     }
 }
@@ -273,9 +271,7 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().inspect_ok(|_| {
             self.wait_new_future_start_time = None;
         })
@@ -335,9 +331,7 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().instrument_await("log_reader_rewind")
     }
 }
@@ -546,9 +540,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
         }
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.core.unconsumed_chunk_queue.clear();
         self.core.consumed_offset_queue.clear();
         self.core.next_chunk_id = 0;
@@ -740,7 +732,7 @@ impl<F> DeliveryFutureManager<F> {
 
 pub struct DeliveryFutureManagerAddFuture<'a, F>(&'a mut DeliveryFutureManager<F>);
 
-impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'a, F> {
+impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'_, F> {
     /// Add a new future to the latest started written chunk.
     /// The returned bool value indicate whether we have awaited on any previous futures.
     pub async fn add_future_may_await(&mut self, future: F) -> Result<bool, F::Error> {

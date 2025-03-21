@@ -20,6 +20,7 @@ use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
 use risingwave_common_estimate_size::EstimateSize;
@@ -32,10 +33,12 @@ use risingwave_connector::sink::log_store::{
     LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, build_sink,
+    GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
 use thiserror_ext::AsReport;
+use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::oneshot;
 
 use crate::common::compact_chunk::{StreamChunkCompactor, merge_chunk_row};
 use crate::executor::prelude::*;
@@ -90,6 +93,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         info: ExecutorInfo,
         input: Executor,
         sink_writer_param: SinkWriterParam,
+        sink: SinkImpl,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
         log_store_factory: F,
@@ -97,8 +101,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_data_types: Vec<DataType>,
         rate_limit: Option<u32>,
     ) -> StreamExecutorResult<Self> {
-        let sink = build_sink(sink_param.clone())
-            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
@@ -249,6 +251,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             // Init the rate limit
             rate_limit_tx.send(self.rate_limit.into()).unwrap();
 
+            let (rebuild_sink_tx, rebuild_sink_rx) = unbounded_channel();
+
             self.log_store_factory
                 .build()
                 .map(move |(log_reader, log_writer)| {
@@ -257,6 +261,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
                         rate_limit_tx,
+                        rebuild_sink_tx,
                     );
 
                     let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
@@ -268,9 +273,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_writer_param,
                             self.actor_context,
                             rate_limit_rx,
+                            rebuild_sink_rx,
                         )
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
-                        .map_ok(|never| match never {}); // unify return type to `Message`
+                        .map_ok(|never| never); // unify return type to `Message`
 
                         consume_log_stream.boxed()
                     });
@@ -283,11 +289,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_write_log(
+    async fn execute_write_log<W: LogWriter>(
         input: impl MessageStream,
-        mut log_writer: impl LogWriter,
+        mut log_writer: W,
         actor_id: ActorId,
         rate_limit_tx: UnboundedSender<RateLimit>,
+        rebuild_sink_tx: UnboundedSender<(Arc<Bitmap>, oneshot::Sender<()>)>,
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
@@ -320,6 +327,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let mutation = barrier.mutation.clone();
                     yield Message::Barrier(barrier);
+                    if F::REBUILD_SINK_ON_UPDATE_VNODE_BITMAP
+                        && let Some(new_vnode_bitmap) = update_vnode_bitmap.clone()
+                    {
+                        let (tx, rx) = oneshot::channel();
+                        rebuild_sink_tx
+                            .send((new_vnode_bitmap, tx))
+                            .map_err(|_| anyhow!("fail to send rebuild sink to reader"))?;
+                        rx.await
+                            .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
+                    }
                     post_flush.post_yield_barrier(update_vnode_bitmap).await?;
 
                     if let Some(mutation) = mutation.as_deref() {
@@ -486,6 +503,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn execute_consume_log<S: Sink, R: LogReader>(
         sink: S,
         log_reader: R,
@@ -494,6 +512,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
+        mut rebuild_sink_rx: UnboundedReceiver<(Arc<Bitmap>, oneshot::Sender<()>)>,
     ) -> StreamExecutorResult<!> {
         let visible_columns = columns
             .iter()
@@ -539,55 +558,72 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .monitored(metrics)
             .rate_limited(rate_limit_rx);
 
-        log_reader.init().await?;
+        loop {
+            let future = async {
+                log_reader.init().await?;
 
-        #[expect(irrefutable_let_patterns)] // false positive
-        while let Err(e) = sink
-            .new_log_sinker(sink_writer_param.clone())
-            .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
-            .await
-        {
-            GLOBAL_ERROR_METRICS.user_sink_error.report([
-                "sink_executor_error".to_owned(),
-                sink_param.sink_id.to_string(),
-                sink_param.sink_name.clone(),
-                actor_context.fragment_id.to_string(),
-            ]);
+                loop {
+                    let Err(e) = sink
+                        .new_log_sinker(sink_writer_param.clone())
+                        .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
+                        .await;
+                    GLOBAL_ERROR_METRICS.user_sink_error.report([
+                        "sink_executor_error".to_owned(),
+                        sink_param.sink_id.to_string(),
+                        sink_param.sink_name.clone(),
+                        actor_context.fragment_id.to_string(),
+                    ]);
 
-            if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
-                meta_client
-                    .add_sink_fail_evet_log(
-                        sink_writer_param.sink_id.sink_id,
-                        sink_writer_param.sink_name.clone(),
-                        sink_writer_param.connector.clone(),
-                        e.to_report_string(),
-                    )
-                    .await;
-            }
+                    if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
+                        meta_client
+                            .add_sink_fail_evet_log(
+                                sink_writer_param.sink_id.sink_id,
+                                sink_writer_param.sink_name.clone(),
+                                sink_writer_param.connector.clone(),
+                                e.to_report_string(),
+                            )
+                            .await;
+                    }
 
-            match log_reader.rewind().await {
-                Ok((true, curr_vnode_bitmap)) => {
-                    warn!(
-                        error = %e.as_report(),
-                        executor_id = sink_writer_param.executor_id,
-                        sink_id = sink_param.sink_id.sink_id,
-                        "rewind successfully after sink error"
-                    );
-                    sink_writer_param.vnode_bitmap = curr_vnode_bitmap;
-                    Ok(())
+                    if F::ALLOW_REWIND {
+                        match log_reader.rewind().await {
+                            Ok(()) => {
+                                warn!(
+                                    error = %e.as_report(),
+                                    executor_id = sink_writer_param.executor_id,
+                                    sink_id = sink_param.sink_id.sink_id,
+                                    "rewind successfully after sink error"
+                                );
+                                Ok(())
+                            }
+                            Err(rewind_err) => {
+                                error!(
+                                    error = %rewind_err.as_report(),
+                                    "fail to rewind log reader"
+                                );
+                                Err(e)
+                            }
+                        }
+                    } else {
+                        Err(e)
+                    }
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                 }
-                Ok((false, _)) => Err(e),
-                Err(rewind_err) => {
-                    error!(
-                        error = %rewind_err.as_report(),
-                        "fail to rewind log reader"
-                    );
-                    Err(e)
+            };
+            select! {
+                result = future => {
+                    let Err(e): StreamExecutorResult<!> = result;
+                    return Err(e);
+                }
+                result = rebuild_sink_rx.recv() => {
+                    let (new_vnode, notify) = result.ok_or_else(|| anyhow!("failed to receive rebuild sink notify"))?;
+                    sink_writer_param.vnode_bitmap = Some((*new_vnode).clone());
+                    if notify.send(()).is_err() {
+                        warn!("failed to notify rebuild sink");
+                    }
                 }
             }
-            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
         }
-        Err(anyhow!("end of stream").into())
     }
 }
 
@@ -601,6 +637,7 @@ impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_connector::sink::build_sink;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -685,11 +722,14 @@ mod test {
             identity: "SinkExecutor".to_owned(),
         };
 
+        let sink = build_sink(sink_param.clone()).unwrap();
+
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
             source,
             SinkWriterParam::for_test(),
+            sink,
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
@@ -815,11 +855,14 @@ mod test {
             identity: "SinkExecutor".to_owned(),
         };
 
+        let sink = build_sink(sink_param.clone()).unwrap();
+
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
             source,
             SinkWriterParam::for_test(),
+            sink,
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::new(1),
@@ -918,11 +961,14 @@ mod test {
             identity: "SinkExecutor".to_owned(),
         };
 
+        let sink = build_sink(sink_param.clone()).unwrap();
+
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
             source,
             SinkWriterParam::for_test(),
+            sink,
             sink_param,
             columns,
             BoundedInMemLogStoreFactory::new(1),

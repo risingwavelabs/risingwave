@@ -101,9 +101,7 @@ impl CatalogController {
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let rename_flag = update_fields
-            .iter()
-            .any(|&field| field == PbUpdateField::Rename);
+        let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
             check_user_name_duplicate(&update_user.name, &inner.db).await?;
         }
@@ -221,6 +219,7 @@ impl CatalogController {
         user_ids: Vec<UserId>,
         new_grant_privileges: &[PbGrantPrivilege],
         grantor: UserId,
+        with_grant_option: bool,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -239,7 +238,7 @@ impl CatalogController {
                     oid: Set(id),
                     granted_by: Set(grantor),
                     action: Set(action),
-                    with_grant_option: Set(action_with_opt.with_grant_option),
+                    with_grant_option: Set(with_grant_option),
                     ..Default::default()
                 });
                 if action == Action::Select {
@@ -251,7 +250,7 @@ impl CatalogController {
                                 oid: Set(tid),
                                 granted_by: Set(grantor),
                                 action: Set(Action::Select),
-                                with_grant_option: Set(action_with_opt.with_grant_option),
+                                with_grant_option: Set(with_grant_option),
                                 ..Default::default()
                             }),
                     );
@@ -264,9 +263,11 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", grantor))?;
+        let mut filtered_privileges = vec![];
         if !user.is_super {
-            for privilege in &mut privileges {
+            for mut privilege in privileges {
                 if grantor == get_object_owner(*privilege.oid.as_ref(), &txn).await? {
+                    filtered_privileges.push(privilege);
                     continue;
                 }
                 let filter = user_privilege::Column::UserId
@@ -282,20 +283,25 @@ impl CatalogController {
                     .one(&txn)
                     .await?;
                 let Some(privilege_id) = privilege_id else {
-                    return Err(MetaError::permission_denied(format!(
+                    tracing::warn!(
                         "user {} don't have privilege {:?} or grant option",
-                        grantor, privilege.action,
-                    )));
+                        grantor,
+                        privilege.action
+                    );
+                    continue;
                 };
                 privilege.dependent_id = Set(Some(privilege_id));
+                filtered_privileges.push(privilege);
             }
+        } else {
+            filtered_privileges = privileges;
         }
 
         // insert privileges
         let user_privileges = user_ids
             .iter()
             .flat_map(|user_id| {
-                privileges.iter().map(|p| {
+                filtered_privileges.iter().map(|p| {
                     let mut p = p.clone();
                     p.user_id = Set(*user_id);
                     p
@@ -579,6 +585,7 @@ mod tests {
             vec![user_1.user_id],
             &[conn_with_option.clone()],
             TEST_ROOT_USER_ID,
+            true,
         )
         .await?;
         // ROOT grant CREATE without grant option to user_1.
@@ -586,6 +593,7 @@ mod tests {
             vec![user_1.user_id],
             &[create_without_option.clone()],
             TEST_ROOT_USER_ID,
+            false,
         )
         .await?;
         // user_1 grant CONN with grant option to user_2.
@@ -593,19 +601,16 @@ mod tests {
             vec![user_2.user_id],
             &[conn_with_option.clone()],
             user_1.user_id,
+            true,
         )
         .await?;
-        // user_1 grant CREATE without grant option to user_2.
-        assert!(
-            mgr.grant_privilege(
-                vec![user_2.user_id],
-                &[create_without_option.clone()],
-                user_1.user_id
-            )
-            .await
-            .is_err(),
-            "user_1 don't have grant option"
-        );
+        mgr.grant_privilege(
+            vec![user_2.user_id],
+            &[create_without_option.clone()],
+            user_1.user_id,
+            false,
+        )
+        .await?;
 
         assert!(
             mgr.drop_user(user_1.user_id).await.is_err(),

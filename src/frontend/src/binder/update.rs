@@ -16,9 +16,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::types::StructType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -128,8 +130,17 @@ impl Binder {
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundUpdate> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let table = self.bind_table(schema_name.as_deref(), &table_name)?;
 
-        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+        let table_catalog = &table.table_catalog;
+        Self::check_for_dml(table_catalog, false)?;
+        self.check_privilege(
+            PbObject::TableId(table_catalog.id.table_id),
+            table_catalog.database_id,
+            AclMode::Update,
+            table_catalog.owner,
+        )?;
+
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         if !returning_items.is_empty() && table_catalog.has_generated_column() {
@@ -142,8 +153,6 @@ impl Binder {
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
         let cols_refed_by_generated_pk = get_col_referenced_by_generated_pk(table_catalog)?;
-
-        let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 

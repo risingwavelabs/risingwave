@@ -11,7 +11,7 @@
 // limitations under the License.
 use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
 use winnow::error::ContextError;
-use winnow::{PResult, Parser};
+use winnow::{ModalParser, ModalResult, Parser};
 
 use super::{ParserExt, TokenStream, data_type, token};
 use crate::ast::Expr;
@@ -19,7 +19,7 @@ use crate::keywords::Keyword;
 use crate::parser::Precedence;
 use crate::tokenizer::Token;
 
-fn expr_parse<S>(input: &mut S) -> PResult<Expr>
+fn expr_parse<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -30,7 +30,7 @@ where
     .parse_next(input)
 }
 
-fn subexpr<S>(precedence: Precedence) -> impl Parser<S, Expr, ContextError>
+fn subexpr<S>(precedence: Precedence) -> impl ModalParser<S, Expr, ContextError>
 where
     S: TokenStream,
 {
@@ -40,7 +40,7 @@ where
     })
 }
 
-pub fn expr_case<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_case<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -73,7 +73,7 @@ where
 }
 
 /// Consume a SQL CAST function e.g. `CAST(expr AS FLOAT)`
-pub fn expr_cast<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_cast<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -89,7 +89,7 @@ where
 }
 
 /// Consume a SQL TRY_CAST function e.g. `TRY_CAST(expr AS FLOAT)`
-pub fn expr_try_cast<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_try_cast<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -105,7 +105,7 @@ where
 }
 
 /// Consume a SQL EXTRACT function e.g. `EXTRACT(YEAR FROM expr)`
-pub fn expr_extract<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_extract<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -129,7 +129,7 @@ where
 }
 
 /// Consume `SUBSTRING (EXPR [FROM 1] [FOR 3])`
-pub fn expr_substring<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_substring<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -153,7 +153,7 @@ where
 }
 
 /// `POSITION(<expr> IN <expr>)`
-pub fn expr_position<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_position<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
@@ -172,7 +172,7 @@ where
 }
 
 /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
-pub fn expr_overlay<S>(input: &mut S) -> PResult<Expr>
+pub fn expr_overlay<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {

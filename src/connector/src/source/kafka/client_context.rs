@@ -36,6 +36,7 @@ struct IamAuthEnv {
     // XXX(runji): madsim does not support `Handle` for now
     #[cfg(not(madsim))]
     rt: tokio::runtime::Handle,
+    signer_timeout_sec: u64,
 }
 
 pub struct KafkaContextCommon {
@@ -76,6 +77,9 @@ impl KafkaContextCommon {
                 region,
                 #[cfg(not(madsim))]
                 rt: tokio::runtime::Handle::current(),
+                signer_timeout_sec: auth
+                    .msk_signer_timeout_sec
+                    .unwrap_or(Self::default_msk_signer_timeout_sec()),
             })
         } else {
             None
@@ -86,6 +90,10 @@ impl KafkaContextCommon {
             metrics,
             auth,
         })
+    }
+
+    fn default_msk_signer_timeout_sec() -> u64 {
+        10
     }
 }
 
@@ -115,16 +123,18 @@ impl KafkaContextCommon {
             credentials_provider,
             region,
             rt,
+            signer_timeout_sec,
         }) = &self.auth
         {
             let region = region.clone();
             let credentials_provider = credentials_provider.clone();
             let rt = rt.clone();
+            let signer_timeout_sec = *signer_timeout_sec;
             let (token, expiration_time_ms) = {
                 let handle = thread::spawn(move || {
                     rt.block_on(async {
                         timeout(
-                            Duration::from_secs(10),
+                            Duration::from_secs(signer_timeout_sec),
                             generate_auth_token_from_credentials_provider(
                                 region,
                                 credentials_provider,

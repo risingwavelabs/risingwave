@@ -179,10 +179,8 @@ impl MonotonicityAnalyzer {
 
         fn time_zone_is_without_dst(time_zone: Option<&str>) -> bool {
             #[allow(clippy::let_and_return)] // to make it more readable
-            let tz_is_utc = time_zone.map_or(
-                false, // conservative
-                |time_zone| time_zone.eq_ignore_ascii_case("UTC"),
-            );
+            let tz_is_utc =
+                time_zone.is_some_and(|time_zone| time_zone.eq_ignore_ascii_case("UTC"));
             tz_is_utc // conservative
         }
 
@@ -282,10 +280,9 @@ impl MonotonicityAnalyzer {
                         .map(|interval| interval.as_interval()),
                     _ => return Inherent(Unknown),
                 };
-                let quantitative_only = interval.map_or(
-                    true, // null interval is treated as `interval '1' second`
-                    |v| v.months() == 0 && (v.days() == 0 || time_zone_is_without_dst(time_zone)),
-                );
+                let quantitative_only = interval.is_none_or(|v| {
+                    v.months() == 0 && (v.days() == 0 || time_zone_is_without_dst(time_zone))
+                });
                 match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
                     (Inherent(Constant), _) => Inherent(Constant),
                     (any, true) => any,

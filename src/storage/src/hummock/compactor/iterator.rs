@@ -312,7 +312,7 @@ impl SstableStreamIterator {
 
     pub fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     fn sst_debug_info(&self) -> String {
@@ -521,7 +521,7 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.sstable_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

@@ -106,8 +106,21 @@ pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 pub enum CatalogError {
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
-    #[error("{0} with name {1} exists")]
-    Duplicated(&'static str, String),
+    #[error(
+        "{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
+    )]
+    Duplicated(
+        &'static str,
+        String,
+        // whether the object is under creation
+        bool,
+    ),
+}
+
+impl CatalogError {
+    pub fn duplicated(object_type: &'static str, name: String) -> Self {
+        Self::Duplicated(object_type, name, false)
+    }
 }
 
 impl From<CatalogError> for RwError {

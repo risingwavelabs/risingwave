@@ -18,12 +18,10 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_meta_model::StreamingParallelism;
-use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
@@ -34,7 +32,10 @@ use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamJobFragments, TableParallelism};
+use crate::model::{
+    ActorId, FragmentActorDispatchers, StreamActor, StreamActorWithDispatchers, StreamJobFragments,
+    TableParallelism,
+};
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange,
@@ -292,6 +293,20 @@ impl GlobalBarrierWorkerContextImpl {
                         warn!(error = %err.as_report(), "update actors failed");
                     })?;
 
+                    let stream_actor_dispatchers = self
+                        .metadata_manager
+                        .catalog_controller
+                        .get_fragment_actor_dispatchers(
+                            info.values()
+                                .flat_map(|database| database.fragment_infos())
+                                .map(|fragment| fragment.fragment_id as _)
+                                .collect(),
+                        )
+                        .await?;
+
+                    let stream_actors =
+                        Self::fill_dispatchers(stream_actors, stream_actor_dispatchers);
+
                     let background_jobs = {
                         let jobs = self
                             .list_background_mv_progress()
@@ -421,10 +436,22 @@ impl GlobalBarrierWorkerContextImpl {
             mv_depended_subscriptions,
         };
 
+        let stream_actor_dispatchers = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_actor_dispatchers(
+                info.fragment_infos()
+                    .map(|fragment| fragment.fragment_id as _)
+                    .collect(),
+            )
+            .await?;
+
         // update and build all actors.
         let stream_actors = self.load_all_actors().await.inspect_err(|err| {
             warn!(error = %err.as_report(), "update actors failed");
         })?;
+
+        let stream_actors = Self::fill_dispatchers(stream_actors, stream_actor_dispatchers);
 
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
@@ -436,6 +463,22 @@ impl GlobalBarrierWorkerContextImpl {
             source_splits,
             background_jobs,
         }))
+    }
+
+    fn fill_dispatchers(
+        actors: HashMap<ActorId, StreamActor>,
+        mut dispatchers: FragmentActorDispatchers,
+    ) -> HashMap<ActorId, StreamActorWithDispatchers> {
+        actors
+            .into_iter()
+            .map(|(actor_id, actor)| {
+                let dispatchers = dispatchers
+                    .get_mut(&(actor.fragment_id as _))
+                    .and_then(|dispatchers| dispatchers.remove(&(actor.actor_id as _)))
+                    .unwrap_or_default();
+                (actor_id, (actor, dispatchers))
+            })
+            .collect()
     }
 }
 
@@ -598,8 +641,8 @@ impl GlobalBarrierWorkerContextImpl {
             Ok(_) => {
                 info!("integrity check passed");
             }
-            Err(_) => {
-                bail!("integrity check failed");
+            Err(e) => {
+                return Err(anyhow!(e).context("integrity check failed").into());
             }
         }
 
@@ -684,47 +727,68 @@ impl GlobalBarrierWorkerContextImpl {
             reschedule_targets
         );
 
-        let plan = self
-            .scale_controller
-            .generate_job_reschedule_plan(JobReschedulePolicy {
-                targets: reschedule_targets,
-            })
-            .await?;
+        let reschedule_targets = reschedule_targets.into_iter().collect_vec();
 
-        let mut compared_table_parallelisms = table_parallelisms.clone();
-
-        // skip reschedule if no reschedule is generated.
-        let reschedule_fragment = if plan.reschedules.is_empty() {
-            HashMap::new()
-        } else {
-            self.scale_controller
-                .analyze_reschedule_plan(
-                    plan.reschedules,
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream: true,
-                        skip_create_new_actors: true,
-                    },
-                    &mut compared_table_parallelisms,
-                )
-                .await?
-        };
-
-        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
-
-        info!("post applying reschedule for offline scaling");
-
-        if let Err(e) = self
-            .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
-            .await
+        for chunk in reschedule_targets
+            .chunks(self.env.opts.parallelism_control_batch_size.max(1))
+            .map(|c| c.to_vec())
         {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to apply reschedule for offline scaling in recovery",
-            );
+            let local_reschedule_targets: HashMap<u32, _> = chunk.into_iter().collect();
 
-            return Err(e);
+            let reschedule_ids = local_reschedule_targets.keys().copied().collect_vec();
+
+            info!(jobs=?reschedule_ids,"generating reschedule plan for jobs in offline scaling");
+
+            let plan = self
+                .scale_controller
+                .generate_job_reschedule_plan(JobReschedulePolicy {
+                    targets: local_reschedule_targets,
+                })
+                .await?;
+
+            // no need to update
+            if plan.reschedules.is_empty() && plan.post_updates.parallelism_updates.is_empty() {
+                info!(jobs=?reschedule_ids,"no plan generated for jobs in offline scaling");
+                continue;
+            };
+
+            let mut compared_table_parallelisms = table_parallelisms.clone();
+
+            // skip reschedule if no reschedule is generated.
+            let reschedule_fragment = if plan.reschedules.is_empty() {
+                HashMap::new()
+            } else {
+                self.scale_controller
+                    .analyze_reschedule_plan(
+                        plan.reschedules,
+                        RescheduleOptions {
+                            resolve_no_shuffle_upstream: true,
+                            skip_create_new_actors: true,
+                        },
+                        &mut compared_table_parallelisms,
+                    )
+                    .await?
+            };
+
+            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
+            info!(jobs=?reschedule_ids,"post applying reschedule for jobs in offline scaling");
+
+            if let Err(e) = self
+                .scale_controller
+                .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
+                .await
+            {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to apply reschedule for offline scaling in recovery",
+                );
+
+                return Err(e);
+            }
+
+            info!(jobs=?reschedule_ids,"post applied reschedule for jobs in offline scaling");
         }
 
         info!("scaling actors succeed.");

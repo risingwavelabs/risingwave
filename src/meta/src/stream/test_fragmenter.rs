@@ -474,6 +474,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let ActorGraphBuildResult {
         graph,
         actor_upstreams,
+        actor_dispatchers,
         ..
     } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
@@ -484,16 +485,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert_eq!(actors.len(), 9);
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
-
-    let fragment_upstreams: HashMap<_, _> = stream_job_fragments
-        .fragments
-        .iter()
-        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
-        .collect();
-
-    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
-    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
@@ -519,15 +510,18 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     for actor in actors {
         assert_eq!(
-            expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor
-                .dispatcher
+            expected_downstream.get(&actor.actor_id).unwrap(),
+            actor_dispatchers
+                .get(&actor.fragment_id)
+                .unwrap()
+                .get(&actor.actor_id)
+                .unwrap()
                 .first()
                 .map_or(&vec![], |d| d.get_downstream_actor_id()),
         );
     }
     for fragment in stream_job_fragments.fragments() {
-        let mut node = fragment.get_nodes().unwrap();
+        let mut node = &fragment.nodes;
         while !node.get_input().is_empty() {
             node = node.get_input().first().unwrap();
         }
@@ -536,7 +530,7 @@ async fn test_graph_builder() -> MetaResult<()> {
                 for actor in &fragment.actors {
                     assert_eq!(
                         expected_upstream
-                            .get(&actor.get_actor_id())
+                            .get(&actor.actor_id)
                             .unwrap()
                             .iter()
                             .collect::<HashSet<_>>(),

@@ -38,12 +38,12 @@ use std::collections::HashMap;
 use std::fs;
 
 use anyhow::Context;
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_common::catalog::Field;
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-use super::avro::{MapHandling, avro_schema_to_column_descs};
+use super::avro::{MapHandling, avro_schema_to_fields};
 
 #[derive(Debug, Error, thiserror_ext::ContextInto)]
 pub enum Error {
@@ -201,13 +201,13 @@ impl crate::JsonSchema {
     pub async fn json_schema_to_columns(
         &mut self,
         retrieval_url: Url,
-    ) -> anyhow::Result<Vec<ColumnDesc>> {
+    ) -> anyhow::Result<Vec<Field>> {
         JsonRef::new()
             .deref_value(&mut self.0, &retrieval_url)
             .await?;
         let avro_schema = jst::convert_avro(&self.0, jst::Context::default()).to_string();
         let schema =
             apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
-        avro_schema_to_column_descs(&schema, Some(MapHandling::Jsonb)).map_err(Into::into)
+        avro_schema_to_fields(&schema, Some(MapHandling::Jsonb))
     }
 }

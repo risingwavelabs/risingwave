@@ -55,7 +55,10 @@ public class JDBCSink implements SinkWriter {
         try {
             conn =
                     JdbcUtils.getConnection(
-                            config.getJdbcUrl(), config.getUser(), config.getPassword());
+                            config.getJdbcUrl(),
+                            config.getUser(),
+                            config.getPassword(),
+                            config.isAutoCommit());
             // Table schema has been validated before, so we get the PK from it directly
             this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
@@ -94,7 +97,9 @@ public class JDBCSink implements SinkWriter {
                     conn.getAutoCommit(),
                     conn.getTransactionIsolation());
             // Commit the `getTransactionIsolation`
-            conn.commit();
+            if (!conn.getAutoCommit()) {
+                conn.commit();
+            }
 
             jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
         } catch (SQLException e) {
@@ -178,6 +183,10 @@ public class JDBCSink implements SinkWriter {
                         LOG.info("Recreate the JDBC connection due to connection broken");
                         // close the statements and connection first
                         jdbcStatements.close();
+                        if (!conn.getAutoCommit()) {
+                            LOG.info("rollback the transaction");
+                            conn.rollback();
+                        }
                         conn.close();
 
                         // create a new connection if the current connection is invalid
@@ -185,7 +194,8 @@ public class JDBCSink implements SinkWriter {
                                 JdbcUtils.getConnection(
                                         config.getJdbcUrl(),
                                         config.getUser(),
-                                        config.getPassword());
+                                        config.getPassword(),
+                                        config.isAutoCommit());
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
                         jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
@@ -341,7 +351,9 @@ public class JDBCSink implements SinkWriter {
             executeStatement(this.upsertStatement);
             executeStatement(this.insertStatement);
 
-            this.conn.commit();
+            if (!conn.getAutoCommit()) {
+                this.conn.commit();
+            }
         }
 
         @Override
@@ -394,6 +406,10 @@ public class JDBCSink implements SinkWriter {
 
         try {
             if (conn != null) {
+                if (!conn.getAutoCommit()) {
+                    LOG.info("rollback the transaction");
+                    conn.rollback();
+                }
                 conn.close();
             }
         } catch (SQLException e) {

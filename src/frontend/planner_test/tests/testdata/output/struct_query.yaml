@@ -428,3 +428,13 @@
   logical_plan: |-
     LogicalProject { exprs: [Case(false:Boolean, Row(0:Int32::Decimal, '00:00:01':Interval), true:Boolean, Row(1.1:Decimal, '00:00:01':Interval), Row(1:Int32::Decimal, '00:00:01':Interval)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: struct column insert field number mismatches 1
+  sql: |
+    create table t (v struct<a int, b int>);
+    insert into t values (ROW(1, 2, 3));
+  binder_error: input has too many columns, expected 2 but got 3
+- name: struct column insert field number mismatches 2
+  sql: |
+    create table t (v struct<a int, b int>);
+    insert into t values (ROW(1));
+  binder_error: input has too few columns, expected 2 but got 1

@@ -335,7 +335,7 @@ impl Sink for MongodbSink {
                 )));
             }
 
-            if !self.is_append_only && self.pk_indices.iter().any(|idx| *idx == coll_field_index) {
+            if !self.is_append_only && self.pk_indices.contains(&coll_field_index) {
                 return Err(SinkError::Config(anyhow!(
                     "collection.name.field {} must not be equal to the primary key field",
                     coll_field

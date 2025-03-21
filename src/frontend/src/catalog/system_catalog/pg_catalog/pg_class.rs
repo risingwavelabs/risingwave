@@ -163,6 +163,20 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relispartition: false,
                     relpartbound: None,
                 }))
+                .chain(schema.iter_connections().map(|connection| PgClass {
+                    oid: connection.id as i32,
+                    relname: connection.name.clone(),
+                    relnamespace: schema.id() as i32,
+                    relowner: connection.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "c".to_owned(), // c for the connection in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
         })
         .collect())
 }

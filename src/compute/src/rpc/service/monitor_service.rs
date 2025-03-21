@@ -16,23 +16,25 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
+use regex::Regex;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetStreamingStatsRequest,
-    GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
-    TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
+    GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -70,6 +72,39 @@ impl MonitorServiceImpl {
     }
 }
 
+static REPLACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    const REGEX_STR: &str = r"consume_log \(sink_id (?<sink_id>\d+)\) \[!!! ";
+    Regex::new(REGEX_STR).unwrap()
+});
+
+fn rewrite_false_positive_consume_log_entry(trace: String) -> String {
+    // transform:
+    //  consume_log (sink_id 346) [!!! 3490.450s]
+    // into:
+    //  consume_log (sink_id 346) [3490.450s]
+    REPLACE_REGEX
+        .replace_all(&trace, r"consume_log (sink_id $sink_id) [")
+        .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::rpc::service::monitor_service::{
+        REPLACE_REGEX, rewrite_false_positive_consume_log_entry,
+    };
+
+    #[test]
+    fn test_rewrite_false_positive_consume_log_entry() {
+        assert!(REPLACE_REGEX.is_match("consume_log (sink_id 346) [!!! 3490.450s]"));
+        assert_eq!(
+            "consume_log (sink_id 346) [3490.450s]",
+            &rewrite_false_positive_consume_log_entry(
+                "consume_log (sink_id 346) [!!! 3490.450s]".into()
+            )
+        );
+    }
+}
+
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
     #[cfg_attr(coverage, coverage(off))]
@@ -82,7 +117,7 @@ impl MonitorService for MonitorServiceImpl {
         let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k.0, v.to_string()))
+                .map(|(k, v)| (k.0, rewrite_false_positive_consume_log_entry(v.to_string())))
                 .collect()
         } else {
             Default::default()
@@ -286,6 +321,24 @@ impl MonitorService for MonitorServiceImpl {
 
         let file = fs::read(Path::new(&collapsed_path_str))?;
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
+    }
+
+    async fn get_profile_stats(
+        &self,
+        request: Request<GetProfileStatsRequest>,
+    ) -> Result<Response<GetProfileStatsResponse>, Status> {
+        let metrics = global_streaming_metrics(MetricLevel::Info);
+        let operator_ids = &request.into_inner().operator_ids;
+        let stream_node_output_row_count = metrics
+            .mem_stream_node_output_row_count
+            .collect(operator_ids);
+        let stream_node_output_blocking_duration_ms = metrics
+            .mem_stream_node_output_blocking_duration_ms
+            .collect(operator_ids);
+        Ok(Response::new(GetProfileStatsResponse {
+            stream_node_output_row_count,
+            stream_node_output_blocking_duration_ms,
+        }))
     }
 
     #[cfg_attr(coverage, coverage(off))]

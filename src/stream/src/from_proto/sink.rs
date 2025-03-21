@@ -24,6 +24,7 @@ use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
+    build_sink,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -75,7 +76,7 @@ fn validate_payload_schema(
     if log_store_payload_schema
         .iter()
         .zip_eq(input_schema.fields.iter())
-        .map(|(log_store_col, input_field)| {
+        .all(|(log_store_col, input_field)| {
             let log_store_col_type = DataType::from(
                 log_store_col
                     .column_desc
@@ -87,7 +88,6 @@ fn validate_payload_schema(
             );
             log_store_col_type.equals_datatype(&input_field.data_type)
         })
-        .all(|equal| equal)
     {
         Ok(())
     } else {
@@ -231,6 +231,9 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector, sink_id.sink_id, params.executor_id
         );
 
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
@@ -241,6 +244,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
@@ -263,6 +267,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
+                let align_init_epoch = sink.is_coordinated_sink();
+
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -272,6 +278,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
+                    align_init_epoch,
                 );
 
                 SinkExecutor::new(
@@ -279,6 +286,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,

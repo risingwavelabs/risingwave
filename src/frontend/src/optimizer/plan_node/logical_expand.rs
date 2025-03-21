@@ -79,7 +79,6 @@ impl PlanTreeNodeUnary for LogicalExpand {
         Self::new(input, self.column_subsets().clone())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

@@ -186,6 +186,7 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
     }
 }
 
+#[expect(dead_code)]
 pub fn spawn_compaction_client(
     config: &IcebergConfig,
 ) -> anyhow::Result<(mpsc::UnboundedSender<()>, oneshot::Sender<()>)> {

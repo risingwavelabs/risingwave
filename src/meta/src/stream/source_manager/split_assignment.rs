@@ -15,6 +15,7 @@
 use itertools::Itertools;
 
 use super::*;
+use crate::model::{FragmentActorDispatchers, StreamJobFragments};
 
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
@@ -92,12 +93,11 @@ impl SourceManager {
     }
 
     /// Allocates splits to actors for a newly created source executor.
-    pub async fn allocate_splits(&self, job_id: &TableId) -> MetaResult<SplitAssignment> {
+    pub async fn allocate_splits(
+        &self,
+        table_fragments: &StreamJobFragments,
+    ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
-        let table_fragments = core
-            .metadata_manager
-            .get_job_fragments_by_id(job_id)
-            .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();
 
@@ -146,20 +146,16 @@ impl SourceManager {
     /// Allocates splits to actors for replace source job.
     pub async fn allocate_splits_for_replace_source(
         &self,
-        job_id: &TableId,
+        table_fragments: &StreamJobFragments,
         merge_updates: &HashMap<FragmentId, Vec<MergeUpdate>>,
     ) -> MetaResult<SplitAssignment> {
         tracing::debug!(?merge_updates, "allocate_splits_for_replace_source");
         if merge_updates.is_empty() {
             // no existing downstream. We can just re-allocate splits arbitrarily.
-            return self.allocate_splits(job_id).await;
+            return self.allocate_splits(table_fragments).await;
         }
 
         let core = self.core.lock().await;
-        let table_fragments = core
-            .metadata_manager
-            .get_job_fragments_by_id(job_id)
-            .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();
         assert_eq!(
@@ -234,15 +230,11 @@ impl SourceManager {
     /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_splits`]).
     pub async fn allocate_splits_for_backfill(
         &self,
-        table_id: &TableId,
+        table_fragments: &StreamJobFragments,
         // dispatchers from SourceExecutor to SourceBackfillExecutor
-        dispatchers: &HashMap<FragmentId, HashMap<ActorId, Vec<Dispatcher>>>,
+        dispatchers: &FragmentActorDispatchers,
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
-        let table_fragments = core
-            .metadata_manager
-            .get_job_fragments_by_id(table_id)
-            .await?;
 
         let source_backfill_fragments = table_fragments.source_backfill_fragments()?;
 

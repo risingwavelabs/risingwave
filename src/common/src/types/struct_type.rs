@@ -17,9 +17,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use itertools::Itertools;
+use either::Either;
+use itertools::{Itertools, repeat_n};
 
 use super::DataType;
+use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
 
 /// A cheaply cloneable struct type.
@@ -28,18 +30,34 @@ pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StructType")
-            .field("fields", &self.0.fields)
-            .finish()
+        let alternate = f.alternate();
+
+        let mut d = f.debug_struct("StructType");
+        d.field("fields", &self.0.fields);
+        if let Some(ids) = &self.0.field_ids
+        // TODO: This is for making `EXPLAIN` output more concise, but it hurts the readability
+        // for testing and debugging. Avoid using `Debug` repr in `EXPLAIN` output instead.
+            && alternate
+        {
+            d.field("field_ids", ids);
+        }
+        d.finish()
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
     /// If fields are unnamed, the names will be `f1`, `f2`, etc.
     fields: Box<[(String, DataType)]>,
+
+    /// The ids of the fields. Used in serialization for nested-schema evolution purposes.
+    ///
+    /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
+    /// in a new version of the catalog that supports nested-schema evolution.
+    field_ids: Option<Box<[ColumnId]>>,
+
     /// Whether the fields are unnamed.
     is_unnamed: bool,
 }
@@ -54,6 +72,7 @@ impl StructType {
 
         Self(Arc::new(StructTypeInner {
             fields,
+            field_ids: None,
             is_unnamed: false,
         }))
     }
@@ -74,8 +93,31 @@ impl StructType {
 
         Self(Arc::new(StructTypeInner {
             fields,
+            field_ids: None,
             is_unnamed: true,
         }))
+    }
+
+    /// Attaches given field ids to the struct type.
+    pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
+        let ids: Box<[ColumnId]> = ids.into_iter().collect();
+
+        assert_eq!(ids.len(), self.len(), "ids length mismatches");
+        assert!(
+            ids.iter().all(|id| *id != ColumnId::placeholder()),
+            "ids should not contain placeholder value"
+        );
+
+        let mut inner = Arc::unwrap_or_clone(self.0);
+        inner.field_ids = Some(ids);
+        Self(Arc::new(inner))
+    }
+
+    /// Whether the struct type has field ids.
+    ///
+    /// Note that this does not recursively check whether composite fields have ids.
+    pub fn has_ids(&self) -> bool {
+        self.0.field_ids.is_some()
     }
 
     /// Whether the fields are unnamed.
@@ -105,6 +147,11 @@ impl StructType {
         self.0.fields.iter().map(|(_, ty)| ty)
     }
 
+    /// Gets the type of a field by index.
+    pub fn type_at(&self, index: usize) -> &DataType {
+        &self.0.fields[index].1
+    }
+
     /// Gets an iterator over the fields.
     ///
     /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
@@ -112,7 +159,23 @@ impl StructType {
         self.0.fields.iter().map(|(name, ty)| (name.as_str(), ty))
     }
 
-    /// Compares the datatype with another, ignoring nested field names and metadata.
+    /// Gets an iterator over the field ids.
+    ///
+    /// Returns `None` if they are not present. See documentation on the field `field_ids`
+    /// for the cases.
+    pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
+        self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
+    }
+
+    /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
+    pub fn ids_or_placeholder(&self) -> impl ExactSizeIterator<Item = ColumnId> + '_ {
+        match self.ids() {
+            Some(ids) => Either::Left(ids),
+            None => Either::Right(repeat_n(ColumnId::placeholder(), self.len())),
+        }
+    }
+
+    /// Compares the datatype with another, ignoring nested field names and ids.
     pub fn equals_datatype(&self, other: &StructType) -> bool {
         if self.len() != other.len() {
             return false;

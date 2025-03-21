@@ -756,7 +756,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 let (row_to_delete_r, row_to_insert_r) =
                     if let Some(pks) = right_inequality_index.get(&inequal_key) {
                         assert!(!pks.is_empty());
-                        let row_pk = side_match.ht.serialize_pk_from_row(row);
+                        let row_pk = side_update.ht.serialize_pk_from_row(row);
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 // If there are multiple rows match the inequality key in the right table, we use one with smallest pk.

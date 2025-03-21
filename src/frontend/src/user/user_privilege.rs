@@ -56,7 +56,24 @@ fn get_all_available_modes(object: &GrantObjects) -> Result<&AclModeSet> {
         GrantObjects::Tables(_) | GrantObjects::AllTablesInSchema { .. } => {
             Ok(&acl::ALL_AVAILABLE_TABLE_MODES)
         }
-        GrantObjects::Sinks(_) => Ok(&acl::ALL_AVAILABLE_SINK_MODES),
+        GrantObjects::Sinks(_) | GrantObjects::AllSinksInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_SINK_MODES)
+        }
+        GrantObjects::Views(_) | GrantObjects::AllViewsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_VIEW_MODES)
+        }
+        GrantObjects::Functions(_) | GrantObjects::AllFunctionsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_FUNCTION_MODES)
+        }
+        GrantObjects::Secrets(_) | GrantObjects::AllSecretsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_SECRET_MODES)
+        }
+        GrantObjects::Subscriptions(_) | GrantObjects::AllSubscriptionsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_SUBSCRIPTION_MODES)
+        }
+        GrantObjects::Connections(_) | GrantObjects::AllConnectionsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_CONNECTION_MODES)
+        }
         _ => Err(
             ErrorCode::BindError("Invalid privilege type for the given object.".to_owned()).into(),
         ),
@@ -74,10 +91,11 @@ pub fn get_prost_action(action: &Action) -> PbAction {
         Action::Select { .. } => PbAction::Select,
         Action::Insert { .. } => PbAction::Insert,
         Action::Update { .. } => PbAction::Update,
-        Action::Delete { .. } => PbAction::Delete,
+        Action::Delete => PbAction::Delete,
         Action::Connect => PbAction::Connect,
         Action::Create => PbAction::Create,
         Action::Usage => PbAction::Usage,
+        Action::Execute => PbAction::Execute,
         _ => unreachable!(),
     }
 }
@@ -94,11 +112,12 @@ pub fn available_prost_privilege(object: PbObject, for_dml_table: bool) -> PbGra
                 &acl::ALL_AVAILABLE_MVIEW_MODES
             }
         }
-        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_TABLE_MODES,
+        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_VIEW_MODES,
         PbObject::SinkId(_) => &acl::ALL_AVAILABLE_SINK_MODES,
         PbObject::SubscriptionId(_) => &acl::ALL_AVAILABLE_SUBSCRIPTION_MODES,
         PbObject::FunctionId(_) => &acl::ALL_AVAILABLE_FUNCTION_MODES,
-        _ => unreachable!("Invalid object type"),
+        PbObject::ConnectionId(_) => &acl::ALL_AVAILABLE_CONNECTION_MODES,
+        PbObject::SecretId(_) => &acl::ALL_AVAILABLE_SECRET_MODES,
     };
     let actions = acl_set
         .iter()

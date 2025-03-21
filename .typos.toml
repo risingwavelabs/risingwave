@@ -7,6 +7,7 @@ numer = "numer"         # numerator
 nd = "nd"               # N-dimentional / 2nd
 steam = "stream"        # You played with Steam games too much.
 ser = "ser"             # Serialization
+typ = "typ"             # Type, to avoid conflict with rust keyword `type`
 # Some weird short variable names
 ot = "ot"
 bui = "bui"             # BackwardUserIterator
@@ -20,6 +21,7 @@ psrser = "parser"
 extreact = "extract"
 buidler = "builder"
 epoches = "epochs"
+
 
 [default.extend-identifiers]
 TABLE_SCHEM = "TABLE_SCHEM"

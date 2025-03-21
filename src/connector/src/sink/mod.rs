@@ -645,6 +645,11 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
+
+    fn is_coordinated_sink(&self) -> bool {
+        false
+    }
+
     #[expect(clippy::unused_async)]
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
@@ -736,6 +741,10 @@ impl SinkImpl {
 
     pub fn is_blackhole(&self) -> bool {
         matches!(self, SinkImpl::BlackHole(_))
+    }
+
+    pub fn is_coordinated_sink(&self) -> bool {
+        dispatch_sink!(self, sink, sink.is_coordinated_sink())
     }
 }
 
@@ -907,12 +916,6 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
-}
-
-impl From<icelake::Error> for SinkError {
-    fn from(value: icelake::Error) -> Self {
-        SinkError::Iceberg(anyhow!(value))
-    }
 }
 
 impl From<OpendalError> for SinkError {

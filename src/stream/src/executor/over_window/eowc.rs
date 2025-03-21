@@ -59,7 +59,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// The reason not to use [`SortBuffer`] is that the table schemas of [`EowcOverWindowExecutor`] and
 /// [`SortBuffer`] are different, since we don't have something like a _grouped_ sort buffer.
 ///
-/// [`SortBuffer`]: crate::executor::sort_buffer::SortBuffer
+/// [`SortBuffer`]: crate::executor::eowc::SortBuffer
 ///
 /// Basic idea:
 ///

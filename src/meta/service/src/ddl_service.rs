@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::rng as thread_rng;
+use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
@@ -872,16 +872,16 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
+        let GetTablesRequest {
+            table_ids,
+            include_dropped_tables,
+        } = request.into_inner();
         let ret = self
             .metadata_manager
             .catalog_controller
             .get_table_by_ids(
-                request
-                    .into_inner()
-                    .table_ids
-                    .into_iter()
-                    .map(|id| id as _)
-                    .collect(),
+                table_ids.into_iter().map(|id| id as _).collect(),
+                include_dropped_tables,
             )
             .await?;
 
@@ -903,12 +903,12 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterParallelismResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id,
+                job_id,
                 JobRescheduleTarget {
                     parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
                     resource_group: JobResourceGroupTarget::Keep,

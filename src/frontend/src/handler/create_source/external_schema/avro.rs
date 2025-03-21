@@ -45,7 +45,7 @@ pub async fn extract_avro_table_schema(
     Ok(vec_column_desc
         .into_iter()
         .map(|col| ColumnCatalog {
-            column_desc: col.into(),
+            column_desc: ColumnDesc::from_field_without_column_id(&col),
             is_hidden: false,
         })
         .collect_vec())

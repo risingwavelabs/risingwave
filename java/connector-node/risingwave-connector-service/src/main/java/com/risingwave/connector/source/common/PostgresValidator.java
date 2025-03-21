@@ -90,8 +90,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     @Override
     public void validateDbConfig() {
         try {
-            if (pgVersion >= 17) {
-                throw ValidatorUtils.failedPrecondition("Postgres version should be less than 17.");
+            // whenever a newer PG version is released, Debezium will take
+            // some time to support it. So even though 18 is not released yet, we put a version
+            // guard here.
+            if (pgVersion >= 18) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Postgres major version should be less than or equal to 17.");
             }
 
             try (var stmt = jdbcConnection.createStatement()) {

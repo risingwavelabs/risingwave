@@ -42,3 +42,25 @@ drop database db_with_owner2;
 # Drop the user.
 statement ok
 drop user user_for_db_owner;
+
+statement ok
+create database db_without_resource_group;
+
+query T
+select resource_group from rw_databases where name = 'db_without_resource_group';
+----
+default
+
+statement ok
+drop database db_without_resource_group;
+
+statement ok
+create database db_with_resource_group resource_group = test;
+
+query T
+select resource_group from rw_databases where name = 'db_with_resource_group';
+----
+test
+
+statement ok
+drop database db_with_resource_group;

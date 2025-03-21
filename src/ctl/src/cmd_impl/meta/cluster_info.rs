@@ -86,7 +86,11 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
         } else {
             println!("Table #{}", table_fragment.table_id);
         }
-        for fragment in table_fragment.fragments.values() {
+        for fragment in table_fragment
+            .fragments
+            .values()
+            .sorted_by_key(|f| f.fragment_id)
+        {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
                 && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
@@ -112,7 +116,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                     "SourceScan"
                 }
             );
-            for actor in &fragment.actors {
+            for actor in fragment.actors.iter().sorted_by_key(|a| a.actor_id) {
                 if let Some((split_count, splits)) = actor_splits_map.get(&actor.actor_id) {
                     println!(
                         "\t\tActor{} ({} splits): [{}]",

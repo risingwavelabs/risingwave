@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -71,6 +72,8 @@ use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
+use tokio_retry::Retry;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 use url::Url;
 use uuid::Uuid;
@@ -85,12 +88,15 @@ use super::{
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::iceberg::compaction::spawn_compaction_client;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+
+fn default_commit_retry_num() -> u32 {
+    8
+}
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
@@ -124,6 +130,13 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
+
+    // Retry commit num when iceberg commit fail. default is 8.
+    // # TODO
+    // Iceberg table may store the retry commit num in table meta.
+    // We should try to find and use that as default commit retry num first.
+    #[serde(default = "default_commit_retry_num")]
+    pub commit_retry_num: u32,
 }
 
 impl IcebergConfig {
@@ -145,24 +158,16 @@ impl IcebergConfig {
             if let Some(primary_key) = &config.primary_key {
                 if primary_key.is_empty() {
                     return Err(SinkError::Config(anyhow!(
-                        "Primary_key must not be empty in {}",
+                        "`primary_key` must not be empty in {}",
                         SINK_TYPE_UPSERT
                     )));
                 }
             } else {
                 return Err(SinkError::Config(anyhow!(
-                    "Must set primary_key in {}",
+                    "Must set `primary_key` in {}",
                     SINK_TYPE_UPSERT
                 )));
             }
-        }
-
-        if config.common.catalog_name.is_none()
-            && config.common.catalog_type.as_deref() != Some("storage")
-        {
-            return Err(SinkError::Config(anyhow!(
-                "catalog.name must be set for non-storage catalog"
-            )));
         }
 
         // All configs start with "catalog." will be treated as java configs.
@@ -257,6 +262,24 @@ impl IcebergSink {
 
     async fn create_table_if_not_exists(&self) -> Result<()> {
         let catalog = self.config.create_catalog().await?;
+        let namespace = if let Some(database_name) = &self.config.common.database_name {
+            let namespace = NamespaceIdent::new(database_name.clone());
+            if !catalog
+                .namespace_exists(&namespace)
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+            {
+                catalog
+                    .create_namespace(&namespace, HashMap::default())
+                    .await
+                    .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                    .context("failed to create iceberg namespace")?;
+            }
+            namespace
+        } else {
+            bail!("database name must be set if you want to create table")
+        };
+
         let table_id = self
             .config
             .full_table_name()
@@ -266,12 +289,6 @@ impl IcebergSink {
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
         {
-            let namespace = if let Some(database_name) = &self.config.common.database_name {
-                NamespaceIdent::new(database_name.clone())
-            } else {
-                bail!("database name must be set if you want to create table")
-            };
-
             let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
             // convert risingwave schema -> arrow schema -> iceberg schema
             let arrow_fields = self
@@ -298,8 +315,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -500,22 +518,20 @@ impl Sink for IcebergSink {
         ))
     }
 
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // Only iceberg engine table will enable config load and need compaction.
-        let (commit_tx, finish_tx) = if self.config.common.enable_config_load.unwrap_or(false) {
-            let (commit_tx, finish_tx) = spawn_compaction_client(&self.config)?;
-            (Some(commit_tx), Some(finish_tx))
-        } else {
-            (None, None)
-        };
-
+        // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
-            commit_notifier: commit_tx,
-            _compact_task_guard: finish_tx,
+            commit_notifier: None,
+            _compact_task_guard: None,
+            commit_retry_num: self.config.commit_retry_num,
         })
     }
 }
@@ -1006,7 +1022,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
-        if ops.len() == 0 {
+        if ops.is_empty() {
             return Ok(());
         }
         let write_batch_size = chunk.estimated_heap_size();
@@ -1276,7 +1292,39 @@ pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
     commit_notifier: Option<mpsc::UnboundedSender<()>>,
+    commit_retry_num: u32,
     _compact_task_guard: Option<oneshot::Sender<()>>,
+}
+
+impl IcebergSinkCommitter {
+    // Reload table and guarantee current schema_id and partition_spec_id matches
+    // given `schema_id` and `partition_spec_id`
+    async fn reload_table(
+        catalog: &dyn Catalog,
+        table_ident: &TableIdent,
+        schema_id: i32,
+        partition_spec_id: i32,
+    ) -> Result<Table> {
+        let table = catalog
+            .load_table(table_ident)
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        if table.metadata().current_schema_id() != schema_id {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Schema evolution not supported, expect schema id {}, but got {}",
+                schema_id,
+                table.metadata().current_schema_id()
+            )));
+        }
+        if table.metadata().default_partition_spec_id() != partition_spec_id {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Partition evolution not supported, expect partition spec id {}, but got {}",
+                partition_spec_id,
+                table.metadata().default_partition_spec_id()
+            )));
+        }
+        Ok(table)
+    }
 }
 
 #[async_trait::async_trait]
@@ -1311,31 +1359,31 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             )));
         }
 
+        let expect_schema_id = write_results[0].schema_id;
+        let expect_partition_spec_id = write_results[0].partition_spec_id;
+
         // Load the latest table to avoid concurrent modification with the best effort.
-        self.table = self
-            .catalog
-            .clone()
-            .load_table(self.table.identifier())
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        let Some(schema) = self
-            .table
-            .metadata()
-            .schema_by_id(write_results[0].schema_id)
-        else {
+        self.table = Self::reload_table(
+            self.catalog.as_ref(),
+            self.table.identifier(),
+            expect_schema_id,
+            expect_partition_spec_id,
+        )
+        .await?;
+        let Some(schema) = self.table.metadata().schema_by_id(expect_schema_id) else {
             return Err(SinkError::Iceberg(anyhow!(
                 "Can't find schema by id {}",
-                write_results[0].schema_id
+                expect_schema_id
             )));
         };
         let Some(partition_spec) = self
             .table
             .metadata()
-            .partition_spec_by_id(write_results[0].partition_spec_id)
+            .partition_spec_by_id(expect_partition_spec_id)
         else {
             return Err(SinkError::Iceberg(anyhow!(
                 "Can't find partition spec by id {}",
-                write_results[0].partition_spec_id
+                expect_partition_spec_id
             )));
         };
         let partition_type = partition_spec
@@ -1354,21 +1402,41 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             })
             .collect::<Result<Vec<DataFile>>>()?;
 
-        let txn = Transaction::new(&self.table);
-        let mut append_action = txn
-            .fast_append(None, vec![])
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        append_action
-            .add_data_files(data_files)
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        let tx = append_action.apply().await.map_err(|err| {
-            tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-            SinkError::Iceberg(anyhow!(err))
-        })?;
-        let table = tx
-            .commit_dyn(self.catalog.as_ref())
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        // # TODO:
+        // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
+        // because retry logic involved reapply the commit metadata.
+        // For now, we just retry the commit operation.
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
+            .map(jitter)
+            .take(self.commit_retry_num as usize);
+        let catalog = self.catalog.clone();
+        let table_ident = self.table.identifier().clone();
+        let table = Retry::spawn(retry_strategy, || async {
+            let table = Self::reload_table(
+                catalog.as_ref(),
+                &table_ident,
+                expect_schema_id,
+                expect_partition_spec_id,
+            )
+            .await?;
+            let txn = Transaction::new(&table);
+            let mut append_action = txn
+                .fast_append(None, None, vec![])
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            append_action
+                .add_data_files(data_files.clone())
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            let tx = append_action.apply().await.map_err(|err| {
+                tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })?;
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
+                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })
+        })
+        .await?;
         self.table = table;
 
         if let Some(commit_notifier) = &mut self.commit_notifier {
@@ -1376,7 +1444,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 warn!("failed to notify commit");
             }
         }
-
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
     }
@@ -1446,9 +1513,7 @@ fn check_compatibility(
             | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
                 let mut schema_fields = HashMap::new();
                 get_fields(our_field_type, field.data_type(), &mut schema_fields)
-                    .map_or(true, |fields| {
-                        check_compatibility(schema_fields, &fields).unwrap()
-                    })
+                    .is_none_or(|fields| check_compatibility(schema_fields, &fields).unwrap())
             }
             // validate nested structs
             (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
@@ -1514,12 +1579,11 @@ mod test {
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{MapType, StructType};
+    use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
-    use crate::source::DataType;
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -1735,6 +1799,9 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
@@ -1746,6 +1813,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
+            commit_retry_num: 8,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
