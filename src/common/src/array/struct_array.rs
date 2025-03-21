@@ -112,6 +112,13 @@ impl ArrayBuilder for StructArrayBuilder {
         self.len += n;
     }
 
+    fn append_iter<'a>(&mut self, data: impl IntoIterator<Item = Option<StructRef<'a>>> + 'a) {
+        // (TODO): No Optimization
+        for value in data {
+            self.append(value);
+        }
+    }
+
     fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
         for (a, o) in self

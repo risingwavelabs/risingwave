@@ -61,6 +61,11 @@ impl ArrayBuilder for MapArrayBuilder {
         self.inner.append_n(n, value.map(|v| v.into_inner()));
     }
 
+    fn append_iter<'a>(&mut self, data: impl IntoIterator<Item = Option<MapRef<'a>>> + 'a) {
+        self.inner
+            .append_iter(data.into_iter().map(|m| m.map(|v| v.into_inner())));
+    }
+
     fn append_array(&mut self, other: &MapArray) {
         self.inner.append_array(&other.inner);
     }
