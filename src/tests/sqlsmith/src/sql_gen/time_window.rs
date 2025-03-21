@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use rand::Rng;
-use rand::prelude::SliceRandom;
+use rand::prelude::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor,
@@ -80,7 +80,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_secs(&mut self) -> u64 {
-        self.rng.gen_range(1..100)
+        self.rng.random_range(1..100)
     }
 
     // TODO(kwannoel): Disable for now, otherwise time window may take forever
@@ -89,7 +89,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     //     let hour = 60 * minute;
     //     let day = 24 * hour;
     //     let week = 7 * day;
-    //     let rand_secs = self.rng.gen_range(1..week);
+    //     let rand_secs = self.rng.random_range(1..week);
     //     let choices = [1, minute, hour, day, week, rand_secs];
     //     let secs = choices.choose(&mut self.rng).unwrap();
     //     *secs
@@ -113,7 +113,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// `size_secs` = k * `slide_secs`.
     /// k cannot be too large, to avoid overflow.
     fn gen_size(&mut self, slide_secs: u64) -> Expr {
-        let k = self.rng.gen_range(1..20);
+        let k = self.rng.random_range(1..20);
         let size_secs = k * slide_secs;
         Self::secs_to_interval_expr(size_secs)
     }

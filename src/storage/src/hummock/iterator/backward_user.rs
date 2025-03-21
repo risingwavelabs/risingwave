@@ -309,8 +309,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ops::Bound::{self, *};
 
-    use rand::distributions::Alphanumeric;
-    use rand::{Rng, thread_rng};
+    use rand::distr::Alphanumeric;
+    use rand::{Rng, rng as thread_rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::key::prev_key;
@@ -966,14 +966,15 @@ mod tests {
         let mut prev_key_number: usize = 1;
         let number_of_keys = 5000;
         for _ in 0..number_of_keys {
-            let key: usize = rng.gen_range(prev_key_number..=(prev_key_number + 10));
+            let key: usize = rng.random_range(prev_key_number..=(prev_key_number + 10));
             prev_key_number = key + 1;
             let key_bytes = key_from_num(key).into_bytes();
             let mut prev_time = 500;
-            let num_updates = rng.gen_range(1..10usize);
+            let num_updates = rng.random_range(1..10usize);
             for _ in 0..num_updates {
-                let time: HummockEpoch = test_epoch(rng.gen_range(prev_time..=(prev_time + 1000)));
-                let is_delete = rng.gen_range(0..=1usize) < 1usize;
+                let time: HummockEpoch =
+                    test_epoch(rng.random_range(prev_time..=(prev_time + 1000)));
+                let is_delete = rng.random_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
                         truth
@@ -982,7 +983,7 @@ mod tests {
                             .insert(Reverse(time), HummockValue::delete());
                     }
                     false => {
-                        let value_size = rng.gen_range(100..=200);
+                        let value_size = rng.random_range(100..=200);
                         let value: String = thread_rng()
                             .sample_iter(&Alphanumeric)
                             .take(value_size)
@@ -1042,7 +1043,7 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1063,8 +1064,8 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1085,8 +1086,8 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1107,9 +1108,9 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1130,9 +1131,9 @@ mod tests {
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),

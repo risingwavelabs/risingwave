@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
@@ -387,7 +387,7 @@ impl WorkerNodeSelector {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .ok_or_else(|| BatchError::EmptyWorkerNodes)
             .map(|w| (*w).clone())
     }

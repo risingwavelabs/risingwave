@@ -40,8 +40,6 @@ use crate::util::value_encoding as plain;
 ///
 /// Only for column with types that can be altered ([`DataType::can_alter`]).
 mod new_serde {
-    use itertools::Itertools;
-
     use super::*;
     use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
     use crate::types::{MapType, ScalarImpl, StructType, data_types};
@@ -129,11 +127,7 @@ mod new_serde {
     //
     // Recursively construct a new column-aware `Deserializer` for nested fields.
     fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
-        let deserializer = super::Deserializer::new(
-            &struct_def.ids().unwrap().collect_vec(), // TODO: avoid this clone
-            struct_def.types().cloned().collect_vec().into(), // TODO: avoid this clone
-            std::iter::empty(),
-        );
+        let deserializer = super::Deserializer::from_struct(struct_def.clone()); // cloning `StructType` is lightweight
         let encoded_len = data.get_u32_le() as usize;
 
         let (struct_data, remaining) = data.split_at(encoded_len);
@@ -347,18 +341,30 @@ mod data_types {
 
     /// A trait unifying data types of a row and field types of a struct.
     pub trait DataTypes: Clone {
-        fn iter(&self) -> impl Iterator<Item = &DataType>;
+        fn iter(&self) -> impl ExactSizeIterator<Item = &DataType>;
+        fn at(&self, index: usize) -> &DataType;
     }
 
-    impl DataTypes for Vec<DataType> {
-        fn iter(&self) -> impl Iterator<Item = &DataType> {
-            self.as_slice().iter()
+    impl<T> DataTypes for T
+    where
+        T: AsRef<[DataType]> + Clone,
+    {
+        fn iter(&self) -> impl ExactSizeIterator<Item = &DataType> {
+            self.as_ref().iter()
+        }
+
+        fn at(&self, index: usize) -> &DataType {
+            &self.as_ref()[index]
         }
     }
 
     impl DataTypes for StructType {
-        fn iter(&self) -> impl Iterator<Item = &DataType> {
+        fn iter(&self) -> impl ExactSizeIterator<Item = &DataType> {
             self.types()
+        }
+
+        fn at(&self, index: usize) -> &DataType {
+            self.type_at(index)
         }
     }
 }
@@ -505,12 +511,45 @@ impl<'a> Iterator for EncodedBytes<'a> {
 /// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
 /// Should non-null default values be specified, a new field could be added to Deserializer
 #[derive(Clone)]
-pub struct Deserializer {
-    required_column_ids: HashMap<i32, usize>,
-    schema: Arc<[DataType]>,
+pub struct Deserializer<D: DataTypes = Arc<[DataType]>> {
+    mapping: ColumnMapping,
+    data_types: D,
 
-    /// A row with default values for each column or `None` if no default value is specified
-    default_row: Vec<Datum>,
+    /// A row with default values for each column.
+    ///
+    /// `None` if all default values are `NULL`, typically for struct fields.
+    default_row: Option<Vec<Datum>>,
+}
+
+/// A mapping from column id to the index of the column in the schema.
+#[derive(Clone)]
+enum ColumnMapping {
+    /// For small number of columns, use linear search with `SmallVec`. This ensures no heap allocation.
+    Small(SmallVec<[i32; COLUMN_ON_STACK]>),
+    /// For larger number of columns, build a `HashMap` for faster lookup.
+    Large(HashMap<i32, usize>),
+}
+
+impl ColumnMapping {
+    fn new(column_ids: impl ExactSizeIterator<Item = ColumnId>) -> Self {
+        if column_ids.len() <= COLUMN_ON_STACK {
+            Self::Small(column_ids.map(|c| c.get_id()).collect())
+        } else {
+            Self::Large(
+                column_ids
+                    .enumerate()
+                    .map(|(i, c)| (c.get_id(), i))
+                    .collect(),
+            )
+        }
+    }
+
+    fn get(&self, id: i32) -> Option<usize> {
+        match self {
+            ColumnMapping::Small(vec) => vec.iter().position(|&x| x == id),
+            ColumnMapping::Large(map) => map.get(&id).copied(),
+        }
+    }
 }
 
 impl Deserializer {
@@ -525,28 +564,38 @@ impl Deserializer {
             default_row[i] = datum;
         }
         Self {
-            required_column_ids: column_ids
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (c.get_id(), i))
-                .collect::<HashMap<_, _>>(),
-            schema,
-            default_row,
+            mapping: ColumnMapping::new(column_ids.iter().copied()),
+            data_types: schema,
+            default_row: Some(default_row),
         }
     }
 }
 
-impl ValueRowDeserializer for Deserializer {
+impl Deserializer<StructType> {
+    /// Create a new `Deserializer` for the fields of the given struct.
+    ///
+    /// Panic if the struct type does not have field ids.
+    pub fn from_struct(struct_type: StructType) -> Self {
+        Self {
+            mapping: ColumnMapping::new(struct_type.ids().unwrap()),
+            data_types: struct_type,
+            default_row: None,
+        }
+    }
+}
+
+impl<D: DataTypes> ValueRowDeserializer for Deserializer<D> {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let encoded_bytes = EncodedBytes::new(encoded_bytes)?;
 
-        let mut row = self.default_row.clone();
+        let mut row =
+            (self.default_row.clone()).unwrap_or_else(|| vec![None; self.data_types.iter().len()]);
 
         for (id, mut data) in encoded_bytes {
-            let Some(&decoded_idx) = self.required_column_ids.get(&id) else {
+            let Some(decoded_idx) = self.mapping.get(id) else {
                 continue;
             };
-            let data_type = &self.schema[decoded_idx];
+            let data_type = self.data_types.at(decoded_idx);
 
             let datum = if data.is_empty() {
                 None

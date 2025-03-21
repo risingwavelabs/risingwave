@@ -330,7 +330,7 @@ profile:
       - use: compute-node
       - use: frontend
 
-  ci-iceberg-engine:
+  ci-iceberg-test:
     steps:
       - use: minio
       - use: postgres
@@ -1019,16 +1019,6 @@ profile:
     steps:
       - use: sqlite
       - use: minio
-
-  ci-iceberg-test:
-    config-path: src/config/ci-iceberg-test.toml
-    steps:
-      - use: minio
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
 
   ci-sink-test:
     config-path: src/config/ci.toml

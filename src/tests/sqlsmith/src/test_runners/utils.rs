@@ -352,12 +352,12 @@ pub(super) fn generate_rng(seed: Option<u64>) -> impl Rng {
     if let Some(seed) = seed {
         ChaChaRng::seed_from_u64(seed)
     } else {
-        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+        ChaChaRng::from_rng(&mut SmallRng::from_os_rng())
     }
     #[cfg(not(madsim))]
     if let Some(seed) = seed {
         SmallRng::seed_from_u64(seed)
     } else {
-        SmallRng::from_entropy()
+        SmallRng::from_os_rng()
     }
 }

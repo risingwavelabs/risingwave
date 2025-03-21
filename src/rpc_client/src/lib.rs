@@ -48,7 +48,7 @@ pub use hummock_meta_client::{
 };
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;
-use rand::prelude::SliceRandom;
+use rand::prelude::IndexedRandom;
 use risingwave_common::config::RpcClientConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -163,7 +163,7 @@ where
             )
             .await
             .with_context(|| format!("failed to create RPC client to {addr}"))?
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .unwrap()
             .clone())
     }

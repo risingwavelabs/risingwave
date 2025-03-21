@@ -47,10 +47,10 @@ fn bench_column_aware_encoding_16_columns(c: &mut Criterion) {
         DataType::Varchar,
     ]);
     let row = OwnedRow::new(vec![
-        Some(ScalarImpl::Int64(rng.gen())),
-        Some(ScalarImpl::Int64(rng.gen())),
-        Some(ScalarImpl::Int64(rng.gen())),
-        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Int64(rng.random())),
+        Some(ScalarImpl::Int64(rng.random())),
+        Some(ScalarImpl::Int64(rng.random())),
+        Some(ScalarImpl::Int32(rng.random())),
         Some(ScalarImpl::Decimal("1.0".parse().unwrap())),
         Some(ScalarImpl::Decimal("114.514".parse().unwrap())),
         None,
@@ -100,9 +100,9 @@ fn bench_column_aware_encoding_4_columns(c: &mut Criterion) {
         DataType::Varchar,
     ]);
     let row = OwnedRow::new(vec![
-        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Int32(rng.random())),
         Some(ScalarImpl::Utf8("United States".into())),
-        Some(ScalarImpl::Int32(rng.gen())),
+        Some(ScalarImpl::Int32(rng.random())),
         Some(ScalarImpl::Utf8("No comments".into())),
     ]);
 
@@ -131,6 +131,63 @@ fn bench_column_aware_encoding_4_columns(c: &mut Criterion) {
 }
 
 fn bench_column_aware_encoding_struct(c: &mut Criterion) {
+    use ScalarImpl::*;
+
+    // struct<f1 int, s struct<f2 int, f3 boolean>>
+    let make = |alterable| {
+        let mut inner_struct =
+            StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)]);
+        if alterable {
+            inner_struct = inner_struct.with_ids([ColumnId::new(11), ColumnId::new(12)]);
+        }
+        let inner_struct: DataType = inner_struct.into();
+        let mut outer_struct = StructType::new([("f1", DataType::Int32), ("s", inner_struct)]);
+        if alterable {
+            outer_struct = outer_struct.with_ids([ColumnId::new(1), ColumnId::new(2)]);
+        }
+        let outer_struct: DataType = outer_struct.into();
+
+        let inner_struct_value = StructValue::new(vec![Some(Int32(6)), Some(Bool(true))]);
+        let outer_struct_value =
+            StructValue::new(vec![Some(Int32(5)), Some(Struct(inner_struct_value))]);
+
+        let serializer = Serializer::new(&[ColumnId::new(1)], [outer_struct.clone()]);
+        let deserializer = Deserializer::new(
+            &[ColumnId::new(1)],
+            [outer_struct].into(),
+            std::iter::empty(),
+        );
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+
+        (serializer, deserializer, row)
+    };
+
+    for alterable in [false, true] {
+        let id = if alterable {
+            "column_aware_row_encoding_struct_alterable"
+        } else {
+            "column_aware_row_encoding_struct_unalterable"
+        };
+
+        let (serializer, deserializer, row) = make(alterable);
+
+        c.bench_function(&format!("{id}_encode"), |b| {
+            b.iter(|| {
+                black_box(serializer.serialize(&row));
+            });
+        });
+
+        let encoded = serializer.serialize(&row);
+        c.bench_function(&format!("{id}_decode"), |b| {
+            b.iter(|| {
+                let result = deserializer.deserialize(&encoded).unwrap();
+                black_box(result);
+            });
+        });
+    }
+}
+
+fn bench_column_aware_encoding_composite(c: &mut Criterion) {
     use ScalarImpl::*;
 
     // struct<f1 int, map map(varchar, struct<f2 int, f3 boolean>[])>
@@ -172,9 +229,9 @@ fn bench_column_aware_encoding_struct(c: &mut Criterion) {
 
     for alterable in [false, true] {
         let id = if alterable {
-            "column_aware_row_encoding_struct_alterable"
+            "column_aware_row_encoding_composite_alterable"
         } else {
-            "column_aware_row_encoding_struct_unalterable"
+            "column_aware_row_encoding_composite_unalterable"
         };
 
         let (serializer, deserializer, row) = make(alterable);
@@ -200,5 +257,6 @@ criterion_group!(
     bench_column_aware_encoding_16_columns,
     bench_column_aware_encoding_4_columns,
     bench_column_aware_encoding_struct,
+    bench_column_aware_encoding_composite,
 );
 criterion_main!(benches);
