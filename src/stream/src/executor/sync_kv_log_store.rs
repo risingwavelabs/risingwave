@@ -319,6 +319,9 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     state_store: S,
     max_buffer_size: usize,
 
+    // Max chunk size when reading from logstore / buffer
+    chunk_size: u32,
+
     pause_duration_ms: Duration,
 }
 // Stream interface
@@ -331,6 +334,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         serde: LogStoreRowSerde,
         state_store: S,
         buffer_size: usize,
+        chunk_size: u32,
         upstream: Executor,
         pause_duration_ms: Duration,
     ) -> Self {
@@ -342,6 +346,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             state_store,
             upstream,
             max_buffer_size: buffer_size,
+            chunk_size,
             pause_duration_ms,
         }
     }
@@ -549,6 +554,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 buffer: VecDeque::new(),
                 current_size: 0,
                 max_size: self.max_buffer_size,
+                max_read_size: self.chunk_size,
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
                 flushed_count: 0,
@@ -917,6 +923,7 @@ struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
+    max_read_size: u32,
     next_chunk_id: ChunkId,
     metrics: SyncedKvLogStoreMetrics,
     flushed_count: usize,
@@ -1038,8 +1045,16 @@ impl SyncedLogStoreBuffer {
     fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
         let mut item = self.buffer.pop_front();
         match &mut item {
-            Some((epoch, LogStoreBufferItem::Flushed { start_seq_id, end_seq_id, vnode_bitmap, chunk_id })) => {
-                let end_seq_id_bound = *start_seq_id + 256;
+            Some((
+                epoch,
+                LogStoreBufferItem::Flushed {
+                    start_seq_id,
+                    end_seq_id,
+                    vnode_bitmap,
+                    chunk_id,
+                },
+            )) => {
+                let end_seq_id_bound = *start_seq_id + self.max_read_size as i32;
                 if *end_seq_id > end_seq_id_bound {
                     let new_item = LogStoreBufferItem::Flushed {
                         start_seq_id: end_seq_id_bound + 1,
@@ -1156,6 +1171,7 @@ mod tests {
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             MemoryStateStore::new(),
             10,
+            256,
             source,
             Duration::from_millis(256),
         )
@@ -1248,6 +1264,7 @@ mod tests {
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             MemoryStateStore::new(),
             10,
+            256,
             source,
             Duration::from_millis(256),
         )
@@ -1338,6 +1355,7 @@ mod tests {
             LogStoreRowSerde::new(&table, vnodes, pk_info),
             MemoryStateStore::new(),
             0,
+            256,
             source,
             Duration::from_millis(256),
         )
