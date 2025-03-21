@@ -404,6 +404,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 5);
         assert_eq!(ret.input_levels[2].table_infos.len(), 2);
     }
+
     #[test]
     fn test_selecting_key_range_overlap() {
         // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
@@ -422,7 +423,7 @@ pub mod tests {
             level_type: LevelType::Nonoverlapping,
             table_infos: vec![
                 generate_table(3, 1, 0, 50, 1),
-                generate_table(4, 1, 150, 200, 1),
+                generate_table(4, 1, 150, 180, 1),
                 generate_table(5, 1, 250, 300, 1),
             ],
             ..Default::default()
@@ -445,7 +446,7 @@ pub mod tests {
             ],
         );
 
-        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
         let mut local_stats = LocalPickerStatistic::default();
         let ret = picker
@@ -453,8 +454,7 @@ pub mod tests {
             .unwrap();
 
         // pick
-        // l0 [sst_1]
-        // l1 [sst_3]
+        // l0 [sst_8]
         assert_eq!(ret.input_levels.len(), 2);
         assert_eq!(
             ret.input_levels[0]
@@ -462,7 +462,25 @@ pub mod tests {
                 .iter()
                 .map(|t| t.sst_id)
                 .collect_vec(),
-            vec![1]
+            vec![8]
+        );
+        // trivial_move
+        assert!(ret.input_levels[1].table_infos.is_empty());
+
+        ret.add_pending_task(0, &mut levels_handler);
+
+        let ret = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+
+        assert_eq!(ret.input_levels.len(), 2);
+        assert_eq!(
+            ret.input_levels[0]
+                .table_infos
+                .iter()
+                .map(|t| t.sst_id)
+                .collect_vec(),
+            vec![7]
         );
 
         assert_eq!(
@@ -471,7 +489,7 @@ pub mod tests {
                 .iter()
                 .map(|t| t.sst_id)
                 .collect_vec(),
-            vec![3,]
+            vec![5]
         );
     }
 
