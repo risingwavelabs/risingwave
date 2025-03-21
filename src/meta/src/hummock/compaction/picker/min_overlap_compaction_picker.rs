@@ -351,10 +351,6 @@ impl NonOverlapSubLevelPicker {
                     level_ssts.sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
                 });
         } else {
-            // ret.total_file_count = 1;
-            // ret.total_file_size = sst.sst_size;
-            // ret.sstable_infos[0].extend(vec![sst.clone()]);
-
             ret.total_file_count = 0;
             ret.total_file_size = 0;
         }
