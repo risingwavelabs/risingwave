@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -38,6 +40,8 @@ pub struct StreamMaterializedExprs {
     pub base: PlanBase<Stream>,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
+    /// Mapping from expr index to field name. May not contain all exprs.
+    field_names: BTreeMap<usize, String>,
     state_clean_col_idx: Option<usize>,
 }
 
@@ -68,7 +72,7 @@ impl Distill for StreamMaterializedExprs {
 
 impl StreamMaterializedExprs {
     /// Creates a new `StreamMaterializedExprs` node.
-    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
+    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, field_names: BTreeMap<usize, String>) -> Self {
         let input_watermark_cols = input.watermark_columns();
 
         // Determine if we have a watermark column for state cleaning
@@ -106,7 +110,7 @@ impl StreamMaterializedExprs {
 
         let base = PlanBase::new_stream(
             input.ctx(),
-            Self::derive_schema(&input, &exprs),
+            Self::derive_schema(&input, &exprs, &field_names),
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
             input.distribution().clone(),
@@ -120,23 +124,29 @@ impl StreamMaterializedExprs {
             base,
             input,
             exprs,
+            field_names,
             state_clean_col_idx,
         }
     }
 
-    fn derive_schema(input: &PlanRef, exprs: &[ExprImpl]) -> Schema {
+    fn derive_schema(
+        input: &PlanRef,
+        exprs: &[ExprImpl],
+        field_names: &BTreeMap<usize, String>,
+    ) -> Schema {
+        let ctx = input.ctx();
         let input_schema = input.schema();
-        let input_fields = input_schema.fields.clone();
+        let mut all_fields = input_schema.fields.clone();
+        all_fields.reserve(exprs.len());
 
-        let mut expr_fields = Vec::with_capacity(exprs.len());
         for (i, expr) in exprs.iter().enumerate() {
-            let field_name = format!("expr_{}", i);
+            let field_name = match field_names.get(&i) {
+                Some(name) => name.clone(),
+                None => format!("$expr{}", ctx.next_expr_display_id()),
+            };
             let field = Field::with_name(expr.return_type(), field_name);
-            expr_fields.push(field);
+            all_fields.push(field);
         }
-
-        let mut all_fields = input_fields;
-        all_fields.extend(expr_fields);
 
         Schema::new(all_fields)
     }
@@ -147,12 +157,17 @@ impl StreamMaterializedExprs {
         self.exprs
             .iter()
             .zip_eq_fast(schema.fields().iter().skip(input_schema_len))
-            .map(|(expr, field)| AliasedExpr {
+            .enumerate()
+            .map(|(i, (expr, field))| AliasedExpr {
                 expr: ExprDisplay {
                     expr,
                     input_schema: self.input.schema(),
                 },
-                alias: Some(field.name.clone()),
+                alias: if self.field_names.contains_key(&i) {
+                    Some(field.name.clone())
+                } else {
+                    None
+                },
             })
             .collect()
     }
@@ -160,55 +175,38 @@ impl StreamMaterializedExprs {
     /// Builds a state table catalog for `StreamMaterializedExprs`
     fn build_state_table(&self) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
-        let input_schema = self.input.schema();
-        let input_stream_key = self.input.stream_key().expect("Expected stream key");
         let dist_keys = self.distribution().dist_column_indices().to_vec();
 
-        // Add all input columns in their original order
-        let mut watermark_col_idx = None;
-        for (idx, field) in input_schema.fields.iter().enumerate() {
-            let col_idx = catalog_builder.add_column(field);
-            if Some(idx) == self.state_clean_col_idx {
-                watermark_col_idx = Some(col_idx);
-            }
-        }
+        // Add all columns
+        self.schema().fields().iter().for_each(|field| {
+            catalog_builder.add_column(field);
+        });
 
-        // Add expression result columns
-        for expr in &self.exprs {
-            let field = Field::with_name(expr.return_type(), "expr_result");
-            catalog_builder.add_column(&field);
-        }
-
-        // Add primary key columns
-        let mut watermark_in_pk = false;
-        let mut watermark_pk_index = None;
-
-        for (pk_idx, &idx) in input_stream_key.iter().enumerate() {
-            catalog_builder.add_order_column(idx, OrderType::ascending());
-            if Some(idx) == self.state_clean_col_idx {
-                watermark_in_pk = true;
-                watermark_pk_index = Some(pk_idx);
-            }
-        }
-
-        let mut pk_len = input_stream_key.len();
-
-        let clean_watermark_index_in_pk = if let Some(idx) = watermark_col_idx {
-            if !watermark_in_pk && self.state_clean_col_idx.is_some() {
-                catalog_builder.add_order_column(idx, OrderType::ascending());
-                pk_len += 1;
-                Some(input_stream_key.len())
+        // Add table PK columns
+        let mut pk_indices = self
+            .input
+            .stream_key()
+            .expect("Expected stream key")
+            .to_vec();
+        let clean_wtmk_in_pk = if let Some(idx) = self.state_clean_col_idx {
+            if let Some(pos) = pk_indices.iter().position(|&x| x == idx) {
+                Some(pos)
             } else {
-                watermark_pk_index
+                pk_indices.push(idx);
+                Some(pk_indices.len() - 1)
             }
         } else {
             None
         };
 
-        let read_prefix_len_hint = pk_len;
+        pk_indices.iter().for_each(|idx| {
+            catalog_builder.add_order_column(*idx, OrderType::ascending());
+        });
+
+        let read_prefix_len_hint = pk_indices.len();
         let mut catalog = catalog_builder.build(dist_keys, read_prefix_len_hint);
 
-        if let Some(idx) = clean_watermark_index_in_pk {
+        if let Some(idx) = clean_wtmk_in_pk {
             catalog.clean_watermark_index_in_pk = Some(idx);
             catalog.cleaned_by_watermark = true;
         }
@@ -223,7 +221,7 @@ impl PlanTreeNodeUnary for StreamMaterializedExprs {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.exprs.clone())
+        Self::new(input, self.exprs.clone(), self.field_names.clone())
     }
 }
 impl_plan_tree_node_for_unary! { StreamMaterializedExprs }
@@ -253,7 +251,7 @@ impl ExprRewritable for StreamMaterializedExprs {
             .iter()
             .map(|e| r.rewrite_expr(e.clone()))
             .collect();
-        Self::new(self.input.clone(), new_exprs).into()
+        Self::new(self.input.clone(), new_exprs, self.field_names.clone()).into()
     }
 }
 

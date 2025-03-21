@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
@@ -271,8 +273,14 @@ impl ToStream for LogicalProject {
 
         let stream_plan = if !udf_exprs.is_empty() {
             // Create MaterializedExprs for UDFs
+            let mut field_names = BTreeMap::new();
+            for (i, idx) in udf_indices.iter().enumerate() {
+                if let Some(name) = self.core.field_names.get(idx) {
+                    field_names.insert(i, name.clone());
+                }
+            }
             let mat_exprs_plan: PlanRef =
-                StreamMaterializedExprs::new(new_input.clone(), udf_exprs).into();
+                StreamMaterializedExprs::new(new_input.clone(), udf_exprs, field_names).into();
 
             let input_schema_len = new_input.schema().len();
 
