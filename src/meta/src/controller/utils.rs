@@ -897,7 +897,9 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::SinkId(id)
         | PbGrantObject::ViewId(id)
         | PbGrantObject::FunctionId(id)
-        | PbGrantObject::SubscriptionId(id) => *id as _,
+        | PbGrantObject::SubscriptionId(id)
+        | PbGrantObject::ConnectionId(id)
+        | PbGrantObject::SecretId(id) => *id as _,
     }
 }
 

@@ -68,15 +68,16 @@ impl DebeziumMongoJsonParser {
             })
             .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
 
-        let mongo_props =
-            try_match_expand!(&source_ctx.connector_props, ConnectorProperties::MongodbCdc)?;
+        let strong_schema = match &source_ctx.connector_props {
+            ConnectorProperties::MongodbCdc(mongo_props) => mongo_props
+                .properties
+                .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+                .map(|v| v == "true")
+                .unwrap_or(false),
 
-        let strong_schema = mongo_props
-            .properties
-            .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
-            .map(|v| v == "true")
-            .unwrap_or(false);
-
+            ConnectorProperties::Kafka(..) | ConnectorProperties::Test(..) => false,
+            _ => todo!(),
+        };
         if !strong_schema {
             let _payload_column = rw_columns
                 .iter()
@@ -363,7 +364,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             );
             assert_eq!(
                 row.datum_at(0).to_owned_datum(),
-                (Some(ScalarImpl::Int64(1004)))
+                (Some(ScalarImpl::Int64(1001)))
             );
         }
     }

@@ -144,6 +144,10 @@ pub struct MetaMetrics {
     pub total_object_count: IntGauge,
     /// Total size of objects that includes dangling objects.
     pub total_object_size: IntGauge,
+    /// Number of objects per table change log.
+    pub table_change_log_object_count: IntGaugeVec,
+    /// Size of objects per table change log.
+    pub table_change_log_object_size: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -491,6 +495,22 @@ impl MetaMetrics {
             registry
         ).unwrap();
 
+        let table_change_log_object_count = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_count",
+            "per table change log object count",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let table_change_log_object_size = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_size",
+            "per table change log object size",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -821,6 +841,8 @@ impl MetaMetrics {
             current_version_object_size,
             total_object_count,
             total_object_size,
+            table_change_log_object_count,
+            table_change_log_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,

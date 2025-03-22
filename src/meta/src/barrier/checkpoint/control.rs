@@ -28,6 +28,7 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
+use thiserror_ext::AsReport;
 use tracing::{debug, warn};
 
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
@@ -50,23 +51,34 @@ use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     InflightSubscriptionInfo, SnapshotBackfillInfo, TracedEpoch,
 };
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
 
-#[derive(Default)]
 pub(crate) struct CheckpointControl {
+    pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
 }
 
 impl CheckpointControl {
-    pub(crate) fn new(
+    pub fn new(env: MetaSrvEnv) -> Self {
+        Self {
+            env,
+            databases: Default::default(),
+            hummock_version_stats: Default::default(),
+        }
+    }
+
+    pub(crate) fn recover(
         databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
-        unconnected_databases: HashSet<DatabaseId>,
+        failed_databases: HashSet<DatabaseId>,
+        control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
+            env: control_stream_manager.env.clone(),
             databases: databases
                 .into_iter()
                 .map(|(database_id, control)| {
@@ -75,11 +87,11 @@ impl CheckpointControl {
                         DatabaseCheckpointControlStatus::Running(control),
                     )
                 })
-                .chain(unconnected_databases.into_iter().map(|database_id| {
+                .chain(failed_databases.into_iter().map(|database_id| {
                     (
                         database_id,
                         DatabaseCheckpointControlStatus::Recovering(
-                            DatabaseRecoveringState::resetting(database_id),
+                            DatabaseRecoveringState::resetting(database_id, control_stream_manager),
                         ),
                     )
                 }))
@@ -160,11 +172,18 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn running_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
+        self.databases.iter().filter_map(|(database_id, database)| {
+            database.running_state().is_some().then_some(*database_id)
+        })
+    }
+
+    /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
         new_barrier: NewBarrier,
         control_stream_manager: &mut ControlStreamManager,
-    ) -> MetaResult<()> {
+    ) -> Option<HashMap<DatabaseId, MetaError>> {
         let NewBarrier {
             command,
             span,
@@ -206,7 +225,7 @@ impl CheckpointControl {
                             notifier.notify_start_failed(err.clone());
                         }
 
-                        return Ok(());
+                        return None;
                     }
                 }
             }
@@ -236,7 +255,7 @@ impl CheckpointControl {
                         } else {
                             new_database.state.in_flight_prev_epoch().clone()
                         };
-                        control_stream_manager.add_partial_graph(database_id, None)?;
+                        control_stream_manager.add_partial_graph(database_id, None);
                         (
                             entry
                                 .insert(DatabaseCheckpointControlStatus::Running(new_database))
@@ -250,7 +269,7 @@ impl CheckpointControl {
                             notifier.notify_collected();
                         }
                         warn!(?command, "skip command for empty database");
-                        return Ok(());
+                        return None;
                     }
                     _ => {
                         panic!(
@@ -263,14 +282,21 @@ impl CheckpointControl {
 
             let curr_epoch = max_prev_epoch.next();
 
-            database.handle_new_barrier(
+            let mut failed_databases: Option<HashMap<_, _>> = None;
+
+            if let Err(e) = database.handle_new_barrier(
                 Some((command, notifiers)),
                 checkpoint,
                 span.clone(),
                 control_stream_manager,
                 &self.hummock_version_stats,
                 curr_epoch.clone(),
-            )?;
+            ) {
+                failed_databases
+                    .get_or_insert_default()
+                    .try_insert(database_id, e)
+                    .expect("non-duplicate");
+            }
             for database in self.databases.values_mut() {
                 let Some(database) = database.running_state_mut() else {
                     continue;
@@ -278,35 +304,50 @@ impl CheckpointControl {
                 if database.database_id == database_id {
                     continue;
                 }
-                database.handle_new_barrier(
+                if let Err(e) = database.handle_new_barrier(
                     None,
                     checkpoint,
                     span.clone(),
                     control_stream_manager,
                     &self.hummock_version_stats,
                     curr_epoch.clone(),
-                )?;
+                ) {
+                    failed_databases
+                        .get_or_insert_default()
+                        .try_insert(database.database_id, e)
+                        .expect("non-duplicate");
+                }
             }
+            failed_databases
         } else {
+            #[expect(clippy::question_mark)]
             let Some(max_prev_epoch) = self.max_prev_epoch() else {
-                return Ok(());
+                return None;
             };
             let curr_epoch = max_prev_epoch.next();
+
+            let mut failed_databases: Option<HashMap<_, _>> = None;
             for database in self.databases.values_mut() {
                 let Some(database) = database.running_state_mut() else {
                     continue;
                 };
-                database.handle_new_barrier(
+                if let Err(e) = database.handle_new_barrier(
                     None,
                     checkpoint,
                     span.clone(),
                     control_stream_manager,
                     &self.hummock_version_stats,
                     curr_epoch.clone(),
-                )?;
+                ) {
+                    failed_databases
+                        .get_or_insert_default()
+                        .try_insert(database.database_id, e)
+                        .expect("non-duplicate");
+                }
             }
+
+            failed_databases
         }
-        Ok(())
     }
 
     pub(crate) fn update_barrier_nums_metrics(&self) {
@@ -1077,11 +1118,17 @@ impl DatabaseCheckpointControl {
                         );
                     }
                     for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
-                        fill_snapshot_backfill_epoch(
+                        if let Err(e) = fill_snapshot_backfill_epoch(
                             &mut fragment.nodes,
                             Some(snapshot_backfill_info),
                             cross_db_snapshot_backfill_info,
-                        )?;
+                        ) {
+                            warn!(e = %e.as_report(), "failed to fill snapshot backfill epoch");
+                            for notifier in notifiers {
+                                notifier.notify_start_failed(e.clone());
+                            }
+                            return Ok(());
+                        };
                     }
                     let info = info.clone();
                     let job_id = info.stream_job_fragments.stream_job_id();
@@ -1092,7 +1139,7 @@ impl DatabaseCheckpointControl {
                         .to_mutation(false)
                         .expect("should have some mutation in `CreateStreamingJob` command");
 
-                    control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
+                    control_stream_manager.add_partial_graph(self.database_id, Some(job_id));
                     self.creating_streaming_job_controls.insert(
                         job_id,
                         CreatingStreamingJobControl::new(

@@ -315,8 +315,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -1798,6 +1799,9 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
