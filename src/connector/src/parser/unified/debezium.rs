@@ -1119,7 +1119,7 @@ where
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
                     Ok(extract_bson_field(type_expected, &bson_doc.take(), Some(field))?.into())
                 } else {
-                    // fail to extract the "_id" field from the message payload
+                    // fail to extract the expected field from the message payload
                     Err(AccessError::Undefined {
                         name: field.to_string(),
                         path: path[0].to_owned(),

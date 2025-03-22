@@ -35,7 +35,6 @@ pub struct DebeziumMongoJsonParser {
     source_ctx: SourceContextRef,
     key_builder: AccessBuilderImpl,
     payload_builder: AccessBuilderImpl,
-    strong_schema: bool,
 }
 
 fn build_accessor_builder(
@@ -110,7 +109,6 @@ impl DebeziumMongoJsonParser {
             source_ctx,
             key_builder,
             payload_builder,
-            strong_schema,
         })
     }
 
@@ -132,12 +130,6 @@ impl DebeziumMongoJsonParser {
 
         let row_op = DebeziumChangeEvent::new_mongodb_event(key_accessor, payload_accessor);
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)
-    }
-}
-
-impl DebeziumMongoJsonParser {
-    pub fn strong_schema(&self) -> bool {
-        self.strong_schema
     }
 }
 
@@ -324,6 +316,49 @@ mod tests {
             row.datum_at(1).to_owned_datum(),
             (Some(ScalarImpl::Jsonb(
                 serde_json::json!({"_id": {"$numberLong": "1004"}, "first_name": "Anne","last_name": "Kretchmar","email": "annek@noanswer.org"}).into()
+            )))
+            );
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int64(1004)))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_with_or_without_schema_field() {
+        let input = vec![
+        br#"{"schema":{"type":"struct","fields":[{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"before"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"after"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"patch"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"filter"},{"type":"struct","fields":[{"type":"array","items":{"type":"string","optional":false},"optional":true,"field":"removedFields"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"updatedFields"},{"type":"array","items":{"type":"struct","fields":[{"type":"string","optional":false,"field":"field"},{"type":"int32","optional":false,"field":"size"}],"optional":false,"name":"io.debezium.connector.mongodb.changestream.truncatedarray","version":1},"optional":true,"field":"truncatedArrays"}],"optional":true,"name":"io.debezium.connector.mongodb.changestream.updatedescription","version":1,"field":"updateDescription"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"rs"},{"type":"string","optional":false,"field":"collection"},{"type":"int32","optional":false,"field":"ord"},{"type":"string","optional":true,"field":"lsid"},{"type":"int64","optional":true,"field":"txnNumber"}],"optional":false,"name":"io.debezium.connector.mongo.Source","field":"source"},{"type":"string","optional":true,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"name":"event.block","version":1,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.customers.Envelope"},"payload":{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1001\"},\"first_name\": \"Sally\",\"last_name\": \"Thomas\",\"email\": \"sally.thomas@acme.com\"}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"true","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}}"#.to_vec(),
+        br#"{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1001\"},\"first_name\": \"Sally\",\"last_name\": \"Thomas\",\"email\": \"sally.thomas@acme.com\"}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"true","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}"#.to_vec()
+        ];
+
+        let columns = vec![
+            SourceColumnDesc::simple("_id", DataType::Int64, ColumnId::from(0)),
+            SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
+        ];
+
+        for data in input {
+            let mut parser =
+                DebeziumMongoJsonParser::new(columns.clone(), generate_source_context().into())
+                    .unwrap();
+
+            let mut builder =
+                SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+
+            parser
+                .parse_inner(None, Some(data), builder.row_writer())
+                .await
+                .unwrap();
+            builder.finish_current_chunk();
+            let chunk = builder.consume_ready_chunks().next().unwrap();
+            let mut rows = chunk.rows();
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+
+            assert_eq!(
+            row.datum_at(1).to_owned_datum(),
+            (Some(ScalarImpl::Jsonb(
+serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_name": "Thomas","email": "sally.thomas@acme.com"}).into()
             )))
             );
             assert_eq!(
