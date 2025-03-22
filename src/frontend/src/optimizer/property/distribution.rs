@@ -67,6 +67,10 @@ use crate::optimizer::property::Order;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Distribution {
     /// There is only one partition. All records are placed on it.
+    ///
+    /// Note: singleton will not be enforced automatically.
+    /// It's set in `crate::stream_fragmenter::build_fragment`,
+    /// by setting `requires_singleton` manually.
     Single,
     /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
     /// about their placement rules.

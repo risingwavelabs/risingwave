@@ -32,7 +32,7 @@ use risingwave_storage::panic_store::PanicStateStore;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    FsListExecutor, IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 
 pub struct SourceExecutorBuilder;
@@ -204,6 +204,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     FsListExecutor::new(
                         params.actor_context.clone(),
                         Some(stream_source_core),
+                        params.executor_stats.clone(),
+                        barrier_receiver,
+                        system_params,
+                        source.rate_limit,
+                    )
+                    .boxed()
+                } else if source.with_properties.is_iceberg_connector() {
+                    IcebergListExecutor::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
