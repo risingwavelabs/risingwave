@@ -845,7 +845,7 @@ macro_rules! impl_convert {
                     /// If the scalar is not of the expected type.
                     pub fn [<as_ $suffix_name>](&self) -> &$scalar {
                         match self {
-                            Self::$variant_name(ref scalar) => scalar,
+                            Self::$variant_name(scalar) => scalar,
                             other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
                         }
                     }

@@ -105,7 +105,7 @@ impl SplitReader for DatagenSplitReader {
             // let name = column.name.clone();
             let data_type = column.data_type.clone();
 
-            let gen = if column.is_visible {
+            let r#gen = if column.is_visible {
                 FieldDesc::Visible(generator_from_data_type(
                     column.data_type,
                     &fields_option_map,
@@ -117,7 +117,7 @@ impl SplitReader for DatagenSplitReader {
             } else {
                 FieldDesc::Invisible
             };
-            fields_vec.push(gen);
+            fields_vec.push(r#gen);
             data_types.push(data_type);
             field_names.push(column.name);
         }
@@ -285,7 +285,7 @@ fn generator_from_data_type(
             let struct_fields = struct_type
                 .iter()
                 .map(|(field_name, data_type)| {
-                    let gen = generator_from_data_type(
+                    let r#gen = generator_from_data_type(
                         data_type.clone(),
                         fields_option_map,
                         &format!("{}.{}", name, field_name),
@@ -293,7 +293,7 @@ fn generator_from_data_type(
                         split_num,
                         offset,
                     )?;
-                    Ok((field_name.to_owned(), gen))
+                    Ok((field_name.to_owned(), r#gen))
                 })
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)

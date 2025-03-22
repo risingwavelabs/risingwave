@@ -268,7 +268,7 @@ impl TestCase {
             frontend.session_ref()
         };
 
-        if let Some(ref config_map) = self.with_config_map() {
+        if let Some(config_map) = self.with_config_map() {
             for (key, val) in config_map {
                 session.set_config(key, val.to_owned()).unwrap();
             }

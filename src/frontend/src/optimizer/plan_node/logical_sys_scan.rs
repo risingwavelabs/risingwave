@@ -101,15 +101,13 @@ impl LogicalSysScan {
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
     fn output_idx_to_input_ref(&self) -> Vec<ExprImpl> {
-        let output_idx = self
-            .output_col_idx()
+        self.output_col_idx()
             .iter()
             .enumerate()
             .map(|(i, &col_idx)| {
                 InputRef::new(i, self.table_desc().columns[col_idx].data_type.clone()).into()
             })
-            .collect_vec();
-        output_idx
+            .collect_vec()
     }
 
     /// Undo predicate push down when predicate in scan is not supported.

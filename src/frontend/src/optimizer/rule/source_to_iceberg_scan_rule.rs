@@ -205,8 +205,7 @@ fn build_position_delete_hashjoin_scan(
     let data_columns_len = data_iceberg_scan.schema().len();
 
     let build_inputs = |scan: &PlanRef, offset: usize| {
-        let delete_column_inputs = scan
-            .schema()
+        scan.schema()
             .fields()
             .iter()
             .enumerate()
@@ -222,8 +221,7 @@ fn build_position_delete_hashjoin_scan(
                     None
                 }
             })
-            .collect::<Vec<InputRef>>();
-        delete_column_inputs
+            .collect::<Vec<InputRef>>()
     };
     let join_left_delete_column_inputs = build_inputs(&data_iceberg_scan, 0);
     let position_delete_iceberg_scan = position_delete_iceberg_scan.into();

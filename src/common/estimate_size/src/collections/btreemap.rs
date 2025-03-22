@@ -180,7 +180,7 @@ where
     pub fn extract_if<'a, F>(
         &'a mut self,
         mut pred: F,
-    ) -> ExtractIf<'a, K, V, impl FnMut(&K, &mut V) -> bool>
+    ) -> ExtractIf<'a, K, V, impl FnMut(&K, &mut V) -> bool + use<F, K, V>>
     where
         F: 'a + FnMut(&K, &V) -> bool,
     {

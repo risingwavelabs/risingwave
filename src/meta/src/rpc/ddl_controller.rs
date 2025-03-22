@@ -686,7 +686,7 @@ impl DdlController {
         node_body: &Option<NodeBody>,
         table_id: u32,
     ) -> MetaResult<bool> {
-        if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = node_body
+        if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
             let options_with_secret = WithOptionsSecResolved::new(

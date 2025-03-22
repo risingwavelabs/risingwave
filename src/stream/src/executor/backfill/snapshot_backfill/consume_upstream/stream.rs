@@ -182,7 +182,7 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
             }
             ConsumeUpstreamStreamState::ConsumingSnapshotStream {
                 stream,
-                ref snapshot_epoch,
+                snapshot_epoch,
                 ..
             } => {
                 stream
@@ -191,8 +191,10 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
                     })
                     .await?;
             }
-            ConsumeUpstreamStreamState::ConsumingChangeLogStream {
-                stream, ref epoch, ..
+            &mut ConsumeUpstreamStreamState::ConsumingChangeLogStream {
+                ref mut stream,
+                ref epoch,
+                ..
             } => {
                 stream
                     .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
@@ -200,11 +202,11 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
                     })
                     .await?;
             }
-            ConsumeUpstreamStreamState::CreatingChangeLogStream {
+            &mut ConsumeUpstreamStreamState::CreatingChangeLogStream {
                 ref prev_epoch_finished_vnodes,
                 ..
             }
-            | ConsumeUpstreamStreamState::ResolvingNextEpoch {
+            | &mut ConsumeUpstreamStreamState::ResolvingNextEpoch {
                 ref prev_epoch_finished_vnodes,
                 ..
             } => {

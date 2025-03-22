@@ -643,7 +643,7 @@ impl ObjectStore for S3ObjectStore {
 }
 
 impl S3ObjectStore {
-    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient {
+    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient + use<> {
         let mut http = hyper::client::HttpConnector::new();
 
         // connection config
@@ -1084,36 +1084,32 @@ where
                     }
                 }
 
-                Some(SdkError::ServiceError(e)) => {
-                    let retry = match e.err().code() {
-                        None => {
-                            if config.s3.developer.retry_unknown_service_error
-                                || config.s3.retry_unknown_service_error
-                            {
-                                tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                                true
-                            } else {
-                                false
-                            }
+                Some(SdkError::ServiceError(e)) => match e.err().code() {
+                    None => {
+                        if config.s3.developer.retry_unknown_service_error
+                            || config.s3.retry_unknown_service_error
+                        {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            true
+                        } else {
+                            false
                         }
-                        Some(code) => {
-                            if config
-                                .s3
-                                .developer
-                                .retryable_service_error_codes
-                                .iter()
-                                .any(|s| s.as_str().eq_ignore_ascii_case(code))
-                            {
-                                tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
-                                true
-                            } else {
-                                false
-                            }
+                    }
+                    Some(code) => {
+                        if config
+                            .s3
+                            .developer
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            true
+                        } else {
+                            false
                         }
-                    };
-
-                    retry
-                }
+                    }
+                },
 
                 Some(SdkError::TimeoutError(_err)) => true,
 

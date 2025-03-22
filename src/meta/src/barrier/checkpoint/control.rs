@@ -191,8 +191,8 @@ impl CheckpointControl {
         } = new_barrier;
 
         if let Some((database_id, mut command, notifiers)) = command {
-            if let Command::CreateStreamingJob {
-                cross_db_snapshot_backfill_info,
+            if let &mut Command::CreateStreamingJob {
+                ref mut cross_db_snapshot_backfill_info,
                 ref info,
                 ..
             } = &mut command
@@ -764,14 +764,11 @@ impl DatabaseCheckpointControl {
 
     /// Pause inject barrier until True.
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        let in_flight_not_full = self
-            .command_ctx_queue
+        self.command_ctx_queue
             .values()
             .filter(|x| x.state.is_inflight())
             .count()
-            < in_flight_barrier_nums;
-
-        in_flight_not_full
+            < in_flight_barrier_nums
     }
 
     /// Return whether the database can still work after worker failure

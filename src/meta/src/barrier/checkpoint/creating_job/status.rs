@@ -137,14 +137,14 @@ impl CreatingStreamingJobStatus {
         create_mview_progress: impl IntoIterator<Item = &CreateMviewProgress>,
     ) -> Option<Vec<CreatingJobInjectBarrierInfo>> {
         match self {
-            Self::ConsumingSnapshot {
-                create_mview_tracker,
+            &mut Self::ConsumingSnapshot {
+                ref mut create_mview_tracker,
                 ref version_stats,
-                prev_epoch_fake_physical_time,
-                pending_upstream_barriers,
-                pending_non_checkpoint_barriers,
+                ref mut prev_epoch_fake_physical_time,
+                ref mut pending_upstream_barriers,
+                ref mut pending_non_checkpoint_barriers,
                 ref backfill_epoch,
-                initial_barrier_info,
+                ref mut initial_barrier_info,
                 ref snapshot_backfill_actors,
                 ..
             } => {

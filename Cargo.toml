@@ -74,7 +74,7 @@ resolver = "2"
 
 [workspace.package]
 version = "2.4.0-alpha"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
 license = "Apache-2.0"
@@ -168,7 +168,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.14.0"
 jsonbb = "0.1.4"
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = { version = "54", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [

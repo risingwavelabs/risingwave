@@ -106,7 +106,7 @@ pub fn risedev_cmd() -> &'static str {
     RISEDEV_CMD.as_str()
 }
 
-pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display {
+pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display + use<> {
     console::style(format!("{} {}", risedev_cmd(), subcmd))
         .blue()
         .bold()

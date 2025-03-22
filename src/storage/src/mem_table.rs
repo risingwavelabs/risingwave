@@ -163,7 +163,7 @@ impl MemTable {
                 self.kv_size.sub_val(old_op);
 
                 match old_op {
-                    KeyOp::Delete(ref mut old_op_old_value) => {
+                    KeyOp::Delete(old_op_old_value) => {
                         let new_op = KeyOp::Update((std::mem::take(old_op_old_value), value));
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);

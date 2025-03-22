@@ -130,11 +130,10 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
                     }
                 })
                 .collect_vec();
-            let update_statements = update_values
+            update_values
                 .iter()
                 .map(|row| Self::row_to_update_statement(table, pk_indices, &value_indices, row))
-                .collect_vec();
-            update_statements
+                .collect_vec()
         }
     }
 

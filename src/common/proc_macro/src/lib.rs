@@ -60,9 +60,9 @@ mod session_config;
 pub fn override_config(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input);
 
-    let gen = config::produce_override_config(input);
+    let r#gen = config::produce_override_config(input);
 
-    gen.into()
+    r#gen.into()
 }
 
 /// `EstimateSize` can be derived if when all the fields in a
@@ -90,14 +90,14 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
         syn::Data::Enum(data_enum) => {
             if data_enum.variants.is_empty() {
                 // Empty enums are easy to implement.
-                let gen = quote! {
+                let r#gen = quote! {
                     impl EstimateSize for #name {
                         fn estimated_heap_size(&self) -> usize {
                             0
                         }
                     }
                 };
-                return gen.into();
+                return r#gen.into();
             }
 
             let mut cmds = Vec::with_capacity(data_enum.variants.len());
@@ -174,7 +174,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             }
 
             // Build the trait implementation
-            let gen = quote! {
+            let r#gen = quote! {
                 impl #impl_generics EstimateSize for #name #ty_generics #where_clause {
                     fn estimated_heap_size(&self) -> usize {
                         match self {
@@ -183,7 +183,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                     }
                 }
             };
-            gen.into()
+            r#gen.into()
         }
         syn::Data::Union(_data_union) => {
             panic!("Deriving EstimateSize for unions is currently not supported.")
@@ -191,14 +191,14 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
         syn::Data::Struct(data_struct) => {
             if data_struct.fields.is_empty() {
                 // Empty structs are easy to implement.
-                let gen = quote! {
+                let r#gen = quote! {
                     impl EstimateSize for #name {
                         fn estimated_heap_size(&self) -> usize {
                             0
                         }
                     }
                 };
-                return gen.into();
+                return r#gen.into();
             }
 
             let mut field_cmds = Vec::with_capacity(data_struct.fields.len());
@@ -234,7 +234,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             }
 
             // Build the trait implementation
-            let gen = quote! {
+            let r#gen = quote! {
                 impl #impl_generics EstimateSize for #name #ty_generics #where_clause {
                     fn estimated_heap_size(&self) -> usize {
                         let mut total = 0;
@@ -245,7 +245,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                     }
                 }
             };
-            gen.into()
+            r#gen.into()
         }
     }
 }
@@ -303,7 +303,7 @@ pub fn session_config(input: TokenStream) -> TokenStream {
 pub fn config_doc(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input);
 
-    let gen = config_doc::generate_config_doc_fn(input);
+    let r#gen = config_doc::generate_config_doc_fn(input);
 
-    gen.into()
+    r#gen.into()
 }

@@ -396,8 +396,7 @@ impl HummockManager {
                 |context_id: u32,
                  stream: Streaming<SubscribeCompactionEventRequest>,
                  compactor_request_streams: &mut FuturesUnordered<_>| {
-                    let future = stream
-                        .into_future()
+                    let future = StreamExt::into_future(stream)
                         .map(move |stream_future| (context_id, stream_future));
 
                     compactor_request_streams.push(future);

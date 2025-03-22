@@ -1268,7 +1268,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         side_match_start_pos: usize,
         join_condition: &Option<NonStrictExpression>,
     ) -> bool {
-        if let Some(ref join_condition) = join_condition {
+        if let Some(join_condition) = join_condition {
             let new_row = Self::row_concat(
                 row,
                 side_update_start_pos,

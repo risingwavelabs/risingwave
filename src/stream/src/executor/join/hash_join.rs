@@ -256,7 +256,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             &self.state.pk_indices,
             &mut self.state.table,
         );
-        let degrees = if let Some(ref degree_state) = degree_state {
+        let degrees = if let Some(degree_state) = degree_state {
             Some(fetch_degrees(key, &self.join_key_data_types, &degree_state.table).await?)
         } else {
             None

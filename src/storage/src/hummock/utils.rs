@@ -535,7 +535,7 @@ pub(crate) fn filter_with_delete_range<'a>(
             range_end
         );
     }
-    kv_iter.filter(move |(ref key, _)| {
+    kv_iter.filter(move |(key, _)| {
         if let Some(range_bound) = range {
             if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
                 == Ordering::Less

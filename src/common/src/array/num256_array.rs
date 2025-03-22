@@ -50,9 +50,9 @@ macro_rules! impl_array_for_num256 {
             type OwnedItem = $scalar;
             type RefItem<$gen> = $scalar_ref<$gen>;
 
-            unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+            unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> { unsafe {
                 $scalar_ref(self.data.get_unchecked(idx))
-            }
+            }}
 
             fn len(&self) -> usize {
                 self.data.len()

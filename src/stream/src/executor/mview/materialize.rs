@@ -477,15 +477,14 @@ impl MaterializeBuffer {
             Entry::Vacant(e) => {
                 e.insert(KeyOp::Insert(value));
             }
-            Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Delete(ref mut old_value) => {
+            Entry::Occupied(mut e) => {
+                if let KeyOp::Delete(old_value) = e.get_mut() {
                     let old_val = std::mem::take(old_value);
                     e.insert(KeyOp::Update((old_val, value)));
-                }
-                KeyOp::Insert(_) | KeyOp::Update(_) => {
+                } else {
                     unreachable!();
                 }
-            },
+            }
         }
     }
 

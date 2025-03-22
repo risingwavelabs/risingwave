@@ -555,9 +555,9 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
                 )
                 .expect("no reason to fail here");
 
-                if let Some(LatestSession {
+                if let Some(&mut LatestSession {
                     ref start_idx,
-                    minimal_next_start,
+                    ref mut minimal_next_start,
                 }) = self.latest_session.as_mut()
                 {
                     if &appended_key.order_key >= minimal_next_start {

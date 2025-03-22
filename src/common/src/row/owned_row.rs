@@ -111,7 +111,7 @@ impl Row for OwnedRow {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.0.get_unchecked(index).to_datum_ref()
+        unsafe { self.0.get_unchecked(index).to_datum_ref() }
     }
 
     #[inline]

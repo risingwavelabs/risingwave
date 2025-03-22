@@ -49,11 +49,9 @@ impl CountMap {
             }
         }
         let mut map = self.0.write();
-        let counter = map
-            .entry(id)
+        map.entry(id)
             .or_insert_with(|| Arc::new(AtomicU64::new(0)))
-            .clone();
-        counter
+            .clone()
     }
 
     pub fn collect(&self, operator_ids: &[u64]) -> HashMap<u64, u64> {

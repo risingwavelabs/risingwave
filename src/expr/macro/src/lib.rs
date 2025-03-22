@@ -22,7 +22,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};
 
 mod context;
-mod gen;
+mod r#gen;
 mod parse;
 mod types;
 mod utils;
@@ -633,7 +633,7 @@ impl UserFunctionAttr {
 pub fn define_context(def: TokenStream) -> TokenStream {
     fn inner(def: TokenStream) -> Result<TokenStream2> {
         let attr: DefineContextAttr = syn::parse(def)?;
-        attr.gen()
+        attr.r#gen()
     }
 
     match inner(def) {

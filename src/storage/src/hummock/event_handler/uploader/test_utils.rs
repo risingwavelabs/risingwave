@@ -332,7 +332,8 @@ pub(crate) fn prepare_uploader_order_test(
 ) -> (
     BufferTracker,
     HummockUploader,
-    impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
+    impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>)
+    + use<>,
 ) {
     let (spawn_fn, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(skip_schedule);
     let gauge = GenericGauge::new("test", "test").unwrap();

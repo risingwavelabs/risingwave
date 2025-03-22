@@ -63,7 +63,7 @@ fn register_hummock_java_binding_native_methods(
     Ok(())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(non_snake_case)]
 pub extern "system" fn JNI_OnLoad(jvm: JavaVM, _reserved: *mut c_void) -> jint {
     let result: Result<(), jni::errors::Error> = try {
@@ -78,7 +78,7 @@ pub extern "system" fn JNI_OnLoad(jvm: JavaVM, _reserved: *mut c_void) -> jint {
 }
 
 #[cfg_or_panic(not(madsim))]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "system" fn Java_com_risingwave_java_binding_HummockIterator_iteratorNewHummock<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,

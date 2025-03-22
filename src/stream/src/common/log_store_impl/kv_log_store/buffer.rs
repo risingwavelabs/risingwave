@@ -197,7 +197,7 @@ impl LogStoreBufferInner {
     }
 
     fn add_truncate_offset(&mut self, (epoch, seq_id): ReaderTruncationOffsetType) {
-        if let Some((prev_epoch, ref mut prev_seq_id)) = self.truncation_list.back_mut()
+        if let Some((prev_epoch, prev_seq_id)) = self.truncation_list.back_mut()
             && *prev_epoch == epoch
         {
             *prev_seq_id = seq_id;
@@ -348,10 +348,7 @@ pub(crate) struct LogStoreBufferReceiver {
 impl LogStoreBufferReceiver {
     pub(crate) async fn next_item(&self) -> (u64, LogStoreBufferItem) {
         let notified = self.update_notify.notified();
-        if let Some(item) = {
-            let opt = self.buffer.inner().pop_item();
-            opt
-        } {
+        if let Some(item) = { self.buffer.inner().pop_item() } {
             item
         } else {
             notified.instrument_await("Wait For New Buffer Item").await;

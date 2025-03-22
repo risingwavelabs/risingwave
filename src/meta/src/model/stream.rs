@@ -607,12 +607,11 @@ impl StreamJobFragments {
 
         let union_fragment_id =
             union_fragment_id.expect("fragment of placeholder merger not found");
-        let union_fragment = self
+
+        (self
             .fragments
             .get_mut(&union_fragment_id)
-            .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id));
-
-        union_fragment
+            .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id))) as _
     }
 
     /// Resolve dependent table
