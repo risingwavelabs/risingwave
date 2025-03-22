@@ -126,6 +126,7 @@ enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// `Some` means consuming historical log data
     ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
     ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
+    Reset(Option<LogStoreReadStateStreamRangeStart>),
     Empty,
 }
 
@@ -375,6 +376,44 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
 }
 
 impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
+    async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
+        // init or rewind must be executed before start_from.
+        let aligned_range_start =
+            if let KvLogStoreReaderFutureState::Reset(aligned_range_start) = &self.future_state {
+                aligned_range_start
+            } else {
+                panic!("future state is not Reset");
+            };
+        // still consuming persisted state store data
+        let persisted_epoch = self
+            .truncate_offset
+            .map(|truncate_offset| match truncate_offset {
+                TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
+                TruncateOffset::Barrier { epoch } => epoch,
+            });
+        // Construct the log reader's read stream based on start_offset, aligned_range_start, and persisted_epoch.
+        // The priority order is: provided start_offset > aligned_range_start > persisted_epoch.
+        let range_start = match (start_offset, aligned_range_start, persisted_epoch) {
+            (Some(rewind_start_offset), _, _) => {
+                tracing::info!(
+                    "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
+                );
+                LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
+            }
+            (None, Some(aligned_range_start), _) => aligned_range_start.clone(),
+            (None, None, Some(last_persisted_epoch)) => {
+                LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch)
+            }
+            _ => LogStoreReadStateStreamRangeStart::Unbounded,
+        };
+
+        self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
+            self.read_persisted_log_store(range_start).await?,
+        );
+        self.rx.rewind(start_offset);
+        Ok(())
+    }
+
     async fn init(&mut self) -> LogStoreResult<()> {
         let aligned_range_start = if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
             let (init_epoch, aligned_range_start) = init_epoch_rx
@@ -399,7 +438,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             aligned_range_start
         };
 
-        let range_start = if self.align_epoch_on_init
+        let range_start: LogStoreReadStateStreamRangeStart = if self.align_epoch_on_init
             && let Some(range_start) = aligned_range_start.expect("should have aligned range start")
         {
             LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start)
@@ -407,9 +446,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             LogStoreReadStateStreamRangeStart::Unbounded
         };
 
-        self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
-            self.read_persisted_log_store(range_start).await?,
-        );
+        self.future_state = KvLogStoreReaderFutureState::Reset(Some(range_start));
         self.latest_offset = None;
         self.truncate_offset = None;
         self.rewind_delay = RewindDelay::new(&self.metrics);
@@ -477,6 +514,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 ));
             }
             KvLogStoreReaderFutureState::Empty => {}
+            KvLogStoreReaderFutureState::Reset(_) => {}
         }
 
         // Now the historical state store has been consumed.
@@ -603,29 +641,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
-        if self.truncate_offset.is_none()
-            || self.truncate_offset.expect("not none").epoch()
-                < self.first_write_epoch.expect("should have init")
-        {
-            // still consuming persisted state store data
-            let persisted_epoch =
-                self.truncate_offset
-                    .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
-                        TruncateOffset::Barrier { epoch } => epoch,
-                    });
-            let range_start = match persisted_epoch {
-                None => LogStoreReadStateStreamRangeStart::Unbounded,
-                Some(epoch) => LogStoreReadStateStreamRangeStart::LastPersistedEpoch(epoch),
-            };
-            self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
-                self.read_persisted_log_store(range_start).await?,
-            );
-        } else {
-            self.future_state = KvLogStoreReaderFutureState::Empty;
-        }
-        self.rx.rewind();
-
+        self.future_state = KvLogStoreReaderFutureState::Reset(None);
         Ok(())
     }
 }
@@ -691,6 +707,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) enum LogStoreReadStateStreamRangeStart {
     Unbounded,
     LastPersistedEpoch(u64),

@@ -566,6 +566,7 @@ mod tests {
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -676,6 +677,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -748,6 +750,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -864,6 +867,7 @@ mod tests {
         test_env.commit_epoch(epoch1).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_id1 = match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -968,6 +972,7 @@ mod tests {
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -1093,7 +1098,9 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
@@ -1217,6 +1224,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         if !align_init_epoch {
             // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
             // set to true, we won't receive the following commented items.
@@ -1301,6 +1309,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         {
             let mut future = pin!(reader.next_item());
@@ -1470,6 +1479,7 @@ mod tests {
         test_env.commit_epoch(epoch3).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         let chunk_ids = check_reader(
             &mut reader,
@@ -1490,6 +1500,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(
             &mut reader,
             [
@@ -1506,6 +1517,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(
             &mut reader,
             [
@@ -1524,6 +1536,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
         assert_eq!(0, chunk_ids.len());
 
@@ -1553,6 +1566,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         let data = [
             (epoch1, Some(&stream_chunk1)),
@@ -1566,6 +1580,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1576,6 +1591,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1590,6 +1606,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[2..].iter()).await;
         assert_eq!(1, chunk_ids.len());
 
@@ -1625,7 +1642,7 @@ mod tests {
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
         reader.init().await.unwrap();
-
+        reader.start_from(None).await.unwrap();
         let data = [
             (epoch1, Some(&stream_chunk1)),
             (epoch2, Some(&stream_chunk2)),
@@ -1645,6 +1662,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
         assert_eq!(4, chunk_ids.len());
 
@@ -1655,6 +1673,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
         assert_eq!(4, chunk_ids.len());
 
@@ -1662,6 +1681,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[2..].iter()).await;
         assert_eq!(3, chunk_ids.len());
 
@@ -1669,6 +1689,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch3 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[3..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1679,6 +1700,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(
             &mut reader,
             [(epoch4, None), (epoch5, Some(&stream_chunk5))].iter(),
@@ -1690,6 +1712,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch4 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids =
             check_reader_last_unsealed(&mut reader, [(epoch5, Some(&stream_chunk5))].iter()).await;
         assert_eq!(1, chunk_ids.len());
@@ -1701,6 +1724,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, empty()).await;
         assert!(chunk_ids.is_empty());
     }
@@ -1807,6 +1831,7 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1865,6 +1890,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1933,6 +1959,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -2015,7 +2042,9 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
@@ -2153,6 +2182,7 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         match reader1.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
@@ -2168,6 +2198,7 @@ mod tests {
             _ => unreachable!(),
         }
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         match reader2.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);

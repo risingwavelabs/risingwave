@@ -34,6 +34,7 @@ impl BatchingLogSinker {
 #[async_trait]
 impl LogSinker for BatchingLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         let mut sink_writer = self.writer;
         #[derive(Debug)]
         enum LogConsumerState {

@@ -310,6 +310,7 @@ impl RemoteLogSinker {
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_writer_metrics = self.sink_writer_metrics;
@@ -675,8 +676,8 @@ impl RemoteCoordinator {
 
 #[async_trait]
 impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

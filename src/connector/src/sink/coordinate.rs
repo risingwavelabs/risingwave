@@ -31,6 +31,7 @@ pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetad
     epoch: u64,
     coordinator_stream_handle: CoordinatorStreamHandle,
     inner: W,
+    pub(crate) log_store_rewind_start_epoch: Option<u64>,
 }
 
 impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter<W> {
@@ -40,10 +41,13 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter
         vnode_bitmap: Bitmap,
         inner: W,
     ) -> Result<Self> {
+        let (coordinator_stream_handle, log_store_rewind_start_epoch) =
+            client.new_stream_handle(param, vnode_bitmap).await?;
         Ok(Self {
             epoch: 0,
-            coordinator_stream_handle: client.new_stream_handle(param, vnode_bitmap).await?,
+            coordinator_stream_handle,
             inner,
+            log_store_rewind_start_epoch,
         })
     }
 }
@@ -87,6 +91,10 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
             .update_vnode_bitmap(&vnode_bitmap)
             .await?;
         self.inner.update_vnode_bitmap(vnode_bitmap).await
+    }
+
+    fn rewind_start_offset(&mut self) -> Result<Option<u64>> {
+        Ok(self.log_store_rewind_start_epoch)
     }
 }
 

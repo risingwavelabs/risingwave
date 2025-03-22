@@ -331,7 +331,6 @@ impl Sink for StarrocksSink {
             inner,
         )
         .await?;
-
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
@@ -897,9 +896,9 @@ pub struct StarrocksSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for StarrocksSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("Starrocks commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
