@@ -579,35 +579,49 @@ where
             .collect()
     }
 
+    pub fn newly_added_object_ids_exclude_change_log(&self) -> HashSet<HummockSstableObjectId> {
+        self.newly_added_sst_infos_exclude_change_log()
+            .map(|sst| sst.object_id())
+            .collect()
+    }
+
     pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.newly_added_sst_infos()
             .map(|sst| sst.sst_id())
             .collect()
     }
 
+    pub fn newly_added_sst_ids_exclude_change_log(&self) -> HashSet<HummockSstableObjectId> {
+        self.newly_added_sst_infos_exclude_change_log()
+            .map(|sst| sst.sst_id())
+            .collect()
+    }
+
     pub fn newly_added_sst_infos(&self) -> impl Iterator<Item = &'_ T> {
-        self.group_deltas
-            .values()
-            .flat_map(|group_deltas| {
-                group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                    let sst_slice = match &group_delta {
-                        GroupDeltaCommon::NewL0SubLevel(inserted_table_infos)
-                        | GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon {
-                            inserted_table_infos,
-                            ..
-                        }) => Some(inserted_table_infos.iter()),
-                        GroupDeltaCommon::GroupConstruct(_)
-                        | GroupDeltaCommon::GroupDestroy(_)
-                        | GroupDeltaCommon::GroupMerge(_) => None,
-                    };
-                    sst_slice.into_iter().flatten()
-                })
-            })
-            .chain(self.change_log_delta.values().flat_map(|delta| {
-                // TODO: optimization: strip table change log
+        self.newly_added_sst_infos_exclude_change_log().chain(
+            self.change_log_delta.values().flat_map(|delta| {
                 let new_log = &delta.new_log;
                 new_log.new_value.iter().chain(new_log.old_value.iter())
-            }))
+            }),
+        )
+    }
+
+    pub fn newly_added_sst_infos_exclude_change_log(&self) -> impl Iterator<Item = &'_ T> {
+        self.group_deltas.values().flat_map(|group_deltas| {
+            group_deltas.group_deltas.iter().flat_map(|group_delta| {
+                let sst_slice = match &group_delta {
+                    GroupDeltaCommon::NewL0SubLevel(inserted_table_infos)
+                    | GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon {
+                        inserted_table_infos,
+                        ..
+                    }) => Some(inserted_table_infos.iter()),
+                    GroupDeltaCommon::GroupConstruct(_)
+                    | GroupDeltaCommon::GroupDestroy(_)
+                    | GroupDeltaCommon::GroupMerge(_) => None,
+                };
+                sst_slice.into_iter().flatten()
+            })
+        })
     }
 }
 
