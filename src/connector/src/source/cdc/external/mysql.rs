@@ -26,16 +26,15 @@ use mysql_common::value::Value;
 use risingwave_common::bail;
 use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Decimal, F32, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
+use sea_schema::mysql::def::{ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
-use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
@@ -114,76 +113,9 @@ impl MySqlExternalTable {
             let data_type = mysql_type_to_rw_type(&col.col_type)?;
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
-            let column_desc = if let Some(default) = col.default {
-                let snapshot_value = match default {
-                    ColumnDefault::Null => None,
-                    ColumnDefault::Int(val) => match data_type {
-                        DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
-                        DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
-                        DataType::Int64 => Some(ScalarImpl::Int64(val)),
-                        DataType::Varchar => {
-                            // should be the Enum type which is mapped to Varchar
-                            Some(ScalarImpl::from(val.to_string()))
-                        }
-                        _ => {
-                            tracing::error!(
-                                column = col_name,
-                                ?data_type,
-                                default_val = val,
-                                "unexpected default value type for column, set default to null"
-                            );
-                            None
-                        }
-                    },
-                    ColumnDefault::Real(val) => match data_type {
-                        DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
-                        DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
-                        DataType::Decimal => Some(ScalarImpl::Decimal(
-                            Decimal::try_from(val).map_err(|err| {
-                                anyhow!("failed to convert default value to decimal").context(err)
-                            })?,
-                        )),
-                        _ => {
-                            tracing::error!(
-                                column = col_name,
-                                ?data_type,
-                                default_val = val,
-                                "unexpected default value type for column, set default to null"
-                            );
-                            None
-                        }
-                    },
-                    ColumnDefault::String(mut val) => {
-                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
-                        // interpret its value
-                        if data_type == DataType::Timestamptz {
-                            val = timestamp_val_to_timestamptz(val.as_str())?;
-                        }
-                        match ScalarImpl::from_text(val.as_str(), &data_type) {
-                            Ok(scalar) => Some(scalar),
-                            Err(err) => {
-                                tracing::warn!(error=%err.as_report(), "failed to parse mysql default value expression, only constant is supported");
-                                None
-                            }
-                        }
-                    }
-                    ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
-                        tracing::warn!(
-                            "MySQL CURRENT_TIMESTAMP and custom expression default value not supported"
-                        );
-                        None
-                    }
-                };
-
-                ColumnDesc::named_with_default_value(
-                    col_name.clone(),
-                    ColumnId::placeholder(),
-                    data_type.clone(),
-                    snapshot_value,
-                )
-            } else {
-                ColumnDesc::named(col_name.clone(), ColumnId::placeholder(), data_type)
-            };
+            // Note: we don't resolve the default value expression.
+            let column_desc =
+                ColumnDesc::named(col_name.clone(), ColumnId::placeholder(), data_type);
 
             column_descs.push(column_desc);
             if matches!(col.key, ColumnKey::Primary) {
