@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -35,6 +35,7 @@ use crate::connector_common::{
 use crate::deserialize_optional_bool_from_string;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
+use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
@@ -328,6 +329,21 @@ impl Connection for ConfluentSchemaRegistryConnection {
         // GET /config to validate the connection
         let client = ConfluentSchemaRegistryClient::try_from(self)?;
         client.validate_connection().await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Hash, Eq)]
+pub struct ElasticsearchConnection(pub BTreeMap<String, String>);
+
+#[async_trait]
+impl Connection for ElasticsearchConnection {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
+        const CONNECTOR: &str = "elasticsearch";
+
+        let config = ElasticSearchOpenSearchConfig::try_from(self)?;
+        let client = config.build_client(CONNECTOR)?;
+        client.ping().await?;
         Ok(())
     }
 }

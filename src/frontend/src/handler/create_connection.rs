@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::catalog::connection_params::ConnectionType;
@@ -71,6 +72,7 @@ fn resolve_create_connection_payload(
         KAFKA_CONNECTOR => ConnectionType::Kafka,
         ICEBERG_CONNECTOR => ConnectionType::Iceberg,
         SCHEMA_REGISTRY_CONNECTION_TYPE => ConnectionType::SchemaRegistry,
+        ES_SINK => ConnectionType::Elasticsearch,
         _ => {
             return Err(RwError::from(ProtocolError(format!(
                 "Connection type \"{connection_type}\" is not supported"
