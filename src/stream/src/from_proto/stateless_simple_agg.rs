@@ -16,7 +16,7 @@ use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::*;
-use crate::executor::StatelessSimpleAggExecutor;
+use crate::executor::aggregate::StatelessSimpleAggExecutor;
 
 pub struct StatelessSimpleAggExecutorBuilder;
 

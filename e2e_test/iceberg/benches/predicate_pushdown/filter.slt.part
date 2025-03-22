@@ -1,4 +1,4 @@
 query I
-select count(*) from iceberg_t1_source where i1 > 1001 and i1 < 1110;
+select count(*) from iceberg_t_bench_source where i1 > 1001 and i1 < 1110;
 ----
 108

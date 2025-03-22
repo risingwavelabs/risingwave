@@ -20,7 +20,7 @@ use std::vec;
 
 use itertools::Itertools;
 use rand::Rng;
-use rand::prelude::SliceRandom;
+use rand::prelude::{IndexedRandom, SliceRandom};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,
@@ -34,7 +34,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates query expression and returns its
     /// query schema as well.
     pub(crate) fn gen_query(&mut self) -> (Query, Vec<Column>) {
-        if self.rng.gen_bool(0.3) {
+        if self.rng.random_bool(0.3) {
             self.gen_complex_query()
         } else {
             self.gen_simple_query()
@@ -44,7 +44,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates a complex query which may recurse.
     /// e.g. through `gen_with` or other generated parts of the query.
     fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
-        let num_select_items = self.rng.gen_range(1..=4);
+        let num_select_items = self.rng.random_range(1..=4);
         let (with, with_tables) = self.gen_with();
         let (query, schema) = self.gen_set_expr(with_tables, num_select_items);
         let order_by = self.gen_order_by();
@@ -66,7 +66,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// does not have "with" clause, "order by".
     /// Which makes it more unlikely to recurse.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
-        let num_select_items = self.rng.gen_range(1..=4);
+        let num_select_items = self.rng.random_range(1..=4);
         let with_tables = vec![];
         let (query, schema) = self.gen_set_expr(with_tables, num_select_items);
         (
@@ -150,7 +150,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         with_tables: Vec<Table>,
         num_select_items: usize,
     ) -> (SetExpr, Vec<Column>) {
-        match self.rng.gen_range(0..=9) {
+        match self.rng.random_range(0..=9) {
             // TODO: Generate other `SetExpr`
             0..=9 => {
                 let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
@@ -164,7 +164,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         if (!self.is_mview || has_order_by) && self.flip_coin() {
             let start = if self.is_mview { 1 } else { 0 };
             Some(Expr::Value(Value::Number(
-                self.rng.gen_range(start..=100).to_string(),
+                self.rng.random_range(start..=100).to_string(),
             )))
         } else {
             None
@@ -239,7 +239,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
         // Generate one cross join at most.
         let mut lateral_contexts = vec![];
-        if self.rng.gen_bool(0.1) {
+        if self.rng.random_bool(0.1) {
             let (table_with_join, mut table) = self.gen_from_relation();
             from.push(table_with_join);
             lateral_contexts.append(&mut table);
@@ -261,7 +261,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_group_by(&mut self) -> Vec<Expr> {
         // 90% generate simple group by.
         // 10% generate grouping sets.
-        match self.rng.gen_range(0..=9) {
+        match self.rng.random_range(0..=9) {
             0..=8 => {
                 let group_by_cols = self.gen_random_bound_columns();
                 self.bound_columns.clone_from(&group_by_cols);
@@ -278,7 +278,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     #[allow(dead_code)]
     /// GROUPING SETS will constrain the generated columns.
     fn gen_grouping_sets(&mut self) -> Vec<Expr> {
-        let grouping_num = self.rng.gen_range(0..=5);
+        let grouping_num = self.rng.random_range(0..=5);
         let mut grouping_sets = vec![];
         let mut new_bound_columns = vec![];
         for _i in 0..grouping_num {
@@ -312,7 +312,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         if !available.is_empty() {
             available.shuffle(self.rng);
             let upper_bound = available.len().div_ceil(2);
-            let n = self.rng.gen_range(1..=upper_bound);
+            let n = self.rng.random_range(1..=upper_bound);
             available.drain(..n).collect_vec()
         } else {
             vec![]

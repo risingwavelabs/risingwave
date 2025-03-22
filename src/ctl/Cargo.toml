@@ -35,7 +35,7 @@ sea-orm = { workspace = true }
 serde = "1"
 serde_json = "1"
 serde_yaml = "0.9.25"
-size = "0.4"
+size = "0.5"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

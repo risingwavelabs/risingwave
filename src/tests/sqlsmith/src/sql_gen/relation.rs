@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use rand::Rng;
-use rand::prelude::SliceRandom;
+use rand::prelude::{IndexedRandom, SliceRandom};
 use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
@@ -36,7 +36,7 @@ fn create_equi_expr(left: String, right: String) -> Expr {
 impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        match self.rng.gen_range(1..=4) {
+        match self.rng.random_range(1..=4) {
             1..=1 => self.gen_no_join(),
             2..=3 => self
                 .gen_simple_join_clause()
@@ -84,7 +84,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.gen_range(0..=2) {
+        match self.rng.random_range(0..=2) {
             0 => self.gen_time_window_func(),
             1 => {
                 if self.can_recurse() {
@@ -143,7 +143,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         if available_join_on_columns.is_empty() {
             return expr;
         }
-        let n = self.rng.gen_range(0..available_join_on_columns.len());
+        let n = self.rng.random_range(0..available_join_on_columns.len());
         let mut count = 0;
         for (l_col, r_col) in available_join_on_columns {
             if count >= n {
@@ -173,9 +173,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let n = if n_join_cols < 2 {
             n_join_cols
         } else {
-            match self.rng.gen_range(0..100) {
-                0..=10 => self.rng.gen_range(n_join_cols / 2..n_join_cols),
-                11..=100 => self.rng.gen_range(0..n_join_cols / 2),
+            match self.rng.random_range(0..100) {
+                0..=10 => self.rng.random_range(n_join_cols / 2..n_join_cols),
+                11..=100 => self.rng.random_range(0..n_join_cols / 2),
                 _ => unreachable!(),
             }
         };
@@ -223,7 +223,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             self.gen_single_equi_join_expr(left_columns, right_columns)?;
 
         // Add more expressions
-        let extra_expr = match self.rng.gen_range(1..=100) {
+        let extra_expr = match self.rng.random_range(1..=100) {
             1..=25 => None,
             26..=50 => Some(self.gen_non_equi_expr(remaining_equi_columns)),
             51..=75 => Some(self.gen_more_equi_join_exprs(remaining_equi_columns)),
@@ -265,7 +265,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
         // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
         // If many failures due to `StreamNestedLoopJoin`, try disable the others.
-        let join_operator = match self.rng.gen_range(0..=3) {
+        let join_operator = match self.rng.random_range(0..=3) {
             0 => JoinOperator::Inner(join_constraint),
             1 => JoinOperator::LeftOuter(join_constraint),
             2 => JoinOperator::RightOuter(join_constraint),

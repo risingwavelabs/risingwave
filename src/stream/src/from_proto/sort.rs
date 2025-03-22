@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::SortNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{SortExecutor, SortExecutorArgs};
+use crate::executor::eowc::{SortExecutor, SortExecutorArgs};
 
 pub struct SortExecutorBuilder;
 

@@ -145,7 +145,7 @@ public class JniCatalogWrapper {
      */
     public boolean dropTable(String tableIdentifier) {
         TableIdentifier id = TableIdentifier.parse(tableIdentifier);
-        return catalog.dropTable(id);
+        return catalog.dropTable(id, true);
     }
 
     /**

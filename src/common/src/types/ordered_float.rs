@@ -847,8 +847,8 @@ fn raw_double_bits<F: Float>(f: &F) -> u64 {
 
 mod impl_rand {
     use rand::Rng;
-    use rand::distributions::uniform::*;
-    use rand::distributions::{Distribution, Open01, OpenClosed01, Standard};
+    use rand::distr::uniform::*;
+    use rand::distr::{Distribution, Open01, OpenClosed01, StandardUniform};
 
     use super::OrderedFloat;
 
@@ -864,7 +864,7 @@ mod impl_rand {
         }
     }
 
-    impl_distribution! { Standard, f32, f64 }
+    impl_distribution! { StandardUniform, f32, f64 }
     impl_distribution! { Open01, f32, f64 }
     impl_distribution! { OpenClosed01, f32, f64 }
 
@@ -881,23 +881,21 @@ mod impl_rand {
             impl UniformSampler for UniformOrdered<$f> {
                 type X = OrderedFloat<$f>;
 
-                fn new<B1, B2>(low: B1, high: B2) -> Self
+                fn new<B1, B2>(low: B1, high: B2) -> Result<Self, Error>
                 where
                     B1: SampleBorrow<Self::X> + Sized,
                     B2: SampleBorrow<Self::X> + Sized,
                 {
-                    UniformOrdered(UniformFloat::<$f>::new(low.borrow().0, high.borrow().0))
+                    UniformFloat::<$f>::new(low.borrow().0, high.borrow().0).map(UniformOrdered)
                 }
 
-                fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
+                fn new_inclusive<B1, B2>(low: B1, high: B2) -> Result<Self, Error>
                 where
                     B1: SampleBorrow<Self::X> + Sized,
                     B2: SampleBorrow<Self::X> + Sized,
                 {
-                    UniformOrdered(UniformFloat::<$f>::new_inclusive(
-                        low.borrow().0,
-                        high.borrow().0,
-                    ))
+                    UniformFloat::<$f>::new_inclusive(low.borrow().0, high.borrow().0)
+                        .map(UniformOrdered)
                 }
 
                 fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use rand::Rng;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_frontend::expr::CastContext;
 use risingwave_sqlparser::ast::Expr;

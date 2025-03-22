@@ -20,25 +20,24 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
-use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
-use super::aggregation::{
-    AggStateStorage, AlwaysOutput, DistinctDeduplicater, agg_call_filter_res, iter_table_storage,
-};
-use crate::executor::aggregation::AggGroup;
+use super::agg_group::{AggGroup, AlwaysOutput};
+use super::agg_state::AggStateStorage;
+use super::distinct::DistinctDeduplicater;
+use super::{AggExecutorArgs, SimpleAggExecutorExtraArgs, agg_call_filter_res, iter_table_storage};
 use crate::executor::prelude::*;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
 /// constructor.
 ///
-/// `SimpleAggExecutor` maintain multiple states together. If there are `n` states and `n`
+/// `SimpleAggExecutor` maintains multiple states together. If there are `n` states and `n`
 /// expressions, there will be `n` columns as output.
 ///
 /// As the engine processes data in chunks, it is possible that multiple update
 /// messages could consolidate to a single row update. For example, our source
-/// emits 1000 inserts in one chunk, and we aggregates count function on that.
+/// emits 1000 inserts in one chunk, and we aggregate the count function on that.
 /// Current `SimpleAggExecutor` will only emit one row for a whole chunk.
-/// Therefore, we "automatically" implemented a window function inside
+/// Therefore, we "automatically" implement a window function inside
 /// `SimpleAggExecutor`.
 pub struct SimpleAggExecutor<S: StateStore> {
     input: Executor,

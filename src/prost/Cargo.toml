@@ -14,7 +14,7 @@ prost = { workspace = true }
 prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-strum = { version = "0.26", features = ["derive"] }
+strum = { version = "0.27", features = ["derive"] }
 thiserror = "1"
 tonic = { workspace = true }
 

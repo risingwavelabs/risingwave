@@ -27,17 +27,17 @@ use risingwave_common_estimate_size::collections::EstimatedHashMap;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_retractable};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 
-use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
-use super::aggregation::{
-    AggStateCacheStats, AggStateStorage, DistinctDeduplicater, GroupKey, OnlyOutputIfHasInput,
-    agg_call_filter_res, iter_table_storage,
+use super::agg_group::{
+    AggGroup as GenericAggGroup, AggStateCacheStats, GroupKey, OnlyOutputIfHasInput,
 };
-use super::monitor::HashAggMetrics;
-use super::sort_buffer::SortBuffer;
+use super::agg_state::AggStateStorage;
+use super::distinct::DistinctDeduplicater;
+use super::{AggExecutorArgs, HashAggExecutorExtraArgs, agg_call_filter_res, iter_table_storage};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTablePostCommit;
-use crate::executor::aggregation::AggGroup as GenericAggGroup;
+use crate::executor::eowc::SortBuffer;
+use crate::executor::monitor::HashAggMetrics;
 use crate::executor::prelude::*;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;

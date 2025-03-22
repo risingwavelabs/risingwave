@@ -333,7 +333,7 @@ pub fn decode_row(
 mod tests {
     use std::ops::Neg;
 
-    use rand::thread_rng;
+    use rand::rng as thread_rng;
 
     use super::*;
     use crate::array::{ListValue, StructValue};

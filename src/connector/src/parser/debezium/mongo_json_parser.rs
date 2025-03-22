@@ -363,7 +363,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             );
             assert_eq!(
                 row.datum_at(0).to_owned_datum(),
-                (Some(ScalarImpl::Int64(1004)))
+                (Some(ScalarImpl::Int64(1001)))
             );
         }
     }

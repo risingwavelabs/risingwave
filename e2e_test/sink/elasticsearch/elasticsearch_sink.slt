@@ -3,7 +3,7 @@ set sink_decouple = false;
 
 statement ok
 CREATE TABLE t7 (
-  v1 int primary key,
+  v1 int,
   v2 bigint,
   v3 varchar,
   d date,
@@ -11,6 +11,7 @@ CREATE TABLE t7 (
   ts timestamp,
   tz timestamptz,
   st struct<st1 int, st2 int>,
+  primary key(v1,v3),
 );
 
 statement ok
@@ -73,6 +74,9 @@ FLUSH;
 
 statement ok
 INSERT INTO t7 VALUES (1, 50, '1-50', '2000-01-01', '00:00:00.123456', '2000-01-01 00:00:00.123456', '2000-01-01 00:00:00.123456Z',(1,1));
+
+statement ok
+update t7 set v2 = 55 where v1 = 2;
 
 statement ok
 FLUSH;

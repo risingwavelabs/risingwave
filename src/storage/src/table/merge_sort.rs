@@ -98,7 +98,7 @@ where
 #[cfg(test)]
 mod tests {
     use futures_async_stream::for_await;
-    use rand::random;
+    use rand::random_range;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
@@ -108,7 +108,7 @@ mod tests {
     use crate::error::StorageResult;
 
     fn gen_pk_and_row(i: u8) -> StorageResult<KeyedRow<Vec<u8>>> {
-        let vnode = VirtualNode::from_index(random::<usize>() % VirtualNode::COUNT_FOR_TEST);
+        let vnode = VirtualNode::from_index(random_range(..VirtualNode::COUNT_FOR_TEST));
         let mut key = vnode.to_be_bytes().to_vec();
         key.extend(vec![i]);
         Ok(KeyedRow::new(

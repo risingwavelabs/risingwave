@@ -497,7 +497,7 @@ mod tests {
             compaction_catalog_agent_ref,
             None,
         );
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for i in 0..TEST_KEYS_COUNT {
             let epoch_count = rng.next_u64() % 20;
             for j in 0..epoch_count {

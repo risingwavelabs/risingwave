@@ -274,7 +274,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -449,6 +449,10 @@ pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult
 pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
 pub type BoxSourceChunkWithStateStream =
     BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
+
+/// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.
+pub type BoxStreamingFileSourceChunkStream =
+    BoxStream<'static, crate::error::ConnectorResult<Option<StreamChunk>>>;
 
 // Manually expand the trait alias to improve IDE experience.
 pub trait SourceChunkStream:

@@ -223,6 +223,11 @@ impl Binder {
         mode: AclMode,
         owner: UserId,
     ) -> Result<()> {
+        // security invoker is disabled for view, ignore privilege check.
+        if self.context.disable_security_invoker {
+            return Ok(());
+        }
+
         match self.bind_for {
             BindFor::Stream | BindFor::Batch => {
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
@@ -335,7 +340,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query(*query).map_err(|e| {
+        let query = self.bind_query_for_view(*query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,

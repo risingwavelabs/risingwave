@@ -382,8 +382,12 @@ impl DataType {
         })
     }
 
+    pub fn type_name(&self) -> DataTypeName {
+        DataTypeName::from(self)
+    }
+
     pub fn prost_type_name(&self) -> PbTypeName {
-        DataTypeName::from(self).into()
+        self.type_name().into()
     }
 
     pub fn to_protobuf(&self) -> PbDataType {
@@ -541,12 +545,53 @@ impl DataType {
         d
     }
 
-    /// Compares the datatype with another, ignoring nested field names and metadata.
+    /// Compares the datatype with another, ignoring nested field names and ids.
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
             (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
+            (Self::Map(m1), Self::Map(m2)) => {
+                m1.key().equals_datatype(m2.key()) && m1.value().equals_datatype(m2.value())
+            }
             _ => self == other,
+        }
+    }
+
+    /// Whether a column with this data type can be altered to a new data type. This determines
+    /// the encoding of the column data.
+    ///
+    /// Returns...
+    /// - `None`, if the data type is simple or does not contain a struct type.
+    /// - `Some(true)`, if the data type contains a struct type with field ids ([`StructType::has_ids`]).
+    /// - `Some(false)`, if the data type contains a struct type without field ids.
+    pub fn can_alter(&self) -> Option<bool> {
+        match self {
+            data_types::simple!() => None,
+
+            DataType::Struct(struct_type) => {
+                // As long as we meet a struct type, we can check its `ids` field to determine if
+                // it can be altered.
+                let struct_can_alter = struct_type.has_ids();
+                // In debug build, we assert that once a struct type does (or does not) have ids,
+                // all its composite fields should have the same property.
+                if cfg!(debug_assertions) {
+                    for field in struct_type.types() {
+                        if let Some(field_can_alter) = field.can_alter() {
+                            assert_eq!(struct_can_alter, field_can_alter);
+                        }
+                    }
+                }
+                Some(struct_can_alter)
+            }
+
+            DataType::List(inner_type) => inner_type.can_alter(),
+            DataType::Map(map_type) => {
+                debug_assert!(
+                    map_type.key().is_simple(),
+                    "unexpected key type of map {map_type:?}"
+                );
+                map_type.value().can_alter()
+            }
         }
     }
 }
@@ -1504,5 +1549,54 @@ mod tests {
                 ("b", DataType::Varchar)
             ]))
         );
+    }
+
+    #[test]
+    fn test_can_alter() {
+        let cannots = [
+            (DataType::Int32, None),
+            (DataType::List(DataType::Int32.into()), None),
+            (
+                MapType::from_kv(DataType::Varchar, DataType::List(DataType::Int32.into())).into(),
+                None,
+            ),
+            (
+                StructType::new([("a", DataType::Int32)]).into(),
+                Some(false),
+            ),
+            (
+                MapType::from_kv(
+                    DataType::Varchar,
+                    StructType::new([("a", DataType::Int32)]).into(),
+                )
+                .into(),
+                Some(false),
+            ),
+        ];
+        for (cannot, why) in cannots {
+            assert_eq!(cannot.can_alter(), why, "{cannot:?}");
+        }
+
+        let cans = [
+            StructType::new([
+                ("a", DataType::Int32),
+                ("b", DataType::List(DataType::Int32.into())),
+            ])
+            .with_ids([ColumnId::new(1), ColumnId::new(2)])
+            .into(),
+            DataType::List(Box::new(DataType::Struct(
+                StructType::new([("a", DataType::Int32)]).with_ids([ColumnId::new(1)]),
+            ))),
+            MapType::from_kv(
+                DataType::Varchar,
+                StructType::new([("a", DataType::Int32)])
+                    .with_ids([ColumnId::new(1)])
+                    .into(),
+            )
+            .into(),
+        ];
+        for can in cans {
+            assert_eq!(can.can_alter(), Some(true), "{can:?}");
+        }
     }
 }

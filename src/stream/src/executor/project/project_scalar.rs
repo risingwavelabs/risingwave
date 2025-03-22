@@ -49,7 +49,6 @@ struct Inner {
 }
 
 impl ProjectExecutor {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
@@ -214,14 +213,13 @@ mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
+    use risingwave_common::types::DefaultOrd;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::expr::{self, ValueImpl};
+    use risingwave_expr::expr::{self, Expression, ValueImpl};
 
-    use super::super::test_utils::MockSource;
-    use super::super::*;
     use super::*;
-    use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::test_utils::expr::build_from_pretty;
+    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
 
     #[tokio::test]
     async fn test_projection() {
@@ -248,7 +246,7 @@ mod tests {
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
-        let project = ProjectExecutor::new(
+        let proj = ProjectExecutor::new(
             ActorContext::for_test(123),
             source,
             vec![test_expr],
@@ -256,16 +254,16 @@ mod tests {
             vec![],
             false,
         );
-        let mut project = project.boxed().execute();
+        let mut proj = proj.boxed().execute();
 
         tx.push_barrier(test_epoch(1), false);
-        let barrier = project.next().await.unwrap().unwrap();
+        let barrier = proj.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
         tx.push_chunk(chunk1);
         tx.push_chunk(chunk2);
 
-        let msg = project.next().await.unwrap().unwrap();
+        let msg = proj.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
             StreamChunk::from_pretty(
@@ -276,7 +274,7 @@ mod tests {
             )
         );
 
-        let msg = project.next().await.unwrap().unwrap();
+        let msg = proj.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
             StreamChunk::from_pretty(
@@ -287,7 +285,7 @@ mod tests {
         );
 
         tx.push_barrier(test_epoch(2), true);
-        assert!(project.next().await.unwrap().unwrap().is_stop());
+        assert!(proj.next().await.unwrap().unwrap().is_stop());
     }
 
     static DUMMY_COUNTER: AtomicI64 = AtomicI64::new(0);
@@ -330,7 +328,7 @@ mod tests {
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
         let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
-        let project = ProjectExecutor::new(
+        let proj = ProjectExecutor::new(
             ActorContext::for_test(123),
             source,
             vec![a_expr, b_expr, c_expr],
@@ -338,14 +336,14 @@ mod tests {
             vec![2],
             false,
         );
-        let mut project = project.boxed().execute();
+        let mut proj = proj.boxed().execute();
 
         tx.push_barrier(test_epoch(1), false);
         tx.push_int64_watermark(0, 100);
 
-        project.expect_barrier().await;
-        let w1 = project.expect_watermark().await;
-        let w2 = project.expect_watermark().await;
+        proj.expect_barrier().await;
+        let w1 = proj.expect_watermark().await;
+        let w2 = proj.expect_watermark().await;
         let (w1, w2) = if w1.col_idx < w2.col_idx {
             (w1, w2)
         } else {
@@ -376,17 +374,17 @@ mod tests {
             + 146 5
             + 133 6",
         ));
-        project.expect_chunk().await;
+        proj.expect_chunk().await;
         tx.push_chunk(StreamChunk::from_pretty(
             "   I I
             + 213 8
             - 133 6",
         ));
-        project.expect_chunk().await;
+        proj.expect_chunk().await;
 
         tx.push_barrier(test_epoch(2), false);
-        let w3 = project.expect_watermark().await;
-        project.expect_barrier().await;
+        let w3 = proj.expect_watermark().await;
+        proj.expect_barrier().await;
 
         tx.push_chunk(StreamChunk::from_pretty(
             "   I I
@@ -394,11 +392,11 @@ mod tests {
             + 104 5
             + 187 3",
         ));
-        project.expect_chunk().await;
+        proj.expect_chunk().await;
 
         tx.push_barrier(test_epoch(3), false);
-        let w4 = project.expect_watermark().await;
-        project.expect_barrier().await;
+        let w4 = proj.expect_watermark().await;
+        proj.expect_barrier().await;
 
         assert_eq!(w3.col_idx, w4.col_idx);
         assert!(w3.val.default_cmp(&w4.val).is_le());
@@ -406,6 +404,6 @@ mod tests {
         tx.push_int64_watermark(1, 100);
         tx.push_barrier(test_epoch(4), true);
 
-        assert!(project.next().await.unwrap().unwrap().is_stop());
+        assert!(proj.next().await.unwrap().unwrap().is_stop());
     }
 }

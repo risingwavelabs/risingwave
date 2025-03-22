@@ -19,7 +19,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use rand::thread_rng;
+use rand::rng as thread_rng;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::message::BorrowedMessage;

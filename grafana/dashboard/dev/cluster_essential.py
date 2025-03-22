@@ -337,6 +337,16 @@ def _(outer_panels: Panels):
                 ],
             ),
             panels.timeseries_count(
+                "Parquet Source Skip Count",
+                "Errors that happened during source data ingestion. Check the logs for detailed error message.",
+                [
+                    panels.target(
+                        f"{metric('parquet_source_skip_row_count')}",
+                        "source_id={{source_id}} @ source_name =  {{source_name}}",
+                    )
+                ],
+            ),
+            panels.timeseries_count(
                 "Sink Errors by Type",
                 "Errors that happened during data sink out. Check the logs for detailed error message.",
                 [

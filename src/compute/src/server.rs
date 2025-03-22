@@ -349,6 +349,7 @@ pub async fn compute_node_serve(
     // Initialize batch environment.
     let batch_client_pool = Arc::new(ComputeClientPool::new(
         config.batch_exchange_connection_pool_size(),
+        config.batch.developer.compute_client_config.clone(),
     ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
@@ -368,6 +369,7 @@ pub async fn compute_node_serve(
     // Initialize the streaming environment.
     let stream_client_pool = Arc::new(ComputeClientPool::new(
         config.streaming_exchange_connection_pool_size(),
+        config.streaming.developer.compute_client_config.clone(),
     ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),

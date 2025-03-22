@@ -14,8 +14,6 @@
 
 //! Provides E2E Test runner functionality.
 
-#[cfg(madsim)]
-use rand_chacha::ChaChaRng;
 use tokio_postgres::Client;
 
 use crate::test_runners::utils::{

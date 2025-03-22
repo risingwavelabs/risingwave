@@ -1,4 +1,4 @@
-name: PR for release branch
+name: PR for release branches
 on:
   pull_request:
     branches:
@@ -23,7 +23,12 @@ jobs:
       - name: Get all release branches including label version and higher
         id: filter-release-branches
         run: |
-          label="${{ github.event.label.name }}"
+          if [[ ${{ github.event.action }} == 'labeled' ]]; then
+            label="${{ github.event.label.name }}"
+          else
+            labels='${{ toJson(github.event.pull_request.labels) }}'
+            label=$(echo "$labels" | jq -r '.[] | select(.name | contains("need-cherry-pick-since")).name' | sort -V | head -n 1)
+          fi
           base_version=$(echo "$label" | sed 's/need-cherry-pick-since-release-//')
 
           echo "Base version from label: $base_version"
@@ -55,7 +60,7 @@ jobs:
             for branch in "${target_branches[@]}"; do
               echo "$branch"
             done
-            echo "branches=$(printf '%s\n' "${target_branches[@]}" | jq -R . | jq -s .)" >> "$GITHUB_OUTPUT"
+            echo "branches=$(printf '%s\n' "${target_branches[@]}" | jq -R . | jq -s -c .)" >> "$GITHUB_OUTPUT"
           fi
 
   release_pull_request:

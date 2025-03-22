@@ -60,7 +60,7 @@ impl<T: ChronoFieldInner> ChronoField<T> {
     fn generate_data(&mut self, offset: u64) -> T {
         let milliseconds = self.max_past.num_milliseconds();
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let max_milliseconds = rng.gen_range(0..=milliseconds);
+        let max_milliseconds = rng.random_range(0..=milliseconds);
         let base = match self.absolute_base {
             Some(base) => base,
             None => T::from_now(),

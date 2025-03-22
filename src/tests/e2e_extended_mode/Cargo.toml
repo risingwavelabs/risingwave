@@ -12,7 +12,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 chrono = { version = "0.4", features = ['serde'] }
 clap = { workspace = true }
 pg_interval = "0.4"
-rust_decimal = { version = "1.36", features = ["db-postgres"] }
+rust_decimal = { version = "1.37", features = ["db-postgres"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",

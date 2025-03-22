@@ -29,10 +29,12 @@ MAIN_CRON_TEST_MAP = {
     "integration-test-deterministic-sink": ["ziqi", "Eric"],
     "e2e-test-deterministic": ["runji", "noelkwan"],
     "recovery-test-deterministic": ["runji", "noelkwan"],
-    "background-ddl-arrangement-backfill-recovery-test-deterministic": ["runji", "noelkwan"],
+    "background-ddl-arrangement-backfill-recovery-test-deterministic": [
+        "runji",
+        "noelkwan",
+    ],
     "background-ddl-recovery-test-deterministic": ["runji", "noelkwan"],
-    "e2e-iceberg-sink-test": ["zilin", "xinhao"],
-    "e2e-iceberg-sink-v2-test": ["zilin", "xinhao"],
+    "e2e-iceberg-test": ["zilin", "xinhao", "tianxiao"],
     "e2e-java-binding-tests": ["yiming"],
     "s3-source-check-aws": ["bohan"],
     "s3-source-check-aws-json-parser": ["bohan"],
@@ -145,14 +147,14 @@ def get_mock_test_status(test):
         "backwards-compat-tests": "",
         "fuzz-test": "",
         "e2e-test-release": "",
-        "e2e-iceberg-sink-tests": "passed",
+        "e2e-iceberg-tests": "passed",
         "e2e-java-binding-tests": "soft_failed",
         "e2e-clickhouse-sink-tests": "hard_failed",
         "e2e-pulsar-sink-tests": "",
         "s3-source-test-for-opendal-fs-engine": "",
         "s3-source-tests": "",
         "pulsar-source-tests": "",
-        "connector-node-integration-test": ""
+        "connector-node-integration-test": "",
     }
     return mock_test_map[test]
 

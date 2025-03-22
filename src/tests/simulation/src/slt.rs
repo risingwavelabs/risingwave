@@ -22,7 +22,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
-use rand::{Rng, SeedableRng, thread_rng};
+use rand::{Rng, SeedableRng, rng as thread_rng};
 use rand_chacha::ChaChaRng;
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
@@ -412,7 +412,7 @@ pub async fn run_slt_task(
                 })
                 && background_ddl_rate > 0.0
             {
-                let background_ddl_setting = rng.gen_bool(background_ddl_rate);
+                let background_ddl_setting = rng.random_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),
@@ -461,13 +461,13 @@ pub async fn run_slt_task(
                 continue;
             }
 
-            let should_kill = thread_rng().gen_bool(kill_opts.kill_rate as f64);
+            let should_kill = thread_rng().random_bool(kill_opts.kill_rate as f64);
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
                 let opts = kill_opts;
                 Some(tokio::spawn(async move {
-                    let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
+                    let t = thread_rng().random_range(Duration::default()..Duration::from_secs(1));
                     tokio::time::sleep(t).await;
                     cluster.kill_node(&opts).await;
                     tokio::time::sleep(Duration::from_secs(15)).await;

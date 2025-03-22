@@ -79,14 +79,30 @@ pub struct IcebergCommon {
     /// A Bearer token which will be used for interaction with the server.
     #[serde(rename = "catalog.token")]
     pub token: Option<String>,
-    /// `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
     /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
-    #[serde(rename = "catalog.oauth2-server-uri")]
+    #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
     /// Additional scope for OAuth2.
     #[serde(rename = "catalog.scope")]
     pub scope: Option<String>,
+
+    /// The signing region to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_region")]
+    pub rest_signing_region: Option<String>,
+
+    /// The signing name to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_name")]
+    pub rest_signing_name: Option<String>,
+
+    /// Whether to use SigV4 for signing requests to the REST catalog.
+    #[serde(
+        rename = "catalog.rest.sigv4_enabled",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub rest_sigv4_enabled: Option<bool>,
 
     #[serde(
         rename = "s3.path.style.access",
@@ -148,9 +164,13 @@ impl IcebergCommon {
             match &self.warehouse_path {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() && (catalog_type == "rest" || catalog_type == "rest_rust") {
+                        if (url.is_err() || is_s3_tables)
+                            && (catalog_type == "rest" || catalog_type == "rest_rust")
+                        {
                             // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
+                            // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                             // so we allow it to pass here.
                             (None, None)
                         } else {
@@ -250,6 +270,32 @@ impl IcebergCommon {
                     }
                     if let Some(scope) = &self.scope {
                         java_catalog_configs.insert("scope".to_owned(), scope.clone());
+                    }
+                    if let Some(rest_signing_region) = &self.rest_signing_region {
+                        java_catalog_configs.insert(
+                            "rest.signing-region".to_owned(),
+                            rest_signing_region.clone(),
+                        );
+                    }
+                    if let Some(rest_signing_name) = &self.rest_signing_name {
+                        java_catalog_configs
+                            .insert("rest.signing-name".to_owned(), rest_signing_name.clone());
+                    }
+                    if let Some(rest_sigv4_enabled) = self.rest_sigv4_enabled {
+                        java_catalog_configs.insert(
+                            "rest.sigv4-enabled".to_owned(),
+                            rest_sigv4_enabled.to_string(),
+                        );
+
+                        if let Some(access_key) = &self.access_key {
+                            java_catalog_configs
+                                .insert("rest.access-key-id".to_owned(), access_key.clone());
+                        }
+
+                        if let Some(secret_key) = &self.secret_key {
+                            java_catalog_configs
+                                .insert("rest.secret-access-key".to_owned(), secret_key.clone());
+                        }
                     }
                 }
                 Some("glue") => {

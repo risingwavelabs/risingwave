@@ -315,6 +315,20 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
+            if new_column
+                .options
+                .iter()
+                .any(|x| matches!(x.option, ColumnOption::NotNull))
+                && !new_column
+                    .options
+                    .iter()
+                    .any(|x| matches!(x.option, ColumnOption::DefaultValue(_)))
+            {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "alter table add NOT NULL columns must have default value".to_owned(),
+                ))?;
+            }
+
             // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
 

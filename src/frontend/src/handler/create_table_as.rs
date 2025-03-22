@@ -70,17 +70,20 @@ pub async fn handle_create_as(
                 .schema()
                 .fields()
                 .iter()
-                .map(|field| {
-                    col_id_gen.generate(field).map(|id| ColumnCatalog {
-                        column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
-                        is_hidden: false,
-                    })
+                .map(|field| ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    is_hidden: false,
                 })
-                .try_collect()?
+                .collect()
         } else {
             unreachable!()
         }
     };
+
+    // Generate column id.
+    for c in &mut columns {
+        col_id_gen.generate(c)?;
+    }
 
     if column_defs.len() > columns.len() {
         return Err(ErrorCode::InvalidInputSyntax(

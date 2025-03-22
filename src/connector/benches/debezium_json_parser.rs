@@ -48,7 +48,7 @@ macro_rules! create_debezium_bench_helpers {
                     .unwrap();
 
                 // Generate records
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let mut records = Vec::with_capacity(NUM_RECORDS);
                 for _ in 0..NUM_RECORDS {
                     let json_row = generate_debezium_json_row(&mut rng, $op_sym);

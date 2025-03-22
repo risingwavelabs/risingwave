@@ -937,7 +937,7 @@ mod tests {
     use futures::{Stream, StreamExt, TryStreamExt, pin_mut, stream};
     use itertools::Itertools;
     use rand::prelude::SliceRandom;
-    use rand::thread_rng;
+    use rand::rng as thread_rng;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;

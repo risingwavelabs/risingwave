@@ -15,6 +15,7 @@
 use std::process::exit;
 
 use futures::future::try_join_all;
+use risingwave_common::config::RpcClientConfig;
 use risingwave_pb::compute::ResizeCacheRequest;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_rpc_client::ComputeClient;
@@ -45,7 +46,7 @@ pub async fn resize_cache(
 
     let futures = worker_nodes.iter().map(|worker| async {
         let addr = worker.get_host().expect("worker host must be set");
-        let client = ComputeClient::new(addr.into())
+        let client = ComputeClient::new(addr.into(), &RpcClientConfig::default())
             .await
             .unwrap_or_else(|_| panic!("Cannot open client to compute node {addr:?}"));
         client

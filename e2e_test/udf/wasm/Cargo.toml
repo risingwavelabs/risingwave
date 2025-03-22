@@ -8,7 +8,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-arrow-udf = "0.5.2"
+arrow-udf = "0.5.3"
 #using a fixed chrono version 0.4.39 because the
 #latest 0.4.40 failed to compile
 chrono = "=0.4.39"

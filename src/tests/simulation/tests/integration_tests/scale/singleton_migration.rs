@@ -17,7 +17,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use rand::thread_rng;
+use rand::rng as thread_rng;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;

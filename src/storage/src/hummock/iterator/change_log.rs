@@ -411,7 +411,7 @@ pub mod test_utils {
     use std::collections::HashMap;
 
     use bytes::Bytes;
-    use rand::{Rng, RngCore, thread_rng};
+    use rand::{Rng, RngCore, rng as thread_rng};
     use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH, test_epoch};
     use risingwave_hummock_sdk::key::TableKey;
 
@@ -434,11 +434,11 @@ pub mod test_utils {
             let mut epoch_logs = Vec::new();
             let epoch = test_epoch(epoch_idx as _);
             for key_idx in 0..key_count {
-                if rng.gen_bool(skip_ratio) {
+                if rng.random_bool(skip_ratio) {
                     continue;
                 }
                 let key = TableKey(Bytes::from(iterator_test_table_key_of(key_idx)));
-                if rng.gen_bool(delete_ratio) {
+                if rng.random_bool(delete_ratio) {
                     if let Some(prev_value) = store.remove(&key) {
                         epoch_logs.push((key, KeyOp::Delete(prev_value)));
                     }
@@ -507,7 +507,7 @@ pub mod test_utils {
                         state_store.insert(key, value, Some(old_value)).unwrap();
                     }
                 }
-                if rng.gen_bool(try_flush_ratio) {
+                if rng.random_bool(try_flush_ratio) {
                     state_store.try_flush().await.unwrap();
                 }
             }

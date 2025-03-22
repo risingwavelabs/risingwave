@@ -33,9 +33,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::KeyedRow;
 use risingwave_storage::table::merge_sort::merge_sort;
 
-use super::{StreamExecutorError, StreamExecutorResult};
 use crate::common::state_cache::{StateCache, StateCacheFiller, TopNStateCache};
 use crate::common::table::state_table::StateTable;
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 type CacheKey = (
     DefaultOrdered<ScalarImpl>, // sort (watermark) column value
