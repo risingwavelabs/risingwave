@@ -576,25 +576,26 @@ pub fn start_compactor(
                                         .await;
                                 });
                             }
-                            ResponseEvent::CancelCompactTask(cancel_compact_task) => {
-                                if let Some(tx) = shutdown
-                                    .lock()
-                                    .unwrap()
-                                    .remove(&cancel_compact_task.task_id)
-                                {
+                            ResponseEvent::CancelCompactTask(cancel_compact_task) => match shutdown
+                                .lock()
+                                .unwrap()
+                                .remove(&cancel_compact_task.task_id)
+                            {
+                                Some(tx) => {
                                     if tx.send(()).is_err() {
                                         tracing::warn!(
                                             "Cancellation of compaction task failed. task_id: {}",
                                             cancel_compact_task.task_id
                                         );
                                     }
-                                } else {
+                                }
+                                _ => {
                                     tracing::warn!(
                                         "Attempting to cancel non-existent compaction task. task_id: {}",
                                         cancel_compact_task.task_id
                                     );
                                 }
-                            }
+                            },
 
                             ResponseEvent::PullTaskAck(_pull_task_ack) => {
                                 // set flag
@@ -747,23 +748,23 @@ pub fn start_shared_compactor(
                                     validate_ssts(validation_task, context.sstable_store.clone()).await;
                                 }
                                 dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
-                                    if let Some(tx) = shutdown
+                                    match shutdown
                                         .lock()
                                         .unwrap()
                                         .remove(&cancel_compact_task.task_id)
-                                    {
+                                    { Some(tx) => {
                                         if tx.send(()).is_err() {
                                             tracing::warn!(
                                                 "Cancellation of compaction task failed. task_id: {}",
                                                 cancel_compact_task.task_id
                                             );
                                         }
-                                    } else {
+                                    } _ => {
                                         tracing::warn!(
                                             "Attempting to cancel non-existent compaction task. task_id: {}",
                                             cancel_compact_task.task_id
                                         );
-                                    }
+                                    }}
                                 }
                             }
                     });

@@ -610,27 +610,28 @@ impl LocalHummockStorage {
 
             self.write_limiter.wait_permission(self.table_id).await;
             let limiter = self.memory_limiter.as_ref();
-            let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
-                tracker
-            } else {
-                warn!(
-                    "blocked at requiring memory: {}, current {}",
-                    size,
-                    limiter.get_memory_usage()
-                );
-                self.event_sender
-                    .send(HummockEvent::BufferMayFlush)
-                    .expect("should be able to send");
-                let tracker = limiter
-                    .require_memory(size as u64)
-                    .verbose_instrument_await("hummock_require_memory")
-                    .await;
-                warn!(
-                    "successfully requiring memory: {}, current {}",
-                    size,
-                    limiter.get_memory_usage()
-                );
-                tracker
+            let tracker = match limiter.try_require_memory(size as u64) {
+                Some(tracker) => tracker,
+                _ => {
+                    warn!(
+                        "blocked at requiring memory: {}, current {}",
+                        size,
+                        limiter.get_memory_usage()
+                    );
+                    self.event_sender
+                        .send(HummockEvent::BufferMayFlush)
+                        .expect("should be able to send");
+                    let tracker = limiter
+                        .require_memory(size as u64)
+                        .verbose_instrument_await("hummock_require_memory")
+                        .await;
+                    warn!(
+                        "successfully requiring memory: {}, current {}",
+                        size,
+                        limiter.get_memory_usage()
+                    );
+                    tracker
+                }
             };
 
             let old_values = old_values.map(|old_values| {

@@ -472,7 +472,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
 }
 
 pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
-    let Some(ref a) = a else {
+    let Some(a) = a else {
         return Ok(None);
     };
     Feature::TimeTravel
