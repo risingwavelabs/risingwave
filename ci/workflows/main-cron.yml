@@ -269,7 +269,7 @@ steps:
     timeout_in_minutes: 50
     retry: *auto-retry
 
-  - label: "integration test (madsim) - scale"
+  - label: "integration test (madsim) - scale, part %n"
     key: "integration-test-deterministic-scale"
     command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale::"
     if: |
@@ -280,7 +280,8 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 90
+    timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "integration test (madsim) - recovery"
