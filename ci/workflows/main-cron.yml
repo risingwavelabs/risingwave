@@ -425,9 +425,11 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v5.5.0: *docker-compose
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 9
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
