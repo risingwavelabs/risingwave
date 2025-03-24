@@ -123,7 +123,6 @@ def execute_slt(args, slt):
     log(f"Command line is [{cmd}]", level=LogLevel.INFO)
     subprocess.run(
         cmd,
-        shell=True,
         env={"CARGO_MAKE_PRINT_TIME_SUMMARY": "false"},
         check=True,
     )
