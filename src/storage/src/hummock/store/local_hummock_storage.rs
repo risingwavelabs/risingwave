@@ -17,7 +17,7 @@ use std::iter::once;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -623,7 +623,7 @@ impl LocalHummockStorage {
                         .expect("should be able to send");
                     let tracker = limiter
                         .require_memory(size as u64)
-                        .verbose_instrument_await("hummock_require_memory")
+                        .instrument_await("hummock_require_memory".verbose())
                         .await;
                     warn!(
                         "successfully requiring memory: {}, current {}",

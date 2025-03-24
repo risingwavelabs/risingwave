@@ -1228,12 +1228,13 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "await-tree"
-version = "0.2.1"
+version = "0.3.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c2d7aec54383fa38ac2f9c28435a02f7312f7174e470c7d5566d2b7e17f9a8d"
+checksum = "d4f971489cbf789470c31f26a55b6b18e9e1bd6f04de7f2ddcccc8466a01e3d1"
 dependencies = [
  "coarsetime",
  "derive_builder",
+ "easy-ext",
  "flexstr",
  "indextree",
  "itertools 0.12.1",

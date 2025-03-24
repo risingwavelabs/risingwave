@@ -128,8 +128,8 @@ mod local_input {
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
     async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
-        let span: await_tree::Span = format!("LocalInput (actor {upstream_actor_id})").into();
-        while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
+        let span = await_tree::span!("LocalInput (actor {upstream_actor_id})").verbose();
+        while let Some(msg) = channel.recv().instrument_await(span.clone()).await {
             match msg.into_messages() {
                 Either::Left(barriers) => {
                     for b in barriers {
@@ -279,12 +279,12 @@ mod remote_input {
             .exchange_frag_recv_size
             .with_guarded_label_values(&[&up_fragment_id, &down_fragment_id]);
 
-        let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
+        let span = await_tree::span!("RemoteInput (actor {up_actor_id})").verbose();
 
         let mut batched_permits_accumulated = 0;
 
         pin_mut!(stream);
-        while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
+        while let Some(data_res) = stream.next().instrument_await(span.clone()).await {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
                     use crate::executor::DispatcherMessageBatch;
