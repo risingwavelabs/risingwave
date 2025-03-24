@@ -164,9 +164,7 @@ async fn restore_impl(
             &opts.hummock_storage_directory,
         )
         .await
-        .inspect_err(|_| {
-            tracing::error!("Fail integrity validation.")
-        })?;
+        .inspect_err(|_| tracing::error!("Fail integrity validation."))?;
         tracing::info!("Succeed integrity validation.");
     }
 
