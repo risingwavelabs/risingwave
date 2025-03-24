@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use anyhow::Context;
+use risingwave_common::bail;
 use risingwave_common::types::DataType;
-use risingwave_common::{bail, try_match_expand};
 
 use crate::error::ConnectorResult;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
