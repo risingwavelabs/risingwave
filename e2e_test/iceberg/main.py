@@ -1,3 +1,4 @@
+import traceback
 from pyspark.sql import SparkSession
 import argparse
 import configparser
