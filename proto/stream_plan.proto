@@ -110,11 +110,10 @@ message DropSubscriptionsMutation {
   repeated SubscriptionUpstreamInfo info = 1;
 }
 
-message ConnectorPropsInfo {
-  map<string, string> connector_props_info = 1;
-}
-
 message ConnectorPropsChangeMutation {
+  message ConnectorPropsInfo {
+    map<string, string> connector_props_info = 1;
+  }
   map<uint32, ConnectorPropsInfo> connector_props_infos = 1;
 }
 

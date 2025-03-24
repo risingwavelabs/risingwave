@@ -29,11 +29,12 @@ use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation,
-    ConnectorPropsInfo, Dispatcher, Dispatchers, DropSubscriptionsMutation, PauseMutation,
+     Dispatcher, Dispatchers, DropSubscriptionsMutation, PauseMutation,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
     ThrottleMutation, UpdateMutation,
 };
