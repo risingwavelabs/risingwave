@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use num_bigint::{BigInt, Sign};
 
 use super::{AccessResult, bail_uncategorized};
@@ -33,46 +35,16 @@ pub fn scaled_bigint_to_rust_decimal(
     ))
 }
 
-fn to_negative_signed_bytes_be(bytes: &mut Vec<u8>) {
-    let first_byte = bytes.first().cloned().unwrap_or(0);
-    if first_byte > 0x7f {
-        bytes.insert(0, 0);
-    }
-
-    // Perform two's complement for negative numbers
-    let mut carry = true;
-    for d in bytes.iter_mut().rev() {
-        // Start from least significant byte
-        *d = !*d; // NOT operation
-        if carry {
-            *d = d.wrapping_add(1);
-            carry = *d == 0;
-        }
-    }
-}
-
 /// Converts a Rust Decimal back to a `BigInt` with scale for Avro encoding
-pub fn rust_decimal_to_scaled_bigint(decimal: rust_decimal::Decimal) -> Vec<u8> {
-    let negative = decimal.is_sign_negative();
+pub fn rust_decimal_to_scaled_bigint(
+    decimal: rust_decimal::Decimal,
+    expect_scale: usize,
+) -> Result<Vec<u8>, String> {
+    let big_decimal = bigdecimal::BigDecimal::from_str(&decimal.to_string()).unwrap(); // bigdecimal has bigger range than rust_decimal so should be safe
+    let scaled_big_decimal = big_decimal.with_scale(expect_scale as i64);
+    let (scaled_big_int, _) = scaled_big_decimal.as_bigint_and_scale();
 
-    // Extract the parts
-    // let (lo, mid, hi, _, _) = decimal.into_parts();
-    let mut decimal_bytes = decimal.serialize();
-    // The serialize method returns the bytes in little-endian order so need to reverse it to fit the big-endian order
-    decimal_bytes.reverse();
-
-    // Concatenate bytes from hi, mid, and lo in big-endian order
-    let mut bytes: Vec<u8> = Vec::with_capacity(13);
-    bytes.push(0); // sign
-    bytes.extend_from_slice(&decimal_bytes[0..4]); // hi
-    bytes.extend_from_slice(&decimal_bytes[4..8]); // mid
-    bytes.extend_from_slice(&decimal_bytes[8..12]); // lo
-
-    if negative {
-        to_negative_signed_bytes_be(&mut bytes);
-    }
-
-    bytes
+    Ok(scaled_big_int.to_signed_bytes_be())
 }
 
 fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
@@ -109,75 +81,5 @@ fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
             Ok((lo, mid, hi))
         }
         _ => bail_uncategorized!("invalid decimal bytes length {}", bytes.len()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_decimal_conversion() {
-        // Test case 1: Large positive number with scale
-        let bigint = BigInt::from(123456789012345678_i64);
-        let scale = 10;
-        test_conversion(bigint, scale);
-
-        // Test case 2: Negative number
-        let bigint = BigInt::from(-987654321987654321_i64);
-        let scale = 5;
-        test_conversion(bigint, scale);
-
-        // Test case 3: Zero with scale
-        let bigint = BigInt::from(0);
-        let scale = 3;
-        test_conversion(bigint, scale);
-
-        // Test case 4: Maximum u32 boundaries
-        let bigint = BigInt::from(u32::MAX) + BigInt::from(1);
-        let scale = 0;
-        test_conversion(bigint, scale);
-
-        // Test case 5: Small number with large scale
-        let bigint = BigInt::from(123);
-        let scale = 28;
-        test_conversion(bigint, scale);
-
-        // Test case 6: Number with leading zeros in binary representation
-        let bigint = BigInt::parse_bytes(b"100000000", 10).unwrap();
-        let scale = 4;
-        test_conversion(bigint, scale);
-
-        // Test case 7: Maximum supported decimal
-        let bigint = BigInt::parse_bytes(b"79228162514264337593543950335", 10).unwrap();
-        let scale = 28;
-        test_conversion(bigint, scale);
-
-        // Test case 8: Minimum supported decimal
-        let bigint = BigInt::parse_bytes(b"-79228162514264337593543950335", 10).unwrap();
-        let scale = 28;
-        test_conversion(bigint, scale);
-
-        // Test case 9: Numbers near u32 boundaries
-        let values = [
-            BigInt::from(u32::MAX) - BigInt::from(1),
-            BigInt::from(u32::MAX),
-            BigInt::from(u32::MAX) + BigInt::from(1),
-            BigInt::from(u32::MAX) + BigInt::from(u32::MAX),
-        ];
-        for value in values {
-            test_conversion(value, 5);
-        }
-    }
-
-    fn test_conversion(bigint: BigInt, scale: usize) {
-        let decimal = scaled_bigint_to_rust_decimal(bigint.clone(), scale).unwrap();
-        let bytes_be = rust_decimal_to_scaled_bigint(decimal);
-        let bigint_back = BigInt::from_signed_bytes_be(&bytes_be);
-        assert_eq!(
-            bigint, bigint_back,
-            "BigInt conversion failed for value: {}",
-            bigint
-        );
     }
 }

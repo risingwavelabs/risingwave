@@ -551,22 +551,26 @@ fn on_field<D: MaybeData>(
                 maybe.on_base(|s| {
                     match s.into_decimal() {
                         risingwave_common::types::Decimal::Normalized(decimal) => {
-                            let data_scale = decimal.scale() as usize;
-                            let signed_bigint_bytes = rust_decimal_to_scaled_bigint(decimal);
-                            if data_scale == decimal_schema.scale {
-                                // avro decimal can only construct from bytes and convert to bigint inner by `BigInt::from_signed_bytes_be`
-                                Ok(Value::Decimal(apache_avro::Decimal::from( &signed_bigint_bytes )) )
-                            }
-                            else {
-                                Err(
-                                    FieldEncodeError::new(format!("decimal scale mismatch: expect {} (from schema), but got {} (from data)", decimal_schema.scale, data_scale))
-                                )
-                            }
+                            // convert to bigint with scale
+                            // rescale the rust_decimal to the scale of the avro decimal
+                            //
+                            // From bigdecimal::BigDecimal::with_scale:
+                            // If the new_scale is lower than the current value (indicating a larger
+                            // power of 10), digits will be dropped (as precision is lower)
+                            let signed_bigint_bytes =
+                                rust_decimal_to_scaled_bigint(decimal, decimal_schema.scale)
+                                    .map_err(FieldEncodeError::new)?;
+                            Ok(Value::Decimal(apache_avro::Decimal::from(
+                                &signed_bigint_bytes,
+                            )))
                         }
-                        d @ risingwave_common::types::Decimal::NaN | d @ risingwave_common::types::Decimal::NegativeInf | d @ risingwave_common::types::Decimal::PositiveInf => {
-                            Err(
-                                FieldEncodeError::new(format!("Avro Decimal does not support NaN or Inf, but got {}", d))
-                            )
+                        d @ risingwave_common::types::Decimal::NaN
+                        | d @ risingwave_common::types::Decimal::NegativeInf
+                        | d @ risingwave_common::types::Decimal::PositiveInf => {
+                            Err(FieldEncodeError::new(format!(
+                                "Avro Decimal does not support NaN or Inf, but got {}",
+                                d
+                            )))
                         }
                     }
                 })?
