@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use num_bigint::{BigInt, Sign};
 
 use super::{AccessResult, bail_uncategorized};
@@ -40,7 +38,9 @@ pub fn rust_decimal_to_scaled_bigint(
     decimal: rust_decimal::Decimal,
     expect_scale: usize,
 ) -> Result<Vec<u8>, String> {
-    let big_decimal = bigdecimal::BigDecimal::from_str(&decimal.to_string()).unwrap(); // bigdecimal has bigger range than rust_decimal so should be safe
+    let mantissa = decimal.mantissa();
+    let scale = decimal.scale();
+    let big_decimal = bigdecimal::BigDecimal::from((mantissa, scale as i64));
     let scaled_big_decimal = big_decimal.with_scale(expect_scale as i64);
     let (scaled_big_int, _) = scaled_big_decimal.as_bigint_and_scale();
 
