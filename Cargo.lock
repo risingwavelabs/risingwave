@@ -4759,9 +4759,9 @@ dependencies = [
 
 [[package]]
 name = "fastrace"
-version = "0.7.2"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25767929385a5128ff5a58c77d5fef43779bb580656801f72d4d32f7a97fea28"
+checksum = "5242121a4de2ca29db07d2ab6ed5988ddbc3cf1ca19e52c80fde10cf498efde8"
 dependencies = [
  "fastrace-macro",
  "minstant",
@@ -4774,11 +4774,11 @@ dependencies = [
 
 [[package]]
 name = "fastrace-macro"
-version = "0.7.2"
+version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d11870c0168b3d10fc7a7f0b6f9319fd7244d4caacc669ae86b3ecc5b6ca1b8c"
+checksum = "fce8ba9d9d06711bc0c3fb287689e41550d8501a0c3ac5a61c60693644e0f059"
 dependencies = [
- "proc-macro-error 1.0.4",
+ "proc-macro-error2",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -4786,9 +4786,9 @@ dependencies = [
 
 [[package]]
 name = "fastrace-opentelemetry"
-version = "0.7.2"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f33f99bae33fb7b952a933500e77cb9976b7672bb5d9def8e464663dfdfc107"
+checksum = "4b9ddbe3c21df04560ef1dfd29f426f7fb8ee1814e5c4b4260e7162c6c67d359"
 dependencies = [
  "fastrace",
  "futures",
@@ -8413,9 +8413,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry"
-version = "0.24.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c365a63eec4f55b7efeceb724f1336f26a9cf3427b70e59e2cd2a5b947fba96"
+checksum = "570074cc999d1a58184080966e5bd3bf3a9a4af650c3b05047c2621e7405cd17"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -8427,9 +8427,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-otlp"
-version = "0.17.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b925a602ffb916fb7421276b86756027b37ee708f9dce2dbdcc51739f07e727"
+checksum = "29e1f9c8b032d4f635c730c0efcf731d5e2530ea13fa8bef7939ddc8420696bd"
 dependencies = [
  "async-trait",
  "futures-core",
@@ -8445,9 +8445,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-proto"
-version = "0.7.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30ee9f20bff9c984511a02f082dc8ede839e4a9bf15cc2487c8d6fea5ad850d9"
+checksum = "c9d3968ce3aefdcca5c27e3c4ea4391b37547726a70893aab52d3de95d5f8b34"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
@@ -8463,9 +8463,9 @@ checksum = "1cefe0543875379e47eb5f1e68ff83f45cc41366a92dfd0d073d513bf68e9a05"
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.24.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "692eac490ec80f24a17828d49b40b60f5aeaccdfe6a503f939713afd22bc28df"
+checksum = "d2c627d9f4c9cdc1f21a29ee4bfbd6028fcb8bcf2a857b43f3abdf72c9c862f3"
 dependencies = [
  "async-trait",
  "futures-channel",
@@ -9417,6 +9417,28 @@ dependencies = [
  "proc-macro2",
  "quote",
  "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "proc-macro-error2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
+dependencies = [
+ "proc-macro-error-attr2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -14963,9 +14985,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-opentelemetry"
-version = "0.25.0"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9784ed4da7d921bc8df6963f8c80a0e4ce34ba6ba76668acadd3edbd985ff3b"
+checksum = "dc58af5d3f6c5811462cabb3289aec0093f7338e367e5a33d28c0433b3c7360b"
 dependencies = [
  "js-sys",
  "once_cell",
