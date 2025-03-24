@@ -446,21 +446,26 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // TODO(bugen): better service name
             // https://github.com/jaegertracing/jaeger-ui/issues/336
             let service_name = format!("{}-{}", settings.name, id);
-            let otel_tracer = sdk::trace::TracerProvider::builder()
+            let otel_tracer = sdk::trace::SdkTracerProvider::builder()
                 .with_batch_exporter(
                     opentelemetry_otlp::SpanExporter::builder()
                         .with_tonic()
                         .with_endpoint(&endpoint)
                         .build()
                         .unwrap(),
-                    sdk::runtime::Tokio,
+                    // sdk::runtime::Tokio,
                 )
-                .with_resource(sdk::Resource::new([
-                    KeyValue::new(resource::SERVICE_NAME, service_name.clone()),
-                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
-                    KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                    KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
-                ]))
+                .with_resource(
+                    sdk::Resource::builder()
+                        .with_service_name(service_name.clone())
+                        .with_attributes([
+                            // KeyValue::new(resource::SERVICE_NAME, ),
+                            KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
+                            KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                            KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
+                        ])
+                        .build(),
+                )
                 .build()
                 .tracer(service_name);
 
@@ -523,10 +528,11 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let reporter = OpenTelemetryReporter::new(
             exporter,
             SpanKind::Server,
-            Cow::Owned(Resource::new([KeyValue::new(
-                resource::SERVICE_NAME,
-                format!("fastrace-{id}"),
-            )])),
+            Cow::Owned(
+                Resource::builder()
+                    .with_service_name(format!("fastrace-{id}"))
+                    .build(),
+            ),
             InstrumentationScope::builder("opentelemetry-instrumentation-foyer").build(),
         );
         fastrace::set_reporter(reporter, fastrace::collector::Config::default());

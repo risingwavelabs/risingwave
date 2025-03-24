@@ -180,9 +180,9 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d9" }
-opentelemetry = "0.27"
-opentelemetry-otlp = "0.27"
-opentelemetry_sdk = { version = "0.27", default-features = false }
+opentelemetry = "0.28"
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.28", default-features = false }
 opentelemetry-semantic-conventions = "0.16"
 parking_lot = { version = "0.12", features = [
     "arc_lock",
@@ -212,7 +212,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
     "fs",
 ] }
 tokio-util = "0.7"
-tracing-opentelemetry = "0.28"
+tracing-opentelemetry = "0.29"
 rand = { version = "0.9", features = ["small_rng"] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
 risingwave_backup = { path = "./src/storage/backup" }
