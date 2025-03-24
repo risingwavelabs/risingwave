@@ -18,8 +18,8 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::bail;
-use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_udf_flight::Client;
+use arrow_udf_flight::arrow_flight::flight_service_client::FlightServiceClient;
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
 use risingwave_common::array::arrow::arrow_schema_udf::{self, Fields};
@@ -283,7 +283,9 @@ fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
     matches!(
         err,
         arrow_udf_flight::Error::Tonic(_)
-            | arrow_udf_flight::Error::Flight(arrow_flight::error::FlightError::Tonic(_))
+            | arrow_udf_flight::Error::Flight(
+                arrow_udf_flight::arrow_flight::error::FlightError::Tonic(_)
+            )
     )
 }
 

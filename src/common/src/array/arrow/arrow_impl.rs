@@ -42,10 +42,10 @@
 
 use std::fmt::Write;
 
-use arrow_53_schema::TimeUnit;
 use arrow_array::array;
 use arrow_array::cast::AsArray;
 use arrow_buffer::OffsetBuffer;
+use arrow_schema::TimeUnit;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 

@@ -686,7 +686,7 @@ impl DdlController {
         node_body: &Option<NodeBody>,
         table_id: u32,
     ) -> MetaResult<bool> {
-        if let Some(NodeBody::StreamCdcScan(ref stream_cdc_scan)) = node_body
+        if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
             let options_with_secret = WithOptionsSecResolved::new(
@@ -1902,9 +1902,10 @@ impl DdlController {
         if let Some(mapping) = &col_index_mapping {
             for (d, _f) in &mut downstream_fragments {
                 *d = mapping.rewrite_dispatch_strategy(d).ok_or_else(|| {
-                    // The `rewrite` only fails if some column is dropped.
+                    // The `rewrite` only fails if some column is dropped (missing) or altered (type changed).
+                    // TODO: support altering referenced columns
                     MetaError::invalid_parameter(
-                        "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                        "unable to drop or alter the column due to being referenced by downstream materialized views or sinks",
                     )
                 })?;
             }

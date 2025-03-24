@@ -266,9 +266,16 @@ pub async fn handle(
             analyze,
             options,
         } => explain::handle_explain(handler_args, *statement, options, analyze).await,
-        Statement::ExplainAnalyzeStreamJob { target } => {
-            explain_analyze_stream_job::handle_explain_analyze_stream_job(handler_args, target)
-                .await
+        Statement::ExplainAnalyzeStreamJob {
+            target,
+            duration_secs,
+        } => {
+            explain_analyze_stream_job::handle_explain_analyze_stream_job(
+                handler_args,
+                target,
+                duration_secs,
+            )
+            .await
         }
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await

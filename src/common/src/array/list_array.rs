@@ -181,10 +181,12 @@ impl Array for ListArray {
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        ListRef {
-            array: &self.value,
-            start: *self.offsets.get_unchecked(idx),
-            end: *self.offsets.get_unchecked(idx + 1),
+        unsafe {
+            ListRef {
+                array: &self.value,
+                start: *self.offsets.get_unchecked(idx),
+                end: *self.offsets.get_unchecked(idx + 1),
+            }
         }
     }
 
@@ -649,7 +651,7 @@ impl Row for ListRef<'_> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.array.value_at_unchecked(self.start as usize + index)
+        unsafe { self.array.value_at_unchecked(self.start as usize + index) }
     }
 
     fn len(&self) -> usize {

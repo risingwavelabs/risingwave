@@ -1970,11 +1970,12 @@ impl Parser<'_> {
         F: FnMut(&mut Self) -> ModalResult<T>,
     {
         let checkpoint = *self;
-        if let Ok(t) = f(self) {
-            Some(t)
-        } else {
-            *self = checkpoint;
-            None
+        match f(self) {
+            Ok(t) => Some(t),
+            _ => {
+                *self = checkpoint;
+                None
+            }
         }
     }
 
@@ -4289,6 +4290,7 @@ impl Parser<'_> {
 
     pub fn parse_explain(&mut self) -> ModalResult<Statement> {
         let mut options = ExplainOptions::default();
+        let mut analyze_duration = None;
 
         let explain_key_words = [
             Keyword::VERBOSE,
@@ -4298,6 +4300,7 @@ impl Parser<'_> {
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
             Keyword::FORMAT,
+            Keyword::DURATION_SECS,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
@@ -4338,6 +4341,9 @@ impl Parser<'_> {
                             _ => unreachable!("{}", keyword),
                         }
                     }
+                }
+                Keyword::DURATION_SECS => {
+                    analyze_duration = Some(parser.parse_literal_uint()?);
                 }
                 _ => unreachable!("{}", keyword),
             };
@@ -4380,7 +4386,10 @@ impl Parser<'_> {
                 }
             }
             if let Some(target) = parse_analyze_target(self)? {
-                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                let statement = Statement::ExplainAnalyzeStreamJob {
+                    target,
+                    duration_secs: analyze_duration,
+                };
                 return Ok(statement);
             }
         }
@@ -4483,17 +4492,20 @@ impl Parser<'_> {
     }
 
     fn parse_cte_inner(&mut self) -> ModalResult<CteInner> {
-        if let Ok(()) = self.expect_token(&Token::LParen) {
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
-            Ok(CteInner::Query(Box::new(query)))
-        } else {
-            let changelog = self.parse_identifier_non_reserved()?;
-            if changelog.to_string().to_lowercase() != "changelog" {
-                parser_err!("Expected 'changelog' but found '{}'", changelog);
+        match self.expect_token(&Token::LParen) {
+            Ok(()) => {
+                let query = self.parse_query()?;
+                self.expect_token(&Token::RParen)?;
+                Ok(CteInner::Query(Box::new(query)))
             }
-            self.expect_keyword(Keyword::FROM)?;
-            Ok(CteInner::ChangeLog(self.parse_object_name()?))
+            _ => {
+                let changelog = self.parse_identifier_non_reserved()?;
+                if changelog.to_string().to_lowercase() != "changelog" {
+                    parser_err!("Expected 'changelog' but found '{}'", changelog);
+                }
+                self.expect_keyword(Keyword::FROM)?;
+                Ok(CteInner::ChangeLog(self.parse_object_name()?))
+            }
         }
     }
 

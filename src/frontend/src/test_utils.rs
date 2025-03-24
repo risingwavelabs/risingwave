@@ -1038,7 +1038,11 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+    async fn get_tables(
+        &self,
+        _table_ids: &[u32],
+        _include_dropped_tables: bool,
+    ) -> RpcResult<HashMap<u32, Table>> {
         Ok(HashMap::new())
     }
 

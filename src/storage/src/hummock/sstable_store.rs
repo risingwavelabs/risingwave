@@ -453,7 +453,7 @@ impl SstableStore {
                 Ok(BlockResponse::Entry(entry))
             }
             CachePolicy::NotFill => {
-                if let Some(entry) = self
+                match self
                     .block_cache
                     .get(&SstableBlockIndex {
                         sst_id: object_id,
@@ -462,12 +462,13 @@ impl SstableStore {
                     .await
                     .map_err(HummockError::foyer_error)?
                 {
-                    Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
+                    Some(entry) => Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
                         entry,
-                    )))
-                } else {
-                    let block = fetch_block().await.map_err(HummockError::foyer_error)?;
-                    Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
+                    ))),
+                    _ => {
+                        let block = fetch_block().await.map_err(HummockError::foyer_error)?;
+                        Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
+                    }
                 }
             }
             CachePolicy::Disable => {
@@ -539,7 +540,7 @@ impl SstableStore {
         &self,
         sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
-    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
+    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
         let object_id = sstable_info_ref.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {

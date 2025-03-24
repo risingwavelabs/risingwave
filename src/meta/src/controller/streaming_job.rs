@@ -1675,24 +1675,27 @@ impl CatalogController {
 
         // Validate that props can be altered
         match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => match_sink_name_str!(
-                connector.to_lowercase().as_str(),
-                SinkType,
-                {
-                    for (k, v) in &props {
-                        if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
-                            return Err(SinkError::Config(anyhow!(
-                                "unsupported alter config: {}={}",
-                                k,
-                                v
-                            ))
-                            .into());
+            Some(connector) => {
+                let connector_type = connector.to_lowercase();
+                match_sink_name_str!(
+                    connector_type.as_str(),
+                    SinkType,
+                    {
+                        for (k, v) in &props {
+                            if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
+                                return Err(SinkError::Config(anyhow!(
+                                    "unsupported alter config: {}={}",
+                                    k,
+                                    v
+                                ))
+                                .into());
+                            }
                         }
-                    }
-                    SinkType::validate_alter_config(&props)
-                },
-                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-            )?,
+                        SinkType::validate_alter_config(&props)
+                    },
+                    |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+                )?
+            }
             None => {
                 return Err(
                     SinkError::Config(anyhow!("connector not specified when alter sink")).into(),

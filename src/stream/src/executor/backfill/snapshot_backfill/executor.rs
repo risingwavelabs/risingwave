@@ -252,7 +252,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             assert_eq!(next_prev_epoch, barrier.epoch.prev);
                         }
                         barrier_epoch = barrier.epoch;
-                        debug!(?barrier_epoch, kind = ?barrier.kind, "before consume change log");
+                        debug!(?barrier_epoch, kind = ?barrier.kind, "start consume epoch change log");
                         // use `upstream_buffer.run_future` to poll upstream concurrently so that we won't have back-pressure
                         // on the upstream. Otherwise, in `batch_iter_log_with_pk_bounds`, we may wait upstream epoch to be committed,
                         // and the back-pressure may cause the upstream unable to consume the barrier and then cause deadlock.
@@ -267,7 +267,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         while let Some(chunk) =
                             upstream_buffer.run_future(stream.try_next()).await?
                         {
-                            debug!(
+                            trace!(
                                 ?barrier_epoch,
                                 size = chunk.cardinality(),
                                 "consume change log yield chunk",
@@ -276,7 +276,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
 
-                        debug!(?barrier_epoch, "after consume change log");
+                        trace!(?barrier_epoch, "after consume change log");
 
                         self.progress.update_create_mview_log_store_progress(
                             barrier.epoch,

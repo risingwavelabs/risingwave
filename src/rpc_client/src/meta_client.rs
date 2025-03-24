@@ -1338,9 +1338,14 @@ impl MetaClient {
         Ok(resp.new_group_id)
     }
 
-    pub async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
+    pub async fn get_tables(
+        &self,
+        table_ids: &[u32],
+        include_dropped_tables: bool,
+    ) -> Result<HashMap<u32, Table>> {
         let req = GetTablesRequest {
             table_ids: table_ids.to_vec(),
+            include_dropped_tables,
         };
         let resp = self.inner.get_tables(req).await?;
         Ok(resp.tables)
