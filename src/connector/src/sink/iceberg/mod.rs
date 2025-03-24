@@ -315,8 +315,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -1084,17 +1085,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1102,17 +1105,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1121,17 +1126,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1140,17 +1147,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1798,6 +1807,9 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

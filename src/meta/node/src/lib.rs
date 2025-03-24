@@ -484,6 +484,9 @@ pub fn start(
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
                 license_key_path: opts.license_key_path,
+                compute_client_config: config.meta.developer.compute_client_config.clone(),
+                stream_client_config: config.meta.developer.stream_client_config.clone(),
+                frontend_client_config: config.meta.developer.frontend_client_config.clone(),
             },
             config.system.into_init_system_params(),
             Default::default(),

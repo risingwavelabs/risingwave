@@ -70,8 +70,8 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
-    SourceWatermark, TableConstraint, get_delimiter,
+    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ObjectName, SourceWatermark, TableConstraint, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -688,7 +688,7 @@ pub fn bind_connector_props(
         // group (that is, different from any other server id being used by any master or slave)
         with_properties
             .entry("server.id".to_owned())
-            .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
+            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
     Ok(with_properties)
 }
@@ -970,6 +970,16 @@ pub async fn handle_create_source(
     )
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
+
+    if stmt.columns.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        return Err(RwError::from(InvalidInputSyntax(
+            "NOT NULL constraint is not supported in source schema".to_owned(),
+        )));
+    }
 
     let source_catalog = bind_create_source_or_table_with_connector(
         handler_args.clone(),

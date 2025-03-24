@@ -190,7 +190,7 @@ impl CompactTask {
             .any(|sst| sst.sst_id != sst.object_id)
     }
 
-    pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> {
+    pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())

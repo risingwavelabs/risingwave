@@ -379,8 +379,9 @@ impl StreamSink {
         // check and ensure that the sink connector is specified and supported
         let sink_decouple = match sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
+                let connector_type = connector.to_lowercase();
                 match_sink_name_str!(
-                    connector.to_lowercase().as_str(),
+                    connector_type.as_str(),
                     SinkType,
                     {
                         // the table sink is created by with properties

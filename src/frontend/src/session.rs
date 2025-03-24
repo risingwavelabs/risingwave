@@ -328,6 +328,7 @@ impl FrontendEnv {
 
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
+            config.batch.developer.compute_client_config.clone(),
         ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -1512,7 +1513,7 @@ impl SessionManagerImpl {
                         UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                     } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
                         let mut salt = [0; 4];
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         rng.fill_bytes(&mut salt);
                         UserAuthenticator::Md5WithSalt {
                             encrypted_password: md5_hash_with_salt(

@@ -402,11 +402,14 @@ impl CreateMviewProgressTracker {
                     // Update the progress of all commands.
                     for progress in create_mview_progress {
                         // Those with actors complete can be finished immediately.
-                        if let Some(command) = self.update(progress, version_stats) {
-                            tracing::trace!(?progress, "finish progress");
-                            commands.push(command);
-                        } else {
-                            tracing::trace!(?progress, "update progress");
+                        match self.update(progress, version_stats) {
+                            Some(command) => {
+                                tracing::trace!(?progress, "finish progress");
+                                commands.push(command);
+                            }
+                            _ => {
+                                tracing::trace!(?progress, "update progress");
+                            }
                         }
                     }
                     commands

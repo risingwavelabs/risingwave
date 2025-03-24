@@ -331,14 +331,14 @@ mod tests {
 
     #[test]
     fn test_col_id_gen_initial() {
-        let mut gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate_simple(B("v1")).unwrap(), ColumnId::new(1));
-        assert_eq!(gen.generate_simple(B("v2")).unwrap(), ColumnId::new(2));
+        let mut r#gen = ColumnIdGenerator::new_initial();
+        assert_eq!(r#gen.generate_simple(B("v1")).unwrap(), ColumnId::new(1));
+        assert_eq!(r#gen.generate_simple(B("v2")).unwrap(), ColumnId::new(2));
     }
 
     #[test]
     fn test_col_id_gen_alter() {
-        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+        let mut r#gen = ColumnIdGenerator::new_alter(&TableCatalog {
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
@@ -369,16 +369,17 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(gen.generate_simple(B("v1")).unwrap(), ColumnId::new(4));
-        assert_eq!(gen.generate_simple(B("v2")).unwrap(), ColumnId::new(5));
+        assert_eq!(r#gen.generate_simple(B("v1")).unwrap(), ColumnId::new(4));
+        assert_eq!(r#gen.generate_simple(B("v2")).unwrap(), ColumnId::new(5));
         assert_eq!(
-            gen.generate_simple(Field::new("f32", DataType::Float32))
+            r#gen
+                .generate_simple(Field::new("f32", DataType::Float32))
                 .unwrap(),
             ColumnId::new(1)
         );
 
         // mismatched simple data type
-        let err = gen
+        let err = r#gen
             .generate_simple(Field::new("f64", DataType::Float32))
             .unwrap_err();
         expect![[r#"column "f64" cannot be altered; only types containing struct can be altered"#]]
@@ -386,7 +387,7 @@ mod tests {
 
         // mismatched composite data type
         // we require the nested data type to be exactly the same
-        let err = gen
+        let err = r#gen
             .generate_simple(Field::new(
                 "nested",
                 // NOTE: field ids are unset, legacy encoding, thus cannot be altered
@@ -396,7 +397,7 @@ mod tests {
         expect![[r#"column "nested" was persisted with legacy encoding thus cannot be altered, consider dropping and readding the column"#]].assert_eq(&err.to_report_string());
 
         // matched composite data type, should work
-        let id = gen
+        let id = r#gen
             .generate_simple(Field::new(
                 "nested",
                 StructType::new([("f1", DataType::Int32)]).into(),
@@ -404,7 +405,7 @@ mod tests {
             .unwrap();
         assert_eq!(id, ColumnId::new(3));
 
-        assert_eq!(gen.generate_simple(B("v3")).unwrap(), ColumnId::new(6));
+        assert_eq!(r#gen.generate_simple(B("v3")).unwrap(), ColumnId::new(6));
     }
 
     #[test]
@@ -460,7 +461,7 @@ mod tests {
             )]))
         };
 
-        let mut gen = ColumnIdGenerator::new_initial();
+        let mut r#gen = ColumnIdGenerator::new_initial();
         let mut col = ColumnCatalog {
             column_desc: ColumnDesc::from_field_without_column_id(&Field::new(
                 "nested",
@@ -468,8 +469,8 @@ mod tests {
             )),
             is_hidden: false,
         };
-        gen.generate(&mut col).unwrap();
-        let version = gen.into_version();
+        r#gen.generate(&mut col).unwrap();
+        let version = r#gen.into_version();
 
         expect![[r#"
             ColumnCatalog {
@@ -534,7 +535,7 @@ mod tests {
         "#]]
         .assert_debug_eq(&col);
 
-        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+        let mut r#gen = ColumnIdGenerator::new_alter(&TableCatalog {
             columns: vec![col],
             version: Some(version),
             ..Default::default()
@@ -546,8 +547,8 @@ mod tests {
             )),
             is_hidden: false,
         };
-        gen.generate(&mut new_col).unwrap();
-        let version = gen.into_version();
+        r#gen.generate(&mut new_col).unwrap();
+        let version = r#gen.into_version();
 
         expect![[r#"
             ColumnCatalog {
@@ -617,7 +618,7 @@ mod tests {
         "#]]
         .assert_debug_eq(&new_col);
 
-        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+        let mut r#gen = ColumnIdGenerator::new_alter(&TableCatalog {
             columns: vec![new_col],
             version: Some(version),
             ..Default::default()
@@ -630,7 +631,7 @@ mod tests {
             )),
             is_hidden: false,
         };
-        let err = gen.generate(&mut new_col).unwrap_err();
+        let err = r#gen.generate(&mut new_col).unwrap_err();
         expect![[r#"incompatible data type change from Float32 to Float64 at path "nested.map.value.element.f6""#]].assert_eq(&err.to_report_string());
     }
 }

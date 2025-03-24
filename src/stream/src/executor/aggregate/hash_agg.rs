@@ -36,9 +36,9 @@ use super::{AggExecutorArgs, HashAggExecutorExtraArgs, agg_call_filter_res, iter
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTablePostCommit;
+use crate::executor::eowc::SortBuffer;
 use crate::executor::monitor::HashAggMetrics;
 use crate::executor::prelude::*;
-use crate::executor::sort_buffer::SortBuffer;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
 type BoxedAggGroup<S> = Box<AggGroup<S>>;
