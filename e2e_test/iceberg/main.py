@@ -211,11 +211,11 @@ def get_parallel_job_info() -> Optional[tuple[int, int]]:
 
 def prepare_test_env():
     print("=== prepare test env")
-    print("--- create minio bucket")
+    print("create minio bucket")
     subprocess.run(
         ["risedev", "mc", "mb", "-p", "hummock-minio/icebergdata"], check=True
     )
-    print("--- start spark connect server")
+    print("start spark connect server")
     subprocess.run(
         [
             os.path.join(os.path.dirname(__file__), "start_spark_connect_server.sh"),
