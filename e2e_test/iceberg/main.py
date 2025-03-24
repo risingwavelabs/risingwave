@@ -119,8 +119,7 @@ def init_iceberg_table(args, init_sqls):
 def execute_slt(args, slt):
     if slt is None or slt == "":
         return
-    rw_config = args["risingwave"]
-    cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
+    cmd = f"risedev slt {slt}"
     log(f"Command line is [{cmd}]", level=LogLevel.INFO)
     subprocess.run(cmd, shell=True, check=True)
     time.sleep(15)
