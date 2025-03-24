@@ -1993,7 +1993,7 @@ pub mod default {
         }
 
         pub fn recover_mode() -> RecoverMode {
-            RecoverMode::None
+            RecoverMode::Quiet
         }
 
         pub fn runtime_config() -> RuntimeOptions {

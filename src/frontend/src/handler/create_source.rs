@@ -688,7 +688,7 @@ pub fn bind_connector_props(
         // group (that is, different from any other server id being used by any master or slave)
         with_properties
             .entry("server.id".to_owned())
-            .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
+            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
     Ok(with_properties)
 }

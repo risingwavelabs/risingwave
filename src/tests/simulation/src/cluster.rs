@@ -662,7 +662,7 @@ impl Cluster {
         }
         let rand_nodes = worker_nodes
             .iter()
-            .choose_multiple(&mut rand::thread_rng(), n)
+            .choose_multiple(&mut rand::rng(), n)
             .to_vec();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
@@ -708,12 +708,12 @@ impl Cluster {
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.meta_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("meta-{}", i));
@@ -724,36 +724,36 @@ impl Cluster {
             }
         }
         if opts.kill_frontend {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.frontend_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("frontend-{}", i));
             }
         }
         if opts.kill_compute {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.compute_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("compute-{}", i));
             }
         }
         if opts.kill_compactor {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.compactor_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("compactor-{}", i));
@@ -773,16 +773,15 @@ impl Cluster {
     ) {
         join_all(nodes.into_iter().map(|name| async move {
             let name = name.as_ref();
-            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let t = rand::rng().random_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
             Handle::current().kill(name);
 
-            let mut t =
-                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let mut t = rand::rng().random_range(Duration::from_secs(0)..Duration::from_secs(1));
             // has a small chance to restart after a long time
             // so that the node is expired and removed from the cluster
-            if rand::thread_rng().gen_bool(0.1) {
+            if rand::rng().random_bool(0.1) {
                 // max_heartbeat_interval_secs = 15
                 t += Duration::from_secs(restart_delay_secs as u64);
             }

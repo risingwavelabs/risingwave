@@ -120,26 +120,29 @@ impl CompactStatus {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        if let Some(task) = selector.pick_compaction(task_id, selector_context) {
-            return Some(task);
-        } else {
-            let compaction_group_config = &group.compaction_config;
-            if let EmergencyState::Emergency =
-                check_emergency_state(levels, compaction_group_config.as_ref())
-                && compaction_group_config.enable_emergency_picker
-            {
-                let selector_context = CompactionSelectorContext {
-                    group,
-                    levels,
-                    member_table_ids,
-                    level_handlers: &mut self.level_handlers,
-                    selector_stats: stats,
-                    table_id_to_options,
-                    developer_config,
-                    table_watermarks,
-                    state_table_info,
-                };
-                return EmergencySelector::default().pick_compaction(task_id, selector_context);
+        match selector.pick_compaction(task_id, selector_context) {
+            Some(task) => {
+                return Some(task);
+            }
+            _ => {
+                let compaction_group_config = &group.compaction_config;
+                if let EmergencyState::Emergency =
+                    check_emergency_state(levels, compaction_group_config.as_ref())
+                    && compaction_group_config.enable_emergency_picker
+                {
+                    let selector_context = CompactionSelectorContext {
+                        group,
+                        levels,
+                        member_table_ids,
+                        level_handlers: &mut self.level_handlers,
+                        selector_stats: stats,
+                        table_id_to_options,
+                        developer_config,
+                        table_watermarks,
+                        state_table_info,
+                    };
+                    return EmergencySelector::default().pick_compaction(task_id, selector_context);
+                }
             }
         }
 

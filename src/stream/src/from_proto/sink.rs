@@ -167,18 +167,19 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     ))
                 })?;
 
+            let sink_type_str = sink_type.to_string().to_lowercase();
             match_sink_name_str!(
-                sink_type.to_lowercase().as_str(),
+                sink_type_str.as_str(),
                 SinkType,
                 Ok(SinkType::SINK_NAME),
-                |other| {
+                |other: &str| {
                     Err(StreamExecutorError::from((
                         SinkError::Config(anyhow!("unsupported sink connector {}", other)),
                         sink_id.sink_id,
                     )))
                 }
-            )
-        }?;
+            )?
+        };
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
             Some(f) => Some(

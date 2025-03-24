@@ -53,7 +53,6 @@ struct Inner {
 }
 
 impl ProjectSetExecutor {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
