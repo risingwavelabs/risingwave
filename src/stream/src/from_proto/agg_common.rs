@@ -21,7 +21,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::*;
 use crate::common::StateTableColumnMapping;
 use crate::common::table::state_table::StateTable;
-use crate::executor::aggregation::AggStateStorage;
+use crate::executor::aggregate::AggStateStorage;
 
 /// Parse from stream proto plan agg call states, generate state tables and column mappings.
 /// The `vnodes` is generally `Some` for Hash Agg and `None` for Simple Agg.

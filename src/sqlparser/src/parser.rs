@@ -4286,6 +4286,7 @@ impl Parser<'_> {
 
     pub fn parse_explain(&mut self) -> ModalResult<Statement> {
         let mut options = ExplainOptions::default();
+        let mut analyze_duration = None;
 
         let explain_key_words = [
             Keyword::VERBOSE,
@@ -4295,6 +4296,7 @@ impl Parser<'_> {
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
             Keyword::FORMAT,
+            Keyword::DURATION_SECS,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
@@ -4335,6 +4337,9 @@ impl Parser<'_> {
                             _ => unreachable!("{}", keyword),
                         }
                     }
+                }
+                Keyword::DURATION_SECS => {
+                    analyze_duration = Some(parser.parse_literal_uint()?);
                 }
                 _ => unreachable!("{}", keyword),
             };
@@ -4377,7 +4382,10 @@ impl Parser<'_> {
                 }
             }
             if let Some(target) = parse_analyze_target(self)? {
-                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                let statement = Statement::ExplainAnalyzeStreamJob {
+                    target,
+                    duration_secs: analyze_duration,
+                };
                 return Ok(statement);
             }
         }

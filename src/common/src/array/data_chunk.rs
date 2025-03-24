@@ -841,7 +841,7 @@ impl DataChunkTestExt for DataChunk {
             let mut rng = SmallRng::from_seed([0; 32]);
             let mut vis_builder = BitmapBuilder::with_capacity(chunk_size);
             for _i in 0..chunk_size {
-                vis_builder.append(rng.gen_bool(visibility_percent));
+                vis_builder.append(rng.random_bool(visibility_percent));
             }
             vis_builder.finish()
         };

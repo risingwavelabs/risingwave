@@ -809,6 +809,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     };
                     let database_id = DatabaseId::new(resp.database_id);
+                    if failed_databases.contains(&database_id) {
+                        assert!(!collecting_databases.contains_key(&database_id));
+                        // ignore the lately arrived collect resp of failed database
+                        continue;
+                    }
+                    assert!(!collected_databases.contains_key(&database_id));
                     let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, *prev_epoch);
                     assert!(node_to_collect.remove(&worker_id).is_some());

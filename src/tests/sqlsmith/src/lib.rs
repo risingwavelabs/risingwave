@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Result, bail};
 use itertools::Itertools;
 use rand::Rng;
-use rand::prelude::SliceRandom;
+use rand::prelude::IndexedRandom;
 use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnOption, Expr, Join, JoinConstraint, JoinOperator, Statement,
     TableConstraint,

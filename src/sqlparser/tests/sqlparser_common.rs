@@ -1924,7 +1924,7 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let expected = "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT, found: )";
+    let expected = "sql parser error: expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT or DURATION_SECS, found: )";
     let actual = res.unwrap_err().to_string();
     assert!(
         actual.contains(expected),
