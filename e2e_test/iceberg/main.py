@@ -16,6 +16,10 @@ import glob
 from typing import List, Dict, Any, Optional
 
 
+def log(msg):
+    print(msg, flush=True)
+
+
 def strtobool(v):
     return v.lower() == "true"
 
@@ -43,7 +47,7 @@ def get_spark(args) -> SparkSession:
 def init_iceberg_table(args, init_sqls):
     spark = get_spark(args)
     for sql in init_sqls:
-        print(f"Executing sql: {sql}")
+        log(f"Executing sql: {sql}")
         spark.sql(sql)
 
 
@@ -52,7 +56,7 @@ def execute_slt(args, slt):
         return
     rw_config = args["risingwave"]
     cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
-    print(f"Command line is [{cmd}]")
+    log(f"Command line is [{cmd}]")
     subprocess.run(cmd, shell=True, check=True)
     time.sleep(15)
 
@@ -61,19 +65,19 @@ def verify_result(args, verify_sql, verify_schema, verify_data):
     tc = unittest.TestCase()
 
     time.sleep(3)
-    print(f"verify_result:\nExecuting sql: {verify_sql}")
+    log(f"verify_result:\nExecuting sql: {verify_sql}")
     spark = get_spark(args)
     df = spark.sql(verify_sql).collect()
-    print(f"Result:")
-    print(f"================")
+    log(f"Result:")
+    log(f"================")
     for row in df:
-        print(row)
-    print(f"================")
+        log(row)
+    log(f"================")
     rows = verify_data.splitlines()
     tc.assertEqual(len(df), len(rows), "row length mismatch")
     tc.assertEqual(len(verify_schema), len(df[0]), "column length mismatch")
     for row1, row2 in zip(df, rows):
-        print(f"Row1: {row1}, Row 2: {row2}")
+        log(f"Row1: {row1}, Row 2: {row2}")
         # New parsing logic for row2
         row2 = parse_row(row2)
         for idx, ty in enumerate(verify_schema):
@@ -111,17 +115,17 @@ def compare_sql(args, cmp_sqls):
 
     tc = unittest.TestCase()
     diff_df = df1.exceptAll(df2).collect()
-    print(f"diff {diff_df}")
+    log(f"diff {diff_df}")
     tc.assertEqual(len(diff_df), 0)
     diff_df = df2.exceptAll(df1).collect()
-    print(f"diff {diff_df}")
+    log(f"diff {diff_df}")
     tc.assertEqual(len(diff_df), 0)
 
 
 def drop_table(args, drop_sqls):
     spark = get_spark(args)
     for sql in drop_sqls:
-        print(f"Executing sql: {sql}")
+        log(f"Executing sql: {sql}")
         spark.sql(sql)
 
 
@@ -164,19 +168,19 @@ def discover_test_cases() -> List[str]:
 
 def run_test_case(test_file: str, args: Dict[str, Any]) -> None:
     """Run a single test case."""
-    print(f"\n=== Running test case: {test_file} ===\n")
+    log(f"\n=== Running test case: {test_file} ===\n")
     with open(test_file, "rb") as f:
         test_case = toml.load(f)
 
         # Extract content from testcase
         init_sqls = test_case["init_sqls"]
-        print(f"init_sqls:{init_sqls}")
+        log(f"init_sqls:{init_sqls}")
         slt = test_case.get("slt")
-        print(f"slt:{slt}")
+        log(f"slt:{slt}")
         verify_schema = test_case.get("verify_schema")
-        print(f"verify_schema:{verify_schema}")
+        log(f"verify_schema:{verify_schema}")
         verify_sql = test_case.get("verify_sql")
-        print(f"verify_sql:{verify_sql}")
+        log(f"verify_sql:{verify_sql}")
         verify_data = test_case.get("verify_data")
         verify_slt = test_case.get("verify_slt")
         cmp_sqls = test_case.get("cmp_sqls")
@@ -195,7 +199,7 @@ def run_test_case(test_file: str, args: Dict[str, Any]) -> None:
             if drop_sqls:
                 drop_table(args, drop_sqls)
         except Exception as e:
-            print(f"test case {test_file} failed: {e}")
+            log(f"test case {test_file} failed: {e}")
             raise e
 
 
@@ -210,19 +214,19 @@ def get_parallel_job_info() -> Optional[tuple[int, int]]:
 
 
 def prepare_test_env():
-    print("=== prepare test env")
-    print("create minio bucket")
+    log("=== prepare test env")
+    log("create minio bucket")
     subprocess.run(
         ["risedev", "mc", "mb", "-p", "hummock-minio/icebergdata"], check=True
     )
-    print("start spark connect server")
+    log("start spark connect server")
     subprocess.run(
         [
             os.path.join(os.path.dirname(__file__), "start_spark_connect_server.sh"),
         ],
         check=True,
     )
-    print("=== prepare test env done")
+    log("=== prepare test env done")
 
 
 if __name__ == "__main__":
@@ -247,7 +251,7 @@ if __name__ == "__main__":
     else:
         # Run discovered test cases
         test_files = discover_test_cases()
-        print(f"Discovered {len(test_files)} test cases")
+        log(f"Discovered {len(test_files)} test cases")
 
         # Get parallel job information
         parallel_info = get_parallel_job_info()
@@ -256,7 +260,7 @@ if __name__ == "__main__":
             # Distribute test files among parallel jobs
             test_files.sort()  # Ensure consistent distribution
             test_files = test_files[job_index::total_jobs]
-            print(
+            log(
                 f"Running job {job_index + 1} of {total_jobs} with {len(test_files)} test cases"
             )
 
