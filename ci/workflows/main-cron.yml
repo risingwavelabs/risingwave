@@ -425,7 +425,9 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v5.5.0: *docker-compose
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 9
     retry: *auto-retry
