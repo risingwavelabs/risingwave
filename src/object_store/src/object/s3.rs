@@ -382,16 +382,19 @@ impl StreamingUploader for S3StreamingUploader {
                 res?;
                 Ok(())
             }
-        } else if let Err(e) = self
-            .flush_multipart_and_complete()
-            .verbose_instrument_await("s3_flush_multipart_and_complete")
-            .await
-        {
-            tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
-            self.abort_multipart_upload().await?;
-            Err(e)
         } else {
-            Ok(())
+            match self
+                .flush_multipart_and_complete()
+                .verbose_instrument_await("s3_flush_multipart_and_complete")
+                .await
+            {
+                Err(e) => {
+                    tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
+                    self.abort_multipart_upload().await?;
+                    Err(e)
+                }
+                _ => Ok(()),
+            }
         }
     }
 
@@ -643,7 +646,7 @@ impl ObjectStore for S3ObjectStore {
 }
 
 impl S3ObjectStore {
-    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient {
+    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient + use<> {
         let mut http = hyper::client::HttpConnector::new();
 
         // connection config
@@ -1084,36 +1087,32 @@ where
                     }
                 }
 
-                Some(SdkError::ServiceError(e)) => {
-                    let retry = match e.err().code() {
-                        None => {
-                            if config.s3.developer.retry_unknown_service_error
-                                || config.s3.retry_unknown_service_error
-                            {
-                                tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                                true
-                            } else {
-                                false
-                            }
+                Some(SdkError::ServiceError(e)) => match e.err().code() {
+                    None => {
+                        if config.s3.developer.retry_unknown_service_error
+                            || config.s3.retry_unknown_service_error
+                        {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            true
+                        } else {
+                            false
                         }
-                        Some(code) => {
-                            if config
-                                .s3
-                                .developer
-                                .retryable_service_error_codes
-                                .iter()
-                                .any(|s| s.as_str().eq_ignore_ascii_case(code))
-                            {
-                                tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
-                                true
-                            } else {
-                                false
-                            }
+                    }
+                    Some(code) => {
+                        if config
+                            .s3
+                            .developer
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            true
+                        } else {
+                            false
                         }
-                    };
-
-                    retry
-                }
+                    }
+                },
 
                 Some(SdkError::TimeoutError(_err)) => true,
 

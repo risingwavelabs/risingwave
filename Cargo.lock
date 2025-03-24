@@ -3314,16 +3314,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctor"
-version = "0.1.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d2301688392eb071b0bf1a37be05c469d3cc4dbbd95df672fe28ab021e6a096"
-dependencies = [
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4758,18 +4748,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastrace"
-version = "0.7.4"
+name = "fastant"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5242121a4de2ca29db07d2ab6ed5988ddbc3cf1ca19e52c80fde10cf498efde8"
+checksum = "62bf7fa928ce0c4a43bd6e7d1235318fc32ac3a3dea06a2208c44e729449471a"
 dependencies = [
+ "small_ctor",
+ "web-time",
+]
+
+[[package]]
+name = "fastrace"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773324bb245e34a32d704c2256871377f9d7cdb4acff10c555e0dc068d6ddb55"
+dependencies = [
+ "fastant",
  "fastrace-macro",
- "minstant",
  "once_cell",
  "parking_lot 0.12.1",
  "pin-project",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rtrb",
+ "serde",
 ]
 
 [[package]]
@@ -5016,8 +5017,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddac72b94b174f342300f54f6dfda93c87a4a220e2def9ee2590e3ac474b5f6d"
+source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5035,8 +5035,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a2fec9e9293931608eb6bb4b032d05b8b45c8749ec6a0ace82bfe40ab5d68c4"
+source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
@@ -5063,8 +5062,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c5016e4ca89ead9045c56f10e7e4cca8068e0b114a57f9df32ad768f90f4c33"
+source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -5089,14 +5087,12 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ab33a86920fddf66dae2485e37dbcaf0e56f424875d752b639df62d3f4c056"
+source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
  "anyhow",
  "array-util",
- "async-channel 2.2.1",
  "auto_enums",
  "bincode 1.3.3",
  "bytes",
@@ -7086,18 +7082,18 @@ checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linkme"
-version = "0.3.24"
+version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ca16377a6dae364fb00769699ba440899f1a720d4f5abf2667d0a8a95f933dd"
+checksum = "22d227772b5999ddc0690e733f734f95ca05387e329c4084fe65678c51198ffe"
 dependencies = [
  "linkme-impl",
 ]
 
 [[package]]
 name = "linkme-impl"
-version = "0.3.24"
+version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e5ac81de04bf8215501c50a436632c3789b22ef1625fe0bf8927dd4ba3696c5"
+checksum = "71a98813fa0073a317ed6a8055dcd4722a49d9b862af828ee68449adb799b6be"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7555,16 +7551,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ffbe83022cedc1d264172192511ae958937694cd57ce297164951b8b3568394"
 dependencies = [
  "adler2",
-]
-
-[[package]]
-name = "minstant"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fb9b5c752f145ac5046bccc3c4f62892e3c950c1d1eab80c5949cd68a2078db"
-dependencies = [
- "ctor",
- "web-time",
 ]
 
 [[package]]
@@ -9014,18 +9000,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.1.7"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be57f64e946e500c8ee36ef6331845d40a93055567ec57e8fae13efd33759b95"
+checksum = "677f1add503faace112b9f1373e43e9e054bfdd22ff1a63c1bc485eaec6a6a8a"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.7"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c0f5fad0874fc7abcd4d750e76917eaebbecaa2c20bde22e1dbeeba8beb758c"
+checksum = "6e918e4ff8c4549eb882f14b3a4bc8c8bc93de829416eacf579f1207a8fbf861"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9804,7 +9790,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -13551,6 +13537,12 @@ name = "slice-group-by"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "826167069c09b99d56f31e9ae5c99049e932a98c9dc2dac47645b08dbbf76ba7"
+
+[[package]]
+name = "small_ctor"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88414a5ca1f85d82cc34471e975f0f74f6aa54c40f062efa42c0080e7f763f81"
 
 [[package]]
 name = "smallbitset"

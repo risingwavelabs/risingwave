@@ -74,7 +74,7 @@ resolver = "2"
 
 [workspace.package]
 version = "2.4.0-alpha"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
 license = "Apache-2.0"
@@ -96,7 +96,9 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-foyer = { version = "0.14.1", features = ["tracing", "nightly"] }
+# Uncomment this line after it is released.
+# foyer = { version = "0.15.0", features = ["tracing", "nightly"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "0805cbb954ba255e59a9700ff57f6a88d17d77e4", features = ["tracing", "nightly"] }
 mixtrics = { version = "0.0.3", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
@@ -168,7 +170,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.14.0"
 jsonbb = "0.1.4"
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = { version = "54", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [

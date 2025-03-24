@@ -1169,7 +1169,7 @@ mod tests {
         epoch: u64,
         seq_id: &mut SeqIdType,
     ) -> (
-        impl Stream<Item = StorageResult<StateStoreKeyedRow>>,
+        impl Stream<Item = StorageResult<StateStoreKeyedRow>> + use<>,
         Sender<()>,
     ) {
         let (tx, rx) = oneshot::channel();
@@ -1198,7 +1198,7 @@ mod tests {
         seq_id: &mut SeqIdType,
         base: i64,
     ) -> (
-        impl Stream<Item = StorageResult<StateStoreKeyedRow>>,
+        impl Stream<Item = StorageResult<StateStoreKeyedRow>> + use<>,
         oneshot::Sender<()>,
         oneshot::Sender<()>,
         Vec<Op>,

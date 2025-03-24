@@ -168,7 +168,7 @@ impl StagingVersion {
         impl Iterator<Item = &'a ImmutableMemtable> + 'a,
         impl Iterator<Item = &'a SstableInfo> + 'a,
     ) {
-        let (ref left, ref right) = table_key_range;
+        let (left, right) = table_key_range;
         let left = left.as_ref().map(|key| TableKey(key.0.as_ref()));
         let right = right.as_ref().map(|key| TableKey(key.0.as_ref()));
         let overlapped_imms = self.imm.iter().filter(move |imm| {

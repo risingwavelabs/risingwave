@@ -166,8 +166,7 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
     fn peek<const NEXT: bool>(&self) -> Option<(&'a K, &'a V)> {
         let mut ss_cursor = self.ss_cursor.clone();
         let mut dt_cursor = self.dt_cursor.clone();
-        let res = Self::move_impl::<NEXT>(&mut ss_cursor, &mut dt_cursor);
-        res
+        Self::move_impl::<NEXT>(&mut ss_cursor, &mut dt_cursor)
     }
 
     fn r#move<const NEXT: bool>(&mut self) -> Option<(&'a K, &'a V)> {
