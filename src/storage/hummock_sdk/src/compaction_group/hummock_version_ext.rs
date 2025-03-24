@@ -956,41 +956,41 @@ impl<T> HummockVersionCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.object_id()).collect()
-    }
-
-    pub fn get_object_ids_exclude_change_log(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos_exclude_change_log()
+    pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos(exclude_change_log)
             .map(|s| s.object_id())
             .collect()
     }
 
-    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.sst_id()).collect()
-    }
-
-    pub fn get_sst_ids_exclude_change_log(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos_exclude_change_log()
+    pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos(exclude_change_log)
             .map(|s| s.sst_id())
             .collect()
     }
 
-    pub fn get_sst_infos(&self) -> impl Iterator<Item = &T> {
-        self.get_sst_infos_exclude_change_log()
-            .chain(self.table_change_log.values().flat_map(|change_log| {
-                change_log.iter().flat_map(|epoch_change_log| {
-                    epoch_change_log
-                        .old_value
-                        .iter()
-                        .chain(epoch_change_log.new_value.iter())
-                })
-            }))
-    }
-
-    pub fn get_sst_infos_exclude_change_log(&self) -> impl Iterator<Item = &T> {
+    pub fn get_sst_infos(&self, exclude_change_log: bool) -> impl Iterator<Item = &T> {
+        let may_table_change_log = if exclude_change_log {
+            None
+        } else {
+            Some(self.table_change_log.values())
+        };
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
+            .chain(
+                may_table_change_log
+                    .map(|v| {
+                        v.flat_map(|table_change_log| {
+                            table_change_log.iter().flat_map(|epoch_change_log| {
+                                epoch_change_log
+                                    .old_value
+                                    .iter()
+                                    .chain(epoch_change_log.new_value.iter())
+                            })
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
     }
 }
 
@@ -1616,7 +1616,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids().len(), 0);
+        assert_eq!(version.get_object_ids(false).len(), 0);
 
         // Add to sub level
         version
@@ -1636,7 +1636,7 @@ mod tests {
                 ],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids().len(), 1);
+        assert_eq!(version.get_object_ids(false).len(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
@@ -1650,7 +1650,7 @@ mod tests {
             ],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids().len(), 2);
+        assert_eq!(version.get_object_ids(false).len(), 2);
     }
 
     #[test]
