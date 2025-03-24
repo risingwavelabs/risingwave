@@ -50,8 +50,8 @@ pub const REDIS_VALUE_TYPE_PUBSUB: &str = "pubsub";
 pub const LON_NAME: &str = "longitude";
 pub const LAT_NAME: &str = "latitude";
 pub const MEMBER_NAME: &str = "member";
-pub const PUBSUB_NAME: &str = "pubsub_name";
-pub const PUBSUB_COLUMN: &str = "pubsub_column";
+pub const CHANNEL: &str = "channel";
+pub const CHANNEL_COLUMN: &str = "channel_column";
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
@@ -373,22 +373,22 @@ impl Sink for RedisSink {
                     }
                 }
                 Some(REDIS_VALUE_TYPE_PUBSUB) => {
-                    let pubsub_name = self.format_desc.options.get(PUBSUB_NAME);
-                    let pubsub_column = self.format_desc.options.get(PUBSUB_COLUMN);
-                    if (pubsub_name.is_none() && pubsub_column.is_none())
-                        || (pubsub_name.is_some() && pubsub_column.is_some())
+                    let channel = self.format_desc.options.get(CHANNEL);
+                    let channel_column = self.format_desc.options.get(CHANNEL_COLUMN);
+                    if (channel.is_none() && channel_column.is_none())
+                        || (channel.is_some() && channel_column.is_some())
                     {
                         return Err(SinkError::Config(anyhow!(
-                            "`{PUBSUB_NAME}` and `{PUBSUB_COLUMN}` only one can be set"
+                            "`{CHANNEL}` and `{CHANNEL_COLUMN}` only one can be set"
                         )));
                     }
 
-                    if let Some(pubsub_column) = pubsub_column
-                        && let Some(pubsub_column_type) = all_map.get(pubsub_column)
-                        && (pubsub_column_type != &DataType::Varchar)
+                    if let Some(channel_column) = channel_column
+                        && let Some(channel_column_type) = all_map.get(channel_column)
+                        && (channel_column_type != &DataType::Varchar)
                     {
                         return Err(SinkError::Config(anyhow!(
-                            "`{PUBSUB_COLUMN}` must be set to `varchar`"
+                            "`{CHANNEL_COLUMN}` must be set to `varchar`"
                         )));
                     }
 

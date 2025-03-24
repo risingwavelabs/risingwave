@@ -60,11 +60,11 @@ impl TemplateEncoder {
     pub fn new_pubsub_key(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        pubsub_name: Option<String>,
-        pubsub_column: Option<String>,
+        channel: Option<String>,
+        channel_column: Option<String>,
     ) -> Result<Self> {
         Ok(TemplateEncoder::RedisPubSubKey(
-            TemplateRedisPubSubKeyEncoder::new(schema, col_indices, pubsub_name, pubsub_column)?,
+            TemplateRedisPubSubKeyEncoder::new(schema, col_indices, channel, channel_column)?,
         ))
     }
 }
@@ -288,35 +288,35 @@ impl TemplateRedisPubSubKeyEncoder {
     pub fn new(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        pubsub_name: Option<String>,
-        pubsub_column: Option<String>,
+        channel: Option<String>,
+        channel_column: Option<String>,
     ) -> Result<Self> {
-        if let Some(pubsub_name) = pubsub_name {
+        if let Some(channel) = channel {
             return Ok(Self {
-                inner: TemplateRedisPubSubKeyEncoderInner::PubSubName(pubsub_name),
+                inner: TemplateRedisPubSubKeyEncoderInner::PubSubName(channel),
                 schema,
                 col_indices,
             });
         }
-        if let Some(pubsub_column) = pubsub_column {
-            let pubsub_column_index = schema
+        if let Some(channel_column) = channel_column {
+            let channel_column_index = schema
                 .names_str()
                 .iter()
-                .position(|name| name == &pubsub_column)
+                .position(|name| name == &channel_column)
                 .ok_or_else(|| {
                     SinkError::Redis(format!(
                         "Can't find pubsub column({}) in schema",
-                        pubsub_column
+                        channel_column
                     ))
                 })?;
             return Ok(Self {
-                inner: TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(pubsub_column_index),
+                inner: TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(channel_column_index),
                 schema,
                 col_indices,
             });
         }
         Err(SinkError::Redis(
-            "`pubsub_name` or `pubsub_column` must be set".to_owned(),
+            "`channel` or `channel_column` must be set".to_owned(),
         ))
     }
 
@@ -326,8 +326,8 @@ impl TemplateRedisPubSubKeyEncoder {
         _col_indices: impl Iterator<Item = usize>,
     ) -> Result<TemplateEncoderOutput> {
         match &self.inner {
-            TemplateRedisPubSubKeyEncoderInner::PubSubName(pubsub_name) => {
-                Ok(TemplateEncoderOutput::RedisPubSubKey(pubsub_name.clone()))
+            TemplateRedisPubSubKeyEncoderInner::PubSubName(channel) => {
+                Ok(TemplateEncoderOutput::RedisPubSubKey(channel.clone()))
             }
             TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(pubsub_col) => {
                 let pubsub_key = row

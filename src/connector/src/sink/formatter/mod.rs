@@ -37,7 +37,7 @@ use super::encoder::{
     TimestamptzHandlingMode,
 };
 use super::redis::{
-    KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, PUBSUB_COLUMN, PUBSUB_NAME, REDIS_VALUE_TYPE,
+    CHANNEL, CHANNEL_COLUMN, KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, REDIS_VALUE_TYPE,
     REDIS_VALUE_TYPE_GEO, REDIS_VALUE_TYPE_PUBSUB, REDIS_VALUE_TYPE_STRING, VALUE_FORMAT,
 };
 use crate::sink::encoder::{
@@ -330,21 +330,16 @@ impl EncoderBuild for TemplateEncoder {
             },
             REDIS_VALUE_TYPE_PUBSUB => match pk_indices {
                 Some(_) => {
-                    let pubsub_name = b.format_desc.options.get(PUBSUB_NAME).cloned();
-                    let pubsub_column = b.format_desc.options.get(PUBSUB_COLUMN).cloned();
-                    if (pubsub_name.is_none() && pubsub_column.is_none())
-                        || (pubsub_name.is_some() && pubsub_column.is_some())
+                    let channel = b.format_desc.options.get(CHANNEL).cloned();
+                    let channel_column = b.format_desc.options.get(CHANNEL_COLUMN).cloned();
+                    if (channel.is_none() && channel_column.is_none())
+                        || (channel.is_some() && channel_column.is_some())
                     {
                         return Err(SinkError::Config(anyhow!(
-                            "`{PUBSUB_NAME}` and `{PUBSUB_COLUMN}` only one can be set"
+                            "`{CHANNEL}` and `{CHANNEL_COLUMN}` only one can be set"
                         )));
                     }
-                    TemplateEncoder::new_pubsub_key(
-                        b.schema,
-                        pk_indices,
-                        pubsub_name,
-                        pubsub_column,
-                    )
+                    TemplateEncoder::new_pubsub_key(b.schema, pk_indices, channel, channel_column)
                 }
                 None => {
                     let template = b.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
