@@ -68,6 +68,9 @@ impl DebeziumMongoJsonParser {
             })
             .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
 
+        // [cl](#20100):
+        // it is not guaranteed that only MongodbCdc properties will be passed
+        // so I'll tolerate MongodbCdc, Kafka, and Test for now
         let strong_schema = match &source_ctx.connector_props {
             ConnectorProperties::MongodbCdc(mongo_props) => mongo_props
                 .properties
