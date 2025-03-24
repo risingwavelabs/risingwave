@@ -121,7 +121,12 @@ def execute_slt(args, slt):
         return
     cmd = f"risedev slt {slt}"
     log(f"Command line is [{cmd}]", level=LogLevel.INFO)
-    subprocess.run(cmd, shell=True, check=True)
+    subprocess.run(
+        cmd,
+        shell=True,
+        env={"CARGO_MAKE_PRINT_TIME_SUMMARY": "false"},
+        check=True,
+    )
     time.sleep(15)
 
 
