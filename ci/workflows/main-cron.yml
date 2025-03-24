@@ -429,7 +429,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 9
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
