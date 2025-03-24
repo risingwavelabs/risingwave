@@ -119,10 +119,8 @@ def init_iceberg_table(args, init_sqls):
 def execute_slt(args, slt):
     if slt is None or slt == "":
         return
-    cmd = f"risedev slt {slt}"
-    log(f"Command line is [{cmd}]", level=LogLevel.INFO)
     subprocess.run(
-        cmd,
+        ["risedev", "slt", slt],
         env={"CARGO_MAKE_PRINT_TIME_SUMMARY": "false"},
         check=True,
     )
