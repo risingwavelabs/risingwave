@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -145,11 +145,6 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     type LogSinker = RemoteLogSinker;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
-
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.param.properties = config;
-        Ok(())
-    }
 
     fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
         match user_specified {
@@ -530,11 +525,6 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter>>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
-
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.param.properties = config;
-        Ok(())
-    }
 
     async fn validate(&self) -> Result<()> {
         validate_remote_sink(&self.param, Self::SINK_NAME).await?;

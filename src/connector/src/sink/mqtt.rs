@@ -163,11 +163,6 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = MqttConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(

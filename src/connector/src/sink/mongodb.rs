@@ -243,11 +243,6 @@ impl Sink for MongodbSink {
 
     const SINK_NAME: &'static str = MONGODB_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = MongodbConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             if self.pk_indices.is_empty() {

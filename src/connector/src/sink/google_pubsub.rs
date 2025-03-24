@@ -122,11 +122,6 @@ impl Sink for GooglePubSubSink {
 
     const SINK_NAME: &'static str = PUBSUB_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = GooglePubSubConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::GooglePubSub(anyhow!(

@@ -659,16 +659,6 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
-
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        if !config.is_empty() {
-            return Err(SinkError::Config(anyhow!(
-                "unsupported update config: {:?}",
-                config
-            )));
-        }
-        Ok(())
-    }
 }
 
 pub trait SinkLogReader: Send + Sized + 'static {

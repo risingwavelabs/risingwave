@@ -496,11 +496,6 @@ impl Sink for ClickHouseSink {
     const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = ClickHouseConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {

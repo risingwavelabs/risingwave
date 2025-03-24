@@ -105,11 +105,6 @@ impl Sink for NatsSink {
 
     const SINK_NAME: &'static str = NATS_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = NatsConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(

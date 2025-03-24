@@ -296,11 +296,6 @@ impl Sink for DeltaLakeSink {
     const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = DeltaLakeConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),

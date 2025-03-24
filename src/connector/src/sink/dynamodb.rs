@@ -109,11 +109,6 @@ impl Sink for DynamoDbSink {
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = DynamoDbConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::DynamoDbSink
             .check_available()

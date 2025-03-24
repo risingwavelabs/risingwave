@@ -74,6 +74,10 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
 
         let mut current_checkpoint: u64 = 0;
         let commit_checkpoint_interval = self.commit_checkpoint_interval;
+        println!(
+            "commit_checkpoint_interval: {:?}",
+            commit_checkpoint_interval
+        );
         let sink_writer_metrics = self.sink_writer_metrics;
 
         loop {

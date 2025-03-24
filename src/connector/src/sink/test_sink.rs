@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::anyhow;
@@ -49,11 +48,6 @@ impl Sink for TestSink {
     type LogSinker = LogSinkerOf<BoxWriter<()>>;
 
     const SINK_NAME: &'static str = "test";
-
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> crate::sink::Result<()> {
-        self.param.properties = config;
-        Ok(())
-    }
 
     async fn validate(&self) -> crate::sink::Result<()> {
         Ok(())

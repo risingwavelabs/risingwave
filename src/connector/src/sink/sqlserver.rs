@@ -145,11 +145,6 @@ impl Sink for SqlServerSink {
 
     const SINK_NAME: &'static str = SQLSERVER_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = SqlServerConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::SqlServerSink
             .check_available()

@@ -247,11 +247,6 @@ impl Sink for RedisSink {
 
     const SINK_NAME: &'static str = "redis";
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = RedisConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(RedisSinkWriter::new(
             self.config.clone(),

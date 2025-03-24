@@ -203,11 +203,6 @@ impl Sink for DorisSink {
 
     const SINK_NAME: &'static str = DORIS_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = DorisConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(DorisSinkWriter::new(
             self.config.clone(),

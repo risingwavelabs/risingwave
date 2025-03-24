@@ -168,11 +168,6 @@ impl Sink for PulsarSink {
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = PulsarConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(PulsarSinkWriter::new(
             self.config.clone(),

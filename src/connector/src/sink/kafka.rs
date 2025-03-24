@@ -335,11 +335,6 @@ impl Sink for KafkaSink {
     ];
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = KafkaConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let formatter = SinkFormatterImpl::new(
             &self.format_desc,

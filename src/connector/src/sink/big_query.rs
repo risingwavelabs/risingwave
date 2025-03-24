@@ -536,11 +536,6 @@ impl Sink for BigQuerySink {
         self.check_column_name_and_type(big_query_schema)?;
         Ok(())
     }
-
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = BigQueryConfig::from_btreemap(config)?;
-        Ok(())
-    }
 }
 
 pub struct BigQuerySinkWriter {

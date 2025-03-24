@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use risingwave_common::catalog::Schema;
 use tonic::async_trait;
 
@@ -54,11 +52,6 @@ impl Sink for ElasticSearchSink {
     type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
 
     const SINK_NAME: &'static str = ES_SINK;
-
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = ElasticSearchOpenSearchConfig::from_btreemap(config)?;
-        Ok(())
-    }
 
     async fn validate(&self) -> Result<()> {
         self.config.validate_config(&self.schema)?;

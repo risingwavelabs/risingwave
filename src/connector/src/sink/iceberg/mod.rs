@@ -468,11 +468,6 @@ impl Sink for IcebergSink {
     const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
-    fn update_config(&mut self, config: BTreeMap<String, String>) -> Result<()> {
-        self.config = IcebergConfig::from_btreemap(config)?;
-        Ok(())
-    }
-
     async fn validate(&self) -> Result<()> {
         if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
             bail!("Snowflake catalog only supports iceberg sources");

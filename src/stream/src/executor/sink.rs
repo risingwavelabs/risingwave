@@ -646,10 +646,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 match log_reader.rewind().await {
                                     Ok(()) => {
                                         sink_param.properties = config.into_iter().collect();
-                                        sink.update_config(sink_param.properties.clone())
-                                            .map_err(|e| {
-                                                StreamExecutorError::from((e, sink_param.sink_id.sink_id))
-                                            })?;
+                                        sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                                         info!(
                                             executor_id = sink_writer_param.executor_id,
                                             sink_id = sink_param.sink_id.sink_id,
@@ -667,10 +664,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             } else {
                                 sink_param.properties = config.into_iter().collect();
-                                sink.update_config(sink_param.properties.clone())
-                                    .map_err(|e| {
-                                        StreamExecutorError::from((e, sink_param.sink_id.sink_id))
-                                    })?;
+                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                                 Err(anyhow!("alter sink config need to rebuild sink.").into())
                             }
                             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
