@@ -290,7 +290,6 @@ mod tests {
     use super::*;
 
     struct BrandNewColumn(&'static str);
-    use BrandNewColumn as B;
 
     impl FieldLike for BrandNewColumn {
         fn name(&self) -> &str {
@@ -332,8 +331,8 @@ mod tests {
     #[test]
     fn test_col_id_gen_initial() {
         let mut r#gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate_simple(B("v1")).unwrap(), ColumnId::new(1));
-        assert_eq!(gen.generate_simple(B("v2")).unwrap(), ColumnId::new(2));
+        assert_eq!(r#gen.generate_simple(B("v1")).unwrap(), ColumnId::new(1));
+        assert_eq!(r#gen.generate_simple(B("v2")).unwrap(), ColumnId::new(2));
     }
 
     #[test]
@@ -369,8 +368,8 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(gen.generate_simple(B("v1")).unwrap(), ColumnId::new(4));
-        assert_eq!(gen.generate_simple(B("v2")).unwrap(), ColumnId::new(5));
+        assert_eq!(r#gen.generate_simple(B("v1")).unwrap(), ColumnId::new(4));
+        assert_eq!(r#gen.generate_simple(B("v2")).unwrap(), ColumnId::new(5));
         assert_eq!(
             r#gen
                 .generate_simple(Field::new("f32", DataType::Float32))
@@ -405,7 +404,7 @@ mod tests {
             .unwrap();
         assert_eq!(id, ColumnId::new(3));
 
-        assert_eq!(gen.generate_simple(B("v3")).unwrap(), ColumnId::new(6));
+        assert_eq!(r#gen.generate_simple(B("v3")).unwrap(), ColumnId::new(6));
     }
 
     #[test]
