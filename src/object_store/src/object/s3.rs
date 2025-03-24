@@ -382,16 +382,19 @@ impl StreamingUploader for S3StreamingUploader {
                 res?;
                 Ok(())
             }
-        } else if let Err(e) = self
-            .flush_multipart_and_complete()
-            .verbose_instrument_await("s3_flush_multipart_and_complete")
-            .await
-        {
-            tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
-            self.abort_multipart_upload().await?;
-            Err(e)
         } else {
-            Ok(())
+            match self
+                .flush_multipart_and_complete()
+                .verbose_instrument_await("s3_flush_multipart_and_complete")
+                .await
+            {
+                Err(e) => {
+                    tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
+                    self.abort_multipart_upload().await?;
+                    Err(e)
+                }
+                _ => Ok(()),
+            }
         }
     }
 

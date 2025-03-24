@@ -2181,22 +2181,25 @@ pub(crate) mod tests {
         let sst = uploader.next_uploaded_sst().await;
         assert_eq!(&get_payload_imm_ids(&epoch1_sync_payload), sst.imm_ids());
 
-        if let Ok(Ok(data)) = sync_rx1.await {
-            assert_eq!(3, data.uploaded_ssts.len());
-            assert_eq!(
-                &get_payload_imm_ids(&epoch1_sync_payload),
-                data.uploaded_ssts[0].imm_ids()
-            );
-            assert_eq!(
-                &get_payload_imm_ids(&epoch1_spill_payload3),
-                data.uploaded_ssts[1].imm_ids()
-            );
-            assert_eq!(
-                &get_payload_imm_ids(&epoch1_spill_payload12),
-                data.uploaded_ssts[2].imm_ids()
-            );
-        } else {
-            unreachable!()
+        match sync_rx1.await {
+            Ok(Ok(data)) => {
+                assert_eq!(3, data.uploaded_ssts.len());
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch1_sync_payload),
+                    data.uploaded_ssts[0].imm_ids()
+                );
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch1_spill_payload3),
+                    data.uploaded_ssts[1].imm_ids()
+                );
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch1_spill_payload12),
+                    data.uploaded_ssts[2].imm_ids()
+                );
+            }
+            _ => {
+                unreachable!()
+            }
         }
 
         // current uploader state:
@@ -2212,14 +2215,17 @@ pub(crate) mod tests {
         let sst = uploader.next_uploaded_sst().await;
         assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
 
-        if let Ok(Ok(data)) = sync_rx2.await {
-            assert_eq!(data.uploaded_ssts.len(), 1);
-            assert_eq!(
-                &get_payload_imm_ids(&epoch2_spill_payload),
-                data.uploaded_ssts[0].imm_ids()
-            );
-        } else {
-            unreachable!("should be sync finish");
+        match sync_rx2.await {
+            Ok(Ok(data)) => {
+                assert_eq!(data.uploaded_ssts.len(), 1);
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch2_spill_payload),
+                    data.uploaded_ssts[0].imm_ids()
+                );
+            }
+            _ => {
+                unreachable!("should be sync finish");
+            }
         }
         assert_eq!(epoch2, uploader.test_max_synced_epoch());
 
@@ -2258,22 +2264,25 @@ pub(crate) mod tests {
         let sst = uploader.next_uploaded_sst().await;
         assert_eq!(&get_payload_imm_ids(&epoch4_sync_payload), sst.imm_ids());
 
-        if let Ok(Ok(data)) = sync_rx4.await {
-            assert_eq!(3, data.uploaded_ssts.len());
-            assert_eq!(
-                &get_payload_imm_ids(&epoch4_sync_payload),
-                data.uploaded_ssts[0].imm_ids()
-            );
-            assert_eq!(
-                &get_payload_imm_ids(&epoch3_spill_payload2),
-                data.uploaded_ssts[1].imm_ids()
-            );
-            assert_eq!(
-                &get_payload_imm_ids(&epoch3_spill_payload1),
-                data.uploaded_ssts[2].imm_ids(),
-            )
-        } else {
-            unreachable!("should be sync finish");
+        match sync_rx4.await {
+            Ok(Ok(data)) => {
+                assert_eq!(3, data.uploaded_ssts.len());
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch4_sync_payload),
+                    data.uploaded_ssts[0].imm_ids()
+                );
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch3_spill_payload2),
+                    data.uploaded_ssts[1].imm_ids()
+                );
+                assert_eq!(
+                    &get_payload_imm_ids(&epoch3_spill_payload1),
+                    data.uploaded_ssts[2].imm_ids(),
+                )
+            }
+            _ => {
+                unreachable!("should be sync finish");
+            }
         }
         assert_eq!(epoch4, uploader.test_max_synced_epoch());
 

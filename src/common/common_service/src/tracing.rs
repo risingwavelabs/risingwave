@@ -71,17 +71,19 @@ where
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
         async move {
-            let span =
-                if let Some(tracing_context) = TracingContext::from_http_headers(req.headers()) {
+            let span = match TracingContext::from_http_headers(req.headers()) {
+                Some(tracing_context) => {
                     let span = tracing::info_span!(
                         "grpc_serve",
                         "otel.name" = req.uri().path(),
                         uri = %req.uri()
                     );
                     tracing_context.attach(span)
-                } else {
+                }
+                _ => {
                     tracing::Span::none() // if there's no parent span, disable tracing for this request
-                };
+                }
+            };
 
             inner.call(req).instrument(span).await
         }

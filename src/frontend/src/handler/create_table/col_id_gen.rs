@@ -290,6 +290,7 @@ mod tests {
     use super::*;
 
     struct BrandNewColumn(&'static str);
+    use BrandNewColumn as B;
 
     impl FieldLike for BrandNewColumn {
         fn name(&self) -> &str {

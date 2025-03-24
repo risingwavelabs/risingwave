@@ -411,10 +411,13 @@ impl HummockEventHandler {
                 continue;
             };
             total_count += 1;
-            if let Some(mut write_guard) = read_version.try_write() {
-                f(instance_id, &mut write_guard);
-            } else {
-                pending.push_back(instance_id);
+            match read_version.try_write() {
+                Some(mut write_guard) => {
+                    f(instance_id, &mut write_guard);
+                }
+                _ => {
+                    pending.push_back(instance_id);
+                }
             }
         }
         if !pending.is_empty() {
@@ -439,11 +442,14 @@ impl HummockEventHandler {
                 .local_read_version_mapping
                 .get(&instance_id)
                 .expect("have checked exist before");
-            if let Some(mut write_guard) = read_version.try_write_for(TRY_LOCK_TIMEOUT) {
-                f(instance_id, &mut write_guard);
-            } else {
-                warn!(instance_id, "failed to get lock again for instance");
-                pending.push_back(instance_id);
+            match read_version.try_write_for(TRY_LOCK_TIMEOUT) {
+                Some(mut write_guard) => {
+                    f(instance_id, &mut write_guard);
+                }
+                _ => {
+                    warn!(instance_id, "failed to get lock again for instance");
+                    pending.push_back(instance_id);
+                }
             }
         }
     }

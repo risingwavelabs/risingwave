@@ -1085,17 +1085,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1103,17 +1105,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1122,17 +1126,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1141,17 +1147,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
