@@ -275,7 +275,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             rate_limit_rx,
                             rebuild_sink_rx,
                         )
-                        .instrument_await(await_tree::span!("consume_log (sink_id {sink_id})"))
+                        .instrument_await(
+                            await_tree::span!("consume_log (sink_id {sink_id})").long_running(),
+                        )
                         .map_ok(|never| never); // unify return type to `Message`
 
                         consume_log_stream.boxed()
