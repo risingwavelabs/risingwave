@@ -44,3 +44,18 @@ mv "${PREFIX_TMP}/mcli" "${PREFIX_BIN}/mcli"
 
 "${PREFIX_BIN}/mcli" --version
 '''
+
+[tasks.mcli]
+category = "RiseDev - External Systems"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_MINIO" ] }
+description = "Run MinIO Client"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+${PREFIX_BIN}/mcli -C ${PREFIX}/config/mcli "$@"
+'''
+
+[tasks.mc]
+alias = "mcli"

@@ -428,6 +428,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 9
+    parallelism: 4
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"

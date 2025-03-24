@@ -254,6 +254,7 @@ steps:
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 22
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"
