@@ -1618,6 +1618,7 @@ pub enum Statement {
     /// TODO(kwannoel): Make profiling duration configurable: EXPLAIN ANALYZE (DURATION 1s) ...
     ExplainAnalyzeStreamJob {
         target: AnalyzeTarget,
+        duration_secs: Option<u64>,
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
@@ -1680,8 +1681,15 @@ impl Statement {
 
                 statement.fmt_inner(f)
             }
-            Statement::ExplainAnalyzeStreamJob { target } => {
-                write!(f, "EXPLAIN ANALYZE {}", target)
+            Statement::ExplainAnalyzeStreamJob {
+                target,
+                duration_secs,
+            } => {
+                write!(f, "EXPLAIN ANALYZE {}", target)?;
+                if let Some(duration_secs) = duration_secs {
+                    write!(f, " (DURATION_SECS {})", duration_secs)?;
+                }
+                Ok(())
             }
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {

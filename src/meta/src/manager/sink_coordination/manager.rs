@@ -92,7 +92,7 @@ impl SinkCoordinatorManager {
     pub async fn handle_new_request(
         &self,
         mut request_stream: SinkWriterRequestStream,
-    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>>, Status> {
+    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>> + use<>, Status> {
         let (param, vnode_bitmap) = match request_stream.try_next().await? {
             Some(CoordinateRequest {
                 msg:

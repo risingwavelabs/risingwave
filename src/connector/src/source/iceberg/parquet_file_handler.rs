@@ -289,6 +289,12 @@ pub async fn read_parquet_file(
             4,
         >,
     >,
+    parquet_source_skip_row_count_metrics: Option<
+        risingwave_common::metrics::LabelGuardedMetric<
+            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+            4,
+        >,
+    >,
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
 > {
@@ -339,7 +345,8 @@ pub async fn read_parquet_file(
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
     > = parquet_parser.into_stream(
         record_batch_stream,
-        file_source_input_row_count_metrics.clone(),
+        file_source_input_row_count_metrics,
+        parquet_source_skip_row_count_metrics,
     );
     Ok(msg_stream)
 }

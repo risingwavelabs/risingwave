@@ -106,7 +106,7 @@ async fn run_compact(
                 > min_compact_gap_duration_sec
         {
             let compact_start_time = Instant::now();
-            if let Err(e) = client
+            match client
                 .compact(
                     catalog.clone(),
                     database.clone(),
@@ -115,21 +115,24 @@ async fn run_compact(
                 )
                 .await
             {
-                let backoff_duration = error_backoff.next().expect("should exist");
-                error_count += 1;
-                error!(
-                    err = ?e.as_report(),
-                    ?backoff_duration,
-                    error_count,
-                    catalog, database, table, "failed to compact"
-                );
-                sleep(backoff_duration).await;
-            } else {
-                info!(catalog, database, table, elapsed = ?compact_start_time.elapsed(),  "compact success");
-                pending_commit_num = 0;
-                error_backoff = new_backoff();
-                error_count = 0;
-                prev_compact_success_time = Instant::now();
+                Err(e) => {
+                    let backoff_duration = error_backoff.next().expect("should exist");
+                    error_count += 1;
+                    error!(
+                        err = ?e.as_report(),
+                        ?backoff_duration,
+                        error_count,
+                        catalog, database, table, "failed to compact"
+                    );
+                    sleep(backoff_duration).await;
+                }
+                _ => {
+                    info!(catalog, database, table, elapsed = ?compact_start_time.elapsed(),  "compact success");
+                    pending_commit_num = 0;
+                    error_backoff = new_backoff();
+                    error_count = 0;
+                    prev_compact_success_time = Instant::now();
+                }
             }
         }
         if commit_rx.recv().await.is_some() {
