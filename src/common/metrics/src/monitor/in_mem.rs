@@ -29,7 +29,6 @@ pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
 impl CountMap {
     pub fn new() -> Self {
         let inner = Arc::new(RwLock::new(HashMap::new()));
-        #[cfg(all(not(test), not(madsim)))]
         {
             let inner = inner.clone();
             tokio::spawn(async move {
