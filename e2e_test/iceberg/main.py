@@ -195,8 +195,8 @@ def run_test_case(test_file: str, args: Dict[str, Any]) -> None:
             if drop_sqls:
                 drop_table(args, drop_sqls)
         except Exception as e:
-            print(f"Error: {e}")
-            traceback.print_exc()
+            print(f"test case {test_file} failed: {e}")
+            raise e
 
 
 def get_parallel_job_info() -> Optional[tuple[int, int]]:
