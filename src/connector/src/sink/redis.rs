@@ -46,9 +46,12 @@ pub const VALUE_FORMAT: &str = "value_format";
 pub const REDIS_VALUE_TYPE: &str = "redis_value_type";
 pub const REDIS_VALUE_TYPE_STRING: &str = "string";
 pub const REDIS_VALUE_TYPE_GEO: &str = "geospatial";
+pub const REDIS_VALUE_TYPE_PUBSUB: &str = "pubsub";
 pub const LON_NAME: &str = "longitude";
 pub const LAT_NAME: &str = "latitude";
 pub const MEMBER_NAME: &str = "member";
+pub const CHANNEL: &str = "channel";
+pub const CHANNEL_COLUMN: &str = "channel_column";
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
@@ -100,6 +103,12 @@ impl RedisPipe {
                 ) => {
                     pipe.geo_add(key, (lon, lat, member));
                 }
+                (
+                    RedisSinkPayloadWriterInput::RedisPubSubKey(key),
+                    RedisSinkPayloadWriterInput::String(v),
+                ) => {
+                    pipe.publish(key, v);
+                }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
             },
             RedisPipe::Single(pipe) => match (k, v) {
@@ -114,6 +123,12 @@ impl RedisPipe {
                     RedisSinkPayloadWriterInput::RedisGeoValue((lat, lon)),
                 ) => {
                     pipe.geo_add(key, (lon, lat, member));
+                }
+                (
+                    RedisSinkPayloadWriterInput::RedisPubSubKey(key),
+                    RedisSinkPayloadWriterInput::String(v),
+                ) => {
+                    pipe.publish(key, v);
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
             },
@@ -280,12 +295,6 @@ impl Sink for RedisSink {
             self.format_desc.encode,
             super::catalog::SinkEncode::Template
         ) {
-            let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "Cannot find '{KEY_FORMAT}', please set it or use JSON"
-                ))
-            })?;
-            TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
             match self
                 .format_desc
                 .options
@@ -294,6 +303,12 @@ impl Sink for RedisSink {
             {
                 // if not set, default to string
                 Some(REDIS_VALUE_TYPE_STRING) | None => {
+                    let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find '{KEY_FORMAT}', please set it or use JSON"
+                        ))
+                    })?;
+                    TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
                     let value_format =
                         self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                             SinkError::Config(anyhow!(
@@ -303,6 +318,13 @@ impl Sink for RedisSink {
                     TemplateStringEncoder::check_string_format(value_format, &all_map)?;
                 }
                 Some(REDIS_VALUE_TYPE_GEO) => {
+                    let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find '{KEY_FORMAT}', please set it or use JSON"
+                        ))
+                    })?;
+                    TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
+
                     let lon_name = self.format_desc.options.get(LON_NAME).ok_or_else(|| {
                         SinkError::Config(anyhow!(
                             "Cannot find `{LON_NAME}`, please set it or use JSON or set `{REDIS_VALUE_TYPE}` to `{REDIS_VALUE_TYPE_STRING}`"
@@ -350,10 +372,36 @@ impl Sink for RedisSink {
                         )));
                     }
                 }
+                Some(REDIS_VALUE_TYPE_PUBSUB) => {
+                    let channel = self.format_desc.options.get(CHANNEL);
+                    let channel_column = self.format_desc.options.get(CHANNEL_COLUMN);
+                    if (channel.is_none() && channel_column.is_none())
+                        || (channel.is_some() && channel_column.is_some())
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{CHANNEL}` and `{CHANNEL_COLUMN}` only one can be set"
+                        )));
+                    }
+
+                    if let Some(channel_column) = channel_column
+                        && let Some(channel_column_type) = all_map.get(channel_column)
+                        && (channel_column_type != &DataType::Varchar)
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{CHANNEL_COLUMN}` must be set to `varchar`"
+                        )));
+                    }
+
+                    let value_format =
+                        self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!("Cannot find `{VALUE_FORMAT}`"))
+                        })?;
+                    TemplateStringEncoder::check_string_format(value_format, &all_map)?;
+                }
                 _ => {
                     return Err(SinkError::Config(anyhow!(
-                        "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}`"
-                    )))
+                        "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}` or `{REDIS_VALUE_TYPE_PUBSUB}`"
+                    )));
                 }
             }
         }
