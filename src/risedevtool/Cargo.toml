@@ -23,7 +23,7 @@ itertools = { workspace = true }
 log = "0.4"
 panic-message = "0.3"
 rdkafka = { workspace = true }
-redis = "0.28"
+redis = { workspace = true }
 regex = "1"
 reqwest = { version = "0.12.2", features = ["blocking"] }
 serde = { version = "1", features = ["derive"] }
