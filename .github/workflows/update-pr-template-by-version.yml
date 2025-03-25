@@ -70,7 +70,7 @@ jobs:
 
       - name: Create pull request
         if: env.update_needed == 'true'
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v7
         with:
           title: "Update PR Template for Highest Release Version"
           body: "This PR updates the pull request template to reflect the highest release version: ${{ env.version }}."
