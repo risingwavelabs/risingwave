@@ -21,7 +21,7 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
-aws-sdk-emrserverless = "1.50.0"
+aws-sdk-emrserverless = "1.53.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
