@@ -1043,9 +1043,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.39.0"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a798aab0c0203b31d67d501e5ed1f3ac6c36a329899ce47fc93c3bea53f3ae89"
+checksum = "e23419d455dc57d3ae60a2f4278cf561fc74fe866e548e14d2b0ad3e1b8ca0b2"
 dependencies = [
  "base64 0.22.0",
  "bytes",
@@ -5683,20 +5683,22 @@ dependencies = [
 
 [[package]]
 name = "governor"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "842dc78579ce01e6a1576ad896edc92fca002dd60c9c3746b7fc2bec6fb429d0"
+checksum = "be93b4ec2e4710b04d9264c0c7350cdd62a8c20e5e4ac732552ebb8f0debe8eb"
 dependencies = [
  "cfg-if",
  "futures-sink",
  "futures-timer",
  "futures-util",
+ "getrandom 0.3.1",
  "no-std-compat",
  "nonzero_ext",
  "parking_lot 0.12.1",
  "portable-atomic",
  "smallvec",
  "spinning_top",
+ "web-time",
 ]
 
 [[package]]
@@ -10025,21 +10027,6 @@ checksum = "0b97c0a6319ae55341eb213c8ef97002630a3a5bd6f287f0124d077121d3f2a5"
 
 [[package]]
 name = "redis"
-version = "0.25.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0d7a6955c7511f60f3ba9e86c6d02b3c3f144f8c24b288d1f4e18074ab8bbec"
-dependencies = [
- "combine",
- "itoa",
- "percent-encoding",
- "ryu",
- "sha1_smol",
- "socket2 0.5.6",
- "url",
-]
-
-[[package]]
-name = "redis"
 version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e37ec3fd44bea2ec947ba6cc7634d7999a6590aca7c35827c250bc0de502bda6"
@@ -10428,7 +10415,7 @@ dependencies = [
  "madsim-rdkafka",
  "madsim-tokio",
  "panic-message",
- "redis 0.25.4",
+ "redis",
  "regex",
  "reqwest 0.12.4",
  "serde",
@@ -11077,7 +11064,7 @@ dependencies = [
  "pulsar",
  "quote",
  "rand 0.9.0",
- "redis 0.28.2",
+ "redis",
  "regex",
  "reqwest 0.12.4",
  "risingwave_common",
