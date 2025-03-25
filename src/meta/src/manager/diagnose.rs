@@ -26,7 +26,7 @@ use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
-use risingwave_pb::monitor_service::StackTraceResponse;
+use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
 use risingwave_sqlparser::parser::Parser;
@@ -626,7 +626,7 @@ impl DiagnoseCommand {
         let compute_clients = ComputeClientPool::adhoc();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
-                && let Ok(result) = client.stack_trace().await
+                && let Ok(result) = client.stack_trace(StackTraceRequest::default()).await
             {
                 all.merge_other(result);
             }

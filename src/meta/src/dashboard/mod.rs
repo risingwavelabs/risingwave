@@ -68,7 +68,7 @@ pub(super) mod handlers {
     };
     use risingwave_pb::monitor_service::{
         GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
-        StackTraceResponse,
+        StackTraceRequest, StackTraceResponse,
     };
     use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
@@ -351,7 +351,10 @@ pub(super) mod handlers {
 
         for worker_node in worker_nodes {
             let client = compute_clients.get(worker_node).await.map_err(err)?;
-            let result = client.stack_trace().await.map_err(err)?;
+            let result = client
+                .stack_trace(StackTraceRequest::default())
+                .await
+                .map_err(err)?;
 
             all.merge_other(result);
         }

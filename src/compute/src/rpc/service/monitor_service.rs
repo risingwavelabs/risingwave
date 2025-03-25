@@ -77,12 +77,23 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
         let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k.0, v.to_string()))
+                .map(|(k, v)| {
+                    (
+                        k.0,
+                        if req.actor_traces_format.is_some()
+                            && req.actor_traces_format.as_ref().unwrap() == "json"
+                        {
+                            serde_json::to_string(&v).unwrap()
+                        } else {
+                            v.to_string()
+                        },
+                    )
+                })
                 .collect()
         } else {
             Default::default()

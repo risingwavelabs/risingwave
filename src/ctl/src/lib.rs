@@ -72,6 +72,9 @@ enum Commands {
     /// Dump the await-tree of compute nodes and compactors
     #[clap(visible_alias("trace"))]
     AwaitTree,
+    /// Detect the bottleneck actors from the await-tree of compute nodes
+    #[clap(visible_alias("trace-analyze"))]
+    AwaitTreeAnalyze,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
@@ -848,6 +851,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::graph_check(endpoint).await?
         }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
+        Commands::AwaitTreeAnalyze => cmd_impl::await_tree::bottleneck_detect(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }
