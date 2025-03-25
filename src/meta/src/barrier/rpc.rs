@@ -332,10 +332,10 @@ impl ControlStreamManager {
                             actor_infos: inflight_info
                                 .fragment_infos()
                                 .flat_map(|fragment| {
-                                    fragment.actors.iter().map(|(actor_id, worker_id)| {
+                                    fragment.actors.iter().map(|(actor_id, actor)| {
                                         let host_addr = self
                                             .nodes
-                                            .get(worker_id)
+                                            .get(&actor.worker_id)
                                             .expect("worker should exist for inflight actor")
                                             .worker
                                             .host
@@ -442,8 +442,8 @@ impl ControlStreamManager {
             HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>,
         > = HashMap::new();
         for fragment_info in info.fragment_infos() {
-            for (actor_id, worker_id) in &fragment_info.actors {
-                let worker_id = *worker_id as WorkerId;
+            for (actor_id, actor) in &fragment_info.actors {
+                let worker_id = actor.worker_id as WorkerId;
                 let actor_id = *actor_id as ActorId;
                 let (stream_actor, dispatchers) =
                     stream_actors.remove(&actor_id).expect("should exist");

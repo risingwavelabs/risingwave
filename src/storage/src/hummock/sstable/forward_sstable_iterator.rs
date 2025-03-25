@@ -15,7 +15,7 @@
 use std::ops::Bound::*;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use thiserror_ext::AsReport;
@@ -237,7 +237,7 @@ impl SstableIterator {
                     self.options.cache_policy,
                     &mut self.stats,
                 )
-                .verbose_instrument_await("prefetch_blocks")
+                .instrument_await("prefetch_blocks".verbose())
                 .await
             {
                 Ok(preload_stream) => self.preload_stream = Some(preload_stream),
@@ -298,7 +298,7 @@ impl SstableIterator {
                             self.options.cache_policy,
                             &mut self.stats,
                         )
-                        .verbose_instrument_await("prefetch_blocks")
+                        .instrument_await("prefetch_blocks".verbose())
                         .await
                     {
                         Ok(stream) => {
