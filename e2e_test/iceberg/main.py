@@ -110,20 +110,20 @@ def get_spark(args) -> SparkSession:
 
 
 def init_iceberg_table(args, init_sqls):
+    log(f"init_sqls:", level=LogLevel.INFO)
     spark = get_spark(args)
     for sql in init_sqls:
-        log(f"Executing sql: {sql}", level=LogLevel.INFO)
+        log(sql, level=LogLevel.INFO, indent=2)
         spark.sql(sql)
 
 
 def execute_slt(args, slt):
     if slt is None or slt == "":
         return
-    subprocess.run(
-        ["risedev", "slt", slt],
-        env={"CARGO_MAKE_PRINT_TIME_SUMMARY": "false"},
-        check=True,
-    )
+    rw_config = args["risingwave"]
+    cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
+    log(f"Executing slt: {slt}", level=LogLevel.INFO)
+    subprocess.run(cmd, shell=True, check=True)
     time.sleep(15)
 
 
@@ -191,9 +191,16 @@ def compare_sql(args, cmp_sqls):
 
 def drop_table(args, drop_sqls):
     spark = get_spark(args)
-    for sql in drop_sqls:
-        log(f"Executing sql: {sql}", level=LogLevel.INFO)
-        spark.sql(sql)
+    try:
+        for sql in drop_sqls:
+            log(f"Executing sql: {sql}", level=LogLevel.INFO)
+            spark.sql(sql)
+    except Exception as e:
+        log(f"drop table failed: {e}", level=LogLevel.ERROR)
+        for db in spark.catalog.listDatabases():
+            tables = spark.catalog.listTables(db.name)
+            log(f"existing tables: {tables}", level=LogLevel.INFO)
+        raise e
 
 
 def parse_row(row):
@@ -241,9 +248,6 @@ def run_test_case(test_file: str, args: Dict[str, Any]) -> None:
 
         # Extract content from testcase
         init_sqls = test_case["init_sqls"]
-        log(f"init_sqls:", level=LogLevel.INFO)
-        for sql in init_sqls:
-            log(sql, level=LogLevel.INFO, indent=2)
         slt = test_case.get("slt")
         log(f"slt: {slt}", level=LogLevel.INFO)
         verify_schema = test_case.get("verify_schema")
@@ -286,7 +290,13 @@ def prepare_test_env():
     log("prepare test env", level=LogLevel.HEADER)
     log("create minio bucket", level=LogLevel.INFO)
     subprocess.run(
-        ["risedev", "mc", "mb", "-p", "hummock-minio/icebergdata"],
+        [
+            "risedev",
+            "mc",
+            "mb",
+            "-p",
+            "hummock-minio/icebergdata",
+        ],
         check=True,
     )
     log("start spark connect server", level=LogLevel.INFO)
@@ -296,6 +306,7 @@ def prepare_test_env():
         ],
         check=True,
     )
+    time.sleep(3)
     log("prepare test env done", level=LogLevel.HEADER)
 
 
