@@ -384,29 +384,33 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             } else {
                 panic!("future state is not Reset");
             };
-        // still consuming persisted state store data
-        let persisted_epoch = self
-            .truncate_offset
-            .map(|truncate_offset| match truncate_offset {
-                TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
-                TruncateOffset::Barrier { epoch } => epoch,
-            });
-        // Construct the log reader's read stream based on start_offset, aligned_range_start, and persisted_epoch.
-        // The priority order is: provided start_offset > aligned_range_start > persisted_epoch.
-        let range_start = match (start_offset, aligned_range_start, persisted_epoch) {
-            (Some(rewind_start_offset), _, _) => {
+
+        // Construct the log reader's read stream based on start_offset, aligned_range_start or persisted_epoch.
+        let range_start = match (start_offset, aligned_range_start) {
+            (Some(rewind_start_offset), _) => {
                 tracing::info!(
                     "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
                 );
                 LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
             }
-            (None, Some(aligned_range_start), _) => aligned_range_start.clone(),
-            (None, None, Some(last_persisted_epoch)) => {
-                LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch)
-            }
-            _ => LogStoreReadStateStreamRangeStart::Unbounded,
-        };
+            (None, Some(aligned_range_start)) => aligned_range_start.clone(),
+            (None, None) => {
+                // still consuming persisted state store data
+                let persisted_epoch =
+                    self.truncate_offset
+                        .map(|truncate_offset| match truncate_offset {
+                            TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
+                            TruncateOffset::Barrier { epoch } => epoch,
+                        });
 
+                match persisted_epoch {
+                    Some(last_persisted_epoch) => {
+                        LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch)
+                    }
+                    None => LogStoreReadStateStreamRangeStart::Unbounded,
+                }
+            }
+        };
         self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
             self.read_persisted_log_store(range_start).await?,
         );
@@ -514,7 +518,9 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 ));
             }
             KvLogStoreReaderFutureState::Empty => {}
-            KvLogStoreReaderFutureState::Reset(_) => {}
+            KvLogStoreReaderFutureState::Reset(_) => {
+                unreachable!("Must call log_reader.start_from() for a Reset reader.")
+            }
         }
 
         // Now the historical state store has been consumed.

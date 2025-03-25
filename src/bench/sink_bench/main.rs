@@ -137,7 +137,7 @@ impl LogReader for MockRangeLogReader {
     }
 
     async fn start_from(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
-        Err(anyhow!("should not call start_from"))
+        Ok(())
     }
 }
 
