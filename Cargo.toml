@@ -217,6 +217,7 @@ tokio-util = "0.7"
 tracing-opentelemetry = "0.27"
 rand = { version = "0.9", features = ["small_rng"] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
+redis = { version = "0.28" }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_batch_executors = { path = "./src/batch/executors" }
