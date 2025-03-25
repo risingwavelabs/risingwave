@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -225,7 +225,7 @@ async fn flush_imms(
         payload,
         compaction_catalog_manager_ref,
     )
-    .verbose_instrument_await("shared_buffer_compact")
+    .instrument_await("shared_buffer_compact".verbose())
     .await
 }
 

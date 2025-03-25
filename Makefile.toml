@@ -1301,7 +1301,7 @@ cat <<EOF > "${INSTALL_PATH}"
 #!/usr/bin/env bash
 set -e
 cd "$DIR"
-RISEDEV_CMD="\\$(basename \\"$0")" ./risedev "\\$@"
+RISEDEV_CMD="\\$(basename \\"$0\\")" ./risedev "\\$@"
 EOF
 chmod +x "${INSTALL_PATH}"
 

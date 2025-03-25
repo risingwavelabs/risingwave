@@ -78,11 +78,19 @@ use crate::model::{
 use crate::stream::{SplitAssignment, build_actor_split_impls};
 use crate::{MetaError, MetaResult, model};
 
+/// Some information of running (inflight) actors.
+#[derive(Clone, Debug)]
+pub struct InflightActorInfo {
+    pub worker_id: WorkerId,
+    pub vnode_bitmap: Option<Bitmap>,
+}
+
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
     pub fragment_id: crate::model::FragmentId,
+    pub distribution_type: DistributionType,
     pub nodes: PbStreamNode,
-    pub actors: HashMap<crate::model::ActorId, WorkerId>,
+    pub actors: HashMap<crate::model::ActorId, InflightActorInfo>,
     pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
 }
 
@@ -939,9 +947,11 @@ impl CatalogController {
                 (
                     ActorId,
                     WorkerId,
+                    Option<VnodeBitmap>,
                     FragmentId,
                     StreamNode,
                     I32Array,
+                    DistributionType,
                     DatabaseId,
                     ObjectId,
                 ),
@@ -951,9 +961,11 @@ impl CatalogController {
             .select_only()
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
+            .column(actor::Column::VnodeBitmap)
             .column(fragment::Column::FragmentId)
             .column(fragment::Column::StreamNode)
             .column(fragment::Column::StateTableIds)
+            .column(fragment::Column::DistributionType)
             .column(object::Column::DatabaseId)
             .column(object::Column::Oid)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
@@ -969,9 +981,11 @@ impl CatalogController {
         while let Some((
             actor_id,
             worker_id,
+            vnode_bitmap,
             fragment_id,
             node,
             state_table_ids,
+            distribution_type,
             database_id,
             job_id,
         )) = actor_info_stream.try_next().await?
@@ -986,17 +1000,22 @@ impl CatalogController {
                 .into_iter()
                 .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
                 .collect();
+            let actor_info = InflightActorInfo {
+                worker_id,
+                vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf().into()),
+            };
             match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
                     assert_eq!(info.state_table_ids, state_table_ids);
-                    assert!(info.actors.insert(actor_id as _, worker_id as _).is_none());
+                    assert!(info.actors.insert(actor_id as _, actor_info).is_none());
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(InflightFragmentInfo {
                         fragment_id: fragment_id as _,
+                        distribution_type,
                         nodes: node.to_protobuf(),
-                        actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
+                        actors: HashMap::from_iter([(actor_id as _, actor_info)]),
                         state_table_ids,
                     });
                 }
@@ -1351,7 +1370,7 @@ impl CatalogController {
                 .map(|result| {
                     result.map(|(actor_id, vnode): (ActorId, Option<VnodeBitmap>)| {
                         (
-                            actor_id,
+                            actor_id as _,
                             vnode.map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
                         )
                     })
@@ -1360,7 +1379,7 @@ impl CatalogController {
                 .await
         };
 
-        let source_backfill_actors: HashMap<ActorId, Option<Bitmap>> =
+        let source_backfill_actors: HashMap<crate::model::ActorId, Option<Bitmap>> =
             load_fragment_actor_distribution(&txn, source_backfill_fragment_id).await?;
 
         let source_actors = load_fragment_actor_distribution(&txn, source_fragment_id).await?;
@@ -1372,7 +1391,9 @@ impl CatalogController {
             &source_backfill_actors,
         )
         .into_iter()
-        .map(|(source_actor, source_backfill_actor)| (source_backfill_actor, source_actor))
+        .map(|(source_actor, source_backfill_actor)| {
+            (source_backfill_actor as _, source_actor as _)
+        })
         .collect())
     }
 

@@ -55,6 +55,10 @@ updates:
       patterns:
         - "strum"
         - "strum_macros"
+    serde:
+      patterns:
+        - "serde"
+        - "serde_derive"
 
 # Don't update these directories
 - package-ecosystem: cargo

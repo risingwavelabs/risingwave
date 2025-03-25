@@ -108,7 +108,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
 ] }
 arc-swap = "1"
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
-await-tree = "0.2.1"
+await-tree = { version = "0.3.0-alpha.3", features = ["serde"] }
 aws-config = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rt-tokio",
@@ -217,6 +217,7 @@ tokio-util = "0.7"
 tracing-opentelemetry = "0.27"
 rand = { version = "0.9", features = ["small_rng"] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
+redis = { version = "0.28" }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_batch_executors = { path = "./src/batch/executors" }
