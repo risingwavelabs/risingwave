@@ -2208,7 +2208,7 @@ async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> Met
             tracing::error!(
                 "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
                 sink_id,
-                e
+                e.as_report()
             );
             Err(e.into())
         }

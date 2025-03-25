@@ -16,6 +16,7 @@ use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
 use sea_orm::{ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter};
+use thiserror_ext::AsReport;
 
 use super::*;
 impl CatalogController {
@@ -29,6 +30,7 @@ impl CatalogController {
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
             .one(&txn)
@@ -91,7 +93,7 @@ impl CatalogController {
             // delete system table for exactly once iceberg sink
             // todo(wcy-fdu): optimize the logic to be Iceberg unique.
             if let Err(e) = clean_all_rows_by_sink_id(&inner.db, object_id).await {
-                tracing::error!("Failed to clean rows: {:?}", e);
+                tracing::error!("Failed to clean rows: {:?}", e.as_report());
                 txn.rollback().await?;
                 return Err(e);
             }
@@ -410,7 +412,7 @@ async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> Met
             tracing::error!(
                 "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
                 sink_id,
-                e
+                e.as_report()
             );
             Err(e.into())
         }
