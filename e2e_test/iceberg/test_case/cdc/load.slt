@@ -54,3 +54,12 @@ system ok
 mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
 
 sleep 20s
+
+statement ok
+drop sink s1;
+
+statement ok
+drop table products;
+
+statement ok
+drop source mysql_mydb;
