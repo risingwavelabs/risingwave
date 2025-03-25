@@ -19,7 +19,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
@@ -115,7 +115,7 @@ impl BlockStreamIterator {
                 self.sstable_info.object_id,
                 &self.sstable.meta.block_metas[self.next_block_index..],
             )
-            .verbose_instrument_await("stream_iter_get_stream")
+            .instrument_await("stream_iter_get_stream".verbose())
             .await?;
         self.block_stream = Some(block_stream);
         Ok(())
@@ -328,7 +328,7 @@ impl ConcatSstableIterator {
             let sstable = self
                 .sstable_store
                 .sstable(sstable_info, &mut self.stats)
-                .verbose_instrument_await("stream_iter_sstable")
+                .instrument_await("stream_iter_sstable".verbose())
                 .await?;
             self.task_progress.inc_num_pending_read_io();
 
