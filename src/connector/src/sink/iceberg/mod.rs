@@ -1429,7 +1429,10 @@ impl IcebergSinkCommitter {
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<Option<u64>> {
         if self.is_exactly_once {
-            tracing::info!("Iceberg sink coordinator initing");
+            tracing::info!(
+                "Sink id = {}: iceberg sink coordinator initing.",
+                self.param.sink_id.sink_id()
+            );
             if self
                 .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
                 .await?
@@ -1457,13 +1460,15 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                     ) {
                         (true, _) => {
                             tracing::info!(
-                                "All data in log store has been written into external sink, skip"
+                                "Sink id = {}: all data in log store has been written into external sink, do nothing when recovery.",
+                                self.param.sink_id.sink_id()
                             );
                         }
                         (false, true) => {
                             // skip
                             tracing::info!(
-                                "All pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed"
+                                "Sink id = {}: all pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed.",
+                                self.param.sink_id.sink_id()
                             );
                             self.mark_row_is_committed_by_sink_id_and_end_epoch(
                                 &self.db,
@@ -1474,7 +1479,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                         }
                         (false, false) => {
                             tracing::info!(
-                                "There are files that were not successfully committed; re-commit these files."
+                                "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
+                                self.param.sink_id.sink_id()
                             );
                             self.re_commit(end_epoch, write_results, snapshot_id)
                                 .await?;
@@ -1483,10 +1489,16 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
                     last_recommit_epoch = end_epoch;
                 }
-                tracing::info!("Iceberg commit coordinator inited.");
+                tracing::info!(
+                    "Sink id = {}: iceberg commit coordinator inited.",
+                    self.param.sink_id.sink_id()
+                );
                 return Ok(Some(last_recommit_epoch));
             } else {
-                tracing::info!("Init iceberg coodinator, and system table is empty.");
+                tracing::info!(
+                    "Sink id = {}: init iceberg coodinator, and system table is empty.",
+                    self.param.sink_id.sink_id()
+                );
                 return Ok(None);
             }
         }
@@ -1674,14 +1686,14 @@ impl IcebergSinkCommitter {
         if self.is_exactly_once {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
-            tracing::info!("Succeeded mark pre commit metadata in epoch {epoch} to deleted.");
+            tracing::info!(
+                "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
+                self.sink_id,
+                epoch
+            );
 
-            if self.is_exactly_once {
-                self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
-                    .await?;
-            }
-
-            tracing::info!("Succeeded delete pre commit metadata less than epoch {epoch}.");
+            self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+                .await?;
         }
         Ok(())
     }
@@ -1728,7 +1740,8 @@ impl IcebergSinkCommitter {
         {
             Ok(_) => {
                 tracing::info!(
-                    "Mark written data status to committed, end_epoch = {}.",
+                    "Sink id = {}: mark written data status to committed, end_epoch = {}.",
+                    sink_id,
                     end_epoch
                 );
                 Ok(())
@@ -1761,12 +1774,14 @@ impl IcebergSinkCommitter {
 
                 if deleted_count == 0 {
                     tracing::info!(
-                        "No item deleted in iceberg exactly once system table, end_epoch < {}.",
+                        "Sink id = {}: no item deleted in iceberg exactly once system table, end_epoch < {}.",
+                        sink_id,
                         end_epoch
                     );
                 } else {
                     tracing::info!(
-                        "Deleted item in iceberg exactly once system table, end_epoch < {}.",
+                        "Sink id = {}: deleted item in iceberg exactly once system table, end_epoch < {}.",
+                        sink_id,
                         end_epoch
                     );
                 }
@@ -1774,7 +1789,8 @@ impl IcebergSinkCommitter {
             }
             Err(e) => {
                 tracing::error!(
-                    "Error deleting from iceberg exactly once system table: {:?}",
+                    "Sink id = {}: error deleting from iceberg exactly once system table: {:?}",
+                    sink_id,
                     e
                 );
                 Err(e.into())
