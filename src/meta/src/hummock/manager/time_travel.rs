@@ -58,7 +58,7 @@ impl HummockManager {
         else {
             return Ok(());
         };
-        guard.last_time_travel_snapshot_sst_ids = version.get_sst_ids();
+        guard.last_time_travel_snapshot_sst_ids = version.get_sst_ids(true);
         Ok(())
     }
 
@@ -115,8 +115,8 @@ impl HummockManager {
         ) = {
             (
                 latest_valid_version.id,
-                latest_valid_version.get_sst_ids(),
-                latest_valid_version.get_object_ids(),
+                latest_valid_version.get_sst_ids(true),
+                latest_valid_version.get_object_ids(true),
             )
         };
         let mut object_ids_to_delete: HashSet<_> = HashSet::default();
@@ -184,7 +184,7 @@ impl HummockManager {
             let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf(
                 &delta_to_delete.version_delta.to_protobuf(),
             );
-            let new_sst_ids = delta_to_delete.newly_added_sst_ids();
+            let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
             // The SST ids added and then deleted by compaction between the 2 versions.
             sst_ids_to_delete.extend(&new_sst_ids - &latest_valid_version_sst_ids);
             if sst_ids_to_delete.len() >= delete_sst_batch_size {
@@ -195,7 +195,7 @@ impl HummockManager {
                 )
                 .await?;
             }
-            let new_object_ids = delta_to_delete.newly_added_object_ids();
+            let new_object_ids = delta_to_delete.newly_added_object_ids(true);
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
         }
         let mut next_version_sst_ids = latest_valid_version_sst_ids;
@@ -214,7 +214,7 @@ impl HummockManager {
                     &prev_version.version.to_protobuf(),
                 )
             };
-            let sst_ids = prev_version.get_sst_ids();
+            let sst_ids = prev_version.get_sst_ids(true);
             // The SST ids deleted by compaction between the 2 versions.
             sst_ids_to_delete.extend(&sst_ids - &next_version_sst_ids);
             if sst_ids_to_delete.len() >= delete_sst_batch_size {
@@ -225,7 +225,7 @@ impl HummockManager {
                 )
                 .await?;
             }
-            let new_object_ids = prev_version.get_object_ids();
+            let new_object_ids = prev_version.get_object_ids(true);
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             next_version_sst_ids = sst_ids;
         }
@@ -379,7 +379,7 @@ impl HummockManager {
         );
 
         let mut sst_ids = actual_version
-            .get_sst_ids()
+            .get_sst_ids(true)
             .into_iter()
             .collect::<VecDeque<_>>();
         let sst_count = sst_ids.len();
@@ -495,7 +495,7 @@ impl HummockManager {
             // `version_sst_ids` is used to update `last_time_travel_snapshot_sst_ids`.
             version_sst_ids = Some(
                 version
-                    .get_sst_infos()
+                    .get_sst_infos(true)
                     .filter_map(|s| {
                         if s.table_ids
                             .iter()
@@ -508,7 +508,7 @@ impl HummockManager {
                     .collect(),
             );
             write_sstable_infos(
-                version.get_sst_infos().filter(|s| {
+                version.get_sst_infos(true).filter(|s| {
                     !skip_sst_ids.contains(&s.sst_id)
                         && s.table_ids
                             .iter()
@@ -537,7 +537,7 @@ impl HummockManager {
             return Ok(version_sst_ids);
         }
         let written = write_sstable_infos(
-            delta.newly_added_sst_infos().filter(|s| {
+            delta.newly_added_sst_infos(true).filter(|s| {
                 !skip_sst_ids.contains(&s.sst_id)
                     && s.table_ids
                         .iter()
