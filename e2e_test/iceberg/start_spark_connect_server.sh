@@ -9,11 +9,11 @@ cd "$SCRIPT_DIR"
 if type -p java; then
     JAVA_VER=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1)
     if [[ "$JAVA_VER" != "8" && "$JAVA_VER" != "11" && "$JAVA_VER" != "17" ]]; then
-        echo "Only Java 8/11/17 are supported. Current version: $JAVA_VER"
+        echo -e "\e[31mOnly Java 8/11/17 are supported. Current version: $JAVA_VER\e[0m"
         exit 1
     fi
 else
-    echo "Java not found. Please install Java 8/11/17."
+    echo -e "\e[31mJava not found. Please install Java 8/11/17.\e[0m"
     exit 1
 fi
 

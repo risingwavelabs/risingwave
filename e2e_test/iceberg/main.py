@@ -236,7 +236,9 @@ def discover_test_cases() -> List[str]:
     test_files = glob.glob(os.path.join(test_case_dir, "*.toml"))
     test_files.extend(glob.glob(os.path.join(test_case_dir, "*/*.toml")))
     # Filter out bench files
-    test_files = [f for f in test_files if "benches" not in f]
+    # Hack: filter out CDC tests, as it uses `--host=mysql` (for CI).
+    # TODO: use `risedev slt` to replace `sqllogictest` so that the test can be run locally.
+    test_files = [f for f in test_files if "benches" not in f and "cdc" not in f]
     return test_files
 
 
