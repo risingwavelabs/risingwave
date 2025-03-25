@@ -281,8 +281,8 @@ pub mod metrics {
         #[cfg(test)]
         pub(crate) fn for_test() -> Self {
             SyncedKvLogStoreMetrics {
-                unclean_state: LabelGuardedIntCounter::test_int_gauge(),
-                clean_state: LabelGuardedIntCounter::test_int_gauge(),
+                unclean_state: LabelGuardedIntCounter::test_int_counter(),
+                clean_state: LabelGuardedIntCounter::test_int_counter(),
                 wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_count: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_size: LabelGuardedIntCounter::test_int_counter(),

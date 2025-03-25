@@ -5,8 +5,8 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
-    clean_state = 'type="clean"'
-    dirty_state = 'type="dirty"'
+    clean_state = 'state="clean"'
+    dirty_state = 'state="dirty"'
     return [
         outer_panels.row_collapsed(
             "Sync Log Store Metrics",
@@ -107,7 +107,7 @@ def _(outer_panels: Panels):
                             "{{type}} {{fragment_id}} {{relation}}",
                         ),
                         panels.target(
-                            f"sum({metric('sync_kv_log_store_unclean_state', filter=clean_state)}) by (fragment_id, relation) - sum({metric('sync_kv_log_store_clean_state', filter=dirty_state)}) by (fragment_id, relation)",
+                            f"sum({metric('sync_kv_log_store_state', filter=clean_state)}) by (fragment_id, relation) - sum({metric('sync_kv_log_store_state', filter=dirty_state)}) by (fragment_id, relation)",
                             "current_state {{fragment_id}} {{relation}}",
                         ),
                     ]
@@ -167,7 +167,7 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"max({metric('sync_kv_log_store_write_pause_duration_ns')}) by (fragment_id, relation) / 1000000",
+                            f"max({metric('sync_kv_log_store_write_pause_duration_ns')}) by (fragment_id, relation) / 1000000000",
                             "{{fragment_id}} {{relation}}",
                         ),
                     ],
@@ -178,7 +178,7 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"max({metric('sync_kv_log_store_wait_next_poll_ns')}) by (fragment_id, relation) / 1000000",
+                            f"max({metric('sync_kv_log_store_wait_next_poll_ns')}) by (fragment_id, relation) / 1000000000",
                             "{{fragment_id}} {{relation}}",
                         ),
                     ]
