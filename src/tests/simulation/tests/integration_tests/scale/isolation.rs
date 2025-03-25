@@ -357,7 +357,7 @@ async fn wait_until(session: &mut Session, sql: &str, target: &str) -> Result<()
     tokio::time::timeout(Duration::from_secs(100), async {
         loop {
             if session.run(sql).await.unwrap() == target {
-                return ();
+                return;
             }
             sleep(Duration::from_secs(1)).await;
         }
