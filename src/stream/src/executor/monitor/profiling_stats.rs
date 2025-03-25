@@ -25,18 +25,18 @@ pub enum ProfileMetricsImpl {
 
 impl ProfileMetricsImpl {
     pub fn new(
+        executor_id: u64,
         stats: &StreamingMetrics,
-        operator_id: u64,
         enable_profiling: bool,
     ) -> ProfileMetricsImpl {
         if enable_profiling {
             ProfileMetricsImpl::ProfileMetrics(ProfileMetrics {
                 stream_node_output_row_count: stats
                     .mem_stream_node_output_row_count
-                    .new_or_get_counter(operator_id),
+                    .new_count(executor_id),
                 stream_node_output_blocking_duration_ms: stats
                     .mem_stream_node_output_blocking_duration_ms
-                    .new_or_get_counter(operator_id),
+                    .new_count(executor_id),
             })
         } else {
             ProfileMetricsImpl::NoopProfileMetrics

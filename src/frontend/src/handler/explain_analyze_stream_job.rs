@@ -184,7 +184,7 @@ mod net {
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    operator_ids: operator_ids.into(),
+                    executor_ids: operator_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -198,7 +198,7 @@ mod net {
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    operator_ids: operator_ids.into(),
+                    executor_ids: operator_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
