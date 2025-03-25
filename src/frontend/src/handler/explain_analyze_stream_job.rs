@@ -43,8 +43,9 @@ struct ExplainAnalyzeStreamJobOutput {
 pub async fn handle_explain_analyze_stream_job(
     handler_args: HandlerArgs,
     target: AnalyzeTarget,
+    duration_secs: Option<u64>,
 ) -> Result<RwPgResponse> {
-    let profiling_duration = Duration::from_secs(10);
+    let profiling_duration = Duration::from_secs(duration_secs.unwrap_or(10));
     let job_id = match &target {
         AnalyzeTarget::Id(id) => *id,
         AnalyzeTarget::Index(name)

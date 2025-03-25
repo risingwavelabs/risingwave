@@ -477,15 +477,14 @@ impl MaterializeBuffer {
             Entry::Vacant(e) => {
                 e.insert(KeyOp::Insert(value));
             }
-            Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Delete(ref mut old_value) => {
+            Entry::Occupied(mut e) => {
+                if let KeyOp::Delete(old_value) = e.get_mut() {
                     let old_val = std::mem::take(old_value);
                     e.insert(KeyOp::Update((old_val, value)));
-                }
-                KeyOp::Insert(_) | KeyOp::Update(_) => {
+                } else {
                     unreachable!();
                 }
-            },
+            }
         }
     }
 
@@ -1953,14 +1952,14 @@ mod tests {
             let len = c.data_chunk().capacity();
             let mut c = StreamChunkMut::from(c);
             for i in 0..len {
-                c.set_vis(i, rng.gen_bool(0.5));
+                c.set_vis(i, rng.random_bool(0.5));
             }
             c.into()
         };
         for _ in 0..row_number {
             let k = (rng.next_u32() % KN) as i32;
             let v = rng.next_u32() as i32;
-            let op = if rng.gen_bool(0.5) {
+            let op = if rng.random_bool(0.5) {
                 Op::Insert
             } else {
                 Op::Delete

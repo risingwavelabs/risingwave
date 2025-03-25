@@ -39,6 +39,7 @@ updates:
         - "opentelemetry"
         - "opentelemetry*"
         - "tracing-opentelemetry"
+        - "fastrace-opentelemetry"
     mysql:
       patterns:
         - "mysql_common"
@@ -46,6 +47,18 @@ updates:
     google-cloud:
       patterns:
         - "google-cloud*"
+    rand:
+      patterns:
+        - "rand"
+        - "rand_chacha"
+    strum:
+      patterns:
+        - "strum"
+        - "strum_macros"
+    serde:
+      patterns:
+        - "serde"
+        - "serde_derive"
 
 # Don't update these directories
 - package-ecosystem: cargo

@@ -417,7 +417,8 @@ impl TaskScheduler {
 fn main() -> Result<()> {
     // Intentionally disable backtrace to provide more compact error message for `risedev dev`.
     // Backtraces for RisingWave components are enabled in `Task::execute`.
-    std::env::set_var("RUST_BACKTRACE", "0");
+    // safety: single-threaded code.
+    unsafe { std::env::set_var("RUST_BACKTRACE", "0") };
 
     // Init logger from a customized env var.
     tracing_subscriber::fmt()

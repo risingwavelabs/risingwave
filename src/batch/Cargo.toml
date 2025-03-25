@@ -22,6 +22,7 @@ linkme = { workspace = true }
 memcomparable = "0.2"
 mysql_async = { workspace = true }
 opendal = { workspace = true }
+panic-message = "0.3"
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 prometheus = { version = "0.13", features = ["process"] }

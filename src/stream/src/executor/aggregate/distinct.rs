@@ -21,8 +21,9 @@ use risingwave_common::array::{ArrayRef, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::aggregate::AggCall;
 
-use super::{AggCall, GroupKey};
+use super::agg_group::GroupKey;
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::monitor::AggDistinctDedupMetrics;
@@ -205,7 +206,9 @@ unsafe fn get_many_mut_from_slice<'a, T>(slice: &'a mut [T], indices: &[usize]) 
     let mut res = Vec::with_capacity(indices.len());
     let ptr = slice.as_mut_ptr();
     for &idx in indices {
-        res.push(&mut *ptr.add(idx));
+        unsafe {
+            res.push(&mut *ptr.add(idx));
+        }
     }
     res
 }
@@ -260,7 +263,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Vec<Bitmap>> {
-        for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
+        for (distinct_col, (call_indices, deduplicater)) in &mut self.deduplicaters {
             let column = &columns[*distinct_col];
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
             // Select visibilities (as mutable references) of distinct agg calls that distinct on

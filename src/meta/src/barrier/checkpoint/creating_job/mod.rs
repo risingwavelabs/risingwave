@@ -69,7 +69,7 @@ impl CreatingStreamingJobControl {
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
         let mut create_mview_tracker = CreateMviewProgressTracker::default();
         create_mview_tracker.update_tracking_jobs(Some((&info, None)), [], version_stat);
-        let fragment_infos: HashMap<_, _> = info.new_fragment_info().collect();
+        let fragment_infos: HashMap<_, _> = info.stream_job_fragments.new_fragment_info().collect();
 
         let table_id = info.stream_job_fragments.stream_job_id();
         let table_id_str = format!("{}", table_id.table_id);
@@ -314,7 +314,7 @@ impl CreatingStreamingJobControl {
 
     pub(super) fn should_merge_to_upstream(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
-            ref log_store_progress_tracker,
+            log_store_progress_tracker,
         } = &self.status
             && log_store_progress_tracker.is_finished()
         {

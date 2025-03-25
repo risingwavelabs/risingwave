@@ -19,7 +19,6 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
-use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const DATABASE_RECOVERY_START: &str = "DATABASE_RECOVERY_START";
@@ -182,19 +181,18 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
         .run("insert into t2 select * from generate_series(1, 50);")
         .await?;
 
-    session
-        .run("select count(*) from group1.public.t1;")
-        .await?
-        .assert_result_eq("100");
+    wait_until(
+        &mut session,
+        "select count(*) from group1.public.t1;",
+        "100",
+    )
+    .await?;
 
     session
         .run("create materialized view mv_join as select t2.v as v from group1.public.t1 join t2 on t1.v = t2.v;")
         .await?;
 
-    session
-        .run("select count(*) from mv_join;")
-        .await?
-        .assert_result_eq("50");
+    wait_until(&mut session, "select count(*) from mv_join;", "50").await?;
 
     cluster.simple_kill_nodes(["compute-1"]).await;
 
@@ -208,15 +206,8 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
         .run("insert into t2 select * from generate_series(51, 120)")
         .await?;
 
-    session
-        .run("select max(v) from t2")
-        .await?
-        .assert_result_eq("120");
-
-    session
-        .run("select count(*) from mv_join;")
-        .await?
-        .assert_result_eq("100");
+    wait_until(&mut session, "select max(v) from t2", "120").await?;
+    wait_until(&mut session, "select count(*) from mv_join;", "100").await?;
 
     cluster.simple_restart_nodes(["compute-1"]).await;
 
@@ -232,10 +223,7 @@ async fn test_isolation_simple_two_databases_join() -> Result<()> {
     // flush is only oriented to the current database, so flush is required here
     session.run("flush").await?;
 
-    session
-        .run("select count(*) from mv_join;")
-        .await?
-        .assert_result_eq("110");
+    wait_until(&mut session, "select count(*) from mv_join;", "110").await?;
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
 
@@ -297,10 +285,7 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
         .run("create materialized view mv_join as select t2.v as v from group1.public.t1 join group2.public.t2 on t1.v = t2.v;")
         .await?;
 
-    session
-        .run("select count(*) from mv_join;")
-        .await?
-        .assert_result_eq("50");
+    wait_until(&mut session, "select count(*) from mv_join;", "50").await?;
 
     cluster.simple_kill_nodes(["compute-1", "compute-3"]).await;
 
@@ -335,10 +320,7 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
 
     session.run("use group3").await?;
 
-    session
-        .run("select count(*) from mv_join;")
-        .await?
-        .assert_result_eq("110");
+    wait_until(&mut session, "select count(*) from mv_join;", "110").await?;
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
 
@@ -367,6 +349,20 @@ async fn test_isolation_simple_two_databases_join_in_other() -> Result<()> {
             .iter()
             .any(|(_, reason)| reason != GLOBAL_RECOVERY_REASON_BOOTSTRAP)
     );
+
+    Ok(())
+}
+
+async fn wait_until(session: &mut Session, sql: &str, target: &str) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(100), async {
+        loop {
+            if session.run(sql).await.unwrap() == target {
+                return;
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await?;
 
     Ok(())
 }

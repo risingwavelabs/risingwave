@@ -318,10 +318,8 @@ fn parse_column_aliases() {
     let sql = "SELECT a.col + 1 AS newname FROM foo AS a";
     let select = verified_only_select(sql);
     if let SelectItem::ExprWithAlias {
-        expr: Expr::BinaryOp {
-            ref op, ref right, ..
-        },
-        ref alias,
+        expr: Expr::BinaryOp { op, right, .. },
+        alias,
     } = only(&select.projection)
     {
         assert_eq!(&BinaryOperator::Plus, op);
@@ -1924,7 +1922,7 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let expected = "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT, found: )";
+    let expected = "sql parser error: expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT or DURATION_SECS, found: )";
     let actual = res.unwrap_err().to_string();
     assert!(
         actual.contains(expected),
@@ -2846,7 +2844,7 @@ fn parse_ctes() {
     let sql = &format!("SELECT ({})", with);
     let select = verified_only_select(sql);
     match expr_from_projection(only(&select.projection)) {
-        Expr::Subquery(ref subquery) => {
+        Expr::Subquery(subquery) => {
             assert_ctes_in_select(&cte_sqls, subquery.as_ref());
         }
         _ => panic!("expected subquery"),

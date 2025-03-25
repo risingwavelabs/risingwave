@@ -1,16 +1,16 @@
 statement ok
-CREATE TABLE t1 (i1 int, i2 varchar, i3 varchar);
+CREATE TABLE t_bench (i1 int, i2 varchar, i3 varchar);
 
 statement ok
-INSERT INTO t1 select key, 'some long string of text', 'another long string of text' from generate_series(1, 1000000) as key;
+INSERT INTO t_bench select key, 'some long string of text', 'another long string of text' from generate_series(1, 1000000) as key;
 
 statement ok
-CREATE SINK sink1 AS select * from t1 WITH (
+CREATE SINK sink1 AS select * from t_bench WITH (
     connector = 'iceberg',
     type = 'append-only',
     force_append_only = 'true',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 't_bench',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
@@ -23,7 +23,7 @@ CREATE SINK sink1 AS select * from t1 WITH (
 );
 
 statement ok
-CREATE SOURCE iceberg_t1_source
+CREATE SOURCE iceberg_t_bench_source
 WITH (
     connector = 'iceberg',
     s3.endpoint = 'http://127.0.0.1:9301',
@@ -34,14 +34,14 @@ WITH (
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
     database.name = 'demo_db',
-    table.name = 't1',
+    table.name = 't_bench',
 );
 
 statement ok
 flush;
 
-query I
-select count(*) from iceberg_t1_source;
+query I retry 3 backoff 5s
+select count(*) from iceberg_t_bench_source;
 ----
 1000000
 
@@ -59,7 +59,7 @@ statement ok
 DROP SINK sink1;
 
 statement ok
-DROP SOURCE iceberg_t1_source;
+DROP SOURCE iceberg_t_bench_source;
 
 statement ok
-DROP TABLE t1 cascade;
+DROP TABLE t_bench cascade;
