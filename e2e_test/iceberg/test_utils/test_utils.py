@@ -35,7 +35,8 @@ def execute_slt(args, slt):
 def verify_result(args, verify_sql, verify_schema, verify_data):
     tc = unittest.TestCase()
 
-    time.sleep(3)
+    # TODO: reduce this sleep
+    time.sleep(15)
     log(f"verify_result:", level=LogLevel.HEADER)
     log(f"Executing sql: {verify_sql}", level=LogLevel.INFO, indent=2)
     spark = get_spark(args)
