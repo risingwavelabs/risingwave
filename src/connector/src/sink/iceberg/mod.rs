@@ -75,7 +75,8 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::{self};
+use tokio::sync::oneshot;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
@@ -88,7 +89,7 @@ use super::decouple_checkpoint_log_sink::{
 };
 use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
-    SinkError, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -545,6 +546,7 @@ impl Sink for IcebergSink {
             commit_notifier: None,
             _compact_task_guard: None,
             commit_retry_num: self.config.commit_retry_num,
+            committed_epoch_subscriber: None,
         })
     }
 }
@@ -1400,6 +1402,7 @@ pub struct IcebergSinkCommitter {
     commit_notifier: Option<mpsc::UnboundedSender<()>>,
     commit_retry_num: u32,
     _compact_task_guard: Option<oneshot::Sender<()>>,
+    pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
 }
 
 impl IcebergSinkCommitter {
@@ -1435,8 +1438,9 @@ impl IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<Option<u64>> {
+    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         if self.is_exactly_once {
+            self.committed_epoch_subscriber = Some(subscriber);
             tracing::info!(
                 "Sink id = {}: iceberg sink coordinator initing.",
                 self.param.sink_id.sink_id()
@@ -1540,7 +1544,48 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 "schema_id and partition_spec_id should be the same in all write results"
             )));
         }
-        self.commit_iceberg_inner(epoch, write_results, None).await
+
+        if self.is_exactly_once {
+            assert!(self.committed_epoch_subscriber.is_some());
+            match self.committed_epoch_subscriber.clone() {
+                Some(committed_epoch_subscriber) => {
+                    // Get the latest committed_epoch and the receiver
+                    let (committed_epoch, mut rw_futures_utilrx) =
+                        committed_epoch_subscriber(self.param.sink_id).await?;
+                    // The exactly once commit process needs to start after the data corresponding to the current epoch is persisted in the log store.
+                    if committed_epoch >= epoch {
+                        self.commit_iceberg_inner(epoch, write_results, None)
+                            .await?;
+                    } else {
+                        tracing::info!(
+                            "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
+                            committed_epoch,
+                            epoch
+                        );
+                        while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
+                            tracing::info!(
+                                "Received next committed epoch: {}",
+                                next_committed_epoch
+                            );
+                            // If next_epoch meets the condition, execute commit immediately
+                            if next_committed_epoch >= epoch {
+                                self.commit_iceberg_inner(epoch, write_results, None)
+                                    .await?;
+                                break;
+                            }
+                        }
+                    }
+                }
+                None => unreachable!(
+                    "Exactly once sink must wait epoch before committing, committed_epoch_subscriber is not initialized."
+                ),
+            }
+        } else {
+            self.commit_iceberg_inner(epoch, write_results, None)
+                .await?;
+        }
+
+        Ok(())
     }
 }
 

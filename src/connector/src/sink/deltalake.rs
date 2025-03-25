@@ -49,7 +49,7 @@ use super::decouple_checkpoint_log_sink::{
 use super::writer::SinkWriter;
 use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::connector_common::AwsAuthProps;
 
@@ -497,7 +497,7 @@ pub struct DeltaLakeSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<Option<u64>> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         tracing::info!("DeltaLake commit coordinator inited.");
         Ok(None)
     }

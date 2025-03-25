@@ -44,8 +44,8 @@ use super::doris_starrocks_connector::{
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator, SinkError,
-    SinkParam, SinkWriterMetrics,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics,
 };
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
@@ -897,7 +897,7 @@ pub struct StarrocksSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for StarrocksSinkCommitter {
-    async fn init(&mut self) -> Result<Option<u64>> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         tracing::info!("Starrocks commit coordinator inited.");
         Ok(None)
     }

@@ -21,8 +21,8 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::array::error::anyhow;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
 use risingwave_pb::connector_service::coordinate_request::Msg;
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, coordinate_request};
 use rw_futures_util::pending_on_none;
@@ -36,7 +36,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::{debug, error, info, warn};
 
-use crate::MetaResult;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::sink_coordination::SinkWriterRequestStream;
@@ -75,13 +74,6 @@ pub struct SinkCoordinatorManager {
     request_tx: mpsc::Sender<ManagerRequest>,
 }
 
-pub(super) type SinkCommittedEpochSubscriber = Arc<
-    dyn Fn(SinkId) -> BoxFuture<'static, MetaResult<(u64, UnboundedReceiver<u64>)>>
-        + Send
-        + Sync
-        + 'static,
->;
-
 fn new_committed_epoch_subscriber(
     hummock_manager: HummockManagerRef,
     metadata_manager: MetadataManager,
@@ -92,13 +84,15 @@ fn new_committed_epoch_subscriber(
         async move {
             let state_table_ids = metadata_manager
                 .get_sink_state_table_ids(sink_id.sink_id as _)
-                .await?;
+                .await
+                .map_err(SinkError::from)?;
             let Some(table_id) = state_table_ids.first() else {
                 return Err(anyhow!("no state table id in sink: {}", sink_id).into());
             };
             hummock_manager
                 .subscribe_table_committed_epoch(*table_id)
                 .await
+                .map_err(SinkError::from)
         }
         .boxed()
     })
@@ -423,7 +417,10 @@ mod tests {
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
         SinkCommitCoordinator for MockCoordinator<C, F>
     {
-        async fn init(&mut self) -> risingwave_connector::sink::Result<Option<u64>> {
+        async fn init(
+            &mut self,
+            _subscriber: SinkCommittedEpochSubscriber,
+        ) -> risingwave_connector::sink::Result<Option<u64>> {
             Ok(None)
         }
 

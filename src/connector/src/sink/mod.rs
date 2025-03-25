@@ -47,7 +47,7 @@ pub mod writer;
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use ::clickhouse::error::Error as ClickHouseError;
 use ::deltalake::DeltaTableError;
@@ -60,6 +60,7 @@ use decouple_checkpoint_log_sink::{
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use deltalake::DELTALAKE_SINK;
+use futures::future::BoxFuture;
 use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
@@ -86,6 +87,7 @@ use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedReceiver;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
@@ -698,11 +700,17 @@ pub trait LogSinker: 'static + Send {
     // Note: Please rebuild the log reader's read stream before consuming the log store,
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
 }
+pub type SinkCommittedEpochSubscriber = Arc<
+    dyn Fn(SinkId) -> BoxFuture<'static, Result<(u64, UnboundedReceiver<u64>)>>
+        + Send
+        + Sync
+        + 'static,
+>;
 
 #[async_trait]
 pub trait SinkCommitCoordinator {
     /// Initialize the sink committer coordinator, return the log store rewind start offset.
-    async fn init(&mut self) -> Result<Option<u64>>;
+    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
@@ -714,7 +722,7 @@ pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
 impl SinkCommitCoordinator for DummySinkCommitCoordinator {
-    async fn init(&mut self) -> Result<Option<u64>> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         Ok(None)
     }
 
