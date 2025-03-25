@@ -6,6 +6,9 @@ CREATE TABLE test_struct (
   info STRUCT <first_name VARCHAR, last_name VARCHAR> NOT NULL
 );
 
+statement error alter table add NOT NULL columns must have default value
+ALTER TABLE test_struct ADD newcolumn FLOAT NOT NULL;
+
 statement ok
 INSERT INTO test_struct (id, info) VALUES (1, ('Alice', 'Smith'));
 
@@ -91,7 +94,15 @@ DROP TABLE test_array;
 
 ### Test stream input
 
-# TODO(Kexiang): enforce DEFAULT when altering table with NOT NULL, e.g., ALTER TABLE test_person ADD weight FLOAT DEFAULT 5 NOT NULL
+statement error Invalid input syntax: NOT NULL constraint is not supported in source schema
+CREATE SOURCE invalid_source (
+  column1 varchar NOT NULL
+) with (
+  connector = 'kafka',
+  topic = 'source',
+  properties.bootstrap.server = 'localhost:29092'
+) FORMAT PLAIN ENCODE JSON;
+
 statement ok
 CREATE TABLE test_person (id INT PRIMARY KEY NOT NULL, name VARCHAR NULL, age INT NOT NULL, height FLOAT NOT NULL);
 

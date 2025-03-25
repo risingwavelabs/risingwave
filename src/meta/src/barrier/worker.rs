@@ -140,6 +140,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             checkpoint_frequency,
         );
 
+        let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
             enable_recovery,
             periodic_barriers,
@@ -147,7 +148,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             enable_per_database_isolation,
             context,
             env,
-            checkpoint_control: CheckpointControl::default(),
+            checkpoint_control,
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
@@ -337,7 +338,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                if let Some(runtime_info) = self.context.reload_database_runtime_info(database_id).await? {
+                                match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
@@ -349,12 +350,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
-                                } else {
+                                } _ => {
                                     info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
                                     // mark ready to unblock subsequent request
                                     self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     entering_initializing.remove();
-                                }
+                                }}
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
@@ -646,6 +647,7 @@ mod retry_strategy {
 
 pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
+use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
 use crate::barrier::utils::is_valid_after_worker_err;
 
@@ -678,7 +680,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     }
 
     async fn recovery_inner(&mut self, is_paused: bool, recovery_reason: String) {
+        let event_log_manager_ref = self.env.event_log_manager_ref();
+
         tracing::info!("recovery start!");
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_start(recovery_reason.clone()),
+        )]);
+
         let retry_strategy = get_retry_strategy();
 
         // We take retry into consideration because this is the latency user sees for a cluster to
@@ -801,6 +809,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     };
                     let database_id = DatabaseId::new(resp.database_id);
+                    if failed_databases.contains(&database_id) {
+                        assert!(!collecting_databases.contains_key(&database_id));
+                        // ignore the lately arrived collect resp of failed database
+                        continue;
+                    }
+                    assert!(!collected_databases.contains_key(&database_id));
                     let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, *prev_epoch);
                     assert!(node_to_collect.remove(&worker_id).is_some());
@@ -825,6 +839,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
+                if !self.enable_per_database_isolation && !failed_databases.is_empty() {
+                    return Err(anyhow!(
+                        "global recovery failed due to failure of databases {:?}",
+                        failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
+                    );
+                }
                 let checkpoint_control = CheckpointControl::recover(
                     collected_databases,
                     failed_databases,
@@ -840,13 +860,16 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
         }.inspect_err(|err: &MetaError| {
             tracing::error!(error = %err.as_report(), "recovery failed");
+            event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                EventRecovery::global_recovery_failure(recovery_reason.clone(), err.to_report_string()),
+            )]);
             GLOBAL_META_METRICS.recovery_failure_cnt.with_label_values(&["global"]).inc();
         }))
             .instrument(tracing::info_span!("recovery_attempt"))
             .await
             .expect("Retry until recovery success.");
 
-        recovery_timer.observe_duration();
+        let duration = recovery_timer.stop_and_record();
 
         (
             self.active_streaming_nodes,
@@ -856,6 +879,26 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         ) = new_state;
 
         tracing::info!("recovery success");
+
+        let recovering_databases = self
+            .checkpoint_control
+            .recovering_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+        let running_databases = self
+            .checkpoint_control
+            .running_databases()
+            .map(|database| database.database_id)
+            .collect_vec();
+
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::global_recovery_success(
+                recovery_reason.clone(),
+                duration as f32,
+                running_databases,
+                recovering_databases,
+            ),
+        )]);
 
         self.env
             .notification_manager()

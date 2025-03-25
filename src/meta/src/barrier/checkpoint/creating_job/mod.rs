@@ -314,7 +314,7 @@ impl CreatingStreamingJobControl {
 
     pub(super) fn should_merge_to_upstream(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
-            ref log_store_progress_tracker,
+            log_store_progress_tracker,
         } = &self.status
             && log_store_progress_tracker.is_finished()
         {

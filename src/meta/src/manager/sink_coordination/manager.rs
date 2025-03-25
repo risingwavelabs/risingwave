@@ -92,7 +92,7 @@ impl SinkCoordinatorManager {
     pub async fn handle_new_request(
         &self,
         mut request_stream: SinkWriterRequestStream,
-    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>>, Status> {
+    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>> + use<>, Status> {
         let (param, vnode_bitmap) = match request_stream.try_next().await? {
             Some(CoordinateRequest {
                 msg:
@@ -374,8 +374,8 @@ mod tests {
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
         SinkCommitCoordinator for MockCoordinator<C, F>
     {
-        async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
-            Ok(())
+        async fn init(&mut self) -> risingwave_connector::sink::Result<Option<u64>> {
+            Ok(None)
         }
 
         async fn commit(
@@ -405,7 +405,7 @@ mod tests {
         let epoch2 = 234;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -485,6 +485,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) =
@@ -649,6 +650,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let mut client = build_client(vnode).await;
@@ -695,7 +697,7 @@ mod tests {
         let epoch = 233;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -737,6 +739,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, client2) = join(build_client(vnode1), build_client(vnode2)).await;
@@ -776,7 +779,7 @@ mod tests {
         let epoch = 233;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -820,6 +823,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) = join(build_client(vnode1), build_client(vnode2)).await;
@@ -874,7 +878,7 @@ mod tests {
         let epoch4 = 236;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -955,6 +959,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) =

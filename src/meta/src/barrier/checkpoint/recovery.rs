@@ -20,6 +20,7 @@ use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::DatabaseId;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::meta::event_log::{Event, EventRecovery};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
@@ -302,6 +303,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
         barrier_complete_output: Option<BarrierCompleteOutput>,
         control_stream_manager: &mut ControlStreamManager,
     ) {
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
             self.control.ack_completed(output);
         }
@@ -316,6 +318,9 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
                 let metrics = DatabaseRecoveryMetrics::new(self.database_id);
+                event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                    EventRecovery::database_recovery_start(self.database_id.database_id),
+                )]);
                 *database_status =
                     DatabaseCheckpointControlStatus::Recovering(DatabaseRecoveringState {
                         stage: DatabaseRecoveringStage::Resetting {
@@ -334,6 +339,9 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     unreachable!("should not enter resetting again")
                 }
                 DatabaseRecoveringStage::Initializing { .. } => {
+                    event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                        EventRecovery::database_recovery_failure(self.database_id.database_id),
+                    )]);
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(self.database_id, reset_request_id);
@@ -480,6 +488,10 @@ pub(crate) struct EnterRunning;
 impl DatabaseStatusAction<'_, EnterRunning> {
     pub(crate) fn enter(self) {
         info!(database_id = ?self.database_id, "database enter running");
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::database_recovery_success(self.database_id.database_id),
+        )]);
         let database_status = self
             .control
             .databases
@@ -496,15 +508,20 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     reset_request_id: 0,
                     backoff_future: None,
                 };
-                if let Some(recovery_timer) = state.metrics.recovery_timer.take() {
-                    recovery_timer.observe_duration();
-                } else if cfg!(debug_assertions) {
-                    panic!(
-                        "take database {} recovery latency for twice",
-                        self.database_id
-                    )
-                } else {
-                    warn!(database_id = %self.database_id,"failed to take recovery latency")
+                match state.metrics.recovery_timer.take() {
+                    Some(recovery_timer) => {
+                        recovery_timer.observe_duration();
+                    }
+                    _ => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "take database {} recovery latency for twice",
+                                self.database_id
+                            )
+                        } else {
+                            warn!(database_id = %self.database_id,"failed to take recovery latency")
+                        }
+                    }
                 }
                 match replace(&mut state.stage, temp_place_holder) {
                     DatabaseRecoveringStage::Resetting { .. } => {

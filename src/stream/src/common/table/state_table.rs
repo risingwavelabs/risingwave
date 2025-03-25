@@ -79,7 +79,7 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 macro_rules! insane_mode_discard_point {
     () => {{
         use rand::Rng;
-        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+        if crate::consistency::insane() && rand::rng().random_bool(0.3) {
             return;
         }
     }};

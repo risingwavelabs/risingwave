@@ -51,17 +51,26 @@ use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     InflightSubscriptionInfo, SnapshotBackfillInfo, TracedEpoch,
 };
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
 
-#[derive(Default)]
 pub(crate) struct CheckpointControl {
+    pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
 }
 
 impl CheckpointControl {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        Self {
+            env,
+            databases: Default::default(),
+            hummock_version_stats: Default::default(),
+        }
+    }
+
     pub(crate) fn recover(
         databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
         failed_databases: HashSet<DatabaseId>,
@@ -69,6 +78,7 @@ impl CheckpointControl {
         hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
+            env: control_stream_manager.env.clone(),
             databases: databases
                 .into_iter()
                 .map(|(database_id, control)| {
@@ -162,6 +172,12 @@ impl CheckpointControl {
         })
     }
 
+    pub(crate) fn running_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
+        self.databases.iter().filter_map(|(database_id, database)| {
+            database.running_state().is_some().then_some(*database_id)
+        })
+    }
+
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
@@ -175,8 +191,8 @@ impl CheckpointControl {
         } = new_barrier;
 
         if let Some((database_id, mut command, notifiers)) = command {
-            if let Command::CreateStreamingJob {
-                cross_db_snapshot_backfill_info,
+            if let &mut Command::CreateStreamingJob {
+                ref mut cross_db_snapshot_backfill_info,
                 ref info,
                 ..
             } = &mut command
@@ -748,14 +764,11 @@ impl DatabaseCheckpointControl {
 
     /// Pause inject barrier until True.
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        let in_flight_not_full = self
-            .command_ctx_queue
+        self.command_ctx_queue
             .values()
             .filter(|x| x.state.is_inflight())
             .count()
-            < in_flight_barrier_nums;
-
-        in_flight_not_full
+            < in_flight_barrier_nums
     }
 
     /// Return whether the database can still work after worker failure

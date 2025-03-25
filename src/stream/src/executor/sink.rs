@@ -275,7 +275,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             rate_limit_rx,
                             rebuild_sink_rx,
                         )
-                        .instrument_await(format!("consume_log (sink_id {sink_id})"))
+                        .instrument_await(
+                            await_tree::span!("consume_log (sink_id {sink_id})").long_running(),
+                        )
                         .map_ok(|never| never); // unify return type to `Message`
 
                         consume_log_stream.boxed()
@@ -592,7 +594,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
                                     sink_id = sink_param.sink_id.sink_id,
-                                    "rewind successfully after sink error"
+                                    "reset log reader stream successfully after sink error"
                                 );
                                 Ok(())
                             }
