@@ -4,7 +4,7 @@ set sink_decouple = false;
 
 # import data to mysql
 system ok
-mysql < ./test_case/cdc/mysql_cdc.sql
+mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc.sql
 
 statement ok
 create source mysql_mydb with (
@@ -51,6 +51,6 @@ select count(*) from products;
 
 # insert new data to mysql
 system ok
-mysql < ./test_case/cdc/mysql_cdc_insert.sql
+mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
 
 sleep 20s
