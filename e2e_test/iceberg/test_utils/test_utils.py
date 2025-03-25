@@ -30,7 +30,6 @@ def execute_slt(args, slt):
     cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
     log(f"Executing slt: {slt}", level=LogLevel.INFO)
     subprocess.run(cmd, shell=True, check=True)
-    time.sleep(15)
 
 
 def verify_result(args, verify_sql, verify_schema, verify_data):
@@ -42,9 +41,6 @@ def verify_result(args, verify_sql, verify_schema, verify_data):
     spark = get_spark(args)
     df = spark.sql(verify_sql).collect()
     log(f"Result:", level=LogLevel.HEADER, indent=2)
-    log("", level=LogLevel.SEPARATOR, indent=2)
-    for row in df:
-        log(row, level=LogLevel.RESULT, indent=4)
     log("", level=LogLevel.SEPARATOR, indent=2)
     rows = verify_data.splitlines()
     tc.assertEqual(len(df), len(rows), "row length mismatch")
