@@ -1552,7 +1552,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids().len(), 0);
+        assert_eq!(version.get_object_ids(false).len(), 0);
 
         // Add to sub level
         version
@@ -1570,7 +1570,7 @@ mod tests {
                 .into()],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids().len(), 1);
+        assert_eq!(version.get_object_ids(false).len(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
@@ -1582,7 +1582,7 @@ mod tests {
             .into()],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids().len(), 2);
+        assert_eq!(version.get_object_ids(false).len(), 2);
     }
 
     #[test]
