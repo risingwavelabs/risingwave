@@ -1,21 +1,18 @@
-import traceback
-from pyspark.sql import SparkSession
 import argparse
 import configparser
-import subprocess
-import csv
-import unittest
-import time
-import os
-import tomli as toml
-from datetime import date
-from datetime import datetime
-from datetime import timezone
 import decimal
 import glob
-from typing import List, Dict, Any, Optional
-from enum import Enum, auto
+import os
+import subprocess
 import sys
+import time
+import unittest
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum, auto
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+
+import tomli as toml
+from pyspark.sql import SparkSession
 
 
 class LogLevel(Enum):
@@ -242,26 +239,37 @@ def discover_test_cases() -> List[str]:
     return test_files
 
 
-def run_test_case(test_file: str, args: Dict[str, Any]) -> None:
+class TestResult(NamedTuple):
+    name: str
+    success: bool
+    duration: timedelta
+    error: Optional[Exception]
+
+
+def run_test_case(test_file: str, args: Dict[str, Any]) -> TestResult:
     """Run a single test case."""
     log(f"\nRunning test case: {test_file}", level=LogLevel.HEADER)
-    with open(test_file, "rb") as f:
-        test_case = toml.load(f)
+    start_time = datetime.now()
+    error = None
+    success = True
 
-        # Extract content from testcase
-        init_sqls = test_case["init_sqls"]
-        slt = test_case.get("slt")
-        log(f"slt: {slt}", level=LogLevel.INFO)
-        verify_schema = test_case.get("verify_schema")
-        log(f"verify_schema: {verify_schema}", level=LogLevel.INFO)
-        verify_sql = test_case.get("verify_sql")
-        log(f"verify_sql: {verify_sql}", level=LogLevel.INFO)
-        verify_data = test_case.get("verify_data")
-        verify_slt = test_case.get("verify_slt")
-        cmp_sqls = test_case.get("cmp_sqls")
-        drop_sqls = test_case["drop_sqls"]
+    try:
+        with open(test_file, "rb") as f:
+            test_case = toml.load(f)
 
-        try:
+            # Extract content from testcase
+            init_sqls = test_case["init_sqls"]
+            slt = test_case.get("slt")
+            log(f"slt: {slt}", level=LogLevel.INFO)
+            verify_schema = test_case.get("verify_schema")
+            log(f"verify_schema: {verify_schema}", level=LogLevel.INFO)
+            verify_sql = test_case.get("verify_sql")
+            log(f"verify_sql: {verify_sql}", level=LogLevel.INFO)
+            verify_data = test_case.get("verify_data")
+            verify_slt = test_case.get("verify_slt")
+            cmp_sqls = test_case.get("cmp_sqls")
+            drop_sqls = test_case["drop_sqls"]
+
             init_iceberg_table(args, init_sqls)
             if slt:
                 execute_slt(args, slt)
@@ -273,9 +281,57 @@ def run_test_case(test_file: str, args: Dict[str, Any]) -> None:
                 execute_slt(args, verify_slt)
             if drop_sqls:
                 drop_table(args, drop_sqls)
-        except Exception as e:
-            log(f"test case {test_file} failed: {e}", level=LogLevel.ERROR)
-            raise e
+    except Exception as e:
+        log(f"test case {test_file} failed: {e}", level=LogLevel.ERROR)
+        error = e
+        success = False
+        raise e
+    finally:
+        duration = datetime.now() - start_time
+        return TestResult(test_file, success, duration, error)
+
+
+def print_test_summary(results: List[TestResult]):
+    """Print a summary of all test results."""
+    log("\nTest Summary", level=LogLevel.HEADER)
+    log("", level=LogLevel.SEPARATOR)
+
+    total_duration = timedelta()
+    passed = 0
+    failed = 0
+
+    # Print individual test results
+    for result in results:
+        status = (
+            Color.GREEN + "PASSED" + Color.ENDC
+            if result.success
+            else Color.RED + "FAILED" + Color.ENDC
+        )
+        duration_str = f"{result.duration.total_seconds():.2f}s"
+        log(
+            f"{result.name}: {status} ({duration_str})",
+            level=LogLevel.INFO if result.success else LogLevel.ERROR,
+        )
+        if not result.success and result.error:
+            log(f"  Error: {str(result.error)}", level=LogLevel.ERROR, indent=2)
+
+        total_duration += result.duration
+        if result.success:
+            passed += 1
+        else:
+            failed += 1
+
+    # Print summary statistics
+    log("", level=LogLevel.SEPARATOR)
+    total_tests = len(results)
+    pass_rate = (passed / total_tests * 100) if total_tests > 0 else 0
+
+    log(f"Total Tests: {total_tests}", level=LogLevel.RESULT)
+    log(f"Passed: {passed}", level=LogLevel.RESULT)
+    log(f"Failed: {failed}", level=LogLevel.RESULT)
+    log(f"Pass Rate: {pass_rate:.1f}%", level=LogLevel.RESULT)
+    log(f"Total Duration: {total_duration.total_seconds():.2f}s", level=LogLevel.RESULT)
+    log("", level=LogLevel.SEPARATOR)
 
 
 def get_parallel_job_info() -> Optional[tuple[int, int]]:
@@ -328,26 +384,38 @@ if __name__ == "__main__":
 
     prepare_test_env()
 
-    if args.test_case:
-        # Run single test case if specified
-        run_test_case(args.test_case, config_dict)
-    else:
-        # Run discovered test cases
-        test_files = discover_test_cases()
-        log(f"Discovered {len(test_files)} test cases", level=LogLevel.INFO)
+    test_results = []
 
-        # Get parallel job information
-        parallel_info = get_parallel_job_info()
-        if parallel_info:
-            job_index, total_jobs = parallel_info
-            # Distribute test files among parallel jobs
-            test_files.sort()  # Ensure consistent distribution
-            test_files = test_files[job_index::total_jobs]
-            log(
-                f"Running job {job_index + 1} of {total_jobs} with {len(test_files)} test cases",
-                level=LogLevel.INFO,
-            )
+    try:
+        if args.test_case:
+            # Run single test case if specified
+            result = run_test_case(args.test_case, config_dict)
+            test_results.append(result)
+        else:
+            # Run discovered test cases
+            test_files = discover_test_cases()
+            log(f"Discovered {len(test_files)} test cases", level=LogLevel.INFO)
 
-        # Run all test cases assigned to this job
-        for test_file in test_files:
-            run_test_case(test_file, config_dict)
+            # Get parallel job information
+            parallel_info = get_parallel_job_info()
+            if parallel_info:
+                job_index, total_jobs = parallel_info
+                # Distribute test files among parallel jobs
+                test_files.sort()  # Ensure consistent distribution
+                test_files = test_files[job_index::total_jobs]
+                log(
+                    f"Running job {job_index + 1} of {total_jobs} with {len(test_files)} test cases",
+                    level=LogLevel.INFO,
+                )
+
+            # Run all test cases assigned to this job
+            for test_file in test_files:
+                try:
+                    result = run_test_case(test_file, config_dict)
+                    test_results.append(result)
+                except Exception:
+                    # Continue running other tests even if one fails
+                    continue
+    finally:
+        # Always print summary, even if some tests failed
+        print_test_summary(test_results)
