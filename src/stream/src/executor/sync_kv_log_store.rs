@@ -549,7 +549,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 buffer: VecDeque::new(),
                 current_size: 0,
                 max_size: self.max_buffer_size,
-                max_read_size: self.chunk_size,
+                max_chunk_size: self.chunk_size,
                 next_chunk_id: 0,
                 metrics: self.metrics.clone(),
                 flushed_count: 0,
@@ -918,7 +918,7 @@ struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
-    max_read_size: u32,
+    max_chunk_size: u32,
     next_chunk_id: ChunkId,
     metrics: SyncedKvLogStoreMetrics,
     flushed_count: usize,
@@ -972,14 +972,20 @@ impl SyncedLogStoreBuffer {
         new_vnode_bitmap: Bitmap,
         epoch: u64,
     ) {
+        let new_chunk_size = end_seq_id - start_seq_id + 1;
+
         if let Some((
             item_epoch,
             LogStoreBufferItem::Flushed {
+                start_seq_id: prev_start_seq_id,
                 end_seq_id: prev_end_seq_id,
                 vnode_bitmap,
                 ..
             },
         )) = self.buffer.back_mut()
+            && let flushed_chunk_size = *prev_end_seq_id - *prev_start_seq_id + 1
+            && let projected_flushed_chunk_size = flushed_chunk_size + new_chunk_size
+            && projected_flushed_chunk_size as u32 <= self.max_chunk_size
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
@@ -1038,30 +1044,10 @@ impl SyncedLogStoreBuffer {
     }
 
     fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
-        let mut item = self.buffer.pop_front();
-        match &mut item {
-            Some((
-                epoch,
-                LogStoreBufferItem::Flushed {
-                    start_seq_id,
-                    end_seq_id,
-                    vnode_bitmap,
-                    chunk_id,
-                },
-            )) => {
-                let end_seq_id_bound = *start_seq_id + self.max_read_size as i32;
-                if *end_seq_id > end_seq_id_bound {
-                    let new_item = LogStoreBufferItem::Flushed {
-                        start_seq_id: end_seq_id_bound + 1,
-                        end_seq_id: *end_seq_id,
-                        vnode_bitmap: vnode_bitmap.clone(),
-                        chunk_id: *chunk_id,
-                    };
-                    *end_seq_id = end_seq_id_bound;
-                    self.buffer.push_front((*epoch, new_item));
-                } else {
-                    self.flushed_count -= 1;
-                }
+        let item = self.buffer.pop_front();
+        match &item {
+            Some((_, LogStoreBufferItem::Flushed { .. })) => {
+                self.flushed_count -= 1;
             }
             Some((_, LogStoreBufferItem::StreamChunk { chunk, .. })) => {
                 self.current_size -= chunk.cardinality();
