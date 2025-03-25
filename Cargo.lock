@@ -6246,7 +6246,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5f9109880438418d7691b1a2c0ac1fa0b5c288fb#5f9109880438418d7691b1a2c0ac1fa0b5c288fb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c9da916ab29b13adcb137ba40bad9e2dc10309c4#c9da916ab29b13adcb137ba40bad9e2dc10309c4"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6279,6 +6279,7 @@ dependencies = [
  "paste",
  "rand 0.8.5",
  "reqwest 0.12.4",
+ "roaring",
  "rust_decimal",
  "serde",
  "serde_bytes",
@@ -6286,6 +6287,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "serde_with 3.8.1",
+ "thrift",
  "tokio",
  "typed-builder 0.20.1",
  "url",
@@ -6296,7 +6298,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5f9109880438418d7691b1a2c0ac1fa0b5c288fb#5f9109880438418d7691b1a2c0ac1fa0b5c288fb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c9da916ab29b13adcb137ba40bad9e2dc10309c4#c9da916ab29b13adcb137ba40bad9e2dc10309c4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6313,7 +6315,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5f9109880438418d7691b1a2c0ac1fa0b5c288fb#5f9109880438418d7691b1a2c0ac1fa0b5c288fb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c9da916ab29b13adcb137ba40bad9e2dc10309c4#c9da916ab29b13adcb137ba40bad9e2dc10309c4"
 dependencies = [
  "async-trait",
  "chrono",
@@ -14397,6 +14399,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
+]
+
+[[package]]
 name = "thrift"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14404,7 +14415,9 @@ checksum = "7e54bc85fc7faa8bc175c4bab5b92ba8d9a3ce893d0e9f42cc455c8ab16a9e09"
 dependencies = [
  "byteorder",
  "integer-encoding",
+ "log",
  "ordered-float 2.10.0",
+ "threadpool",
 ]
 
 [[package]]
