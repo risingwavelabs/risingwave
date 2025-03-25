@@ -17,7 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
 use foyer::CacheHint;
 use futures::future::try_join_all;
@@ -1122,7 +1122,7 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
         while let Some((k, v)) = self
             .iter
             .try_next()
-            .verbose_instrument_await("storage_table_iter_next")
+            .instrument_await("storage_table_iter_next".verbose())
             .await?
         {
             let (table_key, value, epoch_with_gap) = (k.user_key.table_key, v, k.epoch_with_gap);
