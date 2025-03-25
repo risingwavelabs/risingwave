@@ -338,7 +338,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                if let Some(runtime_info) = self.context.reload_database_runtime_info(database_id).await? {
+                                match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
@@ -350,12 +350,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
-                                } else {
+                                } _ => {
                                     info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
                                     // mark ready to unblock subsequent request
                                     self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     entering_initializing.remove();
-                                }
+                                }}
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));

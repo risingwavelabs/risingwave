@@ -201,7 +201,7 @@ impl BigQueryCommon {
     async fn build_writer_client(
         &self,
         aws_auth_props: &AwsAuthProps,
-    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>>)> {
+    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
         let credentials_file = CredentialsFile::new_from_str(&auth_json)

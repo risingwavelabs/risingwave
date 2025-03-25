@@ -494,23 +494,23 @@ mod tests {
     #[ignore]
     #[test]
     fn test_set_use_trace() {
-        std::env::remove_var(USE_TRACE);
+        unsafe { std::env::remove_var(USE_TRACE) };
         assert!(!set_should_use_trace());
 
-        std::env::set_var(USE_TRACE, "true");
+        unsafe { std::env::set_var(USE_TRACE, "true") };
         assert!(set_should_use_trace());
 
-        std::env::set_var(USE_TRACE, "false");
+        unsafe { std::env::set_var(USE_TRACE, "false") };
         assert!(!set_should_use_trace());
 
-        std::env::set_var(USE_TRACE, "invalid");
+        unsafe { std::env::set_var(USE_TRACE, "invalid") };
         assert!(!set_should_use_trace());
     }
 
     #[ignore]
     #[test]
     fn test_should_use_trace() {
-        std::env::set_var(USE_TRACE, "true");
+        unsafe { std::env::set_var(USE_TRACE, "true") };
         assert!(should_use_trace());
         assert!(set_should_use_trace());
     }

@@ -44,10 +44,10 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
-hashbrown = "0.14"
+hashbrown = "0.15"
 hex = "0.4.3"
 http = "1"
-humantime = "2.1"
+humantime = "2.2"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"

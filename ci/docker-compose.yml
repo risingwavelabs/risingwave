@@ -124,6 +124,15 @@ services:
     volumes:
       - ..:/risingwave
 
+  iceberg-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    depends_on:
+      - mysql
+      - db
+      - message_queue
+      - schemaregistry
+    volumes:
+      - ..:/risingwave
   rw-build-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     volumes:

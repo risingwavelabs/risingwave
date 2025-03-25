@@ -2,6 +2,10 @@
 statement ok
 set sink_decouple = false;
 
+# import data to mysql
+system ok
+mysql < ./test_case/cdc/mysql_cdc.sql
+
 statement ok
 create source mysql_mydb with (
     connector = 'mysql-cdc',
@@ -44,3 +48,9 @@ query I
 select count(*) from products;
 ----
 8
+
+# insert new data to mysql
+system ok
+mysql < ./test_case/cdc/mysql_cdc_insert.sql
+
+sleep 20s

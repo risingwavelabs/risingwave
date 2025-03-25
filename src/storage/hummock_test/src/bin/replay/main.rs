@@ -70,7 +70,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     // disable runtime tracing when replaying
-    std::env::set_var(USE_TRACE, "false");
+    unsafe { std::env::set_var(USE_TRACE, "false") };
     run_replay(args).await.unwrap();
 }
 
@@ -87,7 +87,7 @@ async fn run_replay(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay + use<>> {
     let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
     let system_params_reader =

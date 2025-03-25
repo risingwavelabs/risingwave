@@ -389,7 +389,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         let range_start = match (start_offset, aligned_range_start) {
             (Some(rewind_start_offset), _) => {
                 tracing::info!(
-                    "Sink error occurred. rebuild the log reader stream from the rewind start offset returned by the coordinator."
+                    "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
                 );
                 LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
             }
