@@ -5,6 +5,8 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
+    clean_state = 'type="clean"'
+    dirty_state = 'type="dirty"'
     return [
         outer_panels.row_collapsed(
             "Sync Log Store Metrics",
@@ -66,27 +68,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_total_read_count')}[$__rate_interval])) by (target, fragment_id, relation)",
-                            "total {{fragment_id}} {{relation}} ({{target}})",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_storage_read_count')}[$__rate_interval])) by (read_type, actor_id, target, fragment_id, relation)",
-                            "{{read_type}} {{fragment_id}} {{relation}} actor {{actor_id}} ({{target}})",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_buffer_read_count')}[$__rate_interval])) by (actor_id, target, fragment_id, relation)",
-                            "buffer {{fragment_id}} {{relation}} actor {{actor_id}} ({{target}})",
-                        )
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Executor Log Store Consume Throughput(rows)",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_total_read_count')}[$__rate_interval])) by ({NODE_LABEL}, target, fragment_id, actor_id, relation)",
-                            "{{fragment_id}} {{relation}} ({{target}}) actor {{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('sync_kv_log_store_read_count')}[$__rate_interval])) by (type, target, fragment_id, relation)",
+                            "{{type}} {{fragment_id}} {{relation}} ({{target}})",
                         ),
                     ],
                 ),
@@ -95,19 +78,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_total_read_size')}[$__rate_interval])) by (target, fragment_id, relation) / (1000*1000)",
-                            "{{fragment_id}} {{relation}} ({{target}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytesps(
-                    "Executor Log Store Consume Throughput(MB/s)",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_total_read_size')}[$__rate_interval])) by ({NODE_LABEL}, target, fragment_id, actor_id, relation) / (1000*1000)",
-                            "{{fragment_id}} {{relation}} ({{target}}) actor {{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('sync_kv_log_store_total_read_size')}[$__rate_interval])) by (type, target, fragment_id, relation) / (1000*1000)",
+                            "{{type}} {{fragment_id}} {{relation}} ({{target}})",
                         ),
                     ],
                 ),
@@ -127,42 +99,18 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Kv Log Store Buffer State (0-clean, 1-unclean)",
+                    "Kv Log Store Buffer State (0-clean, 1-dirty)",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('sync_kv_log_store_unclean_state')}) by (fragment_id, relation)",
-                            "unclean {{fragment_id}} {{relation}}",
+                            f"sum({metric('sync_kv_log_store_state')}) by (type, fragment_id, relation)",
+                            "{{type}} {{fragment_id}} {{relation}}",
                         ),
                         panels.target(
-                            f"sum({metric('sync_kv_log_store_clean_state')}) by (fragment_id, relation)",
-                            "clean {{fragment_id}} {{relation}}",
-                        ),
-                        panels.target(
-                            f"sum({metric('sync_kv_log_store_unclean_state')}) by (fragment_id, relation) - sum({metric('sync_kv_log_store_clean_state')}) by (fragment_id, relation)",
-                            "current state {{fragment_id}} {{relation}}",
+                            f"sum({metric('sync_kv_log_store_unclean_state', filter=clean_state)}) by (fragment_id, relation) - sum({metric('sync_kv_log_store_clean_state', filter=dirty_state)}) by (fragment_id, relation)",
+                            "current_state {{fragment_id}} {{relation}}",
                         ),
                     ]
-                ),
-                panels.timeseries_ops(
-                    "Kv Log Store Read Storage Row Ops",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_storage_read_count')}[$__rate_interval])) by (actor_id, target, fragment_id, relation)",
-                            "{{fragment_id}} {{relation}} actor {{actor_id}} ({{target}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Kv Log Store Read Storage Size",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_storage_read_size')}[$__rate_interval])) by (actor_id, target, fragment_id, relation)",
-                            "{{fragment_id}} {{relation}} actor {{actor_id}} ({{target}})",
-                        ),
-                    ],
                 ),
                 panels.timeseries_ops(
                     "Kv Log Store Write Storage Row Ops",
