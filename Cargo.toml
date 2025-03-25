@@ -78,7 +78,8 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
+foyer = { version = "0.15.1", features = ["tracing", "nightly"] }
+mixtrics = { version = "0.0.4", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -153,11 +154,7 @@ arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { version = "0.20.1", features = [
-    "s3",
-    "gcs",
-    "datafusion",
-] }
+deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.13.0"
 jsonbb = "0.1.4"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }

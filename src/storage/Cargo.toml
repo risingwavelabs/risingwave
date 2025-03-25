@@ -36,6 +36,7 @@ libc = "0.2"
 lz4 = "1.28.0"
 memcomparable = "0.2"
 metrics-prometheus = "0.7"
+mixtrics = { workspace = true }
 moka = { version = "0.12.0", features = ["future", "sync"] }
 more-asserts = "0.3"
 num-integer = "0.1"

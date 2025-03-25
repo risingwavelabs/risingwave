@@ -312,7 +312,7 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
-    use foyer::CacheContext;
+    use foyer::CacheHint;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;
@@ -477,7 +477,7 @@ mod tests {
             TableKey(Bytes::from(end_key.user_key.table_key.0)),
         );
         let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
             must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
             max_preload_retry_times: 0,
             prefetch_for_large_query: false,

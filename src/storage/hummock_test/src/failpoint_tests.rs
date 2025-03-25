@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::CacheContext;
+use foyer::CacheHint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
@@ -116,7 +116,7 @@ async fn test_failpoints_state_store_read_upload() {
             1,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -172,7 +172,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -187,7 +187,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 table_id: Default::default(),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -206,7 +206,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(bee_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -248,7 +248,7 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -265,7 +265,7 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
