@@ -342,7 +342,7 @@ impl LogSinker for RemoteLogSinker {
             fn truncate_matched_offset(
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
                 persisted_offset: TruncateOffset,
-                log_reader: &mut (impl SinkLogReader + ?Sized),
+                log_reader: &mut impl SinkLogReader,
                 sink_writer_metrics: &SinkWriterMetrics,
             ) -> Result<()> {
                 while let Some((sent_offset, _)) = queue.front()
