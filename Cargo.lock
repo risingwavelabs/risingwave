@@ -5016,8 +5016,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.14.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f219e7c34e1baa1fbcc88539b1e9b24817dddb9b8fbf6e853e9a59f66520637"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5034,8 +5035,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.14.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a00b504fcfd9a056ca6b388d3d061b12049a9efe9e60bf50ffdaf8a16d0f7368"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
@@ -5061,8 +5063,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.14.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "463e796083c33dba352aba92d3f83a4507213f2b85543d5a3bca7751c828fbf0"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -5086,8 +5089,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.14.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=0805cbb954ba255e59a9700ff57f6a88d17d77e4#0805cbb954ba255e59a9700ff57f6a88d17d77e4"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3796fd1efa2d47f157ca3bf543ad284610cd5f76fe39504b6cb2f53ebbd0e110"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5212,12 +5216,12 @@ dependencies = [
 
 [[package]]
 name = "fs4"
-version = "0.12.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c29c30684418547d476f0b48e84f4821639119c483b1eccd566c8cd0cd05f521"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
 dependencies = [
- "rustix 0.38.41",
- "windows-sys 0.52.0",
+ "rustix 1.0.3",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7586,9 +7590,9 @@ dependencies = [
 
 [[package]]
 name = "mixtrics"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff4d2b55cea00ffba84e3df1e875d9190331e2f3bba2ee3bdd3abcc739639a71"
+checksum = "285f6f175bfc4a068c0aa66d1fc48b6f4af0193d9577f8a86fa3a80014be9321"
 dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.1",
@@ -9790,7 +9794,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.1",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
