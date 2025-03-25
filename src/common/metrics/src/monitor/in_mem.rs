@@ -21,15 +21,17 @@ use std::sync::atomic::AtomicU64;
 
 use parking_lot::RwLock;
 
+use crate::MetricLevel;
+
 pub type Count = Arc<AtomicU64>;
 
 #[derive(Clone)]
 pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
 
 impl CountMap {
-    pub fn new() -> Self {
+    pub fn new(metric_level: MetricLevel) -> Self {
         let inner = Arc::new(RwLock::new(HashMap::new()));
-        {
+        if metric_level != MetricLevel::Disabled {
             let inner = inner.clone();
             tokio::spawn(async move {
                 loop {

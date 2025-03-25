@@ -221,8 +221,8 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let stream_node_output_row_count = CountMap::new();
-        let stream_node_output_blocking_duration_ms = CountMap::new();
+        let stream_node_output_row_count = CountMap::new(level);
+        let stream_node_output_blocking_duration_ms = CountMap::new(level);
 
         let source_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
