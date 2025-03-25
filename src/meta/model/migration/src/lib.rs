@@ -35,8 +35,8 @@ mod m20241226_074013_clean_watermark_index_in_pk;
 mod m20250106_072104_fragment_relation;
 mod m20250121_085800_change_wasm_udf_identifier;
 mod m20250210_170743_function_options;
-mod m20250303_081439_exactly_once_iceberg_sink_metadata;
 mod m20250319_062702_mysql_utf8mb4;
+mod m20250325_061743_exactly_once_iceberg_sink_metadata;
 mod utils;
 
 pub struct Migrator;
@@ -110,8 +110,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250106_072104_fragment_relation::Migration),
             Box::new(m20250121_085800_change_wasm_udf_identifier::Migration),
             Box::new(m20250210_170743_function_options::Migration),
-            Box::new(m20250303_081439_exactly_once_iceberg_sink_metadata::Migration),
             Box::new(m20250319_062702_mysql_utf8mb4::Migration),
+            Box::new(m20250325_061743_exactly_once_iceberg_sink_metadata::Migration),
         ]
     }
 }

@@ -1717,7 +1717,7 @@ impl IcebergSinkCommitter {
         match exactly_once_iceberg_sink::Entity::insert(m).exec(&db).await {
             Ok(_) => Ok(()),
             Err(e) => {
-                tracing::error!("Error inserting into system table: {:?}", e);
+                tracing::error!("Error inserting into system table: {:?}", e.as_report());
                 Err(e.into())
             }
         }
@@ -1749,7 +1749,7 @@ impl IcebergSinkCommitter {
             Err(e) => {
                 tracing::error!(
                     "Error marking item to committed from iceberg exactly once system table: {:?}",
-                    e
+                    e.as_report()
                 );
                 Err(e.into())
             }
@@ -1791,7 +1791,7 @@ impl IcebergSinkCommitter {
                 tracing::error!(
                     "Sink id = {}: error deleting from iceberg exactly once system table: {:?}",
                     sink_id,
-                    e
+                    e.as_report()
                 );
                 Err(e.into())
             }
@@ -1812,7 +1812,7 @@ impl IcebergSinkCommitter {
             Err(e) => {
                 tracing::error!(
                     "Error querying pre-commit metadata from system table: {:?}",
-                    e
+                    e.as_report()
                 );
                 Err(e.into())
             }
