@@ -182,18 +182,13 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
 
-    pub sync_kv_log_store_total_read_count: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_total_read_size: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_buffer_read_size: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_buffer_read_count: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec<5>,
+    pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec<5>,
     pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_unclean_state: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_clean_state: LabelGuardedIntCounterVec<4>,
+    pub sync_kv_log_store_state: LabelGuardedIntCounterVec<5>,
     pub sync_kv_log_store_wait_next_poll_ns: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
     pub sync_kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_storage_read_count: LabelGuardedIntCounterVec<5>,
-    pub sync_kv_log_store_storage_read_size: LabelGuardedIntCounterVec<5>,
     pub sync_kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<4>,
     pub sync_kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
     pub sync_kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
@@ -897,34 +892,18 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let sync_kv_log_store_total_read_count = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_total_read_count",
-            "Total read row count throughput of sync_kv log store",
-            &["actor_id", "target", "fragment_id", "relation"],
+        let sync_kv_log_store_read_count = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_read_count",
+            "read row count throughput of sync_kv log store",
+            &["type", "actor_id", "target", "fragment_id", "relation"],
             registry
         )
         .unwrap();
 
-        let sync_kv_log_store_total_read_size = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_total_read_size",
-            "Total read size throughput of sync_kv log store",
-            &["actor_id", "target", "fragment_id", "relation"],
-            registry
-        )
-        .unwrap();
-
-        let sync_kv_log_store_buffer_read_size = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_buffer_read_size",
-            "Read size throughput of sync_kv log store buffer",
-            &["actor_id", "target", "fragment_id", "relation"],
-            registry
-        )
-        .unwrap();
-
-        let sync_kv_log_store_buffer_read_count = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_buffer_read_count",
-            "Read row count throughput of sync_kv log store buffer",
-            &["actor_id", "target", "fragment_id", "relation"],
+        let sync_kv_log_store_read_size = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_read_size",
+            "read size throughput of sync_kv log store",
+            &["type", "actor_id", "target", "fragment_id", "relation"],
             registry
         )
         .unwrap();
@@ -938,18 +917,10 @@ impl StreamingMetrics {
             )
             .unwrap();
 
-        let sync_kv_log_store_unclean_state = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_unclean_state",
-            "clean->unclean state transition for sync_kv log store",
-            &["actor_id", "target", "fragment_id", "relation"],
-            registry
-        )
-        .unwrap();
-
-        let sync_kv_log_store_clean_state = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_clean_state",
-            "unclean->clean state transition for sync_kv log store",
-            &["actor_id", "target", "fragment_id", "relation"],
+        let sync_kv_log_store_state = register_guarded_int_counter_vec_with_registry!(
+            "sync_kv_log_store_state",
+            "clean/unclean state transition for sync_kv log store",
+            &["state", "actor_id", "target", "fragment_id", "relation"],
             registry
         )
         .unwrap();
@@ -967,22 +938,6 @@ impl StreamingMetrics {
             "sync_kv_log_store_storage_write_size",
             "Write size throughput of sync_kv log store",
             &["actor_id", "target", "fragment_id", "relation"],
-            registry
-        )
-        .unwrap();
-
-        let sync_kv_log_store_storage_read_count = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_storage_read_count",
-            "Write row count throughput of sync_kv log store",
-            &["actor_id", "target", "fragment_id", "relation", "read_type"],
-            registry
-        )
-        .unwrap();
-
-        let sync_kv_log_store_storage_read_size = register_guarded_int_counter_vec_with_registry!(
-            "sync_kv_log_store_storage_read_size",
-            "Write size throughput of sync_kv log store",
-            &["actor_id", "target", "fragment_id", "relation", "read_type"],
             registry
         )
         .unwrap();
@@ -1312,18 +1267,13 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
-            sync_kv_log_store_total_read_count,
-            sync_kv_log_store_total_read_size,
-            sync_kv_log_store_buffer_read_size,
-            sync_kv_log_store_buffer_read_count,
+            sync_kv_log_store_read_count,
+            sync_kv_log_store_read_size,
             sync_kv_log_store_write_pause_duration_ns,
-            sync_kv_log_store_unclean_state,
-            sync_kv_log_store_clean_state,
+            sync_kv_log_store_state,
             sync_kv_log_store_wait_next_poll_ns,
             sync_kv_log_store_storage_write_count,
             sync_kv_log_store_storage_write_size,
-            sync_kv_log_store_storage_read_count,
-            sync_kv_log_store_storage_read_size,
             sync_kv_log_store_buffer_unconsumed_item_count,
             sync_kv_log_store_buffer_unconsumed_row_count,
             sync_kv_log_store_buffer_unconsumed_epoch_count,

@@ -111,8 +111,8 @@ pub mod metrics {
     #[derive(Clone)]
     pub struct SyncedKvLogStoreMetrics {
         // state of the log store
-        pub unclean_state: LabelGuardedIntCounter<4>,
-        pub clean_state: LabelGuardedIntCounter<4>,
+        pub unclean_state: LabelGuardedIntCounter<5>,
+        pub clean_state: LabelGuardedIntCounter<5>,
         pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
 
         // Write metrics
@@ -125,12 +125,12 @@ pub mod metrics {
         pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
         pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
         pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
-        pub buffer_read_count: LabelGuardedIntCounter<4>,
-        pub buffer_read_size: LabelGuardedIntCounter<4>,
+        pub buffer_read_count: LabelGuardedIntCounter<5>,
+        pub buffer_read_size: LabelGuardedIntCounter<5>,
 
         // Read metrics
-        pub total_read_count: LabelGuardedIntCounter<4>,
-        pub total_read_size: LabelGuardedIntCounter<4>,
+        pub total_read_count: LabelGuardedIntCounter<5>,
+        pub total_read_size: LabelGuardedIntCounter<5>,
         pub persistent_log_read_metrics: KvLogStoreReadMetrics,
         pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
     }
@@ -153,12 +153,20 @@ pub mod metrics {
             let id_str = id.to_string();
             let labels = &[&actor_id_str, target, &id_str, name];
 
-            let unclean_state = metrics
-                .sync_kv_log_store_unclean_state
-                .with_guarded_label_values(labels);
-            let clean_state = metrics
-                .sync_kv_log_store_clean_state
-                .with_guarded_label_values(labels);
+            let unclean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
+                "dirty",
+                &actor_id_str,
+                target,
+                &id_str,
+                name,
+            ]);
+            let clean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
+                "clean",
+                &actor_id_str,
+                target,
+                &id_str,
+                name,
+            ]);
             let wait_next_poll_ns = metrics
                 .sync_kv_log_store_wait_next_poll_ns
                 .with_guarded_label_values(labels);
@@ -186,60 +194,62 @@ pub mod metrics {
                 .sync_kv_log_store_buffer_unconsumed_min_epoch
                 .with_guarded_label_values(labels);
             let buffer_read_count = metrics
-                .sync_kv_log_store_buffer_read_count
-                .with_guarded_label_values(labels);
+                .sync_kv_log_store_read_count
+                .with_guarded_label_values(&["buffer", &actor_id_str, target, &id_str, name]);
 
             let buffer_read_size = metrics
-                .sync_kv_log_store_buffer_read_size
-                .with_guarded_label_values(labels);
+                .sync_kv_log_store_read_size
+                .with_guarded_label_values(&["buffer", &actor_id_str, target, &id_str, name]);
 
             let total_read_count = metrics
-                .sync_kv_log_store_total_read_count
-                .with_guarded_label_values(labels);
+                .sync_kv_log_store_read_count
+                .with_guarded_label_values(&["total", &actor_id_str, target, &id_str, name]);
 
             let total_read_size = metrics
-                .sync_kv_log_store_total_read_size
-                .with_guarded_label_values(labels);
+                .sync_kv_log_store_read_size
+                .with_guarded_label_values(&["total", &actor_id_str, target, &id_str, name]);
 
             const READ_PERSISTENT_LOG: &str = "persistent_log";
             const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
 
             let persistent_log_read_size = metrics
-                .sync_kv_log_store_storage_read_size
+                .sync_kv_log_store_read_size
                 .with_guarded_label_values(&[
+                    READ_PERSISTENT_LOG,
                     &actor_id_str,
                     target,
                     &id_str,
                     name,
-                    READ_PERSISTENT_LOG,
                 ]);
+
             let persistent_log_read_count = metrics
-                .sync_kv_log_store_storage_read_count
+                .sync_kv_log_store_read_count
                 .with_guarded_label_values(&[
+                    READ_PERSISTENT_LOG,
                     &actor_id_str,
                     target,
                     &id_str,
                     name,
-                    READ_PERSISTENT_LOG,
                 ]);
 
             let flushed_buffer_read_size = metrics
-                .sync_kv_log_store_storage_read_size
+                .sync_kv_log_store_read_size
                 .with_guarded_label_values(&[
+                    READ_FLUSHED_BUFFER,
                     &actor_id_str,
                     target,
                     &id_str,
                     name,
-                    READ_FLUSHED_BUFFER,
                 ]);
+
             let flushed_buffer_read_count = metrics
-                .sync_kv_log_store_storage_read_count
+                .sync_kv_log_store_read_count
                 .with_guarded_label_values(&[
+                    READ_FLUSHED_BUFFER,
                     &actor_id_str,
                     target,
                     &id_str,
                     name,
-                    READ_FLUSHED_BUFFER,
                 ]);
 
             Self {
@@ -533,7 +543,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
             let mut clean_state = log_store_stream.peek().await.is_none();
-
 
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
