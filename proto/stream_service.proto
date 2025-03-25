@@ -52,7 +52,7 @@ message BarrierCompleteResponse {
     uint64 consumed_epoch = 3;
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
-    uint32 pending_barrier_num = 5;
+    uint64 pending_epoch_lag = 5;
   }
   string request_id = 1;
   common.Status status = 2;
@@ -88,6 +88,7 @@ message StreamingControlStreamRequest {
 
   message InitRequest {
     repeated DatabaseInitialPartialGraph databases = 1;
+    string term_id = 2;
   }
 
   message CreatePartialGraphRequest {

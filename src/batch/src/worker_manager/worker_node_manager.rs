@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
@@ -89,14 +89,14 @@ impl WorkerNodeManager {
     fn list_serving_worker_nodes(&self) -> Vec<WorkerNode> {
         self.list_worker_nodes()
             .into_iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+            .filter(|w| w.property.as_ref().is_some_and(|p| p.is_serving))
             .collect()
     }
 
     fn list_streaming_worker_nodes(&self) -> Vec<WorkerNode> {
         self.list_worker_nodes()
             .into_iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
+            .filter(|w| w.property.as_ref().is_some_and(|p| p.is_streaming))
             .collect()
     }
 
@@ -387,7 +387,7 @@ impl WorkerNodeSelector {
             self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .ok_or_else(|| BatchError::EmptyWorkerNodes)
             .map(|w| (*w).clone())
     }

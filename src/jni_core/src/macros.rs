@@ -403,7 +403,7 @@ macro_rules! for_all_plain_native_methods {
     ($macro:path $(,$args:tt)*) => {
         $macro! {
             {
-                public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
+                public static native void tracingSlf4jEvent(String threadName, String name, int level, String message, String stackTrace);
 
                 public static native boolean tracingSlf4jEventEnabled(int level);
 
@@ -864,7 +864,7 @@ mod tests {
         // This test shows the signature of all native methods
         let expected = expect_test::expect![[r#"
             [
-                tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
+                tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
                 defaultVnodeCount                        ()I,
                 iteratorNewStreamChunk                   (J)J,

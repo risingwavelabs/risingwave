@@ -14,6 +14,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::str::Utf8Error;
@@ -39,12 +40,13 @@ use tokio_openssl::SslStream;
 use tracing::Instrument;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::memory_manager::{MessageMemoryGuard, MessageMemoryManagerRef};
 use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
-    FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
-    FePasswordMessage, FeStartupMessage, TransactionStatus,
+    FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeMessageHeader,
+    FeParseMessage, FePasswordMessage, FeStartupMessage, ServerThrottleReason, TransactionStatus,
 };
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
@@ -105,6 +107,7 @@ where
     peer_addr: AddressRef,
 
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    message_memory_manager: MessageMemoryManagerRef,
 }
 
 /// Configures TLS encryption for connections.
@@ -160,7 +163,9 @@ fn record_sql_in_span(
     sql: &str,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 ) -> String {
-    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
+    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords
+        && !keywords.is_empty()
+    {
         redact_sql(sql, keywords)
     } else {
         sql.to_owned()
@@ -181,6 +186,13 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
     }
 }
 
+#[derive(Clone)]
+pub struct ConnectionContext {
+    pub tls_config: Option<TlsConfig>,
+    pub redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    pub message_memory_manager: MessageMemoryManagerRef,
+}
+
 impl<S, SM> PgProtocol<S, SM>
 where
     S: PgByteStream,
@@ -189,10 +201,14 @@ where
     pub fn new(
         stream: S,
         session_mgr: Arc<SM>,
-        tls_config: Option<TlsConfig>,
         peer_addr: AddressRef,
-        redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+        context: ConnectionContext,
     ) -> Self {
+        let ConnectionContext {
+            tls_config,
+            redact_sql_option_keywords,
+            message_memory_manager,
+        } = context;
         Self {
             stream: PgStream::new(stream),
             is_terminate: false,
@@ -211,6 +227,7 @@ where
             ignore_util_sync: false,
             peer_addr,
             redact_sql_option_keywords,
+            message_memory_manager,
         }
     }
 
@@ -236,7 +253,7 @@ where
 
             // Read and process messages.
             let process = std::pin::pin!(async {
-                let msg = match self.read_message().await {
+                let (msg, _memory_guard) = match self.read_message().await {
                     Ok(msg) => msg,
                     Err(e) => {
                         tracing::error!(error = %e.as_report(), "error when reading message");
@@ -408,7 +425,7 @@ where
                         return None;
                     }
 
-                    PsqlError::SimpleQueryError(_) => {
+                    PsqlError::SimpleQueryError(_) | PsqlError::ServerThrottle(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .ok()?;
@@ -506,15 +523,44 @@ where
                 }
             }
             FeMessage::HealthCheck => self.process_health_check(),
+            FeMessage::ServerThrottle(reason) => match reason {
+                ServerThrottleReason::TooLargeMessage => {
+                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!("max_single_query_size_bytes {} has been exceeded, please either reduce the query size or increase the limit", self.message_memory_manager.max_filter_bytes).into()));
+                }
+                ServerThrottleReason::TooManyMemoryUsage => {
+                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!("max_total_query_size_bytes {} has been exceeded, please either retry or increase the limit", self.message_memory_manager.max_running_bytes).into()));
+                }
+            },
         }
         self.stream.flush().await?;
         Ok(())
     }
 
-    pub async fn read_message(&mut self) -> io::Result<FeMessage> {
+    pub async fn read_message(&mut self) -> io::Result<(FeMessage, Option<MessageMemoryGuard>)> {
         match self.state {
-            PgProtocolState::Startup => self.stream.read_startup().await,
-            PgProtocolState::Regular => self.stream.read().await,
+            PgProtocolState::Startup => self
+                .stream
+                .read_startup()
+                .await
+                .map(|message: FeMessage| (message, None)),
+            PgProtocolState::Regular => {
+                self.stream.read_header().await?;
+                let guard = if let Some(ref header) = self.stream.read_header {
+                    let payload_len = std::cmp::max(header.payload_len, 0) as u64;
+                    let (reason, guard) = self.message_memory_manager.add(payload_len);
+                    if let Some(reason) = reason {
+                        // Release the memory ASAP.
+                        drop(guard);
+                        self.stream.skip_body().await?;
+                        return Ok((FeMessage::ServerThrottle(reason), None));
+                    }
+                    guard
+                } else {
+                    None
+                };
+                let message = self.stream.read_body().await?;
+                Ok((message, guard))
+            }
         }
     }
 
@@ -1067,6 +1113,7 @@ pub struct PgStream<S> {
     stream: Arc<Mutex<PgStreamInner<S>>>,
     /// Write into buffer before flush to stream.
     write_buf: BytesMut,
+    read_header: Option<FeMessageHeader>,
 }
 
 impl<S> PgStream<S> {
@@ -1077,6 +1124,7 @@ impl<S> PgStream<S> {
         Self {
             stream: Arc::new(Mutex::new(PgStreamInner::Unencrypted(stream))),
             write_buf: BytesMut::with_capacity(DEFAULT_WRITE_BUF_CAPACITY),
+            read_header: None,
         }
     }
 }
@@ -1086,6 +1134,7 @@ impl<S> Clone for PgStream<S> {
         Self {
             stream: Arc::clone(&self.stream),
             write_buf: BytesMut::with_capacity(self.write_buf.capacity()),
+            read_header: self.read_header.clone(),
         }
     }
 }
@@ -1124,12 +1173,44 @@ where
         }
     }
 
-    async fn read(&mut self) -> io::Result<FeMessage> {
+    async fn read_header(&mut self) -> io::Result<()> {
         let mut stream = self.stream.lock().await;
         match &mut *stream {
             PgStreamInner::Placeholder => unreachable!(),
-            PgStreamInner::Unencrypted(stream) => FeMessage::read(stream).await,
-            PgStreamInner::Ssl(ssl_stream) => FeMessage::read(ssl_stream).await,
+            PgStreamInner::Unencrypted(stream) => {
+                self.read_header = Some(FeMessage::read_header(stream).await?);
+                Ok(())
+            }
+            PgStreamInner::Ssl(ssl_stream) => {
+                self.read_header = Some(FeMessage::read_header(ssl_stream).await?);
+                Ok(())
+            }
+        }
+    }
+
+    async fn read_body(&mut self) -> io::Result<FeMessage> {
+        let mut stream = self.stream.lock().await;
+        let header = self
+            .read_header
+            .take()
+            .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidInput, "header not found"))?;
+        match &mut *stream {
+            PgStreamInner::Placeholder => unreachable!(),
+            PgStreamInner::Unencrypted(stream) => FeMessage::read_body(stream, header).await,
+            PgStreamInner::Ssl(ssl_stream) => FeMessage::read_body(ssl_stream, header).await,
+        }
+    }
+
+    async fn skip_body(&mut self) -> io::Result<()> {
+        let mut stream = self.stream.lock().await;
+        let header = self
+            .read_header
+            .take()
+            .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidInput, "header not found"))?;
+        match &mut *stream {
+            PgStreamInner::Placeholder => unreachable!(),
+            PgStreamInner::Unencrypted(stream) => FeMessage::skip_body(stream, header).await,
+            PgStreamInner::Ssl(ssl_stream) => FeMessage::skip_body(ssl_stream, header).await,
         }
     }
 
@@ -1323,7 +1404,7 @@ mod tests {
         ";
         assert_eq!(
             redact_sql(sql, keywords),
-            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
+            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = '[REDACTED]', v3 = false, v4 = '[REDACTED]') FORMAT PLAIN ENCODE JSON (a = '1', b = '[REDACTED]')"
         );
     }
 }

@@ -58,7 +58,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror_ext::AsReport;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -1187,21 +1187,23 @@ impl DdlController {
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
                 let version = self.stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx)
+                    .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
                 let ctrl = self.clone();
+                let (tx, rx) = oneshot::channel();
                 let fut = async move {
                     let _ = ctrl
                         .stream_manager
-                        .create_streaming_job(stream_job_fragments, ctx)
+                        .create_streaming_job(stream_job_fragments, ctx, Some(tx))
                         .await.inspect_err(|err| {
                         tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                     });
                 };
                 tokio::spawn(fut);
+                rx.await.map_err(|_| anyhow!("failed to receive create streaming job result of job: {}", stream_job_id))??;
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
@@ -1908,9 +1910,10 @@ impl DdlController {
         if let Some(mapping) = &col_index_mapping {
             for (d, _f) in &mut downstream_fragments {
                 *d = mapping.rewrite_dispatch_strategy(d).ok_or_else(|| {
-                    // The `rewrite` only fails if some column is dropped.
+                    // The `rewrite` only fails if some column is dropped (missing) or altered (type changed).
+                    // TODO: support altering referenced columns
                     MetaError::invalid_parameter(
-                        "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                        "unable to drop or alter the column due to being referenced by downstream materialized views or sinks",
                     )
                 })?;
             }

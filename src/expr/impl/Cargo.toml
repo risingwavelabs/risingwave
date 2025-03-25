@@ -13,7 +13,7 @@ repository = { workspace = true }
 ignored = ["chrono-tz", "futures-async-stream"]
 
 [features]
-external-udf = ["arrow-udf-flight", "arrow-flight", "tonic", "ginepro"]
+external-udf = ["arrow-udf-flight", "tonic", "ginepro"]
 js-udf = ["arrow-udf-js"]
 python-udf = ["arrow-udf-python"]
 wasm-udf = ["arrow-udf-wasm", "zstd"]
@@ -21,7 +21,6 @@ wasm-udf = ["arrow-udf-wasm", "zstd"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-flight = { workspace = true, optional = true }
 arrow-udf-flight = { workspace = true, optional = true }
 arrow-udf-js = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }

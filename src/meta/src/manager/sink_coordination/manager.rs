@@ -454,7 +454,7 @@ mod tests {
         let epoch2 = 234;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -771,7 +771,7 @@ mod tests {
         let epoch = 233;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -862,7 +862,7 @@ mod tests {
         let epoch = 233;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
@@ -971,7 +971,7 @@ mod tests {
         let epoch4 = 236;
 
         let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        all_vnode.shuffle(&mut rand::thread_rng());
+        all_vnode.shuffle(&mut rand::rng());
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);

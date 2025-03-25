@@ -192,7 +192,6 @@ impl PlanTreeNodeUnary for LogicalTopN {
         core.into()
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

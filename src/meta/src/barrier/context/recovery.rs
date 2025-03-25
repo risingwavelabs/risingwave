@@ -727,47 +727,68 @@ impl GlobalBarrierWorkerContextImpl {
             reschedule_targets
         );
 
-        let plan = self
-            .scale_controller
-            .generate_job_reschedule_plan(JobReschedulePolicy {
-                targets: reschedule_targets,
-            })
-            .await?;
+        let reschedule_targets = reschedule_targets.into_iter().collect_vec();
 
-        let mut compared_table_parallelisms = table_parallelisms.clone();
-
-        // skip reschedule if no reschedule is generated.
-        let reschedule_fragment = if plan.reschedules.is_empty() {
-            HashMap::new()
-        } else {
-            self.scale_controller
-                .analyze_reschedule_plan(
-                    plan.reschedules,
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream: true,
-                        skip_create_new_actors: true,
-                    },
-                    &mut compared_table_parallelisms,
-                )
-                .await?
-        };
-
-        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
-
-        info!("post applying reschedule for offline scaling");
-
-        if let Err(e) = self
-            .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
-            .await
+        for chunk in reschedule_targets
+            .chunks(self.env.opts.parallelism_control_batch_size.max(1))
+            .map(|c| c.to_vec())
         {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to apply reschedule for offline scaling in recovery",
-            );
+            let local_reschedule_targets: HashMap<u32, _> = chunk.into_iter().collect();
 
-            return Err(e);
+            let reschedule_ids = local_reschedule_targets.keys().copied().collect_vec();
+
+            info!(jobs=?reschedule_ids,"generating reschedule plan for jobs in offline scaling");
+
+            let plan = self
+                .scale_controller
+                .generate_job_reschedule_plan(JobReschedulePolicy {
+                    targets: local_reschedule_targets,
+                })
+                .await?;
+
+            // no need to update
+            if plan.reschedules.is_empty() && plan.post_updates.parallelism_updates.is_empty() {
+                info!(jobs=?reschedule_ids,"no plan generated for jobs in offline scaling");
+                continue;
+            };
+
+            let mut compared_table_parallelisms = table_parallelisms.clone();
+
+            // skip reschedule if no reschedule is generated.
+            let reschedule_fragment = if plan.reschedules.is_empty() {
+                HashMap::new()
+            } else {
+                self.scale_controller
+                    .analyze_reschedule_plan(
+                        plan.reschedules,
+                        RescheduleOptions {
+                            resolve_no_shuffle_upstream: true,
+                            skip_create_new_actors: true,
+                        },
+                        &mut compared_table_parallelisms,
+                    )
+                    .await?
+            };
+
+            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+
+            info!(jobs=?reschedule_ids,"post applying reschedule for jobs in offline scaling");
+
+            if let Err(e) = self
+                .scale_controller
+                .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
+                .await
+            {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to apply reschedule for offline scaling in recovery",
+                );
+
+                return Err(e);
+            }
+
+            info!(jobs=?reschedule_ids,"post applied reschedule for jobs in offline scaling");
         }
 
         info!("scaling actors succeed.");

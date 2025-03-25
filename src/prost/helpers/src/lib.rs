@@ -75,7 +75,7 @@ fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
 pub fn version(input: TokenStream) -> TokenStream {
     fn version_inner(ast: &DeriveInput) -> syn::Result<TokenStream2> {
         let last_variant = match &ast.data {
-            Data::Enum(v) => v.variants.iter().last().ok_or_else(|| {
+            Data::Enum(v) => v.variants.iter().next_back().ok_or_else(|| {
                 syn::Error::new(
                     Span::call_site(),
                     "This macro requires at least one variant in the enum.",

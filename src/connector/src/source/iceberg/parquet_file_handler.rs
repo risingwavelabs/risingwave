@@ -34,10 +34,8 @@ use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, parquet_to_arrow_schema};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::arrow::arrow_schema_udf::{DataType as ArrowDateType, IntervalUnit};
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::types::DataType as RwDataType;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -257,7 +255,7 @@ pub fn get_project_mask(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
+                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_iceberg::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
                             let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
                             if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
                                 Some(pos)
@@ -285,6 +283,12 @@ pub async fn read_parquet_file(
     parser_columns: Option<Vec<SourceColumnDesc>>,
     batch_size: usize,
     offset: usize,
+    file_source_input_row_count_metrics: Option<
+        risingwave_common::metrics::LabelGuardedMetric<
+            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+            4,
+        >,
+    >,
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
 > {
@@ -333,14 +337,17 @@ pub async fn read_parquet_file(
     let parquet_parser = ParquetParser::new(columns, file_name, offset)?;
     let msg_stream: Pin<
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
-    > = parquet_parser.into_stream(record_batch_stream);
+    > = parquet_parser.into_stream(
+        record_batch_stream,
+        file_source_input_row_count_metrics.clone(),
+    );
     Ok(msg_stream)
 }
 
 pub async fn get_parquet_fields(
     op: Operator,
     file_name: String,
-) -> ConnectorResult<risingwave_common::array::arrow::arrow_schema_udf::Fields> {
+) -> ConnectorResult<risingwave_common::array::arrow::arrow_schema_iceberg::Fields> {
     let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
         .reader_with(&file_name)
         .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
@@ -356,74 +363,7 @@ pub async fn get_parquet_fields(
         file_metadata.key_value_metadata(),
     )
     .map_err(anyhow::Error::from)?;
-    let fields: risingwave_common::array::arrow::arrow_schema_udf::Fields =
+    let fields: risingwave_common::array::arrow::arrow_schema_iceberg::Fields =
         converted_arrow_schema.fields;
     Ok(fields)
-}
-
-/// This function checks whether the schema of a Parquet file matches the user defined schema.
-/// It handles the following special cases:
-/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `TimeStamp` type.
-/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `TimeStamptz` type.
-/// - Since RisingWave does not have an `UInt` type:
-///   - Arrow's `UInt8` matches with RisingWave's `Int16`.
-///   - Arrow's `UInt16` matches with RisingWave's `Int32`.
-///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
-///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
-/// - Arrow's `Float16` matches with RisingWave's `Float32`.
-pub fn is_parquet_schema_match_source_schema(
-    arrow_data_type: &ArrowDateType,
-    rw_data_type: &RwDataType,
-) -> bool {
-    matches!(
-        (arrow_data_type, rw_data_type),
-        (ArrowDateType::Boolean, RwDataType::Boolean)
-            | (
-                ArrowDateType::Int8 | ArrowDateType::Int16 | ArrowDateType::UInt8,
-                RwDataType::Int16
-            )
-            | (
-                ArrowDateType::Int32 | ArrowDateType::UInt16,
-                RwDataType::Int32
-            )
-            | (
-                ArrowDateType::Int64 | ArrowDateType::UInt32,
-                RwDataType::Int64
-            )
-            | (
-                ArrowDateType::UInt64 | ArrowDateType::Decimal128(_, _),
-                RwDataType::Decimal
-            )
-            | (ArrowDateType::Decimal256(_, _), RwDataType::Int256)
-            | (
-                ArrowDateType::Float16 | ArrowDateType::Float32,
-                RwDataType::Float32
-            )
-            | (ArrowDateType::Float64, RwDataType::Float64)
-            | (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp)
-            | (
-                ArrowDateType::Timestamp(_, Some(_)),
-                RwDataType::Timestamptz
-            )
-            | (ArrowDateType::Date32, RwDataType::Date)
-            | (
-                ArrowDateType::Time32(_) | ArrowDateType::Time64(_),
-                RwDataType::Time
-            )
-            | (
-                ArrowDateType::Interval(IntervalUnit::MonthDayNano),
-                RwDataType::Interval
-            )
-            | (
-                ArrowDateType::Utf8 | ArrowDateType::LargeUtf8,
-                RwDataType::Varchar
-            )
-            | (
-                ArrowDateType::Binary | ArrowDateType::LargeBinary,
-                RwDataType::Bytea
-            )
-            | (ArrowDateType::List(_), RwDataType::List(_))
-            | (ArrowDateType::Struct(_), RwDataType::Struct(_))
-            | (ArrowDateType::Map(_, _), RwDataType::Map(_))
-    )
 }

@@ -519,13 +519,18 @@ impl ManagedBarrierState {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
+        term_id: String,
     ) -> Self {
         let mut databases = HashMap::new();
         let mut current_shared_context = HashMap::new();
         for database in initial_partial_graphs {
             let database_id = DatabaseId::new(database.database_id);
             assert!(!databases.contains_key(&database_id));
-            let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env));
+            let shared_context = Arc::new(SharedContext::new(
+                database_id,
+                &actor_manager.env,
+                term_id.clone(),
+            ));
             shared_context.add_actors(
                 database
                     .graphs

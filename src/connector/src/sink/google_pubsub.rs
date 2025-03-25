@@ -283,7 +283,7 @@ impl AsyncTruncateSinkWriter for GooglePubSubSinkWriter {
     }
 }
 
-impl<'w> GooglePubSubPayloadWriter<'w> {
+impl GooglePubSubPayloadWriter<'_> {
     pub async fn finish(&mut self) -> Result<()> {
         let message_vec = std::mem::take(&mut self.message_vec);
         let awaiters = self.publisher.publish_bulk(message_vec).await;
@@ -294,7 +294,7 @@ impl<'w> GooglePubSubPayloadWriter<'w> {
     }
 }
 
-impl<'w> FormattedSink for GooglePubSubPayloadWriter<'w> {
+impl FormattedSink for GooglePubSubPayloadWriter<'_> {
     type K = String;
     type V = Vec<u8>;
 

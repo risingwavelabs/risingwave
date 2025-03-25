@@ -22,6 +22,7 @@ use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
+use crate::session::SessionImpl;
 
 pub async fn handle_alter_streaming_rate_limit(
     handler_args: HandlerArgs,
@@ -107,7 +108,16 @@ pub async fn handle_alter_streaming_rate_limit(
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };
+    handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type).await
+}
 
+pub async fn handle_alter_streaming_rate_limit_by_id(
+    session: &SessionImpl,
+    kind: PbThrottleTarget,
+    id: u32,
+    rate_limit: i32,
+    stmt_type: StatementType,
+) -> Result<RwPgResponse> {
     let meta_client = session.env().meta_client();
 
     let rate_limit = if rate_limit < 0 {

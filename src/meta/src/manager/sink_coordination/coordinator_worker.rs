@@ -98,7 +98,7 @@ impl EpochCommitRequests {
     }
 
     fn can_commit(&self) -> bool {
-        self.committed_bitmap.as_ref().map_or(false, |b| b.all())
+        self.committed_bitmap.as_ref().is_some_and(|b| b.all())
     }
 }
 
@@ -107,6 +107,7 @@ struct CoordinationHandleManager {
     writer_handles: HashMap<usize, SinkWriterCoordinationHandle>,
     next_handle_id: usize,
     request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+    initial_log_store_rewind_start_epoch: Option<u64>,
 }
 
 impl CoordinationHandleManager {
@@ -167,10 +168,7 @@ impl CoordinationHandleManager {
         .await
     }
 
-    async fn next_commit_request(
-        &mut self,
-        log_store_rewind_start_epoch: Option<u64>,
-    ) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
+    async fn next_commit_request(&mut self) -> anyhow::Result<(usize, Bitmap, u64, SinkMetadata)> {
         loop {
             select! {
                 handle = self.request_rx.recv() => {
@@ -178,7 +176,7 @@ impl CoordinationHandleManager {
                     if handle.param() != &self.param {
                         warn!(prev_param = ?self.param, new_param = ?handle.param(), "sink param mismatch");
                     }
-                    handle.start(log_store_rewind_start_epoch)?;
+                    handle.start(self.initial_log_store_rewind_start_epoch)?;
                     let handle_id = self.next_handle_id;
                     self.next_handle_id += 1;
                     self.writer_handles.insert(handle_id, handle);
@@ -243,6 +241,7 @@ impl CoordinatorWorker {
                 writer_handles: HashMap::new(),
                 next_handle_id: 0,
                 request_rx,
+                initial_log_store_rewind_start_epoch: None,
             },
             pending_epochs: Default::default(),
         };
@@ -262,12 +261,10 @@ impl CoordinatorWorker {
         mut coordinator: impl SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) -> anyhow::Result<()> {
-        let log_store_rewind_start_epoch = coordinator.init().await?;
+        self.handle_manager.initial_log_store_rewind_start_epoch = coordinator.init().await?;
         loop {
-            let (handle_id, vnode_bitmap, epoch, metadata) = self
-                .handle_manager
-                .next_commit_request(log_store_rewind_start_epoch)
-                .await?;
+            let (handle_id, vnode_bitmap, epoch, metadata) =
+                self.handle_manager.next_commit_request().await?;
             self.pending_epochs
                 .entry(epoch)
                 .or_insert_with(|| EpochCommitRequests::new(epoch))

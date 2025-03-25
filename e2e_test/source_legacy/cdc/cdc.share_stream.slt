@@ -173,6 +173,19 @@ create table orders_test (
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
 
+# invalid not null
+statement error CDC table with NOT NULL constraint is not supported
+create table orders_test (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int NOT NULL,
+   order_status smallint NOT NULL,
+   next_order_id int as order_id + 1,
+   PRIMARY KEY (order_id)
+) from mysql_mytest table 'mytest.orders';
+
 statement ok
 create table orders_test (
    order_id int,

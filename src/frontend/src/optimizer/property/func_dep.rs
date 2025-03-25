@@ -354,9 +354,9 @@ impl FunctionalDependencySet {
     ///    column of the order key form a functional dependency,
     ///    we can prune that column.
     /// 3. This function has O(dn) complexity, where:
-    ///    i.  `d` is the number of functional dependencies,
-    ///        because each iteration in the loop calls `Self::is_determined_by`.
-    ///    ii. `n` is the number of columns.
+    ///    1. `d` is the number of functional dependencies,
+    ///       because each iteration in the loop calls `Self::is_determined_by`.
+    ///    2. `n` is the number of columns.
     fn minimize_order_key_bitset(&self, order_key: Vec<usize>) -> FixedBitSet {
         if order_key.is_empty() {
             return FixedBitSet::new();

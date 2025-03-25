@@ -15,7 +15,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(coroutines)]
-#![feature(hash_extract_if)]
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]

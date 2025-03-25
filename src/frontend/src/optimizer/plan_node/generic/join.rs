@@ -517,7 +517,7 @@ pub fn push_down_into_join(
             // Do not push now on to the on, it will be pulled up into a filter instead.
             let on = Condition {
                 conjunctions: conjunctions
-                    .extract_if(|expr| expr.count_nows() == 0)
+                    .extract_if(.., |expr| expr.count_nows() == 0)
                     .collect(),
             };
             predicate.conjunctions = conjunctions;
@@ -567,7 +567,7 @@ fn push_down_to_inputs(
         Condition { conjunctions }.split(left_col_num, right_col_num)
     } else {
         let temporal_filter_cons = conjunctions
-            .extract_if(|e| e.count_nows() != 0)
+            .extract_if(.., |e| e.count_nows() != 0)
             .collect_vec();
         let (left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);

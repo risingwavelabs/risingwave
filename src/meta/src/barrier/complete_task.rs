@@ -131,16 +131,15 @@ impl CompleteBarrierTask {
                     .map(|finished_job| context.finish_creating_job(finished_job)),
             )
             .await?;
-            for (command_ctx, enqueue_time) in self
-                .epoch_infos
-                .into_values()
-                .flat_map(|(command_context, _)| command_context)
-            {
-                let duration_sec = enqueue_time.stop_and_record();
-                Self::report_complete_event(&env, duration_sec, &command_ctx);
-                GLOBAL_META_METRICS
-                    .last_committed_barrier_time
-                    .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
+            for (database_id, (command, _)) in self.epoch_infos {
+                if let Some((command_ctx, enqueue_time)) = command {
+                    let duration_sec = enqueue_time.stop_and_record();
+                    Self::report_complete_event(&env, duration_sec, &command_ctx);
+                    GLOBAL_META_METRICS
+                        .last_committed_barrier_time
+                        .with_label_values(&[database_id.database_id.to_string().as_str()])
+                        .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
+                }
             }
             version_stats
         };
@@ -179,7 +178,7 @@ pub(super) struct BarrierCompleteOutput {
 impl CompletingTask {
     pub(super) fn next_completed_barrier<'a>(
         &'a mut self,
-        scheduled_barriers: &mut PeriodicBarriers,
+        periodic_barriers: &mut PeriodicBarriers,
         checkpoint_control: &mut CheckpointControl,
         control_stream_manager: &mut ControlStreamManager,
         context: &Arc<impl GlobalBarrierWorkerContext>,
@@ -189,7 +188,7 @@ impl CompletingTask {
         // it has been collected.
         if let CompletingTask::None = self {
             if let Some(task) = checkpoint_control
-                .next_complete_barrier_task(Some((scheduled_barriers, control_stream_manager)))
+                .next_complete_barrier_task(Some((periodic_barriers, control_stream_manager)))
             {
                 {
                     let epochs_to_ack = task.epochs_to_ack();

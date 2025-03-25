@@ -70,6 +70,7 @@ impl From<PartialGraphId> for u32 {
 /// recovery.
 pub struct SharedContext {
     pub(crate) database_id: DatabaseId,
+    term_id: String,
 
     /// Stores the senders and receivers for later `Processor`'s usage.
     ///
@@ -117,15 +118,20 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(database_id: DatabaseId, env: &StreamEnvironment) -> Self {
+    pub fn new(database_id: DatabaseId, env: &StreamEnvironment, term_id: String) -> Self {
         Self {
             database_id,
+            term_id,
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: env.server_address().clone(),
             config: env.config().as_ref().to_owned(),
             compute_client_pool: env.client_pool(),
         }
+    }
+
+    pub fn term_id(&self) -> String {
+        self.term_id.clone()
     }
 
     #[cfg(test)]
@@ -137,6 +143,7 @@ impl SharedContext {
 
         Self {
             database_id: TEST_DATABASE_ID,
+            term_id: "for_test".into(),
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
@@ -226,16 +233,4 @@ impl SharedContext {
             }
         }
     }
-}
-
-/// Generate a globally unique executor id.
-pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
-    assert!(operator_id <= u32::MAX as u64);
-    ((actor_id as u64) << 32) + operator_id
-}
-
-/// Generate a globally unique operator id.
-pub fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
-    assert!(operator_id <= u32::MAX as u64);
-    ((fragment_id as u64) << 32) + operator_id
 }

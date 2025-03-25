@@ -619,7 +619,6 @@ pub mod test_utils {
     }
 
     impl IntervalTestExt for Interval {
-        #[must_use]
         fn from_ymd(year: i32, month: i32, days: i32) -> Self {
             let months = year * 12 + month;
             let usecs = 0;
@@ -630,7 +629,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_month(months: i32) -> Self {
             Interval {
                 months,
@@ -638,7 +636,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_days(days: i32) -> Self {
             Self {
                 days,
@@ -646,7 +643,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_millis(ms: i64) -> Self {
             Self {
                 usecs: ms * 1000,
@@ -654,7 +650,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_minutes(minutes: i64) -> Self {
             Self {
                 usecs: USECS_PER_SEC * 60 * minutes,

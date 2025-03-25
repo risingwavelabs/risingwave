@@ -917,6 +917,7 @@ mod tests {
                             additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::LATEST,
                             system_column: None,
+                            nullable: true,
                         },
                         is_hidden: false
                     },

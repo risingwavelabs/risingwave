@@ -29,6 +29,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
+use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
@@ -47,7 +48,6 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
-use super::{unique_executor_id, unique_operator_id};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
@@ -221,11 +221,13 @@ impl LocalStreamManager {
     pub async fn take_receiver(
         &self,
         database_id: DatabaseId,
+        term_id: String,
         ids: UpDownActorIds,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
                 database_id,
+                term_id,
                 ids,
                 result_sender,
             })
@@ -275,7 +277,11 @@ impl LocalBarrierWorker {
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();
-        *self = Self::new(self.actor_manager.clone(), init_request.databases);
+        *self = Self::new(
+            self.actor_manager.clone(),
+            init_request.databases,
+            init_request.term_id,
+        );
     }
 }
 
@@ -544,9 +550,11 @@ impl StreamActorManager {
 
         // Wrap the executor for debug purpose.
         let wrapped = WrapperExecutor::new(
+            operator_id,
             executor,
             actor_context.clone(),
             env.config().developer.enable_executor_row_count,
+            env.config().developer.enable_explain_analyze_stats,
         );
         let executor = (info, wrapped).into();
 
@@ -773,6 +781,7 @@ impl LocalBarrierWorker {
             &mut self.state.current_shared_context,
             database_id,
             &self.actor_manager,
+            &self.term_id,
         )
         .add_actors(new_actor_infos);
     }

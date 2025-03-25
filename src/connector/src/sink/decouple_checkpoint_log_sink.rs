@@ -36,7 +36,6 @@ pub struct DecoupleCheckpointLogSinkerOf<W> {
     writer: W,
     sink_writer_metrics: SinkWriterMetrics,
     commit_checkpoint_interval: NonZeroU64,
-    rewind_start_offset: Option<u64>,
 }
 
 impl<W> DecoupleCheckpointLogSinkerOf<W> {
@@ -46,13 +45,11 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
         writer: W,
         sink_writer_metrics: SinkWriterMetrics,
         commit_checkpoint_interval: NonZeroU64,
-        rewind_start_offset: Option<u64>,
     ) -> Self {
         DecoupleCheckpointLogSinkerOf {
             writer,
             sink_writer_metrics,
             commit_checkpoint_interval,
-            rewind_start_offset,
         }
     }
 }
@@ -60,11 +57,9 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
-        log_reader
-            .build_stream_from_start_offset(self.rewind_start_offset)
-            .await?;
-
         let mut sink_writer = self.writer;
+        let rewind_start_offset = sink_writer.rewind_start_offset()?;
+        log_reader.start_from(rewind_start_offset).await?;
         #[derive(Debug)]
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -136,6 +131,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                         epoch,
                         prev_epoch
                     );
+
                     sink_writer.begin_epoch(epoch).await?;
                     LogConsumerState::EpochBegun { curr_epoch: epoch }
                 }

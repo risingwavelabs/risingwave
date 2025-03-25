@@ -82,35 +82,3 @@ impl ComputeTelemetryReport {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-    use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-    use risingwave_common::telemetry::{TELEMETRY_REPORT_URL, post_telemetry_report_pb};
-
-    use crate::telemetry::{ComputeTelemetryReport, TELEMETRY_COMPUTE_REPORT_TYPE};
-
-    // It is ok to use `TELEMETRY_REPORT_URL` here because we mark it as test and will not write to the database.
-    #[cfg(not(madsim))]
-    #[tokio::test]
-    async fn test_compute_telemetry_report() {
-        let mut report = ComputeTelemetryReport::new(
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
-            100,
-        );
-        report.base.is_test = true;
-
-        let pb_report = report.to_pb_bytes();
-        let url =
-            (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_COMPUTE_REPORT_TYPE).to_owned();
-
-        // Retry 3 times to mitigate occasional failures on CI.
-        tokio_retry::Retry::spawn(
-            tokio_retry::strategy::ExponentialBackoff::from_millis(10).take(3),
-            || post_telemetry_report_pb(&url, pb_report.clone()),
-        )
-        .await
-        .unwrap();
-    }
-}

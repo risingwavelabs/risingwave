@@ -144,7 +144,7 @@ s_kafka	{SOURCE}	5
 # 		Actor #19  (2 splits): [4,5]
 
 
-query I
+query I retry 3 backoff 5s
 select * from mv_kafka order by x;
 ----
 1

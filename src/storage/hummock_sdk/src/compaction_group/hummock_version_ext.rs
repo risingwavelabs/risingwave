@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -30,6 +31,7 @@ use tracing::warn;
 use super::group_split::split_sst_with_table_ids;
 use super::{StateTableId, group_split};
 use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
+use crate::compact_task::is_compaction_task_expired;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
@@ -40,6 +42,7 @@ use crate::version::{
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
 use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId, can_concat};
+
 #[derive(Debug, Clone, Default)]
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,
@@ -272,8 +275,12 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         }
         let [parent_levels, cur_levels] = self
             .levels
-            .get_many_mut([&parent_group_id, &group_id])
+            .get_disjoint_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
+        // After certain compaction group operation, e.g. split, any ongoing compaction tasks created prior to that should be rejected due to expiration.
+        // By incrementing the compaction_group_version_id of the compaction group, and comparing it with the one recorded in compaction task, expired compaction tasks can be identified.
+        parent_levels.compaction_group_version_id += 1;
+        cur_levels.compaction_group_version_id += 1;
         let l0 = &mut parent_levels.l0;
         {
             for sub_level in &mut l0.sub_levels {
@@ -284,7 +291,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     split_sst_info_for_level(&member_table_ids, sub_level, &mut new_sst_id);
                 sub_level
                     .table_infos
-                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
                         sub_level.total_file_size -= sst_info.sst_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -332,7 +339,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
                     level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -838,8 +845,12 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
 
         let [parent_levels, cur_levels] = self
             .levels
-            .get_many_mut([&parent_group_id, &group_id])
+            .get_disjoint_mut([&parent_group_id, &group_id])
             .map(|res| res.unwrap());
+        // After certain compaction group operation, e.g. split, any ongoing compaction tasks created prior to that should be rejected due to expiration.
+        // By incrementing the compaction_group_version_id of the compaction group, and comparing it with the one recorded in compaction task, expired compaction tasks can be identified.
+        parent_levels.compaction_group_version_id += 1;
+        cur_levels.compaction_group_version_id += 1;
 
         let l0 = &mut parent_levels.l0;
         {
@@ -863,7 +874,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
 
                 sub_level
                     .table_infos
-                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
                         sub_level.total_file_size -= sst_info.sst_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -917,7 +928,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .extract_if(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(.., |sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
                     level.total_file_size -= sst_info.sst_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -979,24 +990,25 @@ impl Levels {
             inserted_table_infos: insert_table_infos,
             vnode_partition_count,
             removed_table_ids: delete_sst_ids_set,
-            ..
+            compaction_group_version_id,
         } = level_delta;
         let new_vnode_partition_count = *vnode_partition_count;
 
-        if !self.check_sst_ids_exist(&[*level_idx], delete_sst_ids_set.clone()) {
+        if is_compaction_task_expired(
+            self.compaction_group_version_id,
+            *compaction_group_version_id,
+        ) {
             warn!(
-                "This VersionDelta may be committed by an expired compact task. Please check it. \n
-                    insert_sst_level_id: {}\n,
-                    insert_sub_level_id: {}\n,
-                    insert_table_infos: {:?}\n,
-                    delete_sst_ids_set: {:?}\n",
+                current_compaction_group_version_id = self.compaction_group_version_id,
+                delta_compaction_group_version_id = compaction_group_version_id,
                 level_idx,
                 l0_sub_level_id,
-                insert_table_infos
+                insert_table_infos = ?insert_table_infos
                     .iter()
                     .map(|sst| (sst.sst_id, sst.object_id))
                     .collect_vec(),
-                delete_sst_ids_set,
+                ?delete_sst_ids_set,
+                "This VersionDelta may be committed by an expired compact task. Please check it."
             );
             return;
         }
@@ -1081,28 +1093,6 @@ impl Levels {
                 .sum::<u64>();
         }
     }
-
-    pub fn check_sst_ids_exist(
-        &self,
-        level_idx_to_check: &[u32],
-        mut sst_ids: HashSet<u64>,
-    ) -> bool {
-        for level_idx in level_idx_to_check {
-            if *level_idx == 0 {
-                for level in &self.l0.sub_levels {
-                    level.table_infos.iter().for_each(|table| {
-                        sst_ids.remove(&table.sst_id);
-                    });
-                }
-            } else {
-                let idx = *level_idx as usize - 1;
-                self.levels[idx].table_infos.iter().for_each(|table| {
-                    sst_ids.remove(&table.sst_id);
-                });
-            }
-        }
-        sst_ids.is_empty()
-    }
 }
 
 impl<T, L> HummockVersionCommon<T, L> {
@@ -1140,6 +1130,7 @@ pub fn build_initial_compaction_group_levels(
         group_id,
         parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
         member_table_ids: vec![],
+        compaction_group_version_id: 0,
     }
 }
 
@@ -1348,6 +1339,12 @@ fn level_delete_ssts(
 }
 
 fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) {
+    fn display_sstable_infos(ssts: &[impl Borrow<SstableInfo>]) -> String {
+        format!(
+            "sstable ids: {:?}",
+            ssts.iter().map(|s| s.borrow().sst_id).collect_vec()
+        )
+    }
     operand.total_file_size += insert_table_infos
         .iter()
         .map(|sst| sst.sst_size)
@@ -1356,24 +1353,63 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
         .iter()
         .map(|sst| sst.uncompressed_file_size)
         .sum::<u64>();
-    operand
-        .table_infos
-        .extend(insert_table_infos.iter().cloned());
-    operand
-        .table_infos
-        .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
     if operand.level_type == PbLevelType::Overlapping {
         operand.level_type = PbLevelType::Nonoverlapping;
-    }
-    assert!(
-        can_concat(&operand.table_infos),
-        "sstable ids: {:?}",
         operand
             .table_infos
+            .extend(insert_table_infos.iter().cloned());
+        operand
+            .table_infos
+            .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
+        assert!(
+            can_concat(&operand.table_infos),
+            "{}",
+            display_sstable_infos(&operand.table_infos)
+        );
+    } else if !insert_table_infos.is_empty() {
+        let sorted_insert: Vec<_> = insert_table_infos
             .iter()
-            .map(|sst| sst.sst_id)
-            .collect_vec()
-    );
+            .sorted_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range))
+            .cloned()
+            .collect();
+        let first = &sorted_insert[0];
+        let last = &sorted_insert[sorted_insert.len() - 1];
+        let pos = operand
+            .table_infos
+            .partition_point(|b| b.key_range.cmp(&first.key_range) == Ordering::Less);
+        if pos >= operand.table_infos.len()
+            || last.key_range.cmp(&operand.table_infos[pos].key_range) == Ordering::Less
+        {
+            operand.table_infos.splice(pos..pos, sorted_insert);
+            // Validate the inserted SST batch along with the two SSTs that precede and follow it.
+            let validate_range = operand
+                .table_infos
+                .iter()
+                .skip(pos.saturating_sub(1))
+                .take(insert_table_infos.len() + 2)
+                .collect_vec();
+            assert!(
+                can_concat(&validate_range),
+                "{}",
+                display_sstable_infos(&validate_range),
+            );
+        } else {
+            // If this branch is reached, it indicates some unexpected behavior in compaction.
+            // Here we issue a warning and fall back to insert one by one.
+            warn!(insert = ?insert_table_infos, level = ?operand.table_infos, "unexpected overlap");
+            for i in insert_table_infos {
+                let pos = operand
+                    .table_infos
+                    .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
+                operand.table_infos.insert(pos, i.clone());
+            }
+            assert!(
+                can_concat(&operand.table_infos),
+                "{}",
+                display_sstable_infos(&operand.table_infos)
+            );
+        }
+    }
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
@@ -1666,6 +1702,12 @@ mod tests {
                                 .into(),
                             ],
                             0,
+                            version
+                                .levels
+                                .get(&1)
+                                .as_ref()
+                                .unwrap()
+                                .compaction_group_version_id,
                         ))],
                     },
                 ),

@@ -112,7 +112,7 @@ pub fn try_purify_table_source_create_sql_ast(
 
             let default_value_option = column_def
                 .options
-                .extract_if(|o| {
+                .extract_if(.., |o| {
                     matches!(
                         o.option,
                         ColumnOption::DefaultValue { .. }

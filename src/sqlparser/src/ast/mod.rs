@@ -11,6 +11,7 @@
 // limitations under the License.
 
 //! SQL Abstract Syntax Tree (AST) types
+mod analyze;
 mod data_type;
 pub(crate) mod ddl;
 mod legacy_source;
@@ -37,13 +38,12 @@ use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
-    AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption,
-    ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
+    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFragmentOperation,
+    AlterFunctionOperation, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation,
+    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
+    WebhookSourceInfo,
 };
-pub use self::legacy_source::{
-    AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema, get_delimiter,
-};
+pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
@@ -55,6 +55,7 @@ pub use self::value::{
     ConnectionRefValue, CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType,
     SecretRefAsType, SecretRefValue, TrimWhereField, Value,
 };
+pub use crate::ast::analyze::AnalyzeTarget;
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
     AlterViewOperation,
@@ -1301,7 +1302,7 @@ pub enum Statement {
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
         /// with_version_column behind on conflict
-        with_version_column: Option<String>,
+        with_version_column: Option<Ident>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1451,6 +1452,11 @@ pub enum Statement {
         with_options: Vec<SqlOption>,
         operation: AlterSecretOperation,
     },
+    /// ALTER FRAGMENT
+    AlterFragment {
+        fragment_id: u32,
+        operation: AlterFragmentOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1556,6 +1562,7 @@ pub enum Statement {
         db_name: ObjectName,
         if_not_exists: bool,
         owner: Option<ObjectName>,
+        resource_group: Option<SetVariableValue>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -1605,6 +1612,13 @@ pub enum Statement {
         /// options of the explain statement
         options: ExplainOptions,
     },
+    /// EXPLAIN ANALYZE for stream job
+    /// We introduce a new statement rather than reuse `EXPLAIN` because
+    /// the body of the statement is not an SQL query.
+    /// TODO(kwannoel): Make profiling duration configurable: EXPLAIN ANALYZE (DURATION 1s) ...
+    ExplainAnalyzeStreamJob {
+        target: AnalyzeTarget,
+    },
     /// CREATE USER
     CreateUser(CreateUserStatement),
     /// ALTER USER
@@ -1632,10 +1646,25 @@ pub enum Statement {
 }
 
 impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buf = String::new();
+        self.fmt_inner(&mut buf)?;
+        // TODO(#20713): expand this check to all statements
+        if matches!(
+            self,
+            Statement::CreateTable { .. } | Statement::CreateSource { .. }
+        ) {
+            let _ = Parser::parse_sql(&buf).expect("normalized SQL should be parsable");
+        }
+        f.write_str(&buf)
+    }
+}
+
+impl Statement {
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
     #[allow(clippy::cognitive_complexity)]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt_inner(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
                 analyze,
@@ -1647,9 +1676,12 @@ impl fmt::Display for Statement {
                 if *analyze {
                     write!(f, "ANALYZE ")?;
                 }
-                options.fmt(f)?;
+                write!(f, "{}", options)?;
 
-                write!(f, "{}", statement)
+                statement.fmt_inner(f)
+            }
+            Statement::ExplainAnalyzeStreamJob { target } => {
+                write!(f, "EXPLAIN ANALYZE {}", target)
             }
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
@@ -1762,6 +1794,7 @@ impl fmt::Display for Statement {
                 db_name,
                 if_not_exists,
                 owner,
+                resource_group,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
@@ -1771,6 +1804,10 @@ impl fmt::Display for Statement {
                 if let Some(owner) = owner {
                     write!(f, " WITH OWNER = {}", owner)?;
                 }
+                if let Some(resource_group) = resource_group {
+                    write!(f, " RESOURCE_GROUP = {}", resource_group)?;
+                }
+
                 Ok(())
             }
             Statement::CreateFunction {
@@ -2214,7 +2251,8 @@ impl fmt::Display for Statement {
                 if !data_types.is_empty() {
                     write!(f, "({}) ", display_comma_separated(data_types))?;
                 }
-                write!(f, "AS {}", statement)
+                write!(f, "AS ")?;
+                statement.fmt_inner(f)
             }
             Statement::Comment {
                 object_type,
@@ -2266,6 +2304,12 @@ impl fmt::Display for Statement {
             Statement::Use { db_name } => {
                 write!(f, "USE {}", db_name)?;
                 Ok(())
+            }
+            Statement::AlterFragment {
+                fragment_id,
+                operation,
+            } => {
+                write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
             }
         }
     }
@@ -2414,6 +2458,14 @@ pub enum GrantObjects {
     AllMviewsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL VIEWS IN SCHEMA <schema_name> [, ...]`
     AllViewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL FUNCTIONS IN SCHEMA <schema_name> [, ...]`
+    AllFunctionsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SECRETS IN SCHEMA <schema_name> [, ...]`
+    AllSecretsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SUBSCRIPTIONS IN SCHEMA <schema_name> [, ...]`
+    AllSubscriptionsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL CONNECTIONS IN SCHEMA <schema_name> [, ...]`
+    AllConnectionsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on specific databases
     Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
@@ -2430,6 +2482,14 @@ pub enum GrantObjects {
     Sinks(Vec<ObjectName>),
     /// Grant privileges on specific views
     Views(Vec<ObjectName>),
+    /// Grant privileges on specific connections
+    Connections(Vec<ObjectName>),
+    /// Grant privileges on specific subscriptions
+    Subscriptions(Vec<ObjectName>),
+    /// Grant privileges on specific functions
+    Functions(Vec<FunctionDesc>),
+    /// Grant privileges on specific secrets
+    Secrets(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -2486,6 +2546,34 @@ impl fmt::Display for GrantObjects {
                     display_comma_separated(schemas)
                 )
             }
+            GrantObjects::AllFunctionsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL FUNCTIONS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllSecretsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SECRETS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllSubscriptionsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SUBSCRIPTIONS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllConnectionsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL CONNECTIONS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
             GrantObjects::Databases(databases) => {
                 write!(f, "DATABASE {}", display_comma_separated(databases))
             }
@@ -2500,6 +2588,18 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Views(views) => {
                 write!(f, "VIEW {}", display_comma_separated(views))
+            }
+            GrantObjects::Connections(connections) => {
+                write!(f, "CONNECTION {}", display_comma_separated(connections))
+            }
+            GrantObjects::Subscriptions(subscriptions) => {
+                write!(f, "SUBSCRIPTION {}", display_comma_separated(subscriptions))
+            }
+            GrantObjects::Functions(func_descs) => {
+                write!(f, "FUNCTION {}", display_comma_separated(func_descs))
+            }
+            GrantObjects::Secrets(secrets) => {
+                write!(f, "SECRET {}", display_comma_separated(secrets))
             }
         }
     }
@@ -2838,7 +2938,7 @@ impl fmt::Display for SqlOption {
             })
             .unwrap_or(false);
         if should_redact {
-            write!(f, "{} = [REDACTED]", self.name)
+            write!(f, "{} = '[REDACTED]'", self.name)
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }

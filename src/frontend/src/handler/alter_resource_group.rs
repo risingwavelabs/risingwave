@@ -68,21 +68,7 @@ pub async fn handle_alter_resource_group(
         }
     };
 
-    let resource_group = match resource_group {
-        None => None,
-        Some(SetVariableValue::Single(SetVariableValueSingle::Ident(ident))) => {
-            Some(ident.real_value())
-        }
-        Some(SetVariableValue::Single(SetVariableValueSingle::Literal(
-            Value::SingleQuotedString(v),
-        ))) => Some(v),
-        _ => {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a valid number or adaptive".to_owned(),
-            )
-            .into());
-        }
-    };
+    let resource_group = resource_group.map(resolve_resource_group).transpose()?;
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
@@ -96,4 +82,19 @@ pub async fn handle_alter_resource_group(
     }
 
     Ok(builder.into())
+}
+
+pub(crate) fn resolve_resource_group(resource_group: SetVariableValue) -> Result<String> {
+    Ok(match resource_group {
+        SetVariableValue::Single(SetVariableValueSingle::Ident(ident)) => ident.real_value(),
+        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::SingleQuotedString(v))) => {
+            v
+        }
+        _ => {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "target parallelism must be a valid number or adaptive".to_owned(),
+            )
+            .into());
+        }
+    })
 }

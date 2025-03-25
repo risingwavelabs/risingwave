@@ -87,7 +87,7 @@ RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
-  && rustup toolchain install --profile minimal \
+  && rustup set profile minimal \
   && rustup show \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1

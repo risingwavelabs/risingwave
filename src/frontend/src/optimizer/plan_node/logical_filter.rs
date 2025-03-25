@@ -98,7 +98,6 @@ impl PlanTreeNodeUnary for LogicalFilter {
         Self::new(input, self.predicate().clone())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

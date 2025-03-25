@@ -54,6 +54,9 @@ This is a bug. We would appreciate a bug report at:
 
     #[error("terminating connection due to idle-in-transaction timeout")]
     IdleInTxnTimeout,
+
+    #[error(transparent)]
+    ServerThrottle(BoxedError),
 }
 
 impl PsqlError {

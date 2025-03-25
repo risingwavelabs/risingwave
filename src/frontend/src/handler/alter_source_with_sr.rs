@@ -336,7 +336,7 @@ pub fn alter_definition_format_encode(
 #[cfg(test)]
 pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-    use risingwave_connector::source::DataType;
+    use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};

@@ -108,6 +108,14 @@ pub enum ExprError {
     #[error("too few arguments for format()")]
     TooFewArguments,
 
+    #[error(
+        "null value in column \"{col_name}\" of relation \"{table_name}\" violates not-null constraint"
+    )]
+    NotNullViolation {
+        col_name: Box<str>,
+        table_name: Box<str>,
+    },
+
     #[error("invalid state: {0}")]
     InvalidState(String),
 

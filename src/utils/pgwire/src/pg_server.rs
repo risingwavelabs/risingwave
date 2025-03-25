@@ -24,7 +24,7 @@ use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
+use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
 use thiserror_ext::AsReport;
 
@@ -32,7 +32,7 @@ use crate::error::{PsqlError, PsqlResult};
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
-use crate::pg_protocol::{PgByteStream, PgProtocol, TlsConfig};
+use crate::pg_protocol::{ConnectionContext, PgByteStream, PgProtocol};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
@@ -267,8 +267,7 @@ pub async fn pg_serve(
     addr: &str,
     tcp_keepalive: TcpKeepalive,
     session_mgr: Arc<impl SessionManager>,
-    tls_config: Option<TlsConfig>,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    context: ConnectionContext,
     shutdown: CancellationToken,
 ) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
@@ -288,7 +287,6 @@ pub async fn pg_serve(
     let worker_runtime = tokio::runtime::Handle::current();
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-
     let session_mgr_clone = session_mgr.clone();
     let f = async move {
         loop {
@@ -299,9 +297,8 @@ pub async fn pg_serve(
                     worker_runtime.spawn(handle_connection(
                         stream,
                         session_mgr_clone.clone(),
-                        tls_config.clone(),
                         Arc::new(peer_addr),
-                        redact_sql_option_keywords.clone(),
+                        context.clone(),
                     ));
                 }
 
@@ -327,22 +324,15 @@ pub async fn pg_serve(
 pub async fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
-    tls_config: Option<TlsConfig>,
     peer_addr: AddressRef,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    context: ConnectionContext,
 ) where
     S: PgByteStream,
     SM: SessionManager,
 {
-    PgProtocol::new(
-        stream,
-        session_mgr,
-        tls_config,
-        peer_addr,
-        redact_sql_option_keywords,
-    )
-    .run()
-    .await;
+    PgProtocol::new(stream, session_mgr, peer_addr, context)
+        .run()
+        .await;
 }
 #[cfg(test)]
 mod tests {
@@ -359,8 +349,10 @@ mod tests {
     use tokio_postgres::NoTls;
 
     use crate::error::PsqlResult;
+    use crate::memory_manager::MessageMemoryManager;
     use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_message::TransactionStatus;
+    use crate::pg_protocol::ConnectionContext;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
         BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
@@ -524,8 +516,12 @@ mod tests {
                 &bind_addr,
                 socket2::TcpKeepalive::new(),
                 Arc::new(session_mgr),
-                None,
-                None,
+                ConnectionContext {
+                    tls_config: None,
+                    redact_sql_option_keywords: None,
+                    message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
+                        .into(),
+                },
                 CancellationToken::new(), // dummy
             )
             .await

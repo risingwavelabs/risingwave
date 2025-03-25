@@ -232,6 +232,7 @@ pub(super) enum LocalActorOperation {
     },
     TakeReceiver {
         database_id: DatabaseId,
+        term_id: String,
         ids: UpDownActorIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
@@ -303,19 +304,27 @@ pub(super) struct LocalBarrierWorker {
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
+
+    pub(super) term_id: String,
 }
 
 impl LocalBarrierWorker {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
+        term_id: String,
     ) -> Self {
-        let state = ManagedBarrierState::new(actor_manager.clone(), initial_partial_graphs);
+        let state = ManagedBarrierState::new(
+            actor_manager.clone(),
+            initial_partial_graphs,
+            term_id.clone(),
+        );
         Self {
             state,
             await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
+            term_id,
         }
     }
 
@@ -350,10 +359,17 @@ impl LocalBarrierWorker {
         current_shared_context: &'a mut HashMap<DatabaseId, Arc<SharedContext>>,
         database_id: DatabaseId,
         actor_manager: &StreamActorManager,
+        term_id: &String,
     ) -> &'a Arc<SharedContext> {
         current_shared_context
             .entry(database_id)
-            .or_insert_with(|| Arc::new(SharedContext::new(database_id, &actor_manager.env)))
+            .or_insert_with(|| {
+                Arc::new(SharedContext::new(
+                    database_id,
+                    &actor_manager.env,
+                    term_id.clone(),
+                ))
+            })
     }
 
     async fn next_completed_epoch(
@@ -508,17 +524,34 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::TakeReceiver {
                 database_id,
+                term_id,
                 ids,
                 result_sender,
             } => {
-                let _ = result_sender.send(
+                let result = try {
+                    if self.term_id != term_id {
+                        warn!(
+                            ?ids,
+                            term_id,
+                            current_term_id = self.term_id,
+                            "take receiver on unmatched term_id"
+                        );
+                        Err(anyhow!(
+                            "take receiver {:?} on unmatched term_id {} to current term_id {}",
+                            ids,
+                            term_id,
+                            self.term_id
+                        ))?;
+                    }
                     LocalBarrierWorker::get_or_insert_database_shared_context(
                         &mut self.state.current_shared_context,
                         database_id,
                         &self.actor_manager,
+                        &self.term_id,
                     )
-                    .take_receiver(ids),
-                );
+                    .take_receiver(ids)?
+                };
+                let _ = result_sender.send(result);
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
@@ -849,6 +882,7 @@ impl LocalBarrierWorker {
                     &mut self.state.current_shared_context,
                     database_id,
                     &self.actor_manager,
+                    &self.term_id,
                 )
                 .clone(),
                 vec![],
@@ -1001,7 +1035,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, vec![]);
+        let worker = LocalBarrierWorker::new(actor_manager, vec![], "uninitialized".into());
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -1220,6 +1254,7 @@ pub(crate) mod barrier_test_utils {
                             actor_infos: vec![],
                         }],
                     }],
+                    term_id: "for_test".into(),
                 },
             });
 

@@ -630,7 +630,7 @@ where
         let mut old_state = vec![None; pk_len + METADATA_STATE_LEN];
         old_state[1..row.len() + 1].clone_from_slice(&row);
         let current_pos = Some((&row[0..pk_len]).into_owned_row());
-        let is_finished = row[pk_len].clone().map_or(false, |d| d.into_bool());
+        let is_finished = row[pk_len].clone().is_some_and(|d| d.into_bool());
         let row_count = row
             .get(pk_len + 1)
             .cloned()

@@ -16,7 +16,7 @@ updates:
     - dependency-name: "*"
       update-types: ["version-update:semver-patch"]
     # Ignore arrow crates. It does major releases frequently: https://github.com/apache/arrow-rs/issues/5368
-    # We depend on arrow directly, and also many other crates depending on arrow, including icelake, deltalake, arrow-udf, ...
+    # We depend on arrow directly, and also many other crates depending on arrow, including deltalake, arrow-udf, ...
     # It will always need human intervention, and we'd better be the last one to update arrow.
     - dependency-name: "arrow*"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]

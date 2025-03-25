@@ -18,26 +18,45 @@
 package com.risingwave.tracing;
 
 import com.risingwave.java.binding.Binding;
+import org.slf4j.event.Level;
 
 public class TracingSlf4jImpl {
-    public static final int ERROR = 0;
-    public static final int WARN = 1;
-    public static final int INFO = 2;
-    public static final int DEBUG = 3;
-    public static final int TRACE = 4;
+    private static final int BINDING_ERROR = 0;
+    private static final int BINDING_WARN = 1;
+    private static final int BINDING_INFO = 2;
+    private static final int BINDING_DEBUG = 3;
+    private static final int BINDING_TRACE = 4;
 
     // TODO: We may support changing the log level at runtime in the future.
-    private static final boolean isErrorEnabled = Binding.tracingSlf4jEventEnabled(ERROR);
-    private static final boolean isWarnEnabled = Binding.tracingSlf4jEventEnabled(WARN);
-    private static final boolean isInfoEnabled = Binding.tracingSlf4jEventEnabled(INFO);
-    private static final boolean isDebugEnabled = Binding.tracingSlf4jEventEnabled(DEBUG);
-    private static final boolean isTraceEnabled = Binding.tracingSlf4jEventEnabled(TRACE);
+    private static final boolean isErrorEnabled = Binding.tracingSlf4jEventEnabled(BINDING_ERROR);
+    private static final boolean isWarnEnabled = Binding.tracingSlf4jEventEnabled(BINDING_WARN);
+    private static final boolean isInfoEnabled = Binding.tracingSlf4jEventEnabled(BINDING_INFO);
+    private static final boolean isDebugEnabled = Binding.tracingSlf4jEventEnabled(BINDING_DEBUG);
+    private static final boolean isTraceEnabled = Binding.tracingSlf4jEventEnabled(BINDING_TRACE);
 
-    public static void event(String name, int level, String message) {
-        Binding.tracingSlf4jEvent(Thread.currentThread().getName(), name, level, message);
+    private static int levelToBinding(Level level) {
+        switch (level) {
+            case ERROR:
+                return BINDING_ERROR;
+            case WARN:
+                return BINDING_WARN;
+            case INFO:
+                return BINDING_INFO;
+            case DEBUG:
+                return BINDING_DEBUG;
+            case TRACE:
+                return BINDING_TRACE;
+            default:
+                return -1;
+        }
     }
 
-    public static boolean isEnabled(int level) {
+    public static void event(String name, Level level, String message, String stackTrace) {
+        Binding.tracingSlf4jEvent(
+                Thread.currentThread().getName(), name, levelToBinding(level), message, stackTrace);
+    }
+
+    public static boolean isEnabled(Level level) {
         switch (level) {
             case ERROR:
                 return isErrorEnabled;

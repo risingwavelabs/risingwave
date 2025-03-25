@@ -12,7 +12,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.38"
+async-nats = "0.39"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -42,7 +42,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d
 ] }
 csv = "1.3"
 deltalake = { workspace = true }
-duration-str = "0.12.0"
+duration-str = "0.16.1"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
@@ -58,12 +58,11 @@ google-cloud-pubsub = "0.30"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-icelake = { workspace = true }
-indexmap = { version = "2.7.0", features = ["serde"] }
+indexmap = { version = "2.8.0", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 maplit = "1.0.2"
-moka = { version = "0.12.8", features = ["future"] }
+moka = { version = "0.12.10", features = ["future"] }
 mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
 mysql_async = { workspace = true }
 mysql_common = { version = "0.32", default-features = false, features = [
@@ -132,11 +131,11 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.14.2", features = ["hints"] }
+simd-json = { version = "0.15.0", features = ["hints"] }
 smallvec = "1"
 sqlx = { workspace = true }
-strum = "0.26"
-strum_macros = "0.26"
+strum = "0.27"
+strum_macros = "0.27"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }

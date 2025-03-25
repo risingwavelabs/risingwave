@@ -183,7 +183,6 @@ impl MetaReportCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for MetaReportCreator {
-    #[expect(refining_impl_trait)]
     async fn create_report(
         &self,
         tracking_id: String,
@@ -246,65 +245,5 @@ impl TelemetryReportCreator for MetaReportCreator {
 
     fn report_type(&self) -> &str {
         TELEMETRY_META_REPORT_TYPE
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use risingwave_common::config::MetaBackend;
-    use risingwave_common::telemetry::{
-        SystemData, TelemetryNodeType, TelemetryReportBase, current_timestamp,
-    };
-    use risingwave_pb::telemetry::PbTelemetryClusterType;
-
-    use crate::telemetry::{MetaTelemetryReport, NodeCount, RwVersion};
-
-    #[cfg(not(madsim))]
-    #[tokio::test]
-    async fn test_meta_telemetry_report() {
-        use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
-        use risingwave_common::telemetry::{TELEMETRY_REPORT_URL, post_telemetry_report_pb};
-
-        use crate::telemetry::TELEMETRY_META_REPORT_TYPE;
-
-        // we don't call `create_report` here because it relies on the metadata manager
-        let report = MetaTelemetryReport {
-            base: TelemetryReportBase {
-                tracking_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
-                session_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
-                system_data: SystemData::new(),
-                up_time: 100,
-                time_stamp: current_timestamp(),
-                node_type: TelemetryNodeType::Meta,
-                is_test: true,
-            },
-            node_count: NodeCount {
-                meta_count: 1,
-                compute_count: 2,
-                frontend_count: 3,
-                compactor_count: 4,
-            },
-            streaming_job_count: 5,
-            meta_backend: MetaBackend::Sql,
-            rw_version: RwVersion {
-                version: "version".to_owned(),
-                git_sha: "git_sha".to_owned(),
-            },
-            job_desc: vec![],
-            cluster_type: PbTelemetryClusterType::Unspecified,
-            object_store_media_type: "s3",
-            connector_usage_json_str: jsonbb::json!({}).to_string(),
-        };
-
-        let pb_bytes = report.to_pb_bytes();
-        let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_META_REPORT_TYPE).to_owned();
-
-        // Retry 3 times to mitigate occasional failures on CI.
-        tokio_retry::Retry::spawn(
-            tokio_retry::strategy::ExponentialBackoff::from_millis(10).take(3),
-            || post_telemetry_report_pb(&url, pb_bytes.clone()),
-        )
-        .await
-        .unwrap();
     }
 }

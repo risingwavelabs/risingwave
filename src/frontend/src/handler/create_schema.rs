@@ -56,7 +56,7 @@ pub async fn handle_create_schema(
                     .notice(format!("schema \"{}\" exists, skipping", schema_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("schema", schema_name).into())
+                Err(CatalogError::duplicated("schema", schema_name).into())
             };
         }
         let db = reader.get_database_by_name(database_name)?;

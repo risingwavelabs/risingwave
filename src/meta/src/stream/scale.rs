@@ -2274,19 +2274,19 @@ impl ScaleController {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum JobParallelismTarget {
     Update(TableParallelism),
     Refresh,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum JobResourceGroupTarget {
     Update(Option<String>),
     Keep,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JobRescheduleTarget {
     pub parallelism: JobParallelismTarget,
     pub resource_group: JobResourceGroupTarget,

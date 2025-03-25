@@ -326,12 +326,10 @@ impl Sink for DeltaLakeSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
             commit_checkpoint_interval,
-            log_store_rewind_start_epoch,
         ))
     }
 
@@ -584,12 +582,12 @@ mod test {
     use maplit::btreemap;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
     use crate::sink::SinkCommitCoordinator;
     use crate::sink::deltalake::DeltaLakeSinkCommitter;
     use crate::sink::writer::SinkWriter;
-    use crate::source::DataType;
 
     #[tokio::test]
     async fn test_deltalake() {

@@ -501,7 +501,6 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
         Self::new(self.core.window_functions.clone(), input)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -533,7 +532,7 @@ impl ColPrunable for LogicalOverWindow {
 
         let (req_cols_input_part, req_cols_win_func_part) = {
             let mut in_input = required_cols.to_vec();
-            let in_win_funcs: IndexSet = in_input.extract_if(|i| *i >= input_len).collect();
+            let in_win_funcs: IndexSet = in_input.extract_if(.., |i| *i >= input_len).collect();
             (IndexSet::from(in_input), in_win_funcs)
         };
 

@@ -299,11 +299,13 @@ impl From<DataTypeName> for PbTypeName {
     }
 }
 
-/// Convenient macros to generate match arms for [`DataType`](crate::types::DataType).
+/// Convenient macros to generate match arms for [`DataType`].
 pub mod data_types {
-    /// Numeric [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    use super::DataType;
+
+    /// Numeric [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! range_frame_numeric {
+    macro_rules! _range_frame_numeric_data_types {
         () => {
             DataType::Int16
                 | DataType::Int32
@@ -313,11 +315,11 @@ pub mod data_types {
                 | DataType::Decimal
         };
     }
-    pub use range_frame_numeric;
+    pub use _range_frame_numeric_data_types as range_frame_numeric;
 
-    /// Date/time [`DataType`](crate::types::DataType)s supported to be `offset` of `RANGE` frame.
+    /// Date/time [`DataType`]s supported to be `offset` of `RANGE` frame.
     #[macro_export]
-    macro_rules! range_frame_datetime {
+    macro_rules! _range_frame_datetime_data_types {
         () => {
             DataType::Date
                 | DataType::Time
@@ -326,7 +328,49 @@ pub mod data_types {
                 | DataType::Interval
         };
     }
-    pub use range_frame_datetime;
+    pub use _range_frame_datetime_data_types as range_frame_datetime;
+
+    /// Data types that do not have inner fields.
+    #[macro_export]
+    macro_rules! _simple_data_types {
+        () => {
+            DataType::Boolean
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+                | DataType::Date
+                | DataType::Varchar
+                | DataType::Time
+                | DataType::Timestamp
+                | DataType::Timestamptz
+                | DataType::Interval
+                | DataType::Bytea
+                | DataType::Jsonb
+                | DataType::Serial
+                | DataType::Int256
+        };
+    }
+    pub use _simple_data_types as simple;
+
+    /// Data types that have inner fields.
+    #[macro_export]
+    macro_rules! _composite_data_types {
+        () => {
+            DataType::Struct { .. } | DataType::List { .. } | DataType::Map { .. }
+        };
+    }
+    pub use _composite_data_types as composite;
+
+    /// Test that all data types are covered either by `simple!()` or `composite!()`.
+    fn _simple_composite_data_types_exhausted(dt: DataType) {
+        match dt {
+            simple!() => {}
+            composite!() => {}
+        }
+    }
 }
 
 impl DataType {
@@ -338,8 +382,12 @@ impl DataType {
         })
     }
 
+    pub fn type_name(&self) -> DataTypeName {
+        DataTypeName::from(self)
+    }
+
     pub fn prost_type_name(&self) -> PbTypeName {
-        DataTypeName::from(self).into()
+        self.type_name().into()
     }
 
     pub fn to_protobuf(&self) -> PbDataType {
@@ -399,6 +447,16 @@ impl DataType {
                 | DataType::Float64
                 | DataType::Decimal
         )
+    }
+
+    /// Returns whether the data type does not have inner fields.
+    pub fn is_simple(&self) -> bool {
+        matches!(self, data_types::simple!())
+    }
+
+    /// Returns whether the data type has inner fields.
+    pub fn is_composite(&self) -> bool {
+        matches!(self, data_types::composite!())
     }
 
     pub fn is_array(&self) -> bool {
@@ -487,12 +545,53 @@ impl DataType {
         d
     }
 
-    /// Compares the datatype with another, ignoring nested field names and metadata.
+    /// Compares the datatype with another, ignoring nested field names and ids.
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
             (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
+            (Self::Map(m1), Self::Map(m2)) => {
+                m1.key().equals_datatype(m2.key()) && m1.value().equals_datatype(m2.value())
+            }
             _ => self == other,
+        }
+    }
+
+    /// Whether a column with this data type can be altered to a new data type. This determines
+    /// the encoding of the column data.
+    ///
+    /// Returns...
+    /// - `None`, if the data type is simple or does not contain a struct type.
+    /// - `Some(true)`, if the data type contains a struct type with field ids ([`StructType::has_ids`]).
+    /// - `Some(false)`, if the data type contains a struct type without field ids.
+    pub fn can_alter(&self) -> Option<bool> {
+        match self {
+            data_types::simple!() => None,
+
+            DataType::Struct(struct_type) => {
+                // As long as we meet a struct type, we can check its `ids` field to determine if
+                // it can be altered.
+                let struct_can_alter = struct_type.has_ids();
+                // In debug build, we assert that once a struct type does (or does not) have ids,
+                // all its composite fields should have the same property.
+                if cfg!(debug_assertions) {
+                    for field in struct_type.types() {
+                        if let Some(field_can_alter) = field.can_alter() {
+                            assert_eq!(struct_can_alter, field_can_alter);
+                        }
+                    }
+                }
+                Some(struct_can_alter)
+            }
+
+            DataType::List(inner_type) => inner_type.can_alter(),
+            DataType::Map(map_type) => {
+                debug_assert!(
+                    map_type.key().is_simple(),
+                    "unexpected key type of map {map_type:?}"
+                );
+                map_type.value().can_alter()
+            }
         }
     }
 }
@@ -1450,5 +1549,54 @@ mod tests {
                 ("b", DataType::Varchar)
             ]))
         );
+    }
+
+    #[test]
+    fn test_can_alter() {
+        let cannots = [
+            (DataType::Int32, None),
+            (DataType::List(DataType::Int32.into()), None),
+            (
+                MapType::from_kv(DataType::Varchar, DataType::List(DataType::Int32.into())).into(),
+                None,
+            ),
+            (
+                StructType::new([("a", DataType::Int32)]).into(),
+                Some(false),
+            ),
+            (
+                MapType::from_kv(
+                    DataType::Varchar,
+                    StructType::new([("a", DataType::Int32)]).into(),
+                )
+                .into(),
+                Some(false),
+            ),
+        ];
+        for (cannot, why) in cannots {
+            assert_eq!(cannot.can_alter(), why, "{cannot:?}");
+        }
+
+        let cans = [
+            StructType::new([
+                ("a", DataType::Int32),
+                ("b", DataType::List(DataType::Int32.into())),
+            ])
+            .with_ids([ColumnId::new(1), ColumnId::new(2)])
+            .into(),
+            DataType::List(Box::new(DataType::Struct(
+                StructType::new([("a", DataType::Int32)]).with_ids([ColumnId::new(1)]),
+            ))),
+            MapType::from_kv(
+                DataType::Varchar,
+                StructType::new([("a", DataType::Int32)])
+                    .with_ids([ColumnId::new(1)])
+                    .into(),
+            )
+            .into(),
+        ];
+        for can in cans {
+            assert_eq!(can.can_alter(), Some(true), "{can:?}");
+        }
     }
 }

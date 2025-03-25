@@ -461,6 +461,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
         } else {
             false
         }

@@ -58,7 +58,6 @@ impl PlanTreeNodeUnary for LogicalDedup {
         Self::new(input, self.dedup_cols().to_vec())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

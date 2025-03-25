@@ -90,7 +90,11 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
-    async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
+    async fn get_tables(
+        &self,
+        table_ids: &[u32],
+        include_dropped_table: bool,
+    ) -> Result<HashMap<u32, Table>>;
 
     /// Returns vector of (worker_id, min_pinned_version_id)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
@@ -216,8 +220,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(ddl_progress)
     }
 
-    async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
-        let tables = self.0.get_tables(table_ids).await?;
+    async fn get_tables(
+        &self,
+        table_ids: &[u32],
+        include_dropped_tables: bool,
+    ) -> Result<HashMap<u32, Table>> {
+        let tables = self.0.get_tables(table_ids, include_dropped_tables).await?;
         Ok(tables)
     }
 

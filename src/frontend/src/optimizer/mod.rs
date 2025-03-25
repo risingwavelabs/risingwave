@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub mod plan_node;
 
+use plan_node::StreamFilter;
 pub use plan_node::{Explain, PlanRef};
 
 pub mod property;
@@ -779,11 +780,18 @@ impl PlanRoot {
             PrimaryKeyKind::UserDefinedPrimaryKey
         };
 
-        let column_descs = columns
+        let column_descs: Vec<ColumnDesc> = columns
             .iter()
             .filter(|&c| c.can_dml())
             .map(|c| c.column_desc.clone())
             .collect();
+
+        let mut not_null_idxs = vec![];
+        for (idx, column) in column_descs.iter().enumerate() {
+            if !column.nullable {
+                not_null_idxs.push(idx);
+            }
+        }
 
         let version_column_index = if let Some(version_column) = with_version_column {
             find_version_column_index(&columns, version_column)?
@@ -909,7 +917,12 @@ impl PlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
-        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+        let mut stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+
+        if !not_null_idxs.is_empty() {
+            stream_plan =
+                StreamFilter::filter_out_any_null_rows(stream_plan.clone(), &not_null_idxs);
+        }
 
         StreamMaterialize::create_for_table(
             stream_plan,

@@ -373,7 +373,7 @@ impl CatalogController {
             .map(|(table_id, incoming_sinks)| {
                 let new_incoming_sinks = incoming_sinks
                     .into_inner()
-                    .extract_if(|id| table_sink_ids.contains(id))
+                    .extract_if(.., |id| table_sink_ids.contains(id))
                     .collect_vec();
                 (table_id, I32Array::from(new_incoming_sinks))
             })

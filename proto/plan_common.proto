@@ -32,7 +32,6 @@ message ColumnDesc {
 
   // Deprecated fields for struct type.
   // TODO(struct): support struct type name and store it in `DataType`.
-  // TODO(struct): support id for nested fields.
   reserved 4;
   reserved "field_descs";
   reserved 5;
@@ -60,6 +59,8 @@ message ColumnDesc {
   ColumnDescVersion version = 10;
 
   AdditionalColumn additional_column = 11;
+
+  bool nullable = 12;
 }
 
 message ColumnCatalog {

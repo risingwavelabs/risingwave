@@ -107,6 +107,15 @@ meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
 meta_hummock_gc_history_insert_batch_size = 1000
 meta_hummock_time_travel_filter_out_objects_batch_size = 1000
 
+[meta.developer.meta_compute_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_stream_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_frontend_client_config]
+connect_timeout_secs = 5
+
 [meta.meta_store_config]
 max_connections = 10
 min_connections = 1
@@ -128,6 +137,14 @@ batch_output_channel_size = 64
 batch_receiver_channel_size = 1000
 batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+
+[batch.developer.batch_compute_client_config]
+connect_timeout_secs = 5
+
+[frontend]
+max_total_query_size_bytes = 1073741824
+min_single_query_size_bytes = 1048576
+max_single_query_size_bytes = 1073741824
 
 [streaming]
 in_flight_barrier_nums = 10000
@@ -164,6 +181,10 @@ stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
 stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
+stream_enable_explain_analyze_stats = true
+
+[streaming.developer.stream_compute_client_config]
+connect_timeout_secs = 5
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -298,3 +319,9 @@ enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
+per_database_isolation = true
+
+[udf]
+enable_embedded_python_udf = false
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true

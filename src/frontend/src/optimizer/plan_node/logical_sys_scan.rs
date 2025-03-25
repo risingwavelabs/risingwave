@@ -293,7 +293,7 @@ impl PredicatePushdown for LogicalSysScan {
         }
         let non_pushable_predicate: Vec<_> = predicate
             .conjunctions
-            .extract_if(|expr| {
+            .extract_if(.., |expr| {
                 if expr.count_nows() > 0 {
                     true
                 } else {

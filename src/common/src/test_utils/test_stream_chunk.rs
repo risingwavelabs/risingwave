@@ -84,7 +84,7 @@ impl BigStreamChunk {
             .into_iter()
             .collect();
 
-        let col = Arc::new(I32Array::from_iter(std::iter::repeat(114_514).take(capacity)).into());
+        let col = Arc::new(I32Array::from_iter(std::iter::repeat_n(114_514, capacity)).into());
 
         let chunk = StreamChunk::with_visibility(ops, vec![col], visibility);
 

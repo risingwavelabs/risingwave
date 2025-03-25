@@ -311,7 +311,7 @@ impl RemoteLogSinker {
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
-        log_reader.build_stream_from_start_offset(None).await?;
+        log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_writer_metrics = self.sink_writer_metrics;

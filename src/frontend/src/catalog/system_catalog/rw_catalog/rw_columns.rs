@@ -34,6 +34,7 @@ struct RwColumn {
     is_primary_key: bool,
     is_distribution_key: bool,
     is_generated: bool,
+    is_nullable: bool,
     generation_expression: Option<String>,
     data_type: String,
     type_oid: i32,
@@ -68,6 +69,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_primary_key: false,
                 is_distribution_key: false,
                 is_generated: false,
+                is_nullable: false,
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -88,6 +90,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_primary_key: sink.downstream_pk.contains(&index),
                 is_distribution_key: sink.distribution_key.contains(&index),
                 is_generated: false,
+                is_nullable: column.nullable(),
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -109,6 +112,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_primary_key: table.pk.contains(&index),
                 is_distribution_key: false,
                 is_generated: false,
+                is_nullable: column.nullable(),
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -133,6 +137,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                     is_primary_key: table.pk().iter().any(|idx| idx.column_index == index),
                     is_distribution_key: table.distribution_key.contains(&index),
                     is_generated: column.is_generated(),
+                    is_nullable: column.nullable(),
                     generation_expression: column.generated_expr().map(|expr_node| {
                         let expr = ExprImpl::from_expr_proto(expr_node).unwrap();
                         let expr_display = ExprDisplay {
@@ -163,6 +168,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                     is_primary_key: source.pk_col_ids.contains(&column.column_id()),
                     is_distribution_key: false,
                     is_generated: false,
+                    is_nullable: column.nullable(),
                     generation_expression: None,
                     data_type: column.data_type().to_string(),
                     type_oid: column.data_type().to_oid(),

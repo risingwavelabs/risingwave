@@ -57,7 +57,6 @@ impl PlanTreeNodeUnary for LogicalMaxOneRow {
         Self::new(core)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

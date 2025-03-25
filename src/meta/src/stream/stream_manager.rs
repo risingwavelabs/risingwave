@@ -15,12 +15,16 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
+use risingwave_pb::meta::object::PbObjectInfo;
+use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
@@ -244,11 +248,12 @@ impl GlobalStreamManager {
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
     ///
-    /// This function is a wrapper over [`Self::create_streaming_job_impl`].
+    /// This function is a wrapper over [`Self::run_create_streaming_job_command`].
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
+        run_command_notifier: Option<oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<NotificationVersion> {
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
@@ -258,9 +263,34 @@ impl GlobalStreamManager {
 
         let stream_manager = self.clone();
         let fut = async move {
-            let res = stream_manager
-                .create_streaming_job_impl(stream_job_fragments, ctx)
-                .await;
+            let res: MetaResult<_> = try {
+                let (source_change, streaming_job) = stream_manager
+                    .run_create_streaming_job_command(stream_job_fragments, ctx)
+                    .inspect(move |result| {
+                        if let Some(tx) = run_command_notifier {
+                            let _ = tx.send(match result {
+                                Ok(_) => {
+                                    Ok(())
+                                }
+                                Err(err) => {
+                                    Err(err.clone())
+                                }
+                            });
+                        }
+                    })
+                    .await?;
+                let version = stream_manager
+                    .metadata_manager
+                    .wait_streaming_job_finished(
+                        streaming_job.database_id().into(),
+                        streaming_job.id() as _,
+                    )
+                    .await?;
+                stream_manager.source_manager.apply_source_change(source_change).await;
+                tracing::debug!(?streaming_job, "stream job finish");
+                version
+            };
+
             match res {
                 Ok(version) => {
                     let _ = sender
@@ -340,7 +370,7 @@ impl GlobalStreamManager {
 
     /// The function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
-    async fn create_streaming_job_impl(
+    async fn run_create_streaming_job_command(
         &self,
         stream_job_fragments: StreamJobFragmentsToCreate,
         CreateStreamingJobContext {
@@ -355,7 +385,7 @@ impl GlobalStreamManager {
             cross_db_snapshot_backfill_info,
             ..
         }: CreateStreamingJobContext,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(SourceChange, StreamingJob)> {
         let mut replace_table_command = None;
 
         tracing::debug!(
@@ -442,13 +472,8 @@ impl GlobalStreamManager {
             .await?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
-        let version = self
-            .metadata_manager
-            .wait_streaming_job_finished(streaming_job.id() as _)
-            .await?;
-        self.source_manager.apply_source_change(source_change).await;
-        tracing::debug!(?streaming_job, "stream job finish");
-        Ok(version)
+
+        Ok((source_change, streaming_job))
     }
 
     /// Send replace job command to barrier scheduler.
@@ -519,7 +544,7 @@ impl GlobalStreamManager {
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
         {
-            let _ = self
+            let res = self
                 .barrier_scheduler
                 .run_command(
                     database_id,
@@ -530,8 +555,8 @@ impl GlobalStreamManager {
                             .collect(),
                         actors: removed_actors,
                         unregistered_state_table_ids: state_table_ids
-                            .into_iter()
-                            .map(|table_id| TableId::new(table_id as _))
+                            .iter()
+                            .map(|table_id| TableId::new(*table_id as _))
                             .collect(),
                         unregistered_fragment_ids: fragment_ids,
                     },
@@ -540,7 +565,36 @@ impl GlobalStreamManager {
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
+            if res.is_ok() {
+                self.post_dropping_streaming_jobs(state_table_ids).await;
+            }
         }
+    }
+
+    async fn post_dropping_streaming_jobs(
+        &self,
+        state_table_ids: Vec<risingwave_meta_model::TableId>,
+    ) {
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .complete_dropped_tables(state_table_ids.into_iter())
+            .await;
+        let objects = tables
+            .into_iter()
+            .map(|t| PbObject {
+                object_info: Some(PbObjectInfo::Table(t)),
+            })
+            .collect();
+        let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
+        self.env
+            .notification_manager()
+            .notify_hummock(Operation::Delete, group.clone())
+            .await;
+        self.env
+            .notification_manager()
+            .notify_compactor(Operation::Delete, group)
+            .await;
     }
 
     /// Cancel streaming jobs and return the canceled table ids.

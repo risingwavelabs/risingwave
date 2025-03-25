@@ -18,11 +18,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
+use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
 use risingwave_sqlparser::parser::ParserError;
 
@@ -179,6 +181,12 @@ impl Binder {
             ) {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
+                self.check_privilege(
+                    PbObject::FunctionId(func.id.function_id()),
+                    self.database_id,
+                    AclMode::Execute,
+                    func.owner,
+                )?;
 
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
@@ -212,6 +220,12 @@ impl Binder {
             ) {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
+            self.check_privilege(
+                PbObject::FunctionId(func.id.function_id()),
+                self.database_id,
+                AclMode::Execute,
+                func.owner,
+            )?;
             Some(func.clone())
         } else {
             None
@@ -226,10 +240,8 @@ impl Binder {
         {
             assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
             Some(AggType::UserDefined(udf.as_ref().into()))
-        } else if let Ok(agg_type) = AggType::from_str(&func_name) {
-            Some(agg_type)
         } else {
-            None
+            AggType::from_str(&func_name).ok()
         };
 
         // try to bind it as a window function call

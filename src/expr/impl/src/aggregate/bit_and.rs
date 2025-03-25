@@ -110,7 +110,7 @@ impl<T: Bits> BitAndUpdatable<T> {
     // state is the number of 0s for each bit.
 
     fn create_state(&self) -> ListValue {
-        ListValue::new(I64Array::from_iter(std::iter::repeat(0).take(T::BITS)).into())
+        ListValue::new(I64Array::from_iter(std::iter::repeat_n(0, T::BITS)).into())
     }
 
     fn accumulate(&self, mut state: ListValue, input: T) -> ListValue {

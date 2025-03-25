@@ -144,6 +144,7 @@ impl CatalogController {
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
+                dropped_tables: HashMap::new(),
             }),
         };
 
@@ -168,8 +169,11 @@ pub struct CatalogControllerInner {
     ///
     /// `DdlController` will update this map, and pass the `tx` side to `CatalogController`.
     /// On notifying, we can remove the entry from this map.
+    #[expect(clippy::type_complexity)]
     pub creating_table_finish_notifier:
-        HashMap<ObjectId, Vec<Sender<MetaResult<NotificationVersion>>>>,
+        HashMap<DatabaseId, HashMap<ObjectId, Vec<Sender<Result<NotificationVersion, String>>>>>,
+    /// Tables have been dropped from the meta store, but the corresponding barrier remains unfinished.
+    pub dropped_tables: HashMap<TableId, PbTable>,
 }
 
 impl CatalogController {
@@ -590,6 +594,14 @@ impl CatalogController {
 
         Ok(version)
     }
+
+    pub async fn complete_dropped_tables(
+        &self,
+        table_ids: impl Iterator<Item = TableId>,
+    ) -> Vec<PbTable> {
+        let mut inner = self.inner.write().await;
+        inner.complete_dropped_tables(table_ids)
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -907,10 +919,13 @@ impl CatalogControllerInner {
 
     pub(crate) fn register_finish_notifier(
         &mut self,
-        id: i32,
-        sender: Sender<MetaResult<NotificationVersion>>,
+        database_id: DatabaseId,
+        id: ObjectId,
+        sender: Sender<Result<NotificationVersion, String>>,
     ) {
         self.creating_table_finish_notifier
+            .entry(database_id)
+            .or_default()
             .entry(id)
             .or_default()
             .push(sender);
@@ -932,12 +947,22 @@ impl CatalogControllerInner {
             })
     }
 
-    pub(crate) fn notify_finish_failed(&mut self, err: &MetaError) {
-        for tx in take(&mut self.creating_table_finish_notifier)
-            .into_values()
-            .flatten()
-        {
-            let _ = tx.send(Err(err.clone()));
+    pub(crate) fn notify_finish_failed(&mut self, database_id: Option<DatabaseId>, err: String) {
+        if let Some(database_id) = database_id {
+            if let Some(creating_tables) = self.creating_table_finish_notifier.remove(&database_id)
+            {
+                for tx in creating_tables.into_values().flatten() {
+                    let _ = tx.send(Err(err.clone()));
+                }
+            }
+        } else {
+            for tx in take(&mut self.creating_table_finish_notifier)
+                .into_values()
+                .flatten()
+                .flat_map(|(_, txs)| txs.into_iter())
+            {
+                let _ = tx.send(Err(err.clone()));
+            }
         }
     }
 
@@ -954,5 +979,24 @@ impl CatalogControllerInner {
             .all(&self.db)
             .await?;
         Ok(table_ids)
+    }
+
+    /// Since the tables have been dropped from both meta store and streaming jobs, this method removes those table copies.
+    /// Returns the removed table copies.
+    pub(crate) fn complete_dropped_tables(
+        &mut self,
+        table_ids: impl Iterator<Item = TableId>,
+    ) -> Vec<PbTable> {
+        table_ids
+            .filter_map(|table_id| {
+                self.dropped_tables.remove(&table_id).map_or_else(
+                    || {
+                        tracing::warn!(table_id, "table not found");
+                        None
+                    },
+                    Some,
+                )
+            })
+            .collect()
     }
 }

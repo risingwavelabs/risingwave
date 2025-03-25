@@ -76,7 +76,7 @@ fn validate_payload_schema(
     if log_store_payload_schema
         .iter()
         .zip_eq(input_schema.fields.iter())
-        .map(|(log_store_col, input_field)| {
+        .all(|(log_store_col, input_field)| {
             let log_store_col_type = DataType::from(
                 log_store_col
                     .column_desc
@@ -88,7 +88,6 @@ fn validate_payload_schema(
             );
             log_store_col_type.equals_datatype(&input_field.data_type)
         })
-        .all(|equal| equal)
     {
         Ok(())
     } else {

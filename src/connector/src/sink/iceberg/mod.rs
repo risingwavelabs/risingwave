@@ -19,6 +19,7 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -269,6 +270,24 @@ impl IcebergSink {
 
     async fn create_table_if_not_exists(&self) -> Result<()> {
         let catalog = self.config.create_catalog().await?;
+        let namespace = if let Some(database_name) = &self.config.common.database_name {
+            let namespace = NamespaceIdent::new(database_name.clone());
+            if !catalog
+                .namespace_exists(&namespace)
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+            {
+                catalog
+                    .create_namespace(&namespace, HashMap::default())
+                    .await
+                    .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                    .context("failed to create iceberg namespace")?;
+            }
+            namespace
+        } else {
+            bail!("database name must be set if you want to create table")
+        };
+
         let table_id = self
             .config
             .full_table_name()
@@ -278,12 +297,6 @@ impl IcebergSink {
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
         {
-            let namespace = if let Some(database_name) = &self.config.common.database_name {
-                NamespaceIdent::new(database_name.clone())
-            } else {
-                bail!("database name must be set if you want to create table")
-            };
-
             let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
             // convert risingwave schema -> arrow schema -> iceberg schema
             let arrow_fields = self
@@ -310,8 +323,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -499,7 +513,6 @@ impl Sink for IcebergSink {
             inner,
         )
         .await?;
-        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
@@ -509,7 +522,6 @@ impl Sink for IcebergSink {
             writer,
             metrics,
             commit_checkpoint_interval,
-            log_store_rewind_start_epoch,
         ))
     }
 
@@ -1023,7 +1035,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
-        if ops.len() == 0 {
+        if ops.is_empty() {
             return Ok(());
         }
         let write_batch_size = chunk.estimated_heap_size();
@@ -1619,7 +1631,8 @@ impl IcebergSinkCommitter {
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
         // because retry logic involved reapply the commit metadata.
         // For now, we just retry the commit operation.
-        let retry_strategy = ExponentialBackoff::from_millis(100)
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
             .map(jitter)
             .take(self.commit_retry_num as usize);
         let catalog = self.catalog.clone();
@@ -1643,7 +1656,7 @@ impl IcebergSinkCommitter {
                 tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })?;
-            tx.commit_dyn(self.catalog.as_ref()).await.map_err(|err| {
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
                 tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })
@@ -1899,9 +1912,7 @@ fn check_compatibility(
             | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
                 let mut schema_fields = HashMap::new();
                 get_fields(our_field_type, field.data_type(), &mut schema_fields)
-                    .map_or(true, |fields| {
-                        check_compatibility(schema_fields, &fields).unwrap()
-                    })
+                    .is_none_or(|fields| check_compatibility(schema_fields, &fields).unwrap())
             }
             // validate nested structs
             (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
@@ -1972,12 +1983,11 @@ mod test {
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{MapType, StructType};
+    use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
-    use crate::source::DataType;
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -2193,6 +2203,9 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

@@ -85,17 +85,34 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
     }
 
-    pub async fn get_table_by_ids(&self, table_ids: Vec<TableId>) -> MetaResult<Vec<PbTable>> {
+    pub async fn get_table_by_ids(
+        &self,
+        table_ids: Vec<TableId>,
+        include_dropped_table: bool,
+    ) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()
             .find_also_related(Object)
-            .filter(table::Column::TableId.is_in(table_ids))
+            .filter(table::Column::TableId.is_in(table_ids.clone()))
             .all(&inner.db)
             .await?;
-        Ok(table_objs
+        let tables = table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
-            .collect())
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into());
+        let tables = if include_dropped_table {
+            tables
+                .chain(inner.dropped_tables.iter().filter_map(|(id, t)| {
+                    if table_ids.contains(id) {
+                        Some(t.clone())
+                    } else {
+                        None
+                    }
+                }))
+                .collect()
+        } else {
+            tables.collect()
+        };
+        Ok(tables)
     }
 
     pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
@@ -369,5 +386,20 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
 
         Ok(job_parallelism)
+    }
+
+    pub async fn get_fragment_streaming_job_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<ObjectId> {
+        let inner = self.inner.read().await;
+        let job_id: ObjectId = Fragment::find_by_id(fragment_id)
+            .select_only()
+            .column(fragment::Column::JobId)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+        Ok(job_id)
     }
 }

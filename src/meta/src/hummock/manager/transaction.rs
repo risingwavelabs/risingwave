@@ -242,7 +242,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
     }
 }
 
-impl<'a, TXN> ValTransaction<TXN> for HummockVersionTransaction<'a>
+impl<TXN> ValTransaction<TXN> for HummockVersionTransaction<'_>
 where
     HummockVersionDelta: Transactional<TXN>,
     HummockVersionStats: Transactional<TXN>,
@@ -337,7 +337,7 @@ impl InMemValTransaction for HummockVersionStatsTransaction<'_> {
     }
 }
 
-impl<'a, TXN> ValTransaction<TXN> for HummockVersionStatsTransaction<'a>
+impl<TXN> ValTransaction<TXN> for HummockVersionStatsTransaction<'_>
 where
     HummockVersionStats: Transactional<TXN>,
 {
