@@ -2,6 +2,12 @@
 
 set -e
 
+# stop if already running
+if nc -z localhost 15002; then
+    echo "Spark connect server already running at port 15002"
+    exit 0
+fi
+
 SCRIPT_DIR="$(dirname "$0")"
 cd "$SCRIPT_DIR"
 
@@ -31,9 +37,6 @@ if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ];then
     wget --no-verbose https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
     tar -xzf $SPARK_FILE --no-same-owner
 fi
-
-# stop old server
-./spark-${SPARK_VERSION}-bin-hadoop3/sbin/stop-connect-server.sh
 
 # start new server
 ./spark-${SPARK_VERSION}-bin-hadoop3/sbin/start-connect-server.sh --packages $PACKAGES \
