@@ -537,14 +537,12 @@ impl HummockManager {
             return Ok(version_sst_ids);
         }
         let written = write_sstable_infos(
-            delta
-                .newly_added_sst_infos_exclude_change_log()
-                .filter(|s| {
-                    !skip_sst_ids.contains(&s.sst_id)
-                        && s.table_ids
-                            .iter()
-                            .any(|tid| time_travel_table_ids.contains(tid))
-                }),
+            delta.newly_added_sst_infos(true).filter(|s| {
+                !skip_sst_ids.contains(&s.sst_id)
+                    && s.table_ids
+                        .iter()
+                        .any(|tid| time_travel_table_ids.contains(tid))
+            }),
             txn,
             self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )

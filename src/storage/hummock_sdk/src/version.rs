@@ -629,10 +629,6 @@ where
                     .flatten(),
             )
     }
-
-    pub fn newly_added_sst_infos_exclude_change_log(&self) -> impl Iterator<Item = &'_ T> {
-        self.newly_added_sst_infos(true)
-    }
 }
 
 impl HummockVersionDelta {
