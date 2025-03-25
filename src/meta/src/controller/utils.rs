@@ -328,6 +328,11 @@ where
         return Ok(false);
     }
 
+    // special check for self referencing
+    if dependent_objs.contains(&target_table) {
+        return Ok(true);
+    }
+
     let query = construct_sink_cycle_check_query(target_table, dependent_objs);
     let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
 
