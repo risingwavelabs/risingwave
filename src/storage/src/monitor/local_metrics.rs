@@ -217,7 +217,7 @@ impl Drop for StoreLocalStatistic {
             && !self.added.load(Ordering::Relaxed)
             && self.need_report()
         {
-            tracing::error!("local stats lost!\n{:#?}", self);
+            // tracing::error!("local stats lost!\n{:#?}", self);
         }
     }
 }

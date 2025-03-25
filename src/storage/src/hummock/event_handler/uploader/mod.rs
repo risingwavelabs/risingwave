@@ -514,10 +514,10 @@ impl LocalInstanceUnsyncData {
             .as_mut()
             .expect("should be Some when seal new epoch");
         let current_epoch = data.epoch;
-        debug!(
-            instance_id = self.instance_id,
-            next_epoch, current_epoch, "local seal epoch"
-        );
+        // debug!(
+        //     instance_id = self.instance_id,
+        //     next_epoch, current_epoch, "local seal epoch"
+        // );
         assert_gt!(next_epoch, current_epoch);
         let epoch_data = replace(data, LocalInstanceEpochData::new(next_epoch));
         if !epoch_data.is_empty() {

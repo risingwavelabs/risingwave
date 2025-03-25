@@ -38,9 +38,9 @@ profile:
       #   database: metadata
 
       # If you want to enable metrics or tracing, uncomment the following lines.
-      # - use: prometheus  # metrics
+      - use: prometheus  # metrics
       # - use: tempo       # tracing
-      # - use: grafana     # visualization
+      - use: grafana     # visualization
 
       - use: meta-node
         # meta-backend: postgres

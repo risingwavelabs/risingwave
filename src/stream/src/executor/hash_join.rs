@@ -572,6 +572,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let mut start_time = Instant::now();
 
+        let mut barrier_count = 0;
+        let mut slept = false;
         while let Some(msg) = aligned_stream
             .next()
             .instrument_await("hash_join_barrier_align")
@@ -596,6 +598,26 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 AlignedMessage::Left(chunk) => {
                     let mut left_time = Duration::from_nanos(0);
                     let mut left_start_time = Instant::now();
+                    if !slept
+                        && actor_id % 4 == 0
+                        && barrier_count == 300
+                        && self.ctx.fragment_id == 17
+                    {
+                        println!(
+                            "WKXLOG actor_id: {}, fragment_id: {}, start to sleep for 200s",
+                            actor_id, self.ctx.fragment_id
+                        );
+                        for _ in 0..200 {
+                            tokio::time::sleep(Duration::from_secs(1))
+                                .instrument_await("hash_join_sleep")
+                                .await;
+                        }
+                        println!(
+                            "WKXLOG actor_id: {}, fragment_id: {}, end to sleep for 200s",
+                            actor_id, self.ctx.fragment_id
+                        );
+                        slept = true;
+                    }
                     #[for_await]
                     for chunk in Self::eq_join_left(EqJoinArgs {
                         ctx: &self.ctx,
@@ -622,6 +644,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 AlignedMessage::Right(chunk) => {
                     let mut right_time = Duration::from_nanos(0);
                     let mut right_start_time = Instant::now();
+
                     #[for_await]
                     for chunk in Self::eq_join_right(EqJoinArgs {
                         ctx: &self.ctx,
@@ -646,6 +669,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.try_flush_data().await?;
                 }
                 AlignedMessage::Barrier(barrier) => {
+                    barrier_count += 1;
+                    if self.ctx.fragment_id == 17 {
+                        println!(
+                            "WKXLOG barrier_count: {}, actor_id: {}, fragment_id: {}",
+                            barrier_count, actor_id, self.ctx.fragment_id
+                        );
+                    }
                     let barrier_start_time = Instant::now();
                     let (left_post_commit, right_post_commit) =
                         self.flush_data(barrier.epoch).await?;
