@@ -673,7 +673,8 @@ impl IcebergSinkWriter {
                 iceberg::spec::DataFileFormat::Parquet,
             ),
         );
-        let data_file_builder = DataFileWriterBuilder::new(parquet_writer_builder, None, None);
+        let data_file_builder =
+            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id());
         if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
             Err(SinkError::Iceberg(anyhow!(
                 "Extra partition column is not supported in append-only mode"
@@ -802,7 +803,11 @@ impl IcebergSinkWriter {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            DataFileWriterBuilder::new(parquet_writer_builder.clone(), None, None)
+            DataFileWriterBuilder::new(
+                parquet_writer_builder.clone(),
+                None,
+                partition_spec.spec_id(),
+            )
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
@@ -825,7 +830,7 @@ impl IcebergSinkWriter {
                         .developer
                         .iceberg_sink_positional_delete_cache_size,
                     None,
-                    None,
+                    partition_spec.spec_id(),
                 ),
                 position_delete_cache_num,
             )
@@ -835,7 +840,7 @@ impl IcebergSinkWriter {
                 unique_column_ids.clone(),
                 table.metadata().current_schema().clone(),
                 None,
-                None,
+                partition_spec.spec_id(),
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
@@ -1415,7 +1420,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .into_iter()
             .flat_map(|r| {
                 r.data_files.into_iter().map(|f| {
-                    f.try_into(expect_schema_id, &partition_type, schema)
+                    f.try_into(expect_partition_spec_id, &partition_type, schema)
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))
                 })
             })
