@@ -128,7 +128,7 @@ impl PersistedFileScanTask {
     pub fn decode(jsonb_ref: &JsonbVal) -> Result<FileScanTask> {
         let persisted_task: Self = serde_json::from_value(jsonb_ref.to_owned_scalar().take())
             .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
-        Ok(persisted_task.to_task())
+        Ok(Self::to_task(persisted_file_scan_task))
     }
 
     /// First converts the [`FileScanTask`] to a persisted one, then encodes the persisted one to a jsonb value.
