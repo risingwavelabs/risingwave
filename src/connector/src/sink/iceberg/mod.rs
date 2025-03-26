@@ -830,7 +830,7 @@ impl IcebergSinkWriter {
                         .developer
                         .iceberg_sink_positional_delete_cache_size,
                     None,
-                    partition_spec.spec_id(),
+                    None,
                 ),
                 position_delete_cache_num,
             )
