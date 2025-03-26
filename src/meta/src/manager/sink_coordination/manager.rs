@@ -14,7 +14,9 @@
 
 use std::collections::HashMap;
 use std::pin::pin;
+use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::future::{BoxFuture, Either, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
@@ -33,6 +35,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::{debug, error, info, warn};
 
+use crate::MetaResult;
+use crate::hummock::HummockManagerRef;
+use crate::manager::MetadataManager;
 use crate::manager::sink_coordination::SinkWriterRequestStream;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
@@ -69,10 +74,48 @@ pub struct SinkCoordinatorManager {
     request_tx: mpsc::Sender<ManagerRequest>,
 }
 
+pub(super) type SinkCommittedEpochSubscriber = Arc<
+    dyn Fn(SinkId) -> BoxFuture<'static, MetaResult<(u64, UnboundedReceiver<u64>)>>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+fn new_committed_epoch_subscriber(
+    hummock_manager: HummockManagerRef,
+    metadata_manager: MetadataManager,
+) -> SinkCommittedEpochSubscriber {
+    Arc::new(move |sink_id| {
+        let hummock_manager = hummock_manager.clone();
+        let metadata_manager = metadata_manager.clone();
+        async move {
+            let state_table_ids = metadata_manager
+                .get_sink_state_table_ids(sink_id.sink_id as _)
+                .await?;
+            let Some(table_id) = state_table_ids.first() else {
+                return Err(anyhow!("no state table id in sink: {}", sink_id).into());
+            };
+            hummock_manager
+                .subscribe_table_committed_epoch(*table_id)
+                .await
+        }
+        .boxed()
+    })
+}
+
 impl SinkCoordinatorManager {
-    pub fn start_worker() -> (Self, (JoinHandle<()>, Sender<()>)) {
-        Self::start_worker_with_spawn_worker(|param, manager_request_stream| {
-            tokio::spawn(CoordinatorWorker::run(param, manager_request_stream))
+    pub fn start_worker(
+        hummock_manager: HummockManagerRef,
+        metadata_manager: MetadataManager,
+    ) -> (Self, (JoinHandle<()>, Sender<()>)) {
+        let subscriber =
+            new_committed_epoch_subscriber(hummock_manager.clone(), metadata_manager.clone());
+        Self::start_worker_with_spawn_worker(move |param, manager_request_stream| {
+            tokio::spawn(CoordinatorWorker::run(
+                param,
+                manager_request_stream,
+                subscriber.clone(),
+            ))
         })
     }
 
