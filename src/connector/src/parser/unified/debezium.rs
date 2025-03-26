@@ -14,11 +14,10 @@
 
 use std::str::FromStr;
 
-use deltalake::arrow::datatypes::i256;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::{
-    DataType, Datum, DatumCow, ListValue, Scalar, ScalarImpl, ScalarRefImpl, StructValue,
+    DataType, Datum, DatumCow, Int256, ListValue, Scalar, ScalarImpl, ScalarRefImpl, StructValue,
     Timestamp, Timestamptz, ToDatumRef, ToOwnedDatum,
 };
 use risingwave_connector_codec::decoder::AccessExt;
@@ -547,6 +546,10 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
 /// date time: {"$date": {"$numberLong": "1630454400000"}}
 ///
 /// For now, we support only the Canonical format of the date and timestamp.
+///
+/// # NOTE:
+///
+/// - `field` indicates the field name in the bson document, if it is None, the `bson_doc` is the field itself.
 // similar to extract the "_id" field from the message payload
 pub fn extract_bson_field(
     type_expected: &DataType,
@@ -808,9 +811,9 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
         }
         // parse to large int
         if *type_expected == DataType::Int256 {
-            let parsed_num = match i256::from_string(num_str) {
-                Some(n) => n,
-                None => {
+            let parsed_num = match Int256::from_str(num_str) {
+                Ok(n) => n,
+                Err(_) => {
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
                         got: "string".into(),
@@ -818,7 +821,7 @@ fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -
                     });
                 }
             };
-            return Ok(Some(ScalarImpl::Int256(parsed_num.into())));
+            return Ok(Some(ScalarImpl::Int256(parsed_num)));
         }
 
         // parse to integer

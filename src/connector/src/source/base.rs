@@ -41,7 +41,7 @@ use super::datagen::DatagenMeta;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
-use super::monitor::{EnumeratorMetrics, SourceMetrics};
+use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
@@ -50,6 +50,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
+use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
     WithOptionsSecResolved, dispatch_source_prop, dispatch_split_impl, for_all_connections,
