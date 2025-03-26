@@ -449,18 +449,90 @@ impl<S: StateStore> Execute for SnapshotBackfillExecutor<S> {
 struct ConsumingSnapshot;
 struct ConsumingLogStore;
 
+struct PendingBarriers {
+    first_upstream_barrier_epoch: EpochPair,
+
+    /// Pending non-checkpoint barriers before receiving the next checkpoint barrier
+    /// Newer barrier at the front
+    pending_non_checkpoint_barriers: VecDeque<DispatcherBarrier>,
+
+    /// In the outer `VecDeque`, newer barriers at the front.
+    /// In the inner `VecDeque`, newer barrier at the front, with the first barrier as checkpoint barrier,
+    /// and others as non-checkpoint barrier
+    checkpoint_barrier_groups: VecDeque<VecDeque<DispatcherBarrier>>,
+}
+
+impl PendingBarriers {
+    fn new(first_upstream_barrier: DispatcherBarrier) -> Self {
+        Self {
+            first_upstream_barrier_epoch: first_upstream_barrier.epoch,
+            pending_non_checkpoint_barriers: Default::default(),
+            checkpoint_barrier_groups: VecDeque::from_iter([VecDeque::from_iter([
+                first_upstream_barrier,
+            ])]),
+        }
+    }
+
+    fn add(&mut self, barrier: DispatcherBarrier) {
+        let is_checkpoint = barrier.kind.is_checkpoint();
+        self.pending_non_checkpoint_barriers.push_front(barrier);
+        if is_checkpoint {
+            self.checkpoint_barrier_groups
+                .push_front(take(&mut self.pending_non_checkpoint_barriers));
+        }
+    }
+
+    fn pop(&mut self) -> Option<VecDeque<DispatcherBarrier>> {
+        self.checkpoint_barrier_groups.pop_back()
+    }
+
+    fn consume_epoch(&mut self, epoch: EpochPair) {
+        let barriers = self
+            .checkpoint_barrier_groups
+            .back_mut()
+            .expect("non-empty");
+        let oldest_upstream_barrier = barriers.back().expect("non-empty");
+        assert!(
+            oldest_upstream_barrier.epoch.prev >= epoch.prev,
+            "oldest upstream barrier has epoch {:?} earlier than epoch to consume {:?}",
+            oldest_upstream_barrier.epoch,
+            epoch
+        );
+        if oldest_upstream_barrier.epoch.prev == epoch.prev {
+            assert_eq!(oldest_upstream_barrier.epoch, epoch);
+            barriers.pop_back();
+            if barriers.is_empty() {
+                self.checkpoint_barrier_groups.pop_back();
+            }
+        }
+    }
+
+    fn latest_epoch(&self) -> Option<EpochPair> {
+        self.pending_non_checkpoint_barriers
+            .front()
+            .or_else(|| {
+                self.checkpoint_barrier_groups
+                    .front()
+                    .and_then(|barriers| barriers.front())
+            })
+            .map(|barrier| barrier.epoch)
+    }
+
+    fn checkpoint_epoch_count(&self) -> usize {
+        self.checkpoint_barrier_groups.len()
+    }
+
+    fn has_checkpoint_epoch(&self) -> bool {
+        !self.checkpoint_barrier_groups.is_empty()
+    }
+}
+
 struct UpstreamBuffer<'a, S> {
     upstream: &'a mut MergeExecutorInput,
     max_pending_epoch_lag: u64,
     consumed_epoch: u64,
-    // newer barrier at the front
-    pending_non_checkpoint_barriers: VecDeque<DispatcherBarrier>,
     /// Barriers received from upstream but not yet received the barrier from local barrier worker.
-    ///
-    /// In the outer `VecDeque`, newer barriers at the front.
-    /// In the inner `VecDeque`, newer barrier at the front, with the last barrier as checkpoint barrier,
-    /// and others as non-checkpoint barrier
-    upstream_pending_barriers: VecDeque<VecDeque<DispatcherBarrier>>,
+    upstream_pending_barriers: PendingBarriers,
     /// Whether we have started polling any upstream data before the next barrier.
     /// When `true`, we should continue polling until the next barrier, because
     /// some data in this epoch have been discarded and data in this epoch
@@ -480,10 +552,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
             upstream,
             is_polling_epoch_data: false,
             consume_upstream_row_count,
-            pending_non_checkpoint_barriers: Default::default(),
-            upstream_pending_barriers: VecDeque::from_iter([VecDeque::from_iter([
-                first_upstream_barrier,
-            ])]),
+            upstream_pending_barriers: PendingBarriers::new(first_upstream_barrier),
             // no limit on the number of pending barrier in the beginning
             max_pending_epoch_lag: u64::MAX,
             consumed_epoch: 0,
@@ -495,19 +564,16 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
         mut self,
         consumed_epoch: u64,
     ) -> Option<UpstreamBuffer<'a, ConsumingLogStore>> {
-        // it's safe to access upstream_pending_barriers[0][0] because it's first upstream barrier
-        let first_upstream_barrier_epoch = self
+        if self
             .upstream_pending_barriers
-            .back()
-            .expect("first upstream barrier")
-            .back()
-            .expect("first upstream barrier")
-            .epoch;
-        if first_upstream_barrier_epoch.prev == consumed_epoch {
+            .first_upstream_barrier_epoch
+            .prev
+            == consumed_epoch
+        {
             assert_eq!(
                 1,
                 self.upstream_pending_barriers
-                    .pop_back()
+                    .pop()
                     .expect("non-empty")
                     .len()
             );
@@ -515,7 +581,6 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
         let max_pending_epoch_lag = self.pending_epoch_lag();
         let buffer = UpstreamBuffer {
             upstream: self.upstream,
-            pending_non_checkpoint_barriers: self.pending_non_checkpoint_barriers,
             upstream_pending_barriers: self.upstream_pending_barriers,
             max_pending_epoch_lag,
             is_polling_epoch_data: self.is_polling_epoch_data,
@@ -554,7 +619,7 @@ impl<S> UpstreamBuffer<'_, S> {
 
     /// Consume the upstream until seeing the next barrier.
     async fn consume_until_next_checkpoint_barrier(&mut self) -> StreamExecutorResult<()> {
-        let barriers = loop {
+        loop {
             let msg: DispatcherMessage = self
                 .upstream
                 .try_next()
@@ -568,10 +633,10 @@ impl<S> UpstreamBuffer<'_, S> {
                 }
                 DispatcherMessage::Barrier(barrier) => {
                     let is_checkpoint = barrier.kind.is_checkpoint();
-                    self.pending_non_checkpoint_barriers.push_front(barrier);
+                    self.upstream_pending_barriers.add(barrier);
                     if is_checkpoint {
                         self.is_polling_epoch_data = false;
-                        break take(&mut self.pending_non_checkpoint_barriers);
+                        break;
                     } else {
                         self.is_polling_epoch_data = true;
                     }
@@ -580,8 +645,7 @@ impl<S> UpstreamBuffer<'_, S> {
                     self.is_polling_epoch_data = true;
                 }
             }
-        };
-        self.upstream_pending_barriers.push_front(barriers);
+        }
         Ok(())
     }
 }
@@ -589,38 +653,22 @@ impl<S> UpstreamBuffer<'_, S> {
 impl UpstreamBuffer<'_, ConsumingLogStore> {
     async fn consumed_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<bool> {
         assert!(!self.is_finished());
-        if self.upstream_pending_barriers.is_empty() {
+        if !self.upstream_pending_barriers.has_checkpoint_epoch() {
             // when upstream_pending_barriers is empty and not polling any intermediate epoch data,
             // we must have returned true to indicate finish, and should not be called again.
             assert!(self.is_polling_epoch_data);
             self.consume_until_next_checkpoint_barrier().await?;
-            assert_eq!(self.upstream_pending_barriers.len(), 1);
+            assert_eq!(self.upstream_pending_barriers.checkpoint_epoch_count(), 1);
         }
-        let barriers = self
-            .upstream_pending_barriers
-            .back_mut()
-            .expect("non-empty");
-        let oldest_upstream_barrier = barriers.back().expect("non-empty");
-        assert!(
-            oldest_upstream_barrier.epoch.prev >= epoch.prev,
-            "oldest upstream barrier has epoch {:?} earlier than epoch to consume {:?}",
-            oldest_upstream_barrier.epoch,
-            epoch
-        );
-        if oldest_upstream_barrier.epoch.prev == epoch.prev {
-            assert_eq!(oldest_upstream_barrier.epoch, epoch);
-            barriers.pop_back();
-            if barriers.is_empty() {
-                self.upstream_pending_barriers.pop_back();
-            }
-        }
+        self.upstream_pending_barriers.consume_epoch(epoch);
+
         {
             {
                 let prev_epoch = epoch.prev;
                 assert!(self.consumed_epoch < prev_epoch);
                 let elapsed_epoch = prev_epoch - self.consumed_epoch;
                 self.consumed_epoch = prev_epoch;
-                if !self.upstream_pending_barriers.is_empty() {
+                if self.upstream_pending_barriers.has_checkpoint_epoch() {
                     // try consuming ready upstreams when we haven't yielded all pending barriers yet.
                     while self.can_consume_upstream()
                         && let Some(result) =
@@ -642,7 +690,14 @@ impl UpstreamBuffer<'_, ConsumingLogStore> {
     }
 
     fn is_finished(&self) -> bool {
-        self.upstream_pending_barriers.is_empty() && !self.is_polling_epoch_data
+        if cfg!(debug_assertions) && !self.is_polling_epoch_data {
+            assert!(
+                self.upstream_pending_barriers
+                    .pending_non_checkpoint_barriers
+                    .is_empty()
+            )
+        }
+        !self.upstream_pending_barriers.has_checkpoint_epoch() && !self.is_polling_epoch_data
     }
 }
 
@@ -667,12 +722,9 @@ impl<S> UpstreamBuffer<'_, S> {
 
     fn pending_epoch_lag(&self) -> u64 {
         self.upstream_pending_barriers
-            .front()
-            .map(|barriers| {
-                barriers
-                    .front()
-                    .expect("non-empty")
-                    .epoch
+            .latest_epoch()
+            .map(|epoch| {
+                epoch
                     .prev
                     .checked_sub(self.consumed_epoch)
                     .expect("pending epoch must be later than consumed_epoch")
