@@ -71,7 +71,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 # install build tools
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
-    cargo-make@0.37.9 \
+    cargo-make@0.37.24 \
     sqllogictest-bin@0.28.0 \
     sccache@0.7.4 \
     && cargo cache -a \
