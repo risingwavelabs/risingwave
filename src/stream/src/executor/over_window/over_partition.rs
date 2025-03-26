@@ -298,6 +298,7 @@ pub(super) struct OverPartition<'a, S: StateStore> {
     stats: OverPartitionStats,
 
     _phantom: PhantomData<S>,
+    fix_inconsistency: Option<bool>,
 }
 
 const MAGIC_BATCH_SIZE: usize = 512;
@@ -343,6 +344,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             stats: Default::default(),
 
             _phantom: PhantomData,
+            fix_inconsistency: std::env::var("RW_OVER_PARTITION_FIX_INCONSISTENCY")
+                .ok()
+                .map(|_| true),
         }
     }
 
@@ -523,7 +527,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await?;
         }
 
-        if !enable_strict_consistency() {
+        if !enable_strict_consistency() || self.fix_inconsistency.unwrap_or(false) {
             // in non-strict mode, we should ensure the delta is consistent with the cache
             let cache = self.range_cache.inner();
             delta.retain(|key, change| match &*change {
