@@ -154,8 +154,7 @@ impl Sink for PostgresSink {
 
             // Check that names and types match, order of columns doesn't matter.
             {
-                let pg_columns: &Vec<risingwave_common::catalog::ColumnDesc> =
-                    pg_table.column_descs();
+                let pg_columns = pg_table.column_descs();
                 let sink_columns = self.schema.fields();
                 if pg_columns.len() < sink_columns.len() {
                     return Err(SinkError::Config(anyhow!(
