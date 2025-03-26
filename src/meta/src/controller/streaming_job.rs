@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
+use indexmap::IndexMap;
 use itertools::Itertools;
-use regex::Regex;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -46,6 +46,8 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{FragmentTypeFlag, PbFragmentTypeFlag, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
+use risingwave_sqlparser::ast::{SqlOption, Statement};
+use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
@@ -1702,22 +1704,42 @@ impl CatalogController {
                 );
             }
         };
-
+        let definition = sink.definition.clone();
+        let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?
+            .try_into()
+            .unwrap();
+        if let Statement::CreateSink { stmt } = &mut stmt {
+            let mut new_sql_options = stmt
+                .with_properties
+                .0
+                .iter()
+                .map(|sql_option| (&sql_option.name, sql_option))
+                .collect::<IndexMap<_, _>>();
+            let add_sql_options = props
+                .iter()
+                .map(|(k, v)| SqlOption::try_from((k, v)))
+                .collect::<Result<Vec<SqlOption>, ParserError>>()
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+            new_sql_options.extend(
+                add_sql_options
+                    .iter()
+                    .map(|sql_option| (&sql_option.name, sql_option)),
+            );
+            stmt.with_properties.0 = new_sql_options.into_values().cloned().collect();
+        } else {
+            return Err(SinkError::Config(anyhow!(
+                "sink definition is not a create sink statement"
+            ))
+            .into());
+        }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props);
 
-        let definition = sink.definition.clone();
-        let entries: &Vec<String> = &new_config
-            .iter()
-            .map(|(k, v)| format!("{} = {}", k, v))
-            .collect();
-        let new_with_definition = format!("WITH ( {} )", entries.join(", "));
-        let re = Regex::new(r"(?i)WITH\s?\([^\)]*\)").unwrap();
-        let new_definition = re.replace_all(&definition, new_with_definition);
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
             properties: Set(risingwave_meta_model::Property(new_config.clone())),
-            definition: Set(new_definition.to_string()),
+            definition: Set(stmt.to_string()),
             ..Default::default()
         };
         active_sink.update(&txn).await?;

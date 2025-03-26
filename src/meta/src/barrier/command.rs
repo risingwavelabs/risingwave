@@ -33,10 +33,10 @@ use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsI
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation,
-     Dispatcher, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;

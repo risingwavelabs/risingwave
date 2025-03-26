@@ -40,11 +40,10 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation,
-    Dispatchers, DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier,
-    PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation,
+    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 

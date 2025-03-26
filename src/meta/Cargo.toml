@@ -26,6 +26,7 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 http = "1"
+indexmap = { version = "2.8.0", features = ["serde"] }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
@@ -40,7 +41,6 @@ prometheus = "0.13"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = { workspace = true }
-regex = "1.9"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
