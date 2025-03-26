@@ -75,4 +75,4 @@ jobs:
           title: "Update PR Template for Highest Release Version"
           body: "This PR updates the pull request template to reflect the highest release version: ${{ env.version }}."
           base: main
-          branch: update-pr-template-${{ env.version }}`
+          branch: update-pr-template-${{ env.version }}
