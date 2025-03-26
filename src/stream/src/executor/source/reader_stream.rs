@@ -211,6 +211,13 @@ impl StreamReaderBuilder {
                     }
                     Err(e) => {
                         if self.ban_recover {
+                            tracing::info!(
+                            error = %e.as_report(),
+                            source_name = self.source_name,
+                            source_id = self.source_id.table_id,
+                            actor_id = self.actor_ctx.id,
+                            "recover is banned by config"
+                            );
                             return Err(StreamExecutorError::connector_error(e));
                         }
                         // recoverable
