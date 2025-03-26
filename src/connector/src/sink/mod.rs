@@ -66,6 +66,7 @@ use prometheus::Registry;
 use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::ActorId;
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
@@ -488,6 +489,7 @@ pub struct SinkWriterParam {
     pub sink_id: SinkId,
     pub sink_name: String,
     pub connector: String,
+    pub streaming_config: StreamingConfig,
 }
 
 #[derive(Clone)]
@@ -583,6 +585,7 @@ impl SinkWriterParam {
             sink_id: SinkId::new(1),
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),
+            streaming_config: StreamingConfig::default(),
         }
     }
 }

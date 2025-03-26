@@ -18,6 +18,7 @@ use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
 use parking_lot::Mutex;
 use risingwave_common::array::Op;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergProperties;
@@ -49,9 +50,10 @@ pub struct IcebergListExecutor<S: StateStore> {
     /// Rate limit in rows/s.
     #[expect(dead_code)]
     rate_limit_rps: Option<u32>,
-}
 
-const LIST_INTERVAL_SEC: u64 = 1;
+    /// Streaming config
+    streaming_config: Arc<StreamingConfig>,
+}
 
 impl<S: StateStore> IcebergListExecutor<S> {
     pub fn new(
@@ -61,6 +63,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
+        streaming_config: Arc<StreamingConfig>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -69,6 +72,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
+            streaming_config,
         }
     }
 
@@ -124,8 +128,10 @@ impl<S: StateStore> IcebergListExecutor<S> {
                     .build()
                     .context("failed to build iceberg scan")?;
 
-                let mut chunk_builder =
-                    StreamChunkBuilder::new(1024, vec![DataType::Varchar, DataType::Jsonb]);
+                let mut chunk_builder = StreamChunkBuilder::new(
+                    self.streaming_config.developer.chunk_size,
+                    vec![DataType::Varchar, DataType::Jsonb],
+                );
                 #[for_await]
                 for scan_task in snapshot_scan
                     .plan_files()
@@ -155,7 +161,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
         let incremental_scan_stream = incremental_scan_stream(
             *iceberg_properties,
             last_snapshot.clone(),
-            LIST_INTERVAL_SEC,
+            self.streaming_config.developer.iceberg_list_interval_sec,
         )
         .map(|res| match res {
             Ok(scan_task) => {
@@ -179,9 +185,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
         let mut stream =
             StreamReaderWithPause::<true, _>::new(barrier_stream, incremental_scan_stream);
 
-        // if barrier.is_pause_on_startup() {
-        //     stream.pause_stream();
-        // }
+        // TODO: support pause (incl. pause on startup)/resume/rate limit
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -206,8 +210,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
                                     let prev_state_row = OwnedRow::new(vec![
                                         ScalarImpl::Int64(prev_persisted_snapshot_id).into(),
                                     ]);
-                                    state_table.delete(prev_state_row);
-                                    state_table.insert(state_row);
+                                    state_table.update(prev_state_row, state_row);
                                 } else {
                                     state_table.insert(state_row);
                                 }
@@ -222,7 +225,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
                         // Only barrier can be received.
                         _ => unreachable!(),
                     },
-                    // Chunked FsPage arrives.
+                    // Data arrives.
                     Either::Right(chunk) => {
                         yield Message::Chunk(chunk);
                     }

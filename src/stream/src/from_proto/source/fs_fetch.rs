@@ -112,6 +112,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source.rate_limit,
+                    params.env.config().clone(),
                 )
                 .boxed()
             }

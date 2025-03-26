@@ -218,6 +218,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
+                        params.env.config().clone(),
                     )
                     .boxed()
                 } else {

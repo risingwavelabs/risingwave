@@ -225,6 +225,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_id,
             sink_name,
             connector: connector.to_owned(),
+            streaming_config: params.env.config().as_ref().clone(),
         };
 
         let log_store_identity = format!(

@@ -26,6 +26,7 @@ use risingwave_common::catalog::{
     ColumnId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
     TableId,
 };
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
@@ -39,19 +40,26 @@ use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
-const SPLIT_BATCH_SIZE: usize = 1000;
-
+/// An executor that fetches data from Iceberg tables.
+///
+/// This executor works with an upstream list executor that provides the list of files to read.
+/// It reads data from Iceberg files in batches, converts them to stream chunks, and passes them
+/// downstream.
 pub struct IcebergFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
-    /// Streaming source for external
+    /// Core component for managing external streaming source state
     stream_source_core: Option<StreamSourceCore<S>>,
 
-    /// Upstream list executor.
+    /// Upstream list executor that provides the list of files to read.
+    /// This executor is responsible for discovering new files and changes in the Iceberg table.
     upstream: Option<Executor>,
 
-    /// Rate limit in rows/s.
+    /// Optional rate limit in rows/s to control data ingestion speed
     rate_limit_rps: Option<u32>,
+
+    /// Configuration for streaming operations, including Iceberg-specific settings
+    streaming_config: Arc<StreamingConfig>,
 }
 
 /// Fetched data from 1 [`FileScanTask`], along with states for checkpointing.
@@ -59,8 +67,13 @@ pub struct IcebergFetchExecutor<S: StateStore> {
 /// Currently 1 `FileScanTask` -> 1 `ChunksWithState`.
 /// Later after we support reading part of a file, we will support 1 `FileScanTask` -> n `ChunksWithState`.
 struct ChunksWithState {
+    /// The actual data chunks read from the file
     chunks: Vec<StreamChunk>,
+
+    /// Path to the data file, used for checkpointing and error reporting.
     data_file_path: String,
+
+    /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
     last_read_pos: Datum,
 }
@@ -71,15 +84,18 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         stream_source_core: StreamSourceCore<S>,
         upstream: Executor,
         rate_limit_rps: Option<u32>,
+        streaming_config: Arc<StreamingConfig>,
     ) -> Self {
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             rate_limit_rps,
+            streaming_config,
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn replace_with_new_batch_reader<const BIASED: bool>(
         splits_on_fetch: &mut usize,
         state_store_handler: &SourceStateTableHandler<S>,
@@ -88,8 +104,10 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         source_desc: SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, ChunksWithState>,
         rate_limit_rps: Option<u32>,
+        streaming_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<()> {
-        let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
+        let mut batch =
+            Vec::with_capacity(streaming_config.developer.iceberg_fetch_batch_size as usize);
         let state_table = state_store_handler.state_table();
         'vnodes: for vnode in state_table.vnodes().iter_vnodes() {
             let table_iter = state_table
@@ -112,7 +130,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 };
                 batch.push(split);
 
-                if batch.len() >= SPLIT_BATCH_SIZE {
+                if batch.len() >= streaming_config.developer.iceberg_fetch_batch_size as usize {
                     break 'vnodes;
                 }
             }
@@ -127,6 +145,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 source_desc,
                 batch,
                 rate_limit_rps,
+                streaming_config,
             )
             .map_err(StreamExecutorError::connector_error);
             stream.replace_data_stream(batch_reader);
@@ -142,6 +161,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         source_desc: SourceDesc,
         batch: Vec<FileScanTask>,
         _rate_limit_rps: Option<u32>,
+        streaming_config: Arc<StreamingConfig>,
     ) {
         let file_path_idx = source_desc
             .columns
@@ -153,12 +173,6 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             .iter()
             .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
             .unwrap();
-        // let (stream, _) = source_desc
-        //     .source
-        //     .build_stream(batch, column_ids, Arc::new(source_ctx), false)
-        //     .await
-        //     .map_err(StreamExecutorError::connector_error)?;
-        // Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
         let properties = source_desc.source.config.clone();
         let properties = match properties {
             risingwave_connector::source::ConnectorProperties::Iceberg(iceberg_properties) => {
@@ -175,7 +189,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 table.clone(),
                 task,
                 IcebergScanOpts {
-                    batch_size: 1024,
+                    chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* TODO: this column is not needed. But need to support col pruning in frontend to remove it. */
                     need_file_path_and_pos: true,
                 },
@@ -290,6 +304,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             source_desc.clone(),
             &mut stream,
             self.rate_limit_rps,
+            self.streaming_config.clone(),
         )
         .await?;
 
@@ -360,6 +375,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             source_desc.clone(),
                                             &mut stream,
                                             self.rate_limit_rps,
+                                            self.streaming_config.clone(),
                                         )
                                         .await?;
                                     }
