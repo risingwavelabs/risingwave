@@ -510,6 +510,7 @@ script = '''
 
 set -e
 
+mkdir -p "${PREFIX_CONFIG}"
 echo > "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
