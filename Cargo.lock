@@ -1375,9 +1375,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-dynamodb"
-version = "1.50.0"
+version = "1.54.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38c3122dd27386bf38745f67c9f2c2c47479157bc8a697a3fd97ff45e78dd34"
+checksum = "8efdda6a491bb4640d35b99b0a4b93f75ce7d6e3a1937c3e902d3cb23d0a179c"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1398,9 +1398,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-emrserverless"
-version = "1.50.0"
+version = "1.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6320a29e4be0f01e3d284d5694950757730fdc746b729684426e83771702ab8"
+checksum = "b9b56da76731f93360694679e5869be7f4a32f396b251c94e63c38719eb95d22"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1673,9 +1673,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime"
-version = "1.7.2"
+version = "1.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a065c0fe6fdbdf9f11817eb68582b2ab4aff9e9c39e986ae48f7ec576c6322db"
+checksum = "9f20685047ca9d6f17b994a07f629c813f08b5bce65523e47124879e60103d45"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-http",
@@ -1717,9 +1717,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-types"
-version = "1.2.13"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7b8a53819e42f10d0821f56da995e1470b199686a1809168db6ca485665f042"
+checksum = "836155caafba616c0ff9b07944324785de2ab016141c3550bd1c07882f8cee8f"
 dependencies = [
  "base64-simd",
  "bytes",
@@ -6035,9 +6035,9 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0475f8b2ac86659c21b64320d5d653f9efe42acd2a4e560073ec61a155a34f1d"
+checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
  "futures-core",
@@ -9029,9 +9029,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.13"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8afb450f006bf6385ca15ef45d71d2288452bc3683ce2e2cacc0d18e4be60b58"
+checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
 name = "pin-utils"
