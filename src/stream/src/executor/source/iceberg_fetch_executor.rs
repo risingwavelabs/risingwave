@@ -14,7 +14,6 @@
 
 use std::ops::Bound;
 
-use anyhow::Context;
 use either::Either;
 use futures::{StreamExt, TryStreamExt, stream};
 use futures_async_stream::try_stream;
@@ -28,7 +27,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef, Serial, ToOwnedDatum};
+use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
@@ -80,6 +79,7 @@ struct ChunksWithState {
 
 pub(super) use state::PersistedFileScanTask;
 mod state {
+    use anyhow::Context;
     use iceberg::expr::BoundPredicate;
     use iceberg::scan::FileScanTask;
     use iceberg::spec::{DataContentType, DataFileFormat, SchemaRef};
