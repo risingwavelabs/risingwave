@@ -39,8 +39,10 @@ impl Array for Utf8Array {
     type RefItem<'a> = &'a str;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        let bytes = self.bytes.raw_value_at_unchecked(idx);
-        std::str::from_utf8_unchecked(bytes)
+        unsafe {
+            let bytes = self.bytes.raw_value_at_unchecked(idx);
+            std::str::from_utf8_unchecked(bytes)
+        }
     }
 
     #[inline]

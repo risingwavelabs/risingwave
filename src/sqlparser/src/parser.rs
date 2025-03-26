@@ -247,6 +247,16 @@ impl Parser<'_> {
             .map_err(|e| ParserError::ParserError(e.inner().to_string()))
     }
 
+    /// Parse function description from a string.
+    pub fn parse_function_desc_str(func: &str) -> Result<FunctionDesc, ParserError> {
+        let mut tokenizer = Tokenizer::new(func);
+        let tokens = tokenizer.tokenize_with_location()?;
+        let parser = Parser(&tokens);
+        Parser::parse_function_desc
+            .parse(parser)
+            .map_err(|e| ParserError::ParserError(e.inner().to_string()))
+    }
+
     /// Parse a list of semicolon-separated statements.
     fn parse_statements(&mut self) -> ModalResult<Vec<Statement>> {
         let mut stmts = Vec::new();
@@ -1960,11 +1970,12 @@ impl Parser<'_> {
         F: FnMut(&mut Self) -> ModalResult<T>,
     {
         let checkpoint = *self;
-        if let Ok(t) = f(self) {
-            Some(t)
-        } else {
-            *self = checkpoint;
-            None
+        match f(self) {
+            Ok(t) => Some(t),
+            _ => {
+                *self = checkpoint;
+                None
+            }
         }
     }
 
@@ -2228,15 +2239,7 @@ impl Parser<'_> {
     ) -> ModalResult<Statement> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], self);
 
-        let name = self.parse_object_name()?;
-        self.expect_token(&Token::LParen)?;
-        let args = if self.peek_token().token == Token::RParen {
-            None
-        } else {
-            Some(self.parse_comma_separated(Parser::parse_function_arg)?)
-        };
-
-        self.expect_token(&Token::RParen)?;
+        let FunctionDesc { name, args } = self.parse_function_desc()?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
             if self.parse_keyword(Keyword::TABLE) {
@@ -4284,6 +4287,7 @@ impl Parser<'_> {
 
     pub fn parse_explain(&mut self) -> ModalResult<Statement> {
         let mut options = ExplainOptions::default();
+        let mut analyze_duration = None;
 
         let explain_key_words = [
             Keyword::VERBOSE,
@@ -4293,6 +4297,7 @@ impl Parser<'_> {
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
             Keyword::FORMAT,
+            Keyword::DURATION_SECS,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
@@ -4333,6 +4338,9 @@ impl Parser<'_> {
                             _ => unreachable!("{}", keyword),
                         }
                     }
+                }
+                Keyword::DURATION_SECS => {
+                    analyze_duration = Some(parser.parse_literal_uint()?);
                 }
                 _ => unreachable!("{}", keyword),
             };
@@ -4375,7 +4383,10 @@ impl Parser<'_> {
                 }
             }
             if let Some(target) = parse_analyze_target(self)? {
-                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                let statement = Statement::ExplainAnalyzeStreamJob {
+                    target,
+                    duration_secs: analyze_duration,
+                };
                 return Ok(statement);
             }
         }
@@ -4478,17 +4489,20 @@ impl Parser<'_> {
     }
 
     fn parse_cte_inner(&mut self) -> ModalResult<CteInner> {
-        if let Ok(()) = self.expect_token(&Token::LParen) {
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
-            Ok(CteInner::Query(Box::new(query)))
-        } else {
-            let changelog = self.parse_identifier_non_reserved()?;
-            if changelog.to_string().to_lowercase() != "changelog" {
-                parser_err!("Expected 'changelog' but found '{}'", changelog);
+        match self.expect_token(&Token::LParen) {
+            Ok(()) => {
+                let query = self.parse_query()?;
+                self.expect_token(&Token::RParen)?;
+                Ok(CteInner::Query(Box::new(query)))
             }
-            self.expect_keyword(Keyword::FROM)?;
-            Ok(CteInner::ChangeLog(self.parse_object_name()?))
+            _ => {
+                let changelog = self.parse_identifier_non_reserved()?;
+                if changelog.to_string().to_lowercase() != "changelog" {
+                    parser_err!("Expected 'changelog' but found '{}'", changelog);
+                }
+                self.expect_keyword(Keyword::FROM)?;
+                Ok(CteInner::ChangeLog(self.parse_object_name()?))
+            }
         }
     }
 
@@ -5307,6 +5321,42 @@ impl Parser<'_> {
             GrantObjects::AllViewsInSchema {
                 schemas: self.parse_comma_separated(Parser::parse_object_name)?,
             }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::FUNCTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllFunctionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SECRETS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSecretsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::CONNECTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllConnectionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
+        } else if self.parse_keywords(&[
+            Keyword::ALL,
+            Keyword::SUBSCRIPTIONS,
+            Keyword::IN,
+            Keyword::SCHEMA,
+        ]) {
+            GrantObjects::AllSubscriptionsInSchema {
+                schemas: self.parse_comma_separated(Parser::parse_object_name)?,
+            }
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             GrantObjects::Mviews(self.parse_comma_separated(Parser::parse_object_name)?)
         } else {
@@ -5317,18 +5367,30 @@ impl Parser<'_> {
                 Keyword::TABLE,
                 Keyword::SOURCE,
                 Keyword::SINK,
-                Keyword::VIEWS,
+                Keyword::VIEW,
+                Keyword::SUBSCRIPTION,
+                Keyword::FUNCTION,
+                Keyword::CONNECTION,
+                Keyword::SECRET,
             ]);
-            let objects = self.parse_comma_separated(Parser::parse_object_name);
-            match object_type {
-                Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
-                Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
-                Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
-                Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
-                Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
-                Some(Keyword::VIEW) => GrantObjects::Views(objects?),
-                Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
-                _ => unreachable!(),
+            if let Some(Keyword::FUNCTION) = object_type {
+                let func_descs = self.parse_comma_separated(Parser::parse_function_desc)?;
+                GrantObjects::Functions(func_descs)
+            } else {
+                let objects = self.parse_comma_separated(Parser::parse_object_name);
+                match object_type {
+                    Some(Keyword::DATABASE) => GrantObjects::Databases(objects?),
+                    Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
+                    Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
+                    Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
+                    Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
+                    Some(Keyword::VIEW) => GrantObjects::Views(objects?),
+                    Some(Keyword::SUBSCRIPTION) => GrantObjects::Subscriptions(objects?),
+                    Some(Keyword::CONNECTION) => GrantObjects::Connections(objects?),
+                    Some(Keyword::SECRET) => GrantObjects::Secrets(objects?),
+                    Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
+                    _ => unreachable!(),
+                }
             }
         };
 

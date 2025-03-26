@@ -17,7 +17,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
 use super::*;
-use crate::executor::{ProjectSetExecutor, ProjectSetSelectItem};
+use crate::executor::project::{ProjectSetExecutor, ProjectSetSelectItem};
 
 pub struct ProjectSetExecutorBuilder;
 

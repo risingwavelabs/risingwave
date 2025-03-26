@@ -211,7 +211,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// 50/50 chance to be true/false.
     fn flip_coin(&mut self) -> bool {
-        self.rng.gen_bool(0.5)
+        self.rng.random_bool(0.5)
     }
 
     /// Provide recursion bounds.
@@ -219,7 +219,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         if self.recursion_weight <= 0.0 {
             return false;
         }
-        let can_recurse = self.rng.gen_bool(self.recursion_weight);
+        let can_recurse = self.rng.random_bool(self.recursion_weight);
         if can_recurse {
             self.recursion_weight *= 0.9;
             if self.recursion_weight < 0.05 {

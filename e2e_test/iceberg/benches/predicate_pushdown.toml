@@ -1,11 +1,11 @@
 init_sqls = [
     'CREATE SCHEMA IF NOT EXISTS demo_db',
-    'DROP TABLE IF EXISTS demo_db.t1',
+    'DROP TABLE IF EXISTS demo_db.t_bench',
 ]
 
 slt = 'benches/predicate_pushdown.slt'
 
 drop_sqls = [
-    'DROP TABLE IF EXISTS demo_db.t1',
+    'DROP TABLE IF EXISTS demo_db.t_bench',
     'DROP SCHEMA IF EXISTS demo_db',
 ]

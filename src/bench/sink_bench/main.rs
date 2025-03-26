@@ -135,6 +135,10 @@ impl LogReader for MockRangeLogReader {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind"))
     }
+
+    async fn start_from(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
+        Ok(())
+    }
 }
 
 impl MockRangeLogReader {

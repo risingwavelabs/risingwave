@@ -160,6 +160,7 @@ impl BigQueryLogSinker {
 #[async_trait]
 impl LogSinker for BigQueryLogSinker {
     async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             tokio::select!(
                 offset = self.bigquery_future_manager.next_offset() => {
@@ -200,7 +201,7 @@ impl BigQueryCommon {
     async fn build_writer_client(
         &self,
         aws_auth_props: &AwsAuthProps,
-    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>>)> {
+    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
         let credentials_file = CredentialsFile::new_from_str(&auth_json)

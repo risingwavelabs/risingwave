@@ -275,8 +275,8 @@ macro_rules! impl_split_small_range {
                             match (left.get(0),right.get(0)) {
                                 $(
                                     (
-                                        Some(Some(ScalarImpl::$type_name(ref left))),
-                                        Some(Some(ScalarImpl::$type_name(ref right))),
+                                        Some(Some(ScalarImpl::$type_name(left))),
+                                        Some(Some(ScalarImpl::$type_name(right))),
                                     ) => {
 
                                         if (right - left + 1) as u64 <= max_gap {

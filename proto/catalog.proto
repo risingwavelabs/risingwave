@@ -249,6 +249,7 @@ message ConnectionParams {
     CONNECTION_TYPE_KAFKA = 1;
     CONNECTION_TYPE_ICEBERG = 2;
     CONNECTION_TYPE_SCHEMA_REGISTRY = 3;
+    CONNECTION_TYPE_ELASTICSEARCH = 4;
   }
 
   ConnectionType connection_type = 1;

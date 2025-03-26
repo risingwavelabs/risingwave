@@ -92,7 +92,7 @@ struct ControlStreamNode {
 
 pub(super) struct ControlStreamManager {
     nodes: HashMap<WorkerId, ControlStreamNode>,
-    env: MetaSrvEnv,
+    pub(crate) env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
@@ -332,10 +332,10 @@ impl ControlStreamManager {
                             actor_infos: inflight_info
                                 .fragment_infos()
                                 .flat_map(|fragment| {
-                                    fragment.actors.iter().map(|(actor_id, worker_id)| {
+                                    fragment.actors.iter().map(|(actor_id, actor)| {
                                         let host_addr = self
                                             .nodes
-                                            .get(worker_id)
+                                            .get(&actor.worker_id)
                                             .expect("worker should exist for inflight actor")
                                             .worker
                                             .host
@@ -442,8 +442,8 @@ impl ControlStreamManager {
             HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>,
         > = HashMap::new();
         for fragment_info in info.fragment_infos() {
-            for (actor_id, worker_id) in &fragment_info.actors {
-                let worker_id = *worker_id as WorkerId;
+            for (actor_id, actor) in &fragment_info.actors {
+                let worker_id = actor.worker_id as WorkerId;
                 let actor_id = *actor_id as ActorId;
                 let (stream_actor, dispatchers) =
                     stream_actors.remove(&actor_id).expect("should exist");
@@ -698,10 +698,11 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         creating_job_id: Option<TableId>,
-    ) -> MetaResult<()> {
+    ) {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
-        self.nodes.iter().try_for_each(|(_, node)| {
-            node.handle
+        self.nodes.iter().for_each(|(_, node)| {
+            if node
+                .handle
                 .request_sender
                 .send(StreamingControlStreamRequest {
                     request: Some(
@@ -712,10 +713,10 @@ impl ControlStreamManager {
                             },
                         ),
                     ),
-                })
-                .map_err(|_| anyhow!("failed to add partial graph"))
-        })?;
-        Ok(())
+                }).is_err() {
+                warn!(%database_id, ?creating_job_id, worker_id = node.worker.id, "fail to add partial graph to worker")
+            }
+        });
     }
 
     pub(super) fn remove_partial_graph(

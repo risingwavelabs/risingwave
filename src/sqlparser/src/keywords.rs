@@ -207,6 +207,7 @@ define_keywords!(
     DOT,
     DOUBLE,
     DROP,
+    DURATION_SECS,
     DYNAMIC,
     EACH,
     ELEMENT,

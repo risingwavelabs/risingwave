@@ -136,10 +136,10 @@ IcebergProperties:
       token for accessing iceberg catalog, only applicable in rest catalog.
       A Bearer token which will be used for interaction with the server.
     required: false
-  - name: catalog.oauth2-server-uri
+  - name: catalog.oauth2_server_uri
     field_type: String
     comments: |-
-      `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+      `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
       Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
     required: false
   - name: catalog.scope
@@ -148,6 +148,19 @@ IcebergProperties:
       scope for accessing iceberg catalog, only applicable in rest catalog.
       Additional scope for OAuth2.
     required: false
+  - name: catalog.rest.signing_region
+    field_type: String
+    comments: The signing region to use when signing requests to the REST catalog.
+    required: false
+  - name: catalog.rest.signing_name
+    field_type: String
+    comments: The signing name to use when signing requests to the REST catalog.
+    required: false
+  - name: catalog.rest.sigv4_enabled
+    field_type: bool
+    comments: Whether to use SigV4 for signing requests to the REST catalog.
+    required: false
+    default: Default::default
   - name: s3.path.style.access
     field_type: bool
     required: false
@@ -346,6 +359,14 @@ KafkaProperties:
       Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
       messages.
     required: false
+  - name: properties.fetch.min.bytes
+    field_type: usize
+    comments: Minimum number of bytes the broker responds with. If fetch.wait.max.ms expires the accumulated data will be sent to the client regardless of this setting.
+    required: false
+  - name: properties.fetch.message.max.bytes
+    field_type: usize
+    comments: Initial maximum number of bytes per topic+partition to request when fetching messages from the broker. If the client encounters a message larger than this value it will gradually try to increase it until the entire message can be fetched.
+    required: false
   - name: properties.fetch.queue.backoff.ms
     field_type: usize
     comments: |-
@@ -542,7 +563,7 @@ MqttProperties:
     field_type: u32
     comments: The max size of messages received by the MQTT client
     required: false
-  - name: tls.client_key
+  - name: tls.ca
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false

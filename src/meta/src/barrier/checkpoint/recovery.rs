@@ -20,6 +20,7 @@ use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::DatabaseId;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::meta::event_log::{Event, EventRecovery};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
@@ -114,8 +115,13 @@ impl DatabaseRecoveryMetrics {
     }
 }
 
+const INITIAL_RESET_REQUEST_ID: u32 = 0;
+
 impl DatabaseRecoveringState {
-    pub(super) fn resetting(database_id: DatabaseId) -> Self {
+    pub(super) fn resetting(
+        database_id: DatabaseId,
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> Self {
         let mut retry_backoff_strategy = get_retry_backoff_strategy();
         let backoff_future = retry_backoff_strategy.next().unwrap();
         let metrics = DatabaseRecoveryMetrics::new(database_id);
@@ -123,12 +129,13 @@ impl DatabaseRecoveringState {
 
         Self {
             stage: DatabaseRecoveringStage::Resetting {
-                remaining_workers: Default::default(),
+                remaining_workers: control_stream_manager
+                    .reset_database(database_id, INITIAL_RESET_REQUEST_ID),
                 reset_resps: Default::default(),
-                reset_request_id: 0,
+                reset_request_id: INITIAL_RESET_REQUEST_ID,
                 backoff_future: Some(backoff_future),
             },
-            next_reset_request_id: 1,
+            next_reset_request_id: INITIAL_RESET_REQUEST_ID + 1,
             retry_backoff_strategy,
             metrics,
         }
@@ -296,6 +303,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
         barrier_complete_output: Option<BarrierCompleteOutput>,
         control_stream_manager: &mut ControlStreamManager,
     ) {
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
             self.control.ack_completed(output);
         }
@@ -306,10 +314,13 @@ impl DatabaseStatusAction<'_, EnterReset> {
             .expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(_) => {
-                let reset_request_id = 0;
+                let reset_request_id = INITIAL_RESET_REQUEST_ID;
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
                 let metrics = DatabaseRecoveryMetrics::new(self.database_id);
+                event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                    EventRecovery::database_recovery_start(self.database_id.database_id),
+                )]);
                 *database_status =
                     DatabaseCheckpointControlStatus::Recovering(DatabaseRecoveringState {
                         stage: DatabaseRecoveringStage::Resetting {
@@ -328,6 +339,9 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     unreachable!("should not enter resetting again")
                 }
                 DatabaseRecoveringStage::Initializing { .. } => {
+                    event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                        EventRecovery::database_recovery_failure(self.database_id.database_id),
+                    )]);
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(self.database_id, reset_request_id);
@@ -419,7 +433,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            control_stream_manager.add_partial_graph(self.database_id, None)?;
+            control_stream_manager.add_partial_graph(self.database_id, None);
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 database_fragment_info,
@@ -474,6 +488,10 @@ pub(crate) struct EnterRunning;
 impl DatabaseStatusAction<'_, EnterRunning> {
     pub(crate) fn enter(self) {
         info!(database_id = ?self.database_id, "database enter running");
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::database_recovery_success(self.database_id.database_id),
+        )]);
         let database_status = self
             .control
             .databases
@@ -490,15 +508,20 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     reset_request_id: 0,
                     backoff_future: None,
                 };
-                if let Some(recovery_timer) = state.metrics.recovery_timer.take() {
-                    recovery_timer.observe_duration();
-                } else if cfg!(debug_assertions) {
-                    panic!(
-                        "take database {} recovery latency for twice",
-                        self.database_id
-                    )
-                } else {
-                    warn!(database_id = %self.database_id,"failed to take recovery latency")
+                match state.metrics.recovery_timer.take() {
+                    Some(recovery_timer) => {
+                        recovery_timer.observe_duration();
+                    }
+                    _ => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "take database {} recovery latency for twice",
+                                self.database_id
+                            )
+                        } else {
+                            warn!(database_id = %self.database_id,"failed to take recovery latency")
+                        }
+                    }
                 }
                 match replace(&mut state.stage, temp_place_holder) {
                     DatabaseRecoveringStage::Resetting { .. } => {

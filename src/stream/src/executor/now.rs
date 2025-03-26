@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::ops::Bound::Unbounded;
-
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::row;
@@ -144,20 +141,7 @@ impl<S: StateStore> NowExecutor<S> {
                     yield Message::Barrier(barrier);
                     // Handle the initial barrier.
                     state_table.init_epoch(first_epoch).await?;
-                    let state_row = {
-                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                            &(Unbounded, Unbounded);
-                        let data_iter = state_table
-                            .iter_with_prefix(row::empty(), sub_range, Default::default())
-                            .await?;
-                        pin_mut!(data_iter);
-                        if let Some(keyed_row) = data_iter.next().await {
-                            Some(keyed_row?)
-                        } else {
-                            None
-                        }
-                    };
-                    last_timestamp = state_row.and_then(|row| row[0].clone());
+                    last_timestamp = state_table.get_from_one_value_table().await?;
                     paused = is_pause_on_startup;
                     initialized = true;
                 } else {
@@ -203,17 +187,17 @@ impl<S: StateStore> NowExecutor<S> {
                     last_timestamp.clone_from(&curr_timestamp)
                 }
                 (
-                    NowMode::GenerateSeries {
+                    &NowMode::GenerateSeries {
                         start_timestamp, ..
                     },
-                    ModeVars::GenerateSeries {
-                        chunk_builder,
+                    &mut ModeVars::GenerateSeries {
+                        ref mut chunk_builder,
                         ref add_interval_expr,
                     },
                 ) => {
                     if last_timestamp.is_none() {
                         // We haven't emit any timestamp yet. Let's emit the first one and populate the state table.
-                        let first = Some((*start_timestamp).into());
+                        let first = Some(start_timestamp.into());
                         let first_row = row::once(&first);
                         let _ = chunk_builder.append_row(Op::Insert, first_row);
                         state_table.insert(first_row);
