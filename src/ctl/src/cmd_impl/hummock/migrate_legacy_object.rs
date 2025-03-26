@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::env;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
+use futures::future::join_all;
 use futures::StreamExt;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::{get_object_id_from_path, get_sst_data_path, OBJECT_SUFFIX};
@@ -123,8 +123,11 @@ async fn copy(
 ) -> anyhow::Result<()> {
     let futures = from_to.map(|(from_path, to_path)| async move {
         println!("From {from_path} to {to_path}");
-        opendal.copy(&from_path, &to_path).await
+        while let Err(e) = opendal.copy(&from_path, &to_path).await {
+            tracing::warn!(from_path, to_path, ?e, "retry on error");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     });
-    try_join_all(futures).await?;
+    join_all(futures).await;
     Ok(())
 }
