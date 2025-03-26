@@ -33,7 +33,6 @@ use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk}
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_storage::store::PrefetchOptions;
-use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
 use super::{SourceStateTableHandler, StreamSourceCore, prune_additional_cols};
@@ -79,133 +78,144 @@ struct ChunksWithState {
     last_read_pos: Datum,
 }
 
-/// This corresponds to the actually persisted `FileScanTask` in the state table.
-///
-/// We introduce this in case the definition of [`FileScanTask`] changes in the iceberg-rs crate.
-/// Currently, they have the same definition.
-///
-/// We can handle possible compatibility issues in [`Self::from_task`] and [`Self::to_task`].
-/// A version id needs to be introduced then.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(super) struct PersistedFileScanTask {
-    /// The start offset of the file to scan.
-    pub start: u64,
-    /// The length of the file to scan.
-    pub length: u64,
-    /// The number of records in the file to scan.
+pub(super) use state::PersistedFileScanTask;
+mod state {
+    use iceberg::expr::BoundPredicate;
+    use iceberg::scan::FileScanTask;
+    use iceberg::spec::{DataContentType, DataFileFormat, SchemaRef};
+    use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef};
+    use serde::{Deserialize, Serialize};
+
+    use crate::executor::StreamExecutorResult;
+    /// This corresponds to the actually persisted `FileScanTask` in the state table.
     ///
-    /// This is an optional field, and only available if we are
-    /// reading the entire data file.
-    pub record_count: Option<u64>,
+    /// We introduce this in case the definition of [`FileScanTask`] changes in the iceberg-rs crate.
+    /// Currently, they have the same definition.
+    ///
+    /// We can handle possible compatibility issues in [`Self::from_task`] and [`Self::to_task`].
+    /// A version id needs to be introduced then.
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    pub struct PersistedFileScanTask {
+        /// The start offset of the file to scan.
+        pub start: u64,
+        /// The length of the file to scan.
+        pub length: u64,
+        /// The number of records in the file to scan.
+        ///
+        /// This is an optional field, and only available if we are
+        /// reading the entire data file.
+        pub record_count: Option<u64>,
 
-    /// The data file path corresponding to the task.
-    pub data_file_path: String,
+        /// The data file path corresponding to the task.
+        pub data_file_path: String,
 
-    /// The content type of the file to scan.
-    pub data_file_content: DataContentType,
+        /// The content type of the file to scan.
+        pub data_file_content: DataContentType,
 
-    /// The format of the file to scan.
-    pub data_file_format: DataFileFormat,
+        /// The format of the file to scan.
+        pub data_file_format: DataFileFormat,
 
-    /// The schema of the file to scan.
-    pub schema: SchemaRef,
-    /// The field ids to project.
-    pub project_field_ids: Vec<i32>,
-    /// The predicate to filter.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub predicate: Option<BoundPredicate>,
+        /// The schema of the file to scan.
+        pub schema: SchemaRef,
+        /// The field ids to project.
+        pub project_field_ids: Vec<i32>,
+        /// The predicate to filter.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub predicate: Option<BoundPredicate>,
 
-    /// The list of delete files that may need to be applied to this data file
-    pub deletes: Vec<PersistedFileScanTask>,
-    /// sequence number
-    pub sequence_number: i64,
-    /// equality ids
-    pub equality_ids: Vec<i32>,
-}
-
-impl PersistedFileScanTask {
-    /// First decodes the json to the struct, then converts the struct to a [`FileScanTask`].
-    pub fn decode(jsonb_ref: JsonbRef<'_>) -> StreamExecutorResult<FileScanTask> {
-        let persisted_task: Self = serde_json::from_value(jsonb_ref.to_owned_scalar().take())
-            .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
-        Ok(Self::to_task(persisted_task))
+        /// The list of delete files that may need to be applied to this data file
+        pub deletes: Vec<PersistedFileScanTask>,
+        /// sequence number
+        pub sequence_number: i64,
+        /// equality ids
+        pub equality_ids: Vec<i32>,
     }
 
-    /// First converts the [`FileScanTask`] to a persisted one, then encodes the persisted one to a jsonb value.
-    pub fn encode(task: FileScanTask) -> JsonbVal {
-        let persisted_task = Self::from_task(task);
-        serde_json::to_value(persisted_task).unwrap().into()
-    }
-
-    /// Converts a persisted task to a [`FileScanTask`].
-    fn to_task(
-        Self {
-            start,
-            length,
-            record_count,
-            data_file_path,
-            data_file_content,
-            data_file_format,
-            schema,
-            project_field_ids,
-            predicate,
-            deletes,
-            sequence_number,
-            equality_ids,
-        }: Self,
-    ) -> FileScanTask {
-        FileScanTask {
-            start,
-            length,
-            record_count,
-            data_file_path,
-            data_file_content,
-            data_file_format,
-            schema,
-            project_field_ids,
-            predicate,
-            deletes: deletes
-                .into_iter()
-                .map(PersistedFileScanTask::to_task)
-                .collect(),
-            sequence_number,
-            equality_ids,
+    impl PersistedFileScanTask {
+        /// First decodes the json to the struct, then converts the struct to a [`FileScanTask`].
+        pub fn decode(jsonb_ref: JsonbRef<'_>) -> StreamExecutorResult<FileScanTask> {
+            let persisted_task: Self =
+                serde_json::from_value(jsonb_ref.to_owned_scalar().take())
+                    .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
+            Ok(Self::to_task(persisted_task))
         }
-    }
 
-    /// Changes a [`FileScanTask`] to a persisted one.
-    fn from_task(
-        FileScanTask {
-            start,
-            length,
-            record_count,
-            data_file_path,
-            data_file_content,
-            data_file_format,
-            schema,
-            project_field_ids,
-            predicate,
-            deletes,
-            sequence_number,
-            equality_ids,
-        }: FileScanTask,
-    ) -> Self {
-        Self {
-            start,
-            length,
-            record_count,
-            data_file_path,
-            data_file_content,
-            data_file_format,
-            schema,
-            project_field_ids,
-            predicate,
-            deletes: deletes
-                .into_iter()
-                .map(PersistedFileScanTask::from_task)
-                .collect(),
-            sequence_number,
-            equality_ids,
+        /// First converts the [`FileScanTask`] to a persisted one, then encodes the persisted one to a jsonb value.
+        pub fn encode(task: FileScanTask) -> JsonbVal {
+            let persisted_task = Self::from_task(task);
+            serde_json::to_value(persisted_task).unwrap().into()
+        }
+
+        /// Converts a persisted task to a [`FileScanTask`].
+        fn to_task(
+            Self {
+                start,
+                length,
+                record_count,
+                data_file_path,
+                data_file_content,
+                data_file_format,
+                schema,
+                project_field_ids,
+                predicate,
+                deletes,
+                sequence_number,
+                equality_ids,
+            }: Self,
+        ) -> FileScanTask {
+            FileScanTask {
+                start,
+                length,
+                record_count,
+                data_file_path,
+                data_file_content,
+                data_file_format,
+                schema,
+                project_field_ids,
+                predicate,
+                deletes: deletes
+                    .into_iter()
+                    .map(PersistedFileScanTask::to_task)
+                    .collect(),
+                sequence_number,
+                equality_ids,
+            }
+        }
+
+        /// Changes a [`FileScanTask`] to a persisted one.
+        fn from_task(
+            FileScanTask {
+                start,
+                length,
+                record_count,
+                data_file_path,
+                data_file_content,
+                data_file_format,
+                schema,
+                project_field_ids,
+                predicate,
+                deletes,
+                sequence_number,
+                equality_ids,
+            }: FileScanTask,
+        ) -> Self {
+            Self {
+                start,
+                length,
+                record_count,
+                data_file_path,
+                data_file_content,
+                data_file_format,
+                schema,
+                project_field_ids,
+                predicate,
+                deletes: deletes
+                    .into_iter()
+                    .map(PersistedFileScanTask::from_task)
+                    .collect(),
+                sequence_number,
+                equality_ids,
+            }
         }
     }
 }
