@@ -26,7 +26,7 @@ use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{StreamSourceCore, barrier_to_message_stream};
+use super::{PersistedFileScanTask, StreamSourceCore, barrier_to_message_stream};
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -169,9 +169,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
                     Op::Insert,
                     OwnedRow::new(vec![
                         Some(ScalarImpl::Utf8(scan_task.data_file_path().into())),
-                        Some(ScalarImpl::Jsonb(
-                            serde_json::to_value(scan_task).unwrap().into(),
-                        )),
+                        Some(ScalarImpl::Jsonb(PersistedFileScanTask::encode(scan_task))),
                     ]),
                 );
                 Ok(StreamChunk::from_rows(
