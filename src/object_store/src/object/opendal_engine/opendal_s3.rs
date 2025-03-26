@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use opendal::layers::LoggingLayer;
+use opendal::layers::{LoggingLayer, RetryLayer, TimeoutLayer};
 use opendal::raw::HttpClient;
 use opendal::services::S3;
 use opendal::Operator;
@@ -92,6 +92,18 @@ impl OpendalObjectStore {
         let http_client = Self::new_http_client(&config)?;
         builder.http_client(http_client);
         let op: Operator = Operator::new(builder)?
+            .layer(
+                TimeoutLayer::new()
+                    .with_io_timeout(Duration::from_millis(config.retry.read_attempt_timeout_ms)),
+            )
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
+                    .with_max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
+                    .with_max_times(config.retry.read_retry_attempts)
+                    .with_factor(config.retry.req_backoff_factor as f32)
+                    .with_jitter(),
+            )
             .layer(LoggingLayer::default())
             .finish();
 
@@ -141,6 +153,18 @@ impl OpendalObjectStore {
         builder.http_client(http_client);
 
         let op: Operator = Operator::new(builder)?
+            .layer(
+                TimeoutLayer::new()
+                    .with_io_timeout(Duration::from_millis(config.retry.read_attempt_timeout_ms)),
+            )
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(config.retry.req_backoff_interval_ms))
+                    .with_max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))
+                    .with_max_times(config.retry.read_retry_attempts)
+                    .with_factor(config.retry.req_backoff_factor as f32)
+                    .with_jitter(),
+            )
             .layer(LoggingLayer::default())
             .finish();
 

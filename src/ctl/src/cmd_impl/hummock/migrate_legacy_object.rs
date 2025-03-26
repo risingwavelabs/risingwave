@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -43,6 +44,22 @@ pub async fn migrate_legacy_object(
     }
     let mut config = ObjectStoreConfig::default();
     config.s3.developer.use_opendal = true;
+    config.retry.read_attempt_timeout_ms = env::var("RW_OPENDAL_TIMEOUT")
+        .unwrap_or("60".into())
+        .parse()
+        .unwrap();
+    config.retry.req_backoff_interval_ms = env::var("RW_OPENDAL_RETRY_MIN_DELAY")
+        .unwrap_or("1".into())
+        .parse()
+        .unwrap();
+    config.retry.req_backoff_max_delay_ms = env::var("RW_OPENDAL_RETRY_MAX_DELAY")
+        .unwrap_or("5".into())
+        .parse()
+        .unwrap();
+    config.retry.read_retry_attempts = env::var("RW_OPENDAL_RETRY_MAX_TIMES")
+        .unwrap_or("10".into())
+        .parse()
+        .unwrap();
     let store = build_remote_object_store(
         &url,
         ObjectStoreMetrics::unused().into(),
