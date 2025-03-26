@@ -561,22 +561,17 @@ impl SinkWriter for StarrocksSinkWriter {
 
         if is_checkpoint && let Some(txn_label) = self.curr_txn_label.take() {
             if let Err(err) = self.prepare_and_commit(txn_label.clone()).await {
-                self.txn_client
-                    .rollback(txn_label.clone())
-                    .await
-                    .map_err(|err| {
-                        SinkError::DorisStarrocksConnect(anyhow!(err).context(format!(
-                            "Couldn't roll back transaction {} after commit failed",
-                            txn_label
-                        )))
-                    })?;
-
-                return Err(SinkError::DorisStarrocksConnect(anyhow!(err).context(
-                    format!(
-                        "transaction {} is successfully rolled back due to commit failure",
-                        txn_label
+                match self.txn_client.rollback(txn_label.clone()).await {
+                    Ok(_) => tracing::warn!(
+                        ?txn_label,
+                        "transaction is successfully rolled back due to commit failure"
                     ),
-                )));
+                    Err(err) => {
+                        tracing::warn!(?txn_label, error = ?err.as_report(), "Couldn't roll back transaction after commit failed")
+                    }
+                }
+
+                return Err(err);
             }
         }
         Ok(())
