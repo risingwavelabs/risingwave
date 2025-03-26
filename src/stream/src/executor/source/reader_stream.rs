@@ -40,6 +40,9 @@ pub(crate) struct StreamReaderBuilder {
     // cdc related
     pub is_auto_schema_change_enable: bool,
     pub actor_ctx: ActorContextRef,
+
+    // panic once meeting error
+    pub ban_recover: bool,
 }
 
 impl StreamReaderBuilder {
@@ -176,7 +179,7 @@ impl StreamReaderBuilder {
                     .await
             };
             if let Err(e) = build_stream_result {
-                if is_initial_build {
+                if is_initial_build || self.ban_recover {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
                     tracing::warn!(
@@ -207,6 +210,10 @@ impl StreamReaderBuilder {
                         yield (msg, latest_splits_info.clone());
                     }
                     Err(e) => {
+                        if self.ban_recover {
+                            return Err(StreamExecutorError::connector_error(e));
+                        }
+                        // recoverable
                         tracing::warn!(
                             error = %e.as_report(),
                             source_name = self.source_name,
