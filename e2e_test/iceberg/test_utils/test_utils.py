@@ -36,7 +36,7 @@ def verify_result(args, verify_sql, verify_schema, verify_data):
     tc = unittest.TestCase()
 
     # TODO: reduce this sleep
-    time.sleep(15)
+    time.sleep(20)
     log(f"verify_result:", level=LogLevel.HEADER)
     log(f"Executing sql: {verify_sql}", level=LogLevel.INFO, indent=2)
     spark = get_spark(args)
