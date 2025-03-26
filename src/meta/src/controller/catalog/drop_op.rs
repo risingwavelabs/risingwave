@@ -94,7 +94,6 @@ impl CatalogController {
             // todo(wcy-fdu): optimize the logic to be Iceberg unique.
             if let Err(e) = clean_all_rows_by_sink_id(&inner.db, object_id).await {
                 tracing::error!("Failed to clean rows: {:?}", e.as_report());
-                txn.rollback().await?;
                 return Err(e);
             }
         }
