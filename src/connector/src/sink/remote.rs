@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
 use jni::JavaVM;
@@ -310,6 +310,7 @@ impl RemoteLogSinker {
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_writer_metrics = self.sink_writer_metrics;
@@ -454,7 +455,7 @@ impl LogSinker for RemoteLogSinker {
                                         batch_id: chunk_id as u64,
                                         chunk,
                                     })
-                                    .instrument_await(format!(
+                                    .instrument_await(span!(
                                         "log_sinker_send_chunk (chunk {chunk_id})"
                                     ))
                                     .await?;
@@ -471,7 +472,7 @@ impl LogSinker for RemoteLogSinker {
                                     let start_time = Instant::now();
                                     request_tx
                                         .barrier(epoch, true)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_commit_checkpoint (epoch {epoch})"
                                         ))
                                         .await?;
@@ -479,7 +480,7 @@ impl LogSinker for RemoteLogSinker {
                                 } else {
                                     request_tx
                                         .barrier(epoch, false)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_send_barrier (epoch {epoch})"
                                         ))
                                         .await?;
@@ -675,8 +676,8 @@ impl RemoteCoordinator {
 
 #[async_trait]
 impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

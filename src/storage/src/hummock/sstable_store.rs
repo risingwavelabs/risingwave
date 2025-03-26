@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
@@ -312,12 +312,12 @@ impl SstableStore {
         let data_path = self.get_sst_data_path(object_id);
         let memory_usage = end_offset - start_offset;
         let tracker = MemoryUsageTracker::new(self.prefetch_buffer_usage.clone(), memory_usage);
-        let span: await_tree::Span = format!("Prefetch SST-{}", object_id).into();
+        let span = await_tree::span!("Prefetch SST-{}", object_id).verbose();
         let store = self.store.clone();
         let join_handle = tokio::spawn(async move {
             store
                 .read(&data_path, start_offset..end_offset)
-                .verbose_instrument_await(span)
+                .instrument_await(span)
                 .await
         });
         let buf = match join_handle.await {
@@ -411,7 +411,7 @@ impl SstableStore {
             async move {
                 let block_data = match store
                     .read(&data_path, range.clone())
-                    .verbose_instrument_await("get_block_response")
+                    .instrument_await("get_block_response".verbose())
                     .await
                 {
                     Ok(data) => data,

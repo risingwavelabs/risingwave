@@ -326,7 +326,7 @@ impl PostgresSinkWriter {
 
         // Rewrite schema types for serialization
         let schema_types = {
-            let pg_table = PostgresExternalTable::connect(
+            let name_to_type = PostgresExternalTable::type_mapping(
                 &config.user,
                 &config.password,
                 &config.host,
@@ -339,7 +339,6 @@ impl PostgresSinkWriter {
                 is_append_only,
             )
             .await?;
-            let name_to_type = pg_table.column_name_to_pg_type();
             let mut schema_types = Vec::with_capacity(schema.fields.len());
             for field in &mut schema.fields[..] {
                 let field_name = &field.name;
@@ -523,6 +522,7 @@ impl PostgresSinkWriter {
 #[async_trait]
 impl LogSinker for PostgresSinkWriter {
     async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
