@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -314,8 +315,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -1083,17 +1085,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1101,17 +1105,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1120,17 +1126,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1139,17 +1147,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1327,9 +1337,11 @@ impl IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("Iceberg commit coordinator inited.");
-        Ok(())
+        // todo(wcy-fdu): The operation of the exactly once sink in the recovery phase will be performed here, and the returned rewind start offset will be updated.
+        // refer to https://github.com/risingwavelabs/risingwave/pull/19771/files#diff-4eafd6e83f9e3fc16b46073e7f3f65261a06c4fac63a997c89abbb1fdd2ad724R1375-R1415
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
@@ -1404,7 +1416,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
         // because retry logic involved reapply the commit metadata.
         // For now, we just retry the commit operation.
-        let retry_strategy = ExponentialBackoff::from_millis(100)
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
             .map(jitter)
             .take(self.commit_retry_num as usize);
         let catalog = self.catalog.clone();
@@ -1419,7 +1432,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await?;
             let txn = Transaction::new(&table);
             let mut append_action = txn
-                .fast_append(None, vec![])
+                .fast_append(None, None, vec![])
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             append_action
                 .add_data_files(data_files.clone())
@@ -1428,7 +1441,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })?;
-            tx.commit_dyn(self.catalog.as_ref()).await.map_err(|err| {
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
                 tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })
@@ -1576,12 +1589,11 @@ mod test {
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{MapType, StructType};
+    use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::IcebergConfig;
-    use crate::source::DataType;
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -1797,6 +1809,9 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

@@ -43,9 +43,7 @@ pub use self::ddl::{
     ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
     WebhookSourceInfo,
 };
-pub use self::legacy_source::{
-    AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema, get_delimiter,
-};
+pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
@@ -1620,6 +1618,7 @@ pub enum Statement {
     /// TODO(kwannoel): Make profiling duration configurable: EXPLAIN ANALYZE (DURATION 1s) ...
     ExplainAnalyzeStreamJob {
         target: AnalyzeTarget,
+        duration_secs: Option<u64>,
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
@@ -1682,8 +1681,15 @@ impl Statement {
 
                 statement.fmt_inner(f)
             }
-            Statement::ExplainAnalyzeStreamJob { target } => {
-                write!(f, "EXPLAIN ANALYZE {}", target)
+            Statement::ExplainAnalyzeStreamJob {
+                target,
+                duration_secs,
+            } => {
+                write!(f, "EXPLAIN ANALYZE {}", target)?;
+                if let Some(duration_secs) = duration_secs {
+                    write!(f, " (DURATION_SECS {})", duration_secs)?;
+                }
+                Ok(())
             }
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
@@ -2460,6 +2466,14 @@ pub enum GrantObjects {
     AllMviewsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on `ALL VIEWS IN SCHEMA <schema_name> [, ...]`
     AllViewsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL FUNCTIONS IN SCHEMA <schema_name> [, ...]`
+    AllFunctionsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SECRETS IN SCHEMA <schema_name> [, ...]`
+    AllSecretsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL SUBSCRIPTIONS IN SCHEMA <schema_name> [, ...]`
+    AllSubscriptionsInSchema { schemas: Vec<ObjectName> },
+    /// Grant privileges on `ALL CONNECTIONS IN SCHEMA <schema_name> [, ...]`
+    AllConnectionsInSchema { schemas: Vec<ObjectName> },
     /// Grant privileges on specific databases
     Databases(Vec<ObjectName>),
     /// Grant privileges on specific schemas
@@ -2476,6 +2490,14 @@ pub enum GrantObjects {
     Sinks(Vec<ObjectName>),
     /// Grant privileges on specific views
     Views(Vec<ObjectName>),
+    /// Grant privileges on specific connections
+    Connections(Vec<ObjectName>),
+    /// Grant privileges on specific subscriptions
+    Subscriptions(Vec<ObjectName>),
+    /// Grant privileges on specific functions
+    Functions(Vec<FunctionDesc>),
+    /// Grant privileges on specific secrets
+    Secrets(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -2532,6 +2554,34 @@ impl fmt::Display for GrantObjects {
                     display_comma_separated(schemas)
                 )
             }
+            GrantObjects::AllFunctionsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL FUNCTIONS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllSecretsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SECRETS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllSubscriptionsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL SUBSCRIPTIONS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
+            GrantObjects::AllConnectionsInSchema { schemas } => {
+                write!(
+                    f,
+                    "ALL CONNECTIONS IN SCHEMA {}",
+                    display_comma_separated(schemas)
+                )
+            }
             GrantObjects::Databases(databases) => {
                 write!(f, "DATABASE {}", display_comma_separated(databases))
             }
@@ -2546,6 +2596,18 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Views(views) => {
                 write!(f, "VIEW {}", display_comma_separated(views))
+            }
+            GrantObjects::Connections(connections) => {
+                write!(f, "CONNECTION {}", display_comma_separated(connections))
+            }
+            GrantObjects::Subscriptions(subscriptions) => {
+                write!(f, "SUBSCRIPTION {}", display_comma_separated(subscriptions))
+            }
+            GrantObjects::Functions(func_descs) => {
+                write!(f, "FUNCTION {}", display_comma_separated(func_descs))
+            }
+            GrantObjects::Secrets(secrets) => {
+                write!(f, "SECRET {}", display_comma_separated(secrets))
             }
         }
     }

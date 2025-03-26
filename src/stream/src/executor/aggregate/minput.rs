@@ -29,8 +29,8 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
+use super::agg_group::{AggStateCacheStats, GroupKey};
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
-use super::{AggStateCacheStats, GroupKey};
 use crate::common::StateTableColumnMapping;
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
@@ -328,11 +328,10 @@ mod tests {
     use risingwave_storage::StateStore;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::MaterializedInputState;
+    use super::*;
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::aggregation::GroupKey;
     use crate::executor::{PkIndices, StreamExecutorResult};
 
     fn create_chunk<S: StateStore>(
@@ -351,7 +350,7 @@ mod tests {
         order_types: Vec<OrderType>,
     ) -> (StateTable<MemoryStateStore>, StateTableColumnMapping) {
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
-        let table_id = TableId::new(rand::thread_rng().gen());
+        let table_id = TableId::new(rand::rng().random());
         let columns = upstream_columns
             .iter()
             .map(|col_idx| input_schema[*col_idx].data_type())
@@ -847,8 +846,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut rng = rand::thread_rng();
-        let insert_values: Vec<i32> = (0..10000).map(|_| rng.gen()).collect_vec();
+        let mut rng = rand::rng();
+        let insert_values: Vec<i32> = (0..10000).map(|_| rng.random()).collect_vec();
         let delete_values: HashSet<_> = insert_values
             .iter()
             .choose_multiple(&mut rng, 1000)

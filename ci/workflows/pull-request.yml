@@ -242,60 +242,18 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end iceberg sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
+  - label: "end-to-end iceberg test"
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-tests?(,|$$)/
+    command: "ci/scripts/e2e-iceberg-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg sink v2 test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 19
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg cdc test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-cdc.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg engine test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-engine-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-engine-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: iceberg-engine-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"

@@ -496,9 +496,9 @@ pub struct DeltaLakeSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
@@ -581,12 +581,12 @@ mod test {
     use maplit::btreemap;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
     use crate::sink::SinkCommitCoordinator;
     use crate::sink::deltalake::DeltaLakeSinkCommitter;
     use crate::sink::writer::SinkWriter;
-    use crate::source::DataType;
 
     #[tokio::test]
     async fn test_deltalake() {

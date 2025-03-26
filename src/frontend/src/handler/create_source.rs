@@ -70,8 +70,8 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
-    ProtobufSchema, SourceWatermark, TableConstraint, get_delimiter,
+    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ObjectName, SourceWatermark, TableConstraint, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -107,7 +107,7 @@ pub use external_schema::{
 };
 mod validate;
 pub use validate::validate_compatibility;
-use validate::{ALLOWED_CONNECTION_CONNECTOR, ALLOWED_CONNECTION_SCHEMA_REGISTRY};
+use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
@@ -688,7 +688,7 @@ pub fn bind_connector_props(
         // group (that is, different from any other server id being used by any master or slave)
         with_properties
             .entry("server.id".to_owned())
-            .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
+            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
     Ok(with_properties)
 }
@@ -828,7 +828,7 @@ pub async fn bind_create_source_or_table_with_connector(
             session,
             TelemetryDatabaseObject::Source,
         )?;
-    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+    ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
@@ -864,9 +864,15 @@ pub async fn bind_create_source_or_table_with_connector(
     }
 
     // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
-    // XXX: should we also change the col id for struct fields?
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        let original_data_type = c.data_type().clone();
+        col_id_gen.generate(c)?;
+        // TODO: Now we restore the data type for `CREATE SOURCE`, so that keep the nested field id unset.
+        //       This behavior is inconsistent with `CREATE TABLE`, and should be fixed once we refactor
+        //       `ALTER SOURCE` to also use `ColumnIdGenerator` in the future.
+        if is_create_source {
+            c.column_desc.data_type = original_data_type;
+        }
     }
     debug_assert_column_ids_distinct(&columns);
 
@@ -964,6 +970,16 @@ pub async fn handle_create_source(
     )
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
+
+    if stmt.columns.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        return Err(RwError::from(InvalidInputSyntax(
+            "NOT NULL constraint is not supported in source schema".to_owned(),
+        )));
+    }
 
     let source_catalog = bind_create_source_or_table_with_connector(
         handler_args.clone(),
@@ -1076,6 +1092,7 @@ pub mod tests {
             ("address", DataType::Varchar),
             ("zipcode", DataType::Varchar),
         ])
+        // .with_ids([5, 6].map(ColumnId::new))
         .into();
         let expected_columns = maplit::hashmap! {
             ROW_ID_COLUMN_NAME => DataType::Serial,
@@ -1084,9 +1101,11 @@ pub mod tests {
             "rate" => DataType::Float32,
             "country" => StructType::new(
                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
-            ).into(),
+            )
+            // .with_ids([3, 4, 7].map(ColumnId::new))
+            .into(),
         };
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[tokio::test]

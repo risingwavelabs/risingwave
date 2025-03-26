@@ -27,3 +27,8 @@ read_retry_attempts = 6
 barrier_interval_ms = 250
 checkpoint_frequency = 5
 max_concurrent_creating_streaming_jobs = 0
+
+[udf]
+enable_embedded_python_udf = true
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true

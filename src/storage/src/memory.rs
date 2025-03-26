@@ -473,9 +473,9 @@ mod batched_iter {
             .unwrap();
 
             let rand_bound = || {
-                let key = rand::thread_rng().gen_range(key_range.clone());
+                let key = rand::rng().random_range(key_range.clone());
                 let key = num_to_full_key(key);
-                match rand::thread_rng().gen_range(1..=5) {
+                match rand::rng().random_range(1..=5) {
                     1 | 2 => Bound::Included(key),
                     3 | 4 => Bound::Excluded(key),
                     _ => Bound::Unbounded,

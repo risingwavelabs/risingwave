@@ -106,6 +106,7 @@ struct CoordinationHandleManager {
     writer_handles: HashMap<usize, SinkWriterCoordinationHandle>,
     next_handle_id: usize,
     request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+    initial_log_store_rewind_start_epoch: Option<u64>,
 }
 
 impl CoordinationHandleManager {
@@ -174,7 +175,7 @@ impl CoordinationHandleManager {
                     if handle.param() != &self.param {
                         warn!(prev_param = ?self.param, new_param = ?handle.param(), "sink param mismatch");
                     }
-                    handle.start()?;
+                    handle.start(self.initial_log_store_rewind_start_epoch)?;
                     let handle_id = self.next_handle_id;
                     self.next_handle_id += 1;
                     self.writer_handles.insert(handle_id, handle);
@@ -236,6 +237,7 @@ impl CoordinatorWorker {
                 writer_handles: HashMap::new(),
                 next_handle_id: 0,
                 request_rx,
+                initial_log_store_rewind_start_epoch: None,
             },
             pending_epochs: Default::default(),
         };
@@ -254,7 +256,7 @@ impl CoordinatorWorker {
         &mut self,
         mut coordinator: impl SinkCommitCoordinator,
     ) -> anyhow::Result<()> {
-        coordinator.init().await?;
+        self.handle_manager.initial_log_store_rewind_start_epoch = coordinator.init().await?;
         loop {
             let (handle_id, vnode_bitmap, epoch, metadata) =
                 self.handle_manager.next_commit_request().await?;

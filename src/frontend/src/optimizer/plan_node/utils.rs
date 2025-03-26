@@ -461,6 +461,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
         } else {
             false
         }
@@ -471,7 +472,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
 }
 
 pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
-    let Some(ref a) = a else {
+    let Some(a) = a else {
         return Ok(None);
     };
     Feature::TimeTravel

@@ -785,6 +785,38 @@ message EventLog {
     string connector = 3;
     string error = 4;
   }
+  message EventRecovery {
+    message GlobalRecoveryStart {
+      string reason = 1;
+    }
+    message GlobalRecoverySuccess {
+      string reason = 1;
+      float duration_secs = 2;
+      repeated uint32 running_database_ids = 3;
+      repeated uint32 recovering_database_ids = 4;
+    }
+    message GlobalRecoveryFailure {
+      string reason = 1;
+      string error = 2;
+    }
+    message DatabaseRecoveryStart {
+      uint32 database_id = 1;
+    }
+    message DatabaseRecoveryFailure {
+      uint32 database_id = 1;
+    }
+    message DatabaseRecoverySuccess {
+      uint32 database_id = 1;
+    }
+    oneof recovery_event {
+      GlobalRecoveryStart global_start = 1;
+      GlobalRecoverySuccess global_success = 2;
+      GlobalRecoveryFailure global_failure = 3;
+      DatabaseRecoveryStart database_start = 4;
+      DatabaseRecoveryFailure database_failure = 5;
+      DatabaseRecoverySuccess database_success = 6;
+    }
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -799,6 +831,7 @@ message EventLog {
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
     EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
     EventLog.EventSinkFail sink_fail = 11;
+    EventRecovery recovery = 12;
   }
 }
 

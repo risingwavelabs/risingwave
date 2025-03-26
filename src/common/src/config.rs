@@ -164,6 +164,10 @@ pub struct RwConfig {
     #[config_doc(nested)]
     pub system: SystemConfig,
 
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub udf: UdfConfig,
+
     #[serde(flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -549,6 +553,21 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub stream_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct RpcClientConfig {
+    #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -649,6 +668,21 @@ pub struct FrontendConfig {
     /// A query of size exceeding this threshold will always be rejected due to memory constraints.
     #[serde(default = "default::frontend::max_single_query_size_bytes")]
     pub max_single_query_size_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct UdfConfig {
+    /// Allow embedded Python UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_python_udf")]
+    pub enable_embedded_python_udf: bool,
+
+    /// Allow embedded JS UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_javascript_udf")]
+    pub enable_embedded_javascript_udf: bool,
+
+    /// Allow embedded WASM UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_wasm_udf")]
+    pub enable_embedded_wasm_udf: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1195,6 +1229,9 @@ pub struct StreamingDeveloperConfig {
     /// Enable / Disable profiling stats used by `EXPLAIN ANALYZE`
     #[serde(default = "default::developer::enable_explain_analyze_stats")]
     pub enable_explain_analyze_stats: bool,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1225,6 +1262,9 @@ pub struct BatchDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
     exchange_connection_pool_size: Option<u16>,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
 }
 
 macro_rules! define_system_config {
@@ -1953,7 +1993,7 @@ pub mod default {
         }
 
         pub fn recover_mode() -> RecoverMode {
-            RecoverMode::None
+            RecoverMode::Quiet
         }
 
         pub fn runtime_config() -> RuntimeOptions {
@@ -2200,6 +2240,10 @@ pub mod default {
         pub fn enable_explain_analyze_stats() -> bool {
             true
         }
+
+        pub fn rpc_client_connect_timeout_secs() -> u64 {
+            5
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -2252,6 +2296,20 @@ pub mod default {
 
         pub fn max_single_query_size_bytes() -> u64 {
             1024 * 1024 * 1024
+        }
+    }
+
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool {
+            false
+        }
+
+        pub fn enable_embedded_javascript_udf() -> bool {
+            true
+        }
+
+        pub fn enable_embedded_wasm_udf() -> bool {
+            true
         }
     }
 

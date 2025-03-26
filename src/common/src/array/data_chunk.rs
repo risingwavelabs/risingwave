@@ -388,7 +388,7 @@ impl DataChunk {
     }
 
     /// Returns a table-like text representation of the `DataChunk`.
-    pub fn to_pretty(&self) -> impl Display {
+    pub fn to_pretty(&self) -> impl Display + use<> {
         use comfy_table::Table;
 
         if self.cardinality() == 0 {
@@ -507,10 +507,12 @@ impl DataChunk {
         variable_cols: &[&ArrayRef],
         row_idx: usize,
     ) -> usize {
-        variable_cols
-            .iter()
-            .map(|col| estimate_serialize_datum_size(col.value_at_unchecked(row_idx)))
-            .sum::<usize>()
+        unsafe {
+            variable_cols
+                .iter()
+                .map(|col| estimate_serialize_datum_size(col.value_at_unchecked(row_idx)))
+                .sum::<usize>()
+        }
     }
 
     unsafe fn init_buffer(
@@ -518,9 +520,11 @@ impl DataChunk {
         variable_cols: &[&ArrayRef],
         row_idx: usize,
     ) -> Vec<u8> {
-        Vec::with_capacity(
-            row_len_fixed + Self::compute_size_of_variable_cols_in_row(variable_cols, row_idx),
-        )
+        unsafe {
+            Vec::with_capacity(
+                row_len_fixed + Self::compute_size_of_variable_cols_in_row(variable_cols, row_idx),
+            )
+        }
     }
 
     /// Serialize each row into value encoding bytes.
@@ -841,7 +845,7 @@ impl DataChunkTestExt for DataChunk {
             let mut rng = SmallRng::from_seed([0; 32]);
             let mut vis_builder = BitmapBuilder::with_capacity(chunk_size);
             for _i in 0..chunk_size {
-                vis_builder.append(rng.gen_bool(visibility_percent));
+                vis_builder.append(rng.random_bool(visibility_percent));
             }
             vis_builder.finish()
         };

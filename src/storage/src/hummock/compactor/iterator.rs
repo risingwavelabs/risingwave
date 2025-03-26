@@ -18,7 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use fail::fail_point;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -131,7 +131,7 @@ impl SstableStreamIterator {
                 self.sstable_info.object_id,
                 &self.block_metas[self.block_idx..],
             )
-            .verbose_instrument_await("stream_iter_get_stream")
+            .instrument_await("stream_iter_get_stream".verbose())
             .await?;
         self.block_stream = Some(block_stream);
         Ok(())
@@ -448,7 +448,7 @@ impl ConcatSstableIterator {
             let sstable = self
                 .sstable_store
                 .sstable(table_info, &mut self.stats)
-                .verbose_instrument_await("stream_iter_sstable")
+                .instrument_await("stream_iter_sstable".verbose())
                 .await?;
 
             let filter_key_range = match seek_key {

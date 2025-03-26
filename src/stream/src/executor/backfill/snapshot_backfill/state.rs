@@ -99,10 +99,10 @@ impl VnodeBackfillProgress {
             row_count,
             progress: if !is_finished {
                 EpochBackfillProgress::Consuming {
-                    latest_pk: row.slice(EXTRA_COLUMN_TYPES.len()..).to_owned_row(),
+                    latest_pk: row.slice(EXTRA_COLUMN_TYPES.len() - 1..).to_owned_row(),
                 }
             } else {
-                row.slice(EXTRA_COLUMN_TYPES.len()..)
+                row.slice(EXTRA_COLUMN_TYPES.len() - 1..)
                     .iter()
                     .enumerate()
                     .for_each(|(i, datum)| {

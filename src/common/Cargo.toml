@@ -15,10 +15,10 @@ arrow-52-array = { package = "arrow-array", version = "52" }
 arrow-52-buffer = { package = "arrow-buffer", version = "52" }
 arrow-52-cast = { package = "arrow-cast", version = "52" }
 arrow-52-schema = { package = "arrow-schema", version = "52" }
-arrow-53-array = { package = "arrow-array", version = "53" }
-arrow-53-buffer = { package = "arrow-buffer", version = "53" }
-arrow-53-cast = { package = "arrow-cast", version = "53" }
-arrow-53-schema = { package = "arrow-schema", version = "53" }
+arrow-54-array = { package = "arrow-array", version = "54" }
+arrow-54-buffer = { package = "arrow-buffer", version = "54" }
+arrow-54-cast = { package = "arrow-cast", version = "54" }
+arrow-54-schema = { package = "arrow-schema", version = "54" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -44,10 +44,10 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
-hashbrown = "0.14"
+hashbrown = "0.15"
 hex = "0.4.3"
 http = "1"
-humantime = "2.1"
+humantime = "2.2"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
@@ -92,11 +92,12 @@ serde_default = "0.2"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
+smallvec = "1"
 speedate = "0.15.0"
 stacker = "0.1"
 static_assertions = "1"
-strum = "0.26"
-strum_macros = "0.26"
+strum = "0.27"
+strum_macros = "0.27"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }

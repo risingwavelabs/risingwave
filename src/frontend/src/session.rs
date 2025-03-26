@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, load_config,
+    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -166,6 +166,7 @@ pub(crate) struct FrontendEnv {
     #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
+    udf_config: UdfConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -177,6 +178,9 @@ pub(crate) struct FrontendEnv {
 
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
+
+    /// address of the serverless backfill controller.
+    serverless_backfill_controller_addr: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -247,11 +251,13 @@ impl FrontendEnv {
             frontend_config: FrontendConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
+            udf_config: UdfConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             spill_metrics: BatchSpillMetrics::for_test(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            serverless_backfill_controller_addr: Default::default(),
         }
     }
 
@@ -322,6 +328,7 @@ impl FrontendEnv {
 
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
+            config.batch.developer.compute_client_config.clone(),
         ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -489,6 +496,8 @@ impl FrontendEnv {
                 frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
+                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
+                udf_config: config.udf,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -553,6 +562,10 @@ impl FrontendEnv {
         self.session_params.read_recursive().clone()
     }
 
+    pub fn sbc_address(&self) -> &String {
+        &self.serverless_backfill_controller_addr
+    }
+
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
@@ -571,6 +584,10 @@ impl FrontendEnv {
 
     pub fn streaming_config(&self) -> &StreamingConfig {
         &self.streaming_config
+    }
+
+    pub fn udf_config(&self) -> &UdfConfig {
+        &self.udf_config
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
@@ -1069,6 +1086,13 @@ impl SessionImpl {
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (connection, _) =
             catalog_reader.get_connection_by_name(db_name, schema_path, connection_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            connection.owner(),
+            AclMode::Usage,
+            Object::ConnectionId(connection.id),
+        )])?;
+
         Ok(connection.clone())
     }
 
@@ -1130,6 +1154,13 @@ impl SessionImpl {
                     format!("table \"{}\" does not exist", table_name),
                 )
             })?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            table.owner(),
+            AclMode::Select,
+            Object::TableId(table.id.table_id()),
+        )])?;
+
         Ok(table.clone())
     }
 
@@ -1145,6 +1176,13 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (secret, _) = catalog_reader.get_secret_by_name(db_name, schema_path, secret_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            secret.owner(),
+            AclMode::Create,
+            Object::SecretId(secret.id.secret_id()),
+        )])?;
+
         Ok(secret.clone())
     }
 
@@ -1475,7 +1513,7 @@ impl SessionManagerImpl {
                         UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                     } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
                         let mut salt = [0; 4];
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         rng.fill_bytes(&mut salt);
                         UserAuthenticator::Md5WithSalt {
                             encrypted_password: md5_hash_with_salt(

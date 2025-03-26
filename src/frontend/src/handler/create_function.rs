@@ -40,12 +40,25 @@ pub async fn handle_create_function(
     if temporary {
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
-    // e.g., `language [ python / java / ...etc]`
+
+    let udf_config = handler_args.session.env().udf_config();
+
+    // e.g., `language [ python / javascript / ...etc]`
     let language = match params.language {
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
+                "java" => lang, // only support external UDF for Java
+                "python" if udf_config.enable_embedded_python_udf => lang,
+                "javascript" if udf_config.enable_embedded_javascript_udf => lang,
+                "rust" | "wasm" if udf_config.enable_embedded_wasm_udf => lang,
+                "python" | "javascript" | "rust" | "wasm" => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "{} UDF is not enabled in configuration",
+                        lang
+                    ))
+                    .into());
+                }
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",

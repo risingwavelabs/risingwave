@@ -15,8 +15,7 @@
 use std::cmp::min;
 use std::str::from_utf8;
 
-use risingwave_common::types::ScalarImpl;
-use risingwave_connector::source::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};

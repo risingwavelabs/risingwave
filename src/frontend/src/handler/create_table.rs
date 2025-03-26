@@ -82,6 +82,7 @@ use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -159,12 +160,9 @@ pub fn bind_sql_columns(
             check_column_name_not_reserved(&name.real_value())?;
         }
 
-        let mut nullable: bool = true;
-        for option in options {
-            if option.option == ColumnOption::NotNull {
-                nullable = false;
-            }
-        }
+        let nullable: bool = !options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull));
 
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
@@ -471,6 +469,15 @@ pub(crate) async fn gen_create_table_plan_with_source(
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
+    } else if column_defs.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        // if non-cdc source
+        notice_to_user(
+            "The table contains columns with NOT NULL constraints. Any rows from upstream violating the constraints will be ignored silently.",
+        );
     }
 
     let db_name: &str = &session.database();
@@ -536,7 +543,7 @@ pub(crate) fn gen_create_table_plan(
 ) -> Result<(PlanRef, PbTable)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
@@ -811,7 +818,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        col_id_gen.generate(c)?;
     }
 
     let (mut columns, pk_column_ids, _row_id_index) =
@@ -2105,11 +2112,13 @@ mod tests {
             "v1" => DataType::Int16,
             "v2" => StructType::new(
                 vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],
-            ).into(),
+            )
+            .with_ids([3, 4, 5].map(ColumnId::new))
+            .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[test]
@@ -2166,7 +2175,7 @@ mod tests {
                 let mut columns = bind_sql_columns(&column_defs, false)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
-                    c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();
+                    col_id_gen.generate(c)?;
                 }
 
                 let pk_names =

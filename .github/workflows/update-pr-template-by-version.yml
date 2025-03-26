@@ -57,19 +57,22 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git checkout -b update-pr-template-${{ env.version }}
-          git diff
+
+          # Checkout branch correctly: create if it doesn’t exist, otherwise reset it
+          git fetch origin update-pr-template-${{ env.version }} || true
+          git checkout -B update-pr-template-${{ env.version }} origin/update-pr-template-${{ env.version }} || git checkout -b update-pr-template-${{ env.version }}
+
           git add .github/pull_request_template.md
           git commit -m "chore: update PR template with highest release version ${{ env.version }}"
           git diff ..main
-          git push origin update-pr-template-${{ env.version }}
+
+          git push --force-with-lease origin update-pr-template-${{ env.version }}
 
       - name: Create pull request
         if: env.update_needed == 'true'
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v7
         with:
           title: "Update PR Template for Highest Release Version"
           body: "This PR updates the pull request template to reflect the highest release version: ${{ env.version }}."
           base: main
-          branch: update-pr-template-${{ env.version }}
-
+          branch: update-pr-template-${{ env.version }}`

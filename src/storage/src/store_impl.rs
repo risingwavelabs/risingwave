@@ -668,6 +668,7 @@ impl StateStoreImpl {
         await_tree_config: Option<await_tree::Config>,
         use_new_object_prefix_strategy: bool,
     ) -> StorageResult<Self> {
+        const KB: usize = 1 << 10;
         const MB: usize = 1 << 20;
 
         let meta_cache = {
@@ -704,7 +705,8 @@ impl StateStoreImpl {
                                 opts.meta_file_cache_reclaimers
                                     + opts.meta_file_cache_reclaimers / 2,
                             )
-                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
+                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
+                            .with_blob_index_size(16 * KB),
                     );
                 if opts.meta_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -754,7 +756,8 @@ impl StateStoreImpl {
                                 opts.data_file_cache_reclaimers
                                     + opts.data_file_cache_reclaimers / 2,
                             )
-                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
+                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                            .with_blob_index_size(16 * KB),
                     );
                 if opts.data_file_cache_insert_rate_limit_mb > 0 {
                     builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -894,13 +897,11 @@ mod dyn_state_store {
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
-    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     pub trait DynStateStoreIter<T: IterItem>: Send {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
     }
 
-    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     impl<T: IterItem, I: StateStoreIter<T>> DynStateStoreIter<T> for I {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
@@ -1017,14 +1018,12 @@ mod dyn_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -1069,7 +1068,6 @@ mod dyn_state_store {
             self.get(key, read_options).await
         }
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1078,7 +1076,6 @@ mod dyn_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
-        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
