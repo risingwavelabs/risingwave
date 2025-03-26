@@ -1147,6 +1147,7 @@ impl DatabaseCheckpointControl {
                         .to_mutation(false)
                         .expect("should have some mutation in `CreateStreamingJob` command");
 
+                    control_stream_manager.add_partial_graph(self.database_id, Some(job_id));
                     self.creating_streaming_job_controls.insert(
                         job_id,
                         CreatingStreamingJobControl::new(
