@@ -143,10 +143,10 @@ async fn scale_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Resul
     assert!(source_parallelism <= test_source.create_stream_count.load(Relaxed));
 
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
 }

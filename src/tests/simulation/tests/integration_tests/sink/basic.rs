@@ -104,7 +104,7 @@ async fn basic_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Resul
 
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
 }

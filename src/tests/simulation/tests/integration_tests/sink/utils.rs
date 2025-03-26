@@ -58,10 +58,10 @@ pub const DROP_SINK: &str = "drop sink test_sink";
 pub const DROP_SOURCE: &str = "drop source test_source";
 
 pub struct TestSinkStoreInner {
-    pub id_name: HashMap<i32, Vec<String>>,
-    pub epochs: Vec<u64>,
-    pub checkpoint_count: usize,
-    pub err_count: usize,
+    id_name: HashMap<i32, Vec<String>>,
+    epochs: Vec<u64>,
+    checkpoint_count: usize,
+    err_count: usize,
 }
 
 #[derive(Clone)]
@@ -96,7 +96,7 @@ impl TestSinkStore {
         self.inner().epochs.push(epoch)
     }
 
-    pub fn inner(&self) -> MutexGuard<'_, TestSinkStoreInner> {
+    fn inner(&self) -> MutexGuard<'_, TestSinkStoreInner> {
         self.inner.lock().unwrap()
     }
 
@@ -115,6 +115,18 @@ impl TestSinkStore {
 
     pub fn id_count(&self) -> usize {
         self.inner().id_name.len()
+    }
+
+    pub fn inc_checkpoint(&self) {
+        self.inner().checkpoint_count += 1;
+    }
+
+    pub fn checkpoint_count(&self) -> usize {
+        self.inner().checkpoint_count
+    }
+
+    pub fn inc_err(&self) {
+        self.inner().err_count += 1;
     }
 
     pub fn err_count(&self) -> usize {
@@ -172,7 +184,7 @@ impl SinkWriter for TestWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
         if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
             println!("write with err");
-            self.store.inner().err_count += 1;
+            self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
         }
         for (op, row) in chunk.rows() {
@@ -190,7 +202,7 @@ impl SinkWriter for TestWriter {
         is_checkpoint: bool,
     ) -> risingwave_connector::sink::Result<Self::CommitMetadata> {
         if is_checkpoint {
-            self.store.inner().checkpoint_count += 1;
+            self.store.inc_checkpoint();
             sleep(Duration::from_millis(100)).await;
         }
         Ok(())
