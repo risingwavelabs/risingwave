@@ -43,7 +43,7 @@ use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamin
 use crate::barrier::InflightSubscriptionInfo;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::utils::collect_resp_info;
-use crate::controller::fragment::InflightFragmentInfo;
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
@@ -84,7 +84,7 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    pub newly_created_actors: Vec<(StreamActorWithDispatchers, WorkerId)>,
+    pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -118,35 +118,11 @@ pub struct ReplaceStreamJobPlan {
 impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
-        for fragment in self.new_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(
-                self.streaming_job.id().into(),
-                InflightFragmentInfo {
-                    fragment_id: fragment.fragment_id,
-                    nodes: fragment.nodes.clone(),
-                    actors: fragment
-                        .actors
-                        .iter()
-                        .map(|actor| {
-                            (
-                                actor.actor_id,
-                                self.new_fragments
-                                    .actor_status
-                                    .get(&actor.actor_id)
-                                    .expect("should exist")
-                                    .worker_id() as WorkerId,
-                            )
-                        })
-                        .collect(),
-                    state_table_ids: fragment
-                        .state_table_ids
-                        .iter()
-                        .map(|table_id| TableId::new(*table_id))
-                        .collect(),
-                },
-            );
+        for (fragment_id, new_fragment) in self.new_fragments.new_fragment_info() {
+            let fragment_change =
+                CommandFragmentChanges::NewFragment(self.streaming_job.id().into(), new_fragment);
             fragment_changes
-                .try_insert(fragment.fragment_id, fragment_change)
+                .try_insert(fragment_id, fragment_change)
                 .expect("non-duplicate");
         }
         for fragment in self.old_fragments.fragments.values() {
@@ -190,14 +166,6 @@ impl ReplaceStreamJobPlan {
         }
         fragment_replacements
     }
-
-    pub fn dropped_actors(&self) -> HashSet<ActorId> {
-        self.merge_updates
-            .values()
-            .flatten()
-            .flat_map(|merge_update| merge_update.removed_upstream_actor_id.clone())
-            .collect()
-    }
 }
 
 #[derive(educe::Educe, Clone)]
@@ -214,42 +182,43 @@ pub struct CreateStreamingJobCommandInfo {
     pub internal_tables: Vec<Table>,
 }
 
-impl CreateStreamingJobCommandInfo {
+impl StreamJobFragments {
     pub(super) fn new_fragment_info(
         &self,
     ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
-        self.stream_job_fragments
-            .fragments
-            .values()
-            .map(|fragment| {
-                (
-                    fragment.fragment_id,
-                    InflightFragmentInfo {
-                        fragment_id: fragment.fragment_id,
-                        nodes: fragment.nodes.clone(),
-                        actors: fragment
-                            .actors
-                            .iter()
-                            .map(|actor| {
-                                (
-                                    actor.actor_id,
-                                    self.stream_job_fragments
+        self.fragments.values().map(|fragment| {
+            (
+                fragment.fragment_id,
+                InflightFragmentInfo {
+                    fragment_id: fragment.fragment_id,
+                    distribution_type: fragment.distribution_type.into(),
+                    nodes: fragment.nodes.clone(),
+                    actors: fragment
+                        .actors
+                        .iter()
+                        .map(|actor| {
+                            (
+                                actor.actor_id,
+                                InflightActorInfo {
+                                    worker_id: self
                                         .actor_status
                                         .get(&actor.actor_id)
                                         .expect("should exist")
                                         .worker_id()
                                         as WorkerId,
-                                )
-                            })
-                            .collect(),
-                        state_table_ids: fragment
-                            .state_table_ids
-                            .iter()
-                            .map(|table_id| TableId::new(*table_id))
-                            .collect(),
-                    },
-                )
-            })
+                                    vnode_bitmap: actor.vnode_bitmap.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                    state_table_ids: fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|table_id| TableId::new(*table_id))
+                        .collect(),
+                },
+            )
+        })
     }
 }
 
@@ -405,6 +374,7 @@ impl Command {
                     "should handle fragment changes separately for snapshot backfill"
                 );
                 let mut changes: HashMap<_, _> = info
+                    .stream_job_fragments
                     .new_fragment_info()
                     .map(|(fragment_id, fragment_info)| {
                         (
@@ -435,8 +405,32 @@ impl Command {
                                     .added_actors
                                     .iter()
                                     .flat_map(|(node_id, actors)| {
-                                        actors.iter().map(|actor_id| (*actor_id, *node_id))
+                                        actors.iter().map(|actor_id| {
+                                            (
+                                                *actor_id,
+                                                InflightActorInfo {
+                                                    worker_id: *node_id,
+                                                    vnode_bitmap: reschedule
+                                                        .newly_created_actors
+                                                        .get(actor_id)
+                                                        .expect("should exist")
+                                                        .0
+                                                        .0
+                                                        .vnode_bitmap
+                                                        .clone(),
+                                                },
+                                            )
+                                        })
                                     })
+                                    .collect(),
+                                actor_update_vnode_bitmap: reschedule
+                                    .vnode_bitmap_updates
+                                    .iter()
+                                    .filter(|(actor_id, _)| {
+                                        // only keep the existing actors
+                                        !reschedule.newly_created_actors.contains_key(actor_id)
+                                    })
+                                    .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),
                                 to_remove: reschedule.removed_actors.iter().cloned().collect(),
                             },
@@ -1042,7 +1036,7 @@ impl Command {
                     reschedules.iter().flat_map(|(fragment_id, reschedule)| {
                         reschedule
                             .newly_created_actors
-                            .iter()
+                            .values()
                             .map(|((actor, dispatchers), _)| {
                                 (actor.actor_id, *fragment_id, dispatchers.as_slice())
                             })
@@ -1054,7 +1048,7 @@ impl Command {
                     reschedules.iter().flat_map(|(fragment_id, reschedule)| {
                         reschedule
                             .newly_created_actors
-                            .iter()
+                            .values()
                             .map(|(actors, status)| (*fragment_id, actors, status))
                     })
                 {

@@ -1752,7 +1752,7 @@ impl CatalogController {
                     _,
                 ),
                 worker_id,
-            ) in newly_created_actors
+            ) in newly_created_actors.into_values()
             {
                 let splits = actor_splits
                     .get(&actor_id)

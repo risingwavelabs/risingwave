@@ -348,7 +348,6 @@ impl SuspendedDatabaseState {
         failure: Option<(Option<ActorId>, StreamError)>,
         _completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>, /* discard the completing futures */
     ) -> Self {
-        state.abort_actors();
         Self {
             suspend_time: Instant::now(),
             inner: state,
@@ -358,7 +357,7 @@ impl SuspendedDatabaseState {
 
     async fn reset(mut self) -> ResetDatabaseOutput {
         let root_err = self.inner.try_find_root_actor_failure(self.failure).await;
-        self.inner.await_actors().await;
+        self.inner.abort_and_wait_actors().await;
         if let Some(hummock) = self.inner.actor_manager.env.state_store().as_hummock() {
             hummock.clear_tables(self.inner.table_ids).await;
         }
@@ -387,12 +386,10 @@ impl DatabaseStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
             DatabaseStatus::Running(state) => {
-                state.abort_actors();
-                state.await_actors().await;
+                state.abort_and_wait_actors().await;
             }
             DatabaseStatus::Suspended(SuspendedDatabaseState { inner: state, .. }) => {
-                // has called `abort_actors` on `suspend` call
-                state.await_actors().await;
+                state.abort_and_wait_actors().await;
             }
             DatabaseStatus::Resetting(state) => {
                 (&mut state.join_handle)
@@ -622,7 +619,7 @@ impl DatabaseManagedBarrierState {
         }
     }
 
-    fn abort_actors(&self) {
+    async fn abort_and_wait_actors(&mut self) {
         for (actor_id, state) in &self.actor_states {
             tracing::debug!("force stopping actor {}", actor_id);
             state.join_handle.abort();
@@ -630,9 +627,7 @@ impl DatabaseManagedBarrierState {
                 monitor_task_handle.abort();
             }
         }
-    }
 
-    async fn await_actors(&mut self) {
         for (actor_id, state) in self.actor_states.drain() {
             tracing::debug!("join actor {}", actor_id);
             let result = state.join_handle.await;

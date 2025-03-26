@@ -11,7 +11,11 @@ GRAFANA_DOWNLOAD_TAR_GZ = "https://dl.grafana.com/oss/release/${GRAFANA_RELEASE}
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }
+condition = { env_set = [
+    "ENABLE_PROMETHEUS_GRAFANA",
+], files_not_exist = [
+    "${PREFIX_BIN}/grafana/RISEDEV-VERSION-${GRAFANA_VERSION}",
+] }
 description = "Download and extract Grafana"
 script = '''
 #!/usr/bin/env bash
