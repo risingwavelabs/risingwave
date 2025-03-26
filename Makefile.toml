@@ -780,7 +780,7 @@ dependencies = ["k", "clean-data"]
 [tasks.install-nextest]
 private = true
 category = "RiseDev - Check"
-install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
+install_crate = { min_version = "0.9.72", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
     "nextest",
     "--help",
 ], install_command = "binstall" }
