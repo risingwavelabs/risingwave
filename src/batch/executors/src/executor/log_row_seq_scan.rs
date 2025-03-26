@@ -36,8 +36,8 @@ use risingwave_storage::{StateStore, dispatch_state_store};
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ScanRange,
 };
+use crate::build_scan_range_from_pb;
 use crate::error::{BatchError, Result};
-use crate::executor::build_scan_ranges_from_pb;
 use crate::monitor::BatchMetrics;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
@@ -55,7 +55,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     new_epoch: u64,
     version_id: HummockVersionId,
     ordered: bool,
-    scan_ranges: Vec<ScanRange>,
+    scan_range: ScanRange,
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
@@ -68,7 +68,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         identity: String,
         metrics: Option<BatchMetrics>,
         ordered: bool,
-        scan_ranges: Vec<ScanRange>,
+        scan_range: ScanRange,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
@@ -85,7 +85,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             new_epoch,
             version_id,
             ordered,
-            scan_ranges,
+            scan_range,
         }
     }
 }
@@ -143,8 +143,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let old_epoch = old_epoch.epoch;
         let new_epoch = new_epoch.epoch;
 
-        let scan_ranges =
-            build_scan_ranges_from_pb(&log_store_seq_scan_node.scan_ranges, table_desc)?;
+        let scan_range = build_scan_range_from_pb(&log_store_seq_scan_node.scan_range, table_desc)?;
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
@@ -157,7 +156,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
                 source.plan_node().get_identity().clone(),
                 metrics,
                 log_store_seq_scan_node.ordered,
-                scan_ranges,
+                scan_range,
             )))
         })
     }
@@ -188,7 +187,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             version_id,
             schema,
             ordered,
-            scan_ranges,
+            scan_range,
             ..
         } = *self;
         let table = std::sync::Arc::new(table);
@@ -200,23 +199,21 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         // Range Scan
         // WARN: DO NOT use `select` to execute range scans concurrently
         //       it can consume too much memory if there're too many ranges.
-        for range in scan_ranges {
-            let stream = Self::execute_range(
-                table.clone(),
-                old_epoch,
-                new_epoch,
-                version_id,
-                chunk_size,
-                histogram,
-                Arc::new(schema.clone()),
-                ordered,
-                range,
-            );
-            #[for_await]
-            for chunk in stream {
-                let chunk = chunk?;
-                yield chunk;
-            }
+        let stream = Self::execute_range(
+            table.clone(),
+            old_epoch,
+            new_epoch,
+            version_id,
+            chunk_size,
+            histogram,
+            Arc::new(schema.clone()),
+            ordered,
+            scan_range,
+        );
+        #[for_await]
+        for chunk in stream {
+            let chunk = chunk?;
+            yield chunk;
         }
     }
 

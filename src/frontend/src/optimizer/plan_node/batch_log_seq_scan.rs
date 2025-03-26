@@ -25,35 +25,35 @@ use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
+use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::scheduler::SchedulerResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLogSeqScan {
     pub base: PlanBase<Batch>,
     core: generic::LogScan,
-    scan_ranges: Vec<ScanRange>,
+    scan_range: Option<ScanRange>,
 }
 
 impl BatchLogSeqScan {
-    fn new_inner(core: generic::LogScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
-        let order = if scan_ranges.len() > 1 {
-            Order::any()
-        } else {
-            core.get_out_column_index_order()
-        };
+    fn new_inner(
+        core: generic::LogScan,
+        dist: Distribution,
+        scan_range: Option<ScanRange>,
+    ) -> Self {
+        let order = core.get_out_column_index_order();
         let base = PlanBase::new_batch(core.ctx(), core.schema(), dist, order);
 
         Self {
             base,
             core,
-            scan_ranges,
+            scan_range,
         }
     }
 
-    pub fn new(core: generic::LogScan, scan_ranges: Vec<ScanRange>) -> Self {
+    pub fn new(core: generic::LogScan, scan_range: Option<ScanRange>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
-        Self::new_inner(core, Distribution::Single, scan_ranges)
+        Self::new_inner(core, Distribution::Single, scan_range)
     }
 
     fn clone_with_dist(&self) -> Self {
@@ -72,7 +72,7 @@ impl BatchLogSeqScan {
                     }
                 }
             },
-            self.scan_ranges.clone(),
+            self.scan_range.clone(),
         )
     }
 
@@ -102,14 +102,14 @@ impl Distill for BatchLogSeqScan {
         vec.push(("old_epoch", Pretty::from(self.core.old_epoch.to_string())));
         vec.push(("new_epoch", Pretty::from(self.core.new_epoch.to_string())));
         vec.push(("version_id", Pretty::from(self.core.version_id.to_string())));
-        if !self.scan_ranges.is_empty() {
+        if let Some(scan_range) = &self.scan_range {
             let order_names = match verbose {
                 true => self.core.order_names_with_table_prefix(),
                 false => self.core.order_names(),
             };
-            let range_strs = scan_ranges_as_strs(order_names, &self.scan_ranges);
+            let range_strs = scan_ranges_as_strs(order_names, &vec![scan_range.clone()]);
             vec.push((
-                "scan_ranges",
+                "scan_range",
                 Pretty::Array(range_strs.into_iter().map(Pretty::from).collect()),
             ));
         }
@@ -153,7 +153,10 @@ impl TryToBatchPb for BatchLogSeqScan {
             }),
             // It's currently true.
             ordered: !self.order().is_any(),
-            scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
+            scan_range: self
+                .scan_range
+                .as_ref()
+                .map(|scan_range| scan_range.to_protobuf()),
         }))
     }
 }
@@ -167,7 +170,7 @@ impl ToLocalBatch for BatchLogSeqScan {
         } else {
             Distribution::SomeShard
         };
-        Ok(Self::new_inner(self.core.clone(), dist, self.scan_ranges.clone()).into())
+        Ok(Self::new_inner(self.core.clone(), dist, self.scan_range.clone()).into())
     }
 }
 

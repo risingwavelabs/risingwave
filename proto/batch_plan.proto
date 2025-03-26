@@ -172,7 +172,7 @@ message LogRowSeqScanNode {
   common.BatchQueryEpoch old_epoch = 4;
   common.BatchQueryEpoch new_epoch = 5;
   bool ordered = 6;
-  repeated ScanRange scan_ranges = 7;
+  ScanRange scan_range = 7;
 }
 
 message InsertNode {

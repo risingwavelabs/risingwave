@@ -902,7 +902,7 @@ impl SubscriptionCursor {
                 }
             }
             if pk_rows.is_empty() {
-                (vec![], None)
+                (None, None)
             } else {
                 let (right_data, right_types): (Vec<_>, Vec<_>) = values.into_iter().unzip();
                 let right_data = ScalarImpl::Struct(StructValue::new(right_data));
@@ -920,10 +920,16 @@ impl SubscriptionCursor {
                     ],
                 }
                 .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
-                (scan, Some(predicate))
+                if scan.len() > 1 {
+                    return Err(ErrorCode::InternalError(
+                        "Seek pk row should only generate one scan range".to_owned(),
+                    )
+                    .into());
+                }
+                (scan.first().cloned(), Some(predicate))
             }
         } else {
-            (vec![], None)
+            (None, None)
         };
 
         let (seq_scan, out_fields, out_names) = if old_epoch.is_some() && new_epoch.is_some() {
@@ -954,7 +960,11 @@ impl SubscriptionCursor {
                 None,
                 Cardinality::default(),
             );
-            let table_scan = BatchSeqScan::new(core, scan, None);
+            let scans = match scan {
+                Some(scan) => vec![scan],
+                None => vec![],
+            };
+            let table_scan = BatchSeqScan::new(core, scans, None);
             let out_fields = table_scan.core().out_fields();
             let out_names = table_scan.core().column_names();
             (table_scan.into(), out_fields, out_names)
