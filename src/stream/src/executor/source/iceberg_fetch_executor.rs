@@ -125,7 +125,7 @@ pub(super) struct PersistedFileScanTask {
 
 impl PersistedFileScanTask {
     /// First decodes the json to the struct, then converts the struct to a [`FileScanTask`].
-    pub fn decode(jsonb_ref: JsonbRef<'_>) -> Result<FileScanTask> {
+    pub fn decode(jsonb_ref: JsonbRef<'_>) -> StreamExecutorResult<FileScanTask> {
         let persisted_task: Self = serde_json::from_value(jsonb_ref.to_owned_scalar().take())
             .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
         Ok(Self::to_task(persisted_task))
