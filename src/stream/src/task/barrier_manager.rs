@@ -677,7 +677,7 @@ fn sync_epoch(
     };
 
     future
-        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+        .instrument_await(await_tree::span!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
             timer.observe_duration();
         })

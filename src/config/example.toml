@@ -236,7 +236,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-recover_mode = "None"
+recover_mode = "Quiet"
 
 [storage.data_file_cache.runtime_config.Unified]
 worker_threads = 0
@@ -252,7 +252,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-recover_mode = "None"
+recover_mode = "Quiet"
 
 [storage.meta_file_cache.runtime_config.Unified]
 worker_threads = 0

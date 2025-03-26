@@ -510,6 +510,7 @@ script = '''
 
 set -e
 
+mkdir -p "${PREFIX_CONFIG}"
 echo > "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
@@ -779,7 +780,7 @@ dependencies = ["k", "clean-data"]
 [tasks.install-nextest]
 private = true
 category = "RiseDev - Check"
-install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
+install_crate = { min_version = "0.9.72", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
     "nextest",
     "--help",
 ], install_command = "binstall" }
@@ -1300,7 +1301,7 @@ cat <<EOF > "${INSTALL_PATH}"
 #!/usr/bin/env bash
 set -e
 cd "$DIR"
-RISEDEV_CMD="\\$(basename \\"$0")" ./risedev "\\$@"
+RISEDEV_CMD="\\$(basename \\"$0\\")" ./risedev "\\$@"
 EOF
 chmod +x "${INSTALL_PATH}"
 

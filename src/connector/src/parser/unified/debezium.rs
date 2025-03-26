@@ -515,7 +515,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
             _ => return Err(type_error()),
         },
         DataType::Int32 => {
-            if let serde_json::Value::Object(ref obj) = id_field
+            if let serde_json::Value::Object(obj) = id_field
                 && obj.contains_key("$numberInt")
             {
                 let int_str = obj["$numberInt"].as_str().unwrap_or_default();
@@ -525,7 +525,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
             }
         }
         DataType::Int64 => {
-            if let serde_json::Value::Object(ref obj) = id_field
+            if let serde_json::Value::Object(obj) = id_field
                 && obj.contains_key("$numberLong")
             {
                 let int_str = obj["$numberLong"].as_str().unwrap_or_default();

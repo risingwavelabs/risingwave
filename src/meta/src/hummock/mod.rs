@@ -142,22 +142,25 @@ pub fn start_checkpoint_loop(
             {
                 continue;
             }
-            if let Err(err) = hummock_manager
+            match hummock_manager
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
-            } else {
-                let backup_manager_2 = backup_manager.clone();
-                let hummock_manager_2 = hummock_manager.clone();
-                tokio::task::spawn(async move {
-                    let _ = hummock_manager_2
-                        .try_start_minor_gc(backup_manager_2)
-                        .await
-                        .inspect_err(|err| {
-                            tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
-                        });
-                });
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
+                }
+                _ => {
+                    let backup_manager_2 = backup_manager.clone();
+                    let hummock_manager_2 = hummock_manager.clone();
+                    tokio::task::spawn(async move {
+                        let _ = hummock_manager_2
+                            .try_start_minor_gc(backup_manager_2)
+                            .await
+                            .inspect_err(|err| {
+                                tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
+                            });
+                    });
+                }
             }
         }
     });

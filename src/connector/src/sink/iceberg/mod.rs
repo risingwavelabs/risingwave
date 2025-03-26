@@ -673,7 +673,8 @@ impl IcebergSinkWriter {
                 iceberg::spec::DataFileFormat::Parquet,
             ),
         );
-        let data_file_builder = DataFileWriterBuilder::new(parquet_writer_builder, None);
+        let data_file_builder =
+            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id());
         if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
             Err(SinkError::Iceberg(anyhow!(
                 "Extra partition column is not supported in append-only mode"
@@ -802,7 +803,11 @@ impl IcebergSinkWriter {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            DataFileWriterBuilder::new(parquet_writer_builder.clone(), None)
+            DataFileWriterBuilder::new(
+                parquet_writer_builder.clone(),
+                None,
+                partition_spec.spec_id(),
+            )
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
@@ -818,7 +823,12 @@ impl IcebergSinkWriter {
                 ),
             );
             MonitoredPositionDeleteWriterBuilder::new(
-                SortPositionDeleteWriterBuilder::new(parquet_writer_builder.clone(), 1024, None),
+                SortPositionDeleteWriterBuilder::new(
+                    parquet_writer_builder.clone(),
+                    1024,
+                    None,
+                    None,
+                ),
                 position_delete_cache_num,
             )
         };
@@ -827,6 +837,7 @@ impl IcebergSinkWriter {
                 unique_column_ids.clone(),
                 table.metadata().current_schema().clone(),
                 None,
+                partition_spec.spec_id(),
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
@@ -1085,17 +1096,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1103,17 +1116,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1122,17 +1137,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1141,17 +1158,19 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => Some(writer.close().await),
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1329,9 +1348,11 @@ impl IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         tracing::info!("Iceberg commit coordinator inited.");
-        Ok(())
+        // todo(wcy-fdu): The operation of the exactly once sink in the recovery phase will be performed here, and the returned rewind start offset will be updated.
+        // refer to https://github.com/risingwavelabs/risingwave/pull/19771/files#diff-4eafd6e83f9e3fc16b46073e7f3f65261a06c4fac63a997c89abbb1fdd2ad724R1375-R1415
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
@@ -1396,7 +1417,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .into_iter()
             .flat_map(|r| {
                 r.data_files.into_iter().map(|f| {
-                    f.try_into(&partition_type, schema)
+                    f.try_into(expect_partition_spec_id, &partition_type, schema)
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))
                 })
             })

@@ -197,7 +197,7 @@ impl LogStoreBufferInner {
     }
 
     fn add_truncate_offset(&mut self, (epoch, seq_id): ReaderTruncationOffsetType) {
-        if let Some((prev_epoch, ref mut prev_seq_id)) = self.truncation_list.back_mut()
+        if let Some((prev_epoch, prev_seq_id)) = self.truncation_list.back_mut()
             && *prev_epoch == epoch
         {
             *prev_seq_id = seq_id;
@@ -206,9 +206,12 @@ impl LogStoreBufferInner {
         }
     }
 
-    fn rewind(&mut self) {
+    fn rewind(&mut self, log_store_rewind_start_epoch: Option<u64>) {
+        let rewind_start_epoch = log_store_rewind_start_epoch.unwrap_or(0);
         while let Some((epoch, item)) = self.consumed_queue.pop_front() {
-            self.unconsumed_queue.push_back((epoch, item));
+            if epoch > rewind_start_epoch {
+                self.unconsumed_queue.push_back((epoch, item));
+            }
         }
         self.update_unconsumed_buffer_metrics();
     }
@@ -348,10 +351,7 @@ pub(crate) struct LogStoreBufferReceiver {
 impl LogStoreBufferReceiver {
     pub(crate) async fn next_item(&self) -> (u64, LogStoreBufferItem) {
         let notified = self.update_notify.notified();
-        if let Some(item) = {
-            let opt = self.buffer.inner().pop_item();
-            opt
-        } {
+        if let Some(item) = { self.buffer.inner().pop_item() } {
             item
         } else {
             notified.instrument_await("Wait For New Buffer Item").await;
@@ -429,8 +429,8 @@ impl LogStoreBufferReceiver {
         inner.add_truncate_offset((epoch, None));
     }
 
-    pub(crate) fn rewind(&self) {
-        self.buffer.inner().rewind()
+    pub(crate) fn rewind(&self, log_store_rewind_start_epoch: Option<u64>) {
+        self.buffer.inner().rewind(log_store_rewind_start_epoch)
     }
 }
 

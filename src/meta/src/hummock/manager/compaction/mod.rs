@@ -396,8 +396,7 @@ impl HummockManager {
                 |context_id: u32,
                  stream: Streaming<SubscribeCompactionEventRequest>,
                  compactor_request_streams: &mut FuturesUnordered<_>| {
-                    let future = stream
-                        .into_future()
+                    let future = StreamExt::into_future(stream)
                         .map(move |stream_future| (context_id, stream_future));
 
                     compactor_request_streams.push(future);
@@ -481,7 +480,7 @@ impl HummockManager {
                                     }
                                 }
 
-                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                match compactor_manager.get_compactor(context_id) { Some(compactor) => {
                                     // Forcefully cancel the task so that it terminates
                                     // early on the compactor
                                     // node.
@@ -493,11 +492,11 @@ impl HummockManager {
                                             "CancelTask operation has been sent to compactor node",
                                         );
                                     }
-                                } else {
+                                } _ => {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
                                     compactor_alive = false;
-                                }
+                                }}
                             },
 
                             RequestEvent::Register(_) => {
@@ -1222,32 +1221,35 @@ impl HummockManager {
             }
 
             let is_success = if let TaskStatus::Success = compact_task.task_status {
-                if let Err(e) = self
+                match self
                     .report_compaction_sanity_check(&task.object_timestamps)
                     .await
                 {
-                    warn!(
-                        "failed to commit compaction task {} {}",
-                        compact_task.task_id,
-                        e.as_report()
-                    );
-                    compact_task.task_status = TaskStatus::RetentionTimeRejected;
-                    false
-                } else {
-                    let group = version
-                        .latest_version()
-                        .levels
-                        .get(&compact_task.compaction_group_id)
-                        .unwrap();
-                    let is_expired = compact_task.is_expired(group.compaction_group_version_id);
-                    if is_expired {
-                        compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                    Err(e) => {
                         warn!(
-                            "The task may be expired because of group split, task:\n {:?}",
-                            compact_task_to_string(&compact_task)
+                            "failed to commit compaction task {} {}",
+                            compact_task.task_id,
+                            e.as_report()
                         );
+                        compact_task.task_status = TaskStatus::RetentionTimeRejected;
+                        false
                     }
-                    !is_expired
+                    _ => {
+                        let group = version
+                            .latest_version()
+                            .levels
+                            .get(&compact_task.compaction_group_id)
+                            .unwrap();
+                        let is_expired = compact_task.is_expired(group.compaction_group_version_id);
+                        if is_expired {
+                            compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                            warn!(
+                                "The task may be expired because of group split, task:\n {:?}",
+                                compact_task_to_string(&compact_task)
+                            );
+                        }
+                        !is_expired
+                    }
                 }
             } else {
                 false

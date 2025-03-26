@@ -41,7 +41,7 @@ impl<R: Row> Row for Slice<R> {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.row.datum_at_unchecked(self.range.start + index)
+        unsafe { self.row.datum_at_unchecked(self.range.start + index) }
     }
 
     #[inline]

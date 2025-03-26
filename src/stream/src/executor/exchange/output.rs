@@ -60,7 +60,7 @@ impl LocalOutput {
     pub fn new(actor_id: ActorId, ch: Sender) -> Self {
         Self {
             actor_id,
-            span: format!("LocalOutput (actor {:?})", actor_id).into(),
+            span: await_tree::span!("LocalOutput (actor {:?})", actor_id).verbose(),
             ch,
         }
     }
@@ -71,7 +71,7 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> StreamResult<()> {
         self.ch
             .send(message)
-            .verbose_instrument_await(self.span.clone())
+            .instrument_await(self.span.clone())
             .await
             .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
     }
@@ -102,7 +102,7 @@ impl RemoteOutput {
     pub fn new(actor_id: ActorId, ch: Sender) -> Self {
         Self {
             actor_id,
-            span: format!("RemoteOutput (actor {:?})", actor_id).into(),
+            span: await_tree::span!("RemoteOutput (actor {:?})", actor_id).verbose(),
             ch,
         }
     }
@@ -118,7 +118,7 @@ impl Output for RemoteOutput {
 
         self.ch
             .send(message)
-            .verbose_instrument_await(self.span.clone())
+            .instrument_await(self.span.clone())
             .await
             .map_err(|_| ExchangeChannelClosed::output(self.actor_id).into())
     }

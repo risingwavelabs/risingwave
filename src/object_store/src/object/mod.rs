@@ -31,7 +31,7 @@ pub mod opendal_engine;
 pub use opendal_engine::*;
 
 pub mod s3;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::stream::BoxStream;
 use futures::{Future, StreamExt};
 pub use risingwave_common::config::ObjectStoreConfig;
@@ -408,7 +408,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let res = self
             .inner
             .write_bytes(data)
-            .verbose_instrument_await(operation_type_str)
+            .instrument_await(operation_type_str.verbose())
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
@@ -434,7 +434,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
             self.inner
                 .finish()
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
@@ -487,7 +487,7 @@ impl MonitoredStreamingReader {
         let future = async {
             self.inner
                 .next()
-                .verbose_instrument_await(self.operation_type_str)
+                .instrument_await(self.operation_type_str.verbose())
                 .await
         };
         let res = match self.streaming_read_timeout.as_ref() {
@@ -595,7 +595,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .upload(path, obj.clone())
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -628,7 +628,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .streaming_upload(path)
-            .verbose_instrument_await(operation_type_str)
+            .instrument_await(operation_type_str.verbose())
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
@@ -653,7 +653,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .read(path, range.clone())
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -707,7 +707,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .streaming_read(path, range.clone())
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -745,7 +745,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .metadata(path)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -776,7 +776,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .delete(path)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -807,7 +807,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .delete_objects(paths)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -843,7 +843,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .list(prefix, start_after.clone(), limit)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -1063,7 +1063,7 @@ pub async fn build_remote_object_store(
 fn get_retry_strategy(
     config: &ObjectStoreConfig,
     operation_type: OperationType,
-) -> impl Iterator<Item = Duration> {
+) -> impl Iterator<Item = Duration> + use<> {
     let attempts = get_retry_attempts_by_type(config, operation_type);
     ExponentialBackoff::from_millis(config.retry.req_backoff_interval_ms)
         .max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))

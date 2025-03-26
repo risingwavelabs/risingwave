@@ -77,7 +77,7 @@ pub struct MqttCommon {
     pub max_packet_size: Option<u32>,
 
     /// Path to CA certificate file for verifying the broker's key.
-    #[serde(rename = "tls.client_key")]
+    #[serde(rename = "tls.ca")]
     pub ca: Option<String>,
     /// Path to client's certificate file (PEM). Required for client authentication.
     /// Can be a file path under fs:// or a string with the certificate content.

@@ -508,15 +508,20 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     reset_request_id: 0,
                     backoff_future: None,
                 };
-                if let Some(recovery_timer) = state.metrics.recovery_timer.take() {
-                    recovery_timer.observe_duration();
-                } else if cfg!(debug_assertions) {
-                    panic!(
-                        "take database {} recovery latency for twice",
-                        self.database_id
-                    )
-                } else {
-                    warn!(database_id = %self.database_id,"failed to take recovery latency")
+                match state.metrics.recovery_timer.take() {
+                    Some(recovery_timer) => {
+                        recovery_timer.observe_duration();
+                    }
+                    _ => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "take database {} recovery latency for twice",
+                                self.database_id
+                            )
+                        } else {
+                            warn!(database_id = %self.database_id,"failed to take recovery latency")
+                        }
+                    }
                 }
                 match replace(&mut state.stage, temp_place_holder) {
                     DatabaseRecoveringStage::Resetting { .. } => {

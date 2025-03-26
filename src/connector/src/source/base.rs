@@ -555,9 +555,10 @@ impl ConnectorProperties {
             LocalSecretManager::global().fill_secrets(options, secret_refs)?;
         let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
-            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
         match_source_name_str!(
-            connector.to_lowercase().as_str(),
+            connector.as_str(),
             PropType,
             PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
@@ -651,8 +652,9 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
     type Error = crate::error::ConnectorError;
 
     fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+        let split_type = split.split_type.to_lowercase();
         match_source_name_str!(
-            split.split_type.to_lowercase().as_str(),
+            split_type.as_str(),
             PropType,
             {
                 <PropType as SourceProperties>::Split::restore_from_bytes(
@@ -667,8 +669,9 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
 
 impl SplitImpl {
     fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
+        let split_type = split_type.to_lowercase();
         match_source_name_str!(
-            split_type.to_lowercase().as_str(),
+            split_type.as_str(),
             PropType,
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
             |other| bail!("connector '{}' is not supported", other)

@@ -92,7 +92,7 @@ impl SinkCoordinatorManager {
     pub async fn handle_new_request(
         &self,
         mut request_stream: SinkWriterRequestStream,
-    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>>, Status> {
+    ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>> + use<>, Status> {
         let (param, vnode_bitmap) = match request_stream.try_next().await? {
             Some(CoordinateRequest {
                 msg:
@@ -374,8 +374,8 @@ mod tests {
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
         SinkCommitCoordinator for MockCoordinator<C, F>
     {
-        async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
-            Ok(())
+        async fn init(&mut self) -> risingwave_connector::sink::Result<Option<u64>> {
+            Ok(None)
         }
 
         async fn commit(
@@ -485,6 +485,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) =
@@ -649,6 +650,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let mut client = build_client(vnode).await;
@@ -737,6 +739,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, client2) = join(build_client(vnode1), build_client(vnode2)).await;
@@ -820,6 +823,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) = join(build_client(vnode1), build_client(vnode2)).await;
@@ -955,6 +959,7 @@ mod tests {
             })
             .await
             .unwrap()
+            .0
         };
 
         let (mut client1, mut client2) =
