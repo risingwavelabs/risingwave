@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use risingwave_common::bail;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -27,6 +29,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
+use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
 use crate::hummock::HummockManagerRef;
@@ -44,6 +47,19 @@ pub struct GlobalBarrierManager {
 pub type BarrierManagerRef = Arc<GlobalBarrierManager>;
 
 impl GlobalBarrierManager {
+    pub async fn get_inflight_database_info(
+        &self,
+    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::GetInflightDatabaseInfo(tx))
+            .context("failed to send get inflight database info request")?;
+        let inflight_database_info = rx
+            .await
+            .context("failed to receive inflight database info")?;
+        Ok(inflight_database_info)
+    }
+
     /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
         let mut ddl_progress = {

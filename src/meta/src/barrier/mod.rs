@@ -95,6 +95,7 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
     AdhocRecovery(Sender<()>),
+    GetInflightDatabaseInfo(Sender<HashMap<DatabaseId, InflightDatabaseInfo>>),
 }
 
 #[derive(Debug)]

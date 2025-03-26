@@ -274,6 +274,15 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of adhoc recovery");
                                 }
                             }
+                            BarrierManagerRequest::GetInflightDatabaseInfo(result_tx) => {
+                                let inflight_infos = self.checkpoint_control.inflight_infos()
+                                    .map(|(database_id, _, inflight_database_info)|
+                                        (database_id, inflight_database_info.clone()))
+                                    .collect();
+                                if result_tx.send(inflight_infos).is_err() {
+                                    error!("failed to send inflight database info");
+                                }
+                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
