@@ -89,15 +89,6 @@ impl CatalogController {
             },
         };
         removed_objects.push(obj);
-        if let ObjectType::Sink = object_type {
-            // delete system table for exactly once iceberg sink
-            // todo(wcy-fdu): optimize the logic to be Iceberg unique.
-            if let Err(e) = clean_all_rows_by_sink_id(&inner.db, object_id).await {
-                tracing::error!("Failed to clean rows: {:?}", e.as_report());
-                return Err(e);
-            }
-        }
-
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
 
@@ -388,32 +379,5 @@ async fn report_drop_object(
             }),
             None,
         );
-    }
-}
-
-async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> MetaResult<()> {
-    match Entity::delete_many()
-        .filter(Column::SinkId.eq(sink_id))
-        .exec(db)
-        .await
-    {
-        Ok(result) => {
-            let deleted_count = result.rows_affected;
-
-            tracing::info!(
-                "Deleted {} items for sink_id = {} in iceberg exactly once system table.",
-                deleted_count,
-                sink_id
-            );
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!(
-                "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
-                sink_id,
-                e.as_report()
-            );
-            Err(e.into())
-        }
     }
 }
