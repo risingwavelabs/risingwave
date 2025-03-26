@@ -27,16 +27,14 @@ use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
 use crate::MetaResult;
+use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
-use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::{BarrierWorkerState, CheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
-use crate::barrier::info::InflightDatabaseInfo;
-use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
+use crate::barrier::rpc::{ControlStreamManager, DatabaseInitialBarrierCollector};
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
-use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
@@ -75,9 +73,7 @@ enum DatabaseRecoveringStage {
         backoff_future: Option<RetryBackoffFuture>,
     },
     Initializing {
-        remaining_workers: NodeToCollect,
-        database: DatabaseCheckpointControl,
-        prev_epoch: u64,
+        initial_barrier_collector: Box<DatabaseInitialBarrierCollector>,
     },
 }
 
@@ -161,17 +157,14 @@ impl DatabaseRecoveringState {
                 // ignore the collected barrier on resetting or backoff
             }
             DatabaseRecoveringStage::Initializing {
-                remaining_workers,
-                prev_epoch,
-                ..
+                initial_barrier_collector,
             } => {
                 let worker_id = resp.worker_id as WorkerId;
-                assert!(remaining_workers.remove(&worker_id).is_some());
-                assert_eq!(resp.epoch, *prev_epoch);
+                initial_barrier_collector.collect_resp(resp);
                 info!(
                     ?database_id,
                     worker_id,
-                    ?remaining_workers,
+                    remaining_workers = ?initial_barrier_collector,
                     "initializing database barrier collected"
                 );
             }
@@ -187,8 +180,9 @@ impl DatabaseRecoveringState {
                 true
             }
             DatabaseRecoveringStage::Initializing {
-                remaining_workers, ..
-            } => is_valid_after_worker_err(remaining_workers, worker_id),
+                initial_barrier_collector,
+                ..
+            } => initial_barrier_collector.is_valid_after_worker_err(worker_id),
         }
     }
 
@@ -251,9 +245,10 @@ impl DatabaseRecoveringState {
                 }
             }
             DatabaseRecoveringStage::Initializing {
-                remaining_workers, ..
+                initial_barrier_collector,
+                ..
             } => {
-                if remaining_workers.is_empty() {
+                if initial_barrier_collector.is_collected() {
                     return Poll::Ready(RecoveringStateAction::EnterRunning);
                 }
             }
@@ -261,10 +256,13 @@ impl DatabaseRecoveringState {
         Poll::Pending
     }
 
-    pub(super) fn checkpoint_control(&self) -> Option<&DatabaseCheckpointControl> {
+    pub(super) fn database_state(&self) -> Option<&BarrierWorkerState> {
         match &self.stage {
             DatabaseRecoveringStage::Resetting { .. } => None,
-            DatabaseRecoveringStage::Initializing { database, .. } => Some(database),
+            DatabaseRecoveringStage::Initializing {
+                initial_barrier_collector,
+                ..
+            } => Some(initial_barrier_collector.database_state()),
         }
     }
 }
@@ -396,11 +394,8 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
-    pub(crate) fn inflight_infos(
-        &self,
-    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
-    {
-        self.control.inflight_infos()
+    pub(crate) fn control(&self) -> &CheckpointControl {
+        &*self.control
     }
 
     pub(crate) fn enter(
@@ -433,7 +428,6 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            control_stream_manager.add_partial_graph(self.database_id, None);
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 database_fragment_info,
@@ -447,12 +441,10 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             )?
         };
         match result {
-            Ok((remaining_workers, database, prev_epoch)) => {
-                info!(?remaining_workers, database_id = ?self.database_id, "database enter initializing");
+            Ok(initial_barrier_collector) => {
+                info!(node_to_collect = ?initial_barrier_collector, database_id = ?self.database_id, "database enter initializing");
                 status.stage = DatabaseRecoveringStage::Initializing {
-                    remaining_workers,
-                    database,
-                    prev_epoch,
+                    initial_barrier_collector: initial_barrier_collector.into(),
                 };
             }
             Err(e) => {
@@ -528,12 +520,11 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                         unreachable!("can only enter running during initializing")
                     }
                     DatabaseRecoveringStage::Initializing {
-                        remaining_workers,
-                        database,
-                        ..
+                        initial_barrier_collector,
                     } => {
-                        assert!(remaining_workers.is_empty());
-                        *database_status = DatabaseCheckpointControlStatus::Running(database);
+                        *database_status = DatabaseCheckpointControlStatus::Running(
+                            initial_barrier_collector.finish(),
+                        );
                     }
                 }
             }

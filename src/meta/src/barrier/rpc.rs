@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fmt::{Debug, Formatter};
 use std::future::poll_fn;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -43,8 +44,8 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     RemovePartialGraphRequest, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::{
-    InjectBarrierRequest, StreamingControlStreamRequest, streaming_control_stream_request,
-    streaming_control_stream_response,
+    BarrierCompleteResponse, InjectBarrierRequest, StreamingControlStreamRequest,
+    streaming_control_stream_request, streaming_control_stream_response,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -56,9 +57,9 @@ use uuid::Uuid;
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
 use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::utils::NodeToCollect;
+use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{
@@ -111,7 +112,12 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         inflight_infos: impl Iterator<
-            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+            Item = (
+                DatabaseId,
+                &InflightSubscriptionInfo,
+                &InflightDatabaseInfo,
+                impl Iterator<Item = &InflightStreamingJobInfo>,
+            ),
         >,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
@@ -149,7 +155,12 @@ impl ControlStreamManager {
         &mut self,
         node: WorkerNode,
         inflight_infos: impl Iterator<
-            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+            Item = (
+                DatabaseId,
+                &InflightSubscriptionInfo,
+                &InflightDatabaseInfo,
+                impl Iterator<Item = &InflightStreamingJobInfo>,
+            ),
         >,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
@@ -317,38 +328,67 @@ impl ControlStreamManager {
     fn collect_init_request(
         &self,
         initial_inflight_infos: impl Iterator<
-            Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo),
+            Item = (
+                DatabaseId,
+                &InflightSubscriptionInfo,
+                &InflightDatabaseInfo,
+                impl Iterator<Item = &InflightStreamingJobInfo>,
+            ),
         >,
         term_id: String,
     ) -> PbInitRequest {
         PbInitRequest {
             databases: initial_inflight_infos
                 .map(
-                    |(database_id, subscriptions, inflight_info)| PbDatabaseInitialPartialGraph {
-                        database_id: database_id.database_id,
-                        graphs: vec![PbInitialPartialGraph {
+                    |(
+                        database_id,
+                        subscriptions,
+                        database_inflight_info,
+                        creating_job_inflight_info,
+                    )| {
+                        fn actor_infos(
+                            nodes: &HashMap<WorkerId, ControlStreamNode>,
+                            fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
+                        ) -> Vec<ActorInfo> {
+                            {
+                                fragment_infos
+                                    .flat_map(|fragment| {
+                                        fragment.actors.iter().map(|(actor_id, actor)| {
+                                            let host_addr = nodes
+                                                .get(&actor.worker_id)
+                                                .expect("worker should exist for inflight actor")
+                                                .worker
+                                                .host
+                                                .clone()
+                                                .expect("should exist");
+                                            ActorInfo {
+                                                actor_id: *actor_id,
+                                                host: Some(host_addr),
+                                            }
+                                        })
+                                    })
+                                    .collect()
+                            }
+                        }
+                        let mut graphs = vec![PbInitialPartialGraph {
                             partial_graph_id: to_partial_graph_id(None),
                             subscriptions: subscriptions.into_iter().collect_vec(),
-                            actor_infos: inflight_info
-                                .fragment_infos()
-                                .flat_map(|fragment| {
-                                    fragment.actors.iter().map(|(actor_id, actor)| {
-                                        let host_addr = self
-                                            .nodes
-                                            .get(&actor.worker_id)
-                                            .expect("worker should exist for inflight actor")
-                                            .worker
-                                            .host
-                                            .clone()
-                                            .expect("should exist");
-                                        ActorInfo {
-                                            actor_id: *actor_id,
-                                            host: Some(host_addr),
-                                        }
-                                    })
-                                })
-                                .collect(),
-                        }],
+                            actor_infos: actor_infos(
+                                &self.nodes,
+                                database_inflight_info.fragment_infos(),
+                            ),
+                        }];
+                        graphs.extend(creating_job_inflight_info.map(|job| {
+                            PbInitialPartialGraph {
+                                partial_graph_id: to_partial_graph_id(Some(job.job_id)),
+                                subscriptions: vec![],
+                                actor_infos: actor_infos(&self.nodes, job.fragment_infos()),
+                            }
+                        }));
+                        PbDatabaseInitialPartialGraph {
+                            database_id: database_id.database_id,
+                            graphs,
+                        }
                     },
                 )
                 .collect(),
@@ -357,13 +397,59 @@ impl ControlStreamManager {
     }
 }
 
+pub(super) struct DatabaseInitialBarrierCollector {
+    database_id: DatabaseId,
+    node_to_collect: NodeToCollect,
+    database_state: BarrierWorkerState,
+    create_mview_tracker: CreateMviewProgressTracker,
+    committed_epoch: u64,
+}
+
+impl Debug for DatabaseInitialBarrierCollector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseInitialBarrierCollector")
+            .field("database_id", &self.database_id)
+            .field("node_to_collect", &self.node_to_collect)
+            .finish()
+    }
+}
+
+impl DatabaseInitialBarrierCollector {
+    pub(super) fn is_collected(&self) -> bool {
+        self.node_to_collect.is_empty()
+    }
+
+    pub(super) fn database_state(&self) -> &BarrierWorkerState {
+        &self.database_state
+    }
+
+    pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
+        assert_eq!(self.database_id.database_id, resp.database_id);
+        assert_eq!(resp.epoch, self.committed_epoch);
+        assert!(
+            self.node_to_collect
+                .remove(&(resp.worker_id as _))
+                .is_some()
+        );
+    }
+
+    pub(super) fn finish(self) -> DatabaseCheckpointControl {
+        assert!(self.is_collected());
+        DatabaseCheckpointControl::recovery(
+            self.database_id,
+            self.create_mview_tracker,
+            self.database_state,
+            self.committed_epoch,
+        )
+    }
+
+    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+        is_valid_after_worker_err(&mut self.node_to_collect, worker_id)
+    }
+}
+
 impl ControlStreamManager {
     /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
-    ///
-    /// Return:
-    ///  - the worker nodes that need to wait for initial barrier collection
-    ///  - the extracted database information
-    ///  - the `prev_epoch` of the initial barrier
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
@@ -375,7 +461,8 @@ impl ControlStreamManager {
         subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-    ) -> MetaResult<(NodeToCollect, DatabaseCheckpointControl, u64)> {
+    ) -> MetaResult<DatabaseInitialBarrierCollector> {
+        self.add_partial_graph(database_id, None);
         let source_split_assignments = info
             .fragment_infos()
             .flat_map(|info| info.actors.keys())
@@ -458,10 +545,13 @@ impl ControlStreamManager {
             }
         }
 
-        let background_mviews = info
-            .job_ids()
-            .filter_map(|job_id| background_jobs.remove(&job_id).map(|mview| (job_id, mview)))
-            .collect();
+        let background_mviews = info.job_ids().filter_map(|job_id| {
+            background_jobs
+                .get(&job_id)
+                .map(|(definition, stream_job_fragments)| {
+                    (job_id, (definition.clone(), stream_job_fragments))
+                })
+        });
         let tracker = CreateMviewProgressTracker::recover(background_mviews, hummock_version_stats);
 
         let node_to_collect = self.inject_barrier(
@@ -481,18 +571,17 @@ impl ControlStreamManager {
             "inject initial barrier"
         );
 
+        let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
-        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
-        Ok((
+        let database_state =
+            BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
+        Ok(DatabaseInitialBarrierCollector {
+            database_id,
             node_to_collect,
-            DatabaseCheckpointControl::recovery(
-                database_id,
-                tracker,
-                state,
-                barrier_info.prev_epoch.value().0,
-            ),
-            barrier_info.prev_epoch.value().0,
-        ))
+            database_state,
+            create_mview_tracker: tracker,
+            committed_epoch,
+        })
     }
 
     pub(super) fn inject_command_ctx_barrier(
