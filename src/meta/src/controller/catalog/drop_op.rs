@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::{ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter};
-use thiserror_ext::AsReport;
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
