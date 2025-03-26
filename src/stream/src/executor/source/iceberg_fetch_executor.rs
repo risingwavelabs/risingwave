@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
+use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
@@ -125,10 +125,10 @@ pub(super) struct PersistedFileScanTask {
 
 impl PersistedFileScanTask {
     /// First decodes the json to the struct, then converts the struct to a [`FileScanTask`].
-    pub fn decode(jsonb_ref: &JsonbVal) -> Result<FileScanTask> {
+    pub fn decode(jsonb_ref: JsonbRef<'_>) -> Result<FileScanTask> {
         let persisted_task: Self = serde_json::from_value(jsonb_ref.to_owned_scalar().take())
             .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
-        Ok(Self::to_task(persisted_file_scan_task))
+        Ok(Self::to_task(persisted_task))
     }
 
     /// First converts the [`FileScanTask`] to a persisted one, then encodes the persisted one to a jsonb value.
@@ -164,7 +164,10 @@ impl PersistedFileScanTask {
             schema,
             project_field_ids,
             predicate,
-            deletes: deletes.into_iter().map(PersistedFileScanTask::to_task),
+            deletes: deletes
+                .into_iter()
+                .map(PersistedFileScanTask::to_task)
+                .collect(),
             sequence_number,
             equality_ids,
         }
@@ -197,7 +200,10 @@ impl PersistedFileScanTask {
             schema,
             project_field_ids,
             predicate,
-            deletes: deletes.into_iter().map(PersistedFileScanTask::from_task),
+            deletes: deletes
+                .into_iter()
+                .map(PersistedFileScanTask::from_task)
+                .collect(),
             sequence_number,
             equality_ids,
         }
