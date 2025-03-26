@@ -89,13 +89,13 @@ impl Versioning {
         min_pinned_version_id: HummockVersionId,
     ) -> HashSet<HummockSstableObjectId> {
         // object ids in checkpoint version
-        let mut tracked_object_ids = self.checkpoint.version.get_object_ids();
+        let mut tracked_object_ids = self.checkpoint.version.get_object_ids(false);
         // add object ids added between checkpoint version and current version
         for (_, delta) in self.hummock_version_deltas.range((
             Excluded(self.checkpoint.version.id),
             Included(self.current_version.id),
         )) {
-            tracked_object_ids.extend(delta.newly_added_object_ids());
+            tracked_object_ids.extend(delta.newly_added_object_ids(false));
         }
         // add stale object ids before the checkpoint version
         tracked_object_ids.extend(

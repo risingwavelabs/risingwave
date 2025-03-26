@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
 use jni::JavaVM;
@@ -457,7 +457,7 @@ impl LogSinker for RemoteLogSinker {
                                         batch_id: chunk_id as u64,
                                         chunk,
                                     })
-                                    .instrument_await(format!(
+                                    .instrument_await(span!(
                                         "log_sinker_send_chunk (chunk {chunk_id})"
                                     ))
                                     .await?;
@@ -474,7 +474,7 @@ impl LogSinker for RemoteLogSinker {
                                     let start_time = Instant::now();
                                     request_tx
                                         .barrier(epoch, true)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_commit_checkpoint (epoch {epoch})"
                                         ))
                                         .await?;
@@ -482,7 +482,7 @@ impl LogSinker for RemoteLogSinker {
                                 } else {
                                     request_tx
                                         .barrier(epoch, false)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_send_barrier (epoch {epoch})"
                                         ))
                                         .await?;

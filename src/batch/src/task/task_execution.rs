@@ -412,8 +412,17 @@ impl BatchTaskExecution {
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         let this = self.clone();
-        async fn notify_panic(this: &BatchTaskExecution, state_tx: Option<&mut StateReporter>) {
-            let err_str = "execution panic".into();
+        async fn notify_panic(
+            this: &BatchTaskExecution,
+            state_tx: Option<&mut StateReporter>,
+            message: Option<&str>,
+        ) {
+            let err_str = if let Some(message) = message {
+                format!("execution panic: {}", message)
+            } else {
+                "execution panic".into()
+            };
+
             if let Err(e) = this
                 .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str))
                 .await
@@ -451,8 +460,9 @@ impl BatchTaskExecution {
                 .rw_catch_unwind()
                 .await
             {
-                error!("Batch task {:?} panic: {:?}", task_id, error);
-                notify_panic(&this, state_tx.as_mut()).await;
+                let message = panic_message::get_panic_message(&error);
+                error!(?task_id, error = message, "Batch task panic");
+                notify_panic(&this, state_tx.as_mut(), message).await;
             }
         };
 
