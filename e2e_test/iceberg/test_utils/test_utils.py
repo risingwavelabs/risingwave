@@ -111,10 +111,20 @@ def discover_test_cases() -> List[str]:
     # Find all .toml files in test_case directory, excluding benches directory
     test_files = glob.glob(os.path.join(test_case_dir, "*.toml"))
     test_files.extend(glob.glob(os.path.join(test_case_dir, "*/*.toml")))
-    # Filter out bench files
-    # Hack: filter out CDC tests, as it uses `--host=mysql` (for CI).
-    # TODO: use `risedev slt` to replace `sqllogictest` so that the test can be run locally.
-    test_files = [f for f in test_files if "benches" not in f and "cdc" not in f]
+
+    is_ci = os.environ.get("RISINGWAVE_CI") == "true"
+
+    def should_exclude(f):
+        # Filter out bench files
+        if "benches" in f:
+            return True
+        # Hack: filter out CDC tests, as it uses `--host=mysql` (for CI).
+        # TODO: use `risedev slt` to replace `sqllogictest` so that the test can be run locally.
+        if not is_ci and "cdc" in f:
+            return True
+        return False
+
+    test_files = [f for f in test_files if not should_exclude(f)]
     return test_files
 
 
