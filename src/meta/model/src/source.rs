@@ -42,6 +42,7 @@ pub struct Model {
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
     pub rate_limit: Option<i32>,
+    pub ban_source_recover: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -106,6 +107,7 @@ impl From<PbSource> for ActiveModel {
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
             rate_limit: Set(source.rate_limit.map(|id| id as _)),
+            ban_source_recover: Set(source.ban_source_recover),
         }
     }
 }

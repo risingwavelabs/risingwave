@@ -49,6 +49,7 @@ struct RwSource {
     connector_props: JsonbVal,
     // format-encode options in json format
     format_encode_options: JsonbVal,
+    ban_source_recover: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sources")]
@@ -98,6 +99,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),
                     created_at_cluster_version: source.created_at_cluster_version.clone(),
                     is_shared: source.info.is_shared(),
+                    ban_source_recover: source.ban_source_recover,
 
                     connector_props: serialize_props_with_secret(
                         &catalog_reader,

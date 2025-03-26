@@ -55,6 +55,7 @@ pub struct SourceCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
+    pub ban_source_recover: bool,
 }
 
 impl SourceCatalog {
@@ -100,6 +101,7 @@ impl SourceCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
+            ban_source_recover: self.ban_source_recover,
         }
     }
 
@@ -207,6 +209,7 @@ impl From<&PbSource> for SourceCatalog {
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
             rate_limit,
+            ban_source_recover: prost.ban_source_recover,
         }
     }
 }

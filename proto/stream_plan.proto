@@ -205,6 +205,8 @@ message StreamSource {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  // Whether to ban source recover.
+  bool ban_source_recover = 11;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future

@@ -44,6 +44,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             source_info.clone(),
             node.row_id_index,
             options_with_secret,
+            false, // source backfill does not utilize `StreamReaderBuilder`
         );
 
         let source_column_ids: Vec<_> = source_desc_builder

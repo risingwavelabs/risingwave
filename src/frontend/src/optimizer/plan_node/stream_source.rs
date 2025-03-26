@@ -93,6 +93,7 @@ impl StreamNode for StreamSource {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                ban_source_recover: source_catalog.ban_source_recover,
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

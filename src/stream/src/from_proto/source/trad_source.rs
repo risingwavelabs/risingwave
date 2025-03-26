@@ -43,6 +43,7 @@ pub fn create_source_desc_builder(
     source_info: PbStreamSourceInfo,
     row_id_index: Option<u32>,
     with_properties: WithOptionsSecResolved,
+    ban_source_recover: bool,
 ) -> SourceDescBuilder {
     {
         // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
@@ -125,6 +126,7 @@ pub fn create_source_desc_builder(
         // We should consdier add back the "pk_column_ids" field removed by #8841 in
         // StreamSource
         params.info.pk_indices.clone(),
+        ban_source_recover,
     )
 }
 
@@ -170,6 +172,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     source_info,
                     source.row_id_index,
                     with_properties,
+                    source.ban_source_recover,
                 );
 
                 let source_column_ids: Vec<_> = source_desc_builder

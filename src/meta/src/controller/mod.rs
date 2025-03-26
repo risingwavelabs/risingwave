@@ -300,6 +300,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
             rate_limit: value.0.rate_limit.map(|v| v as _),
+            ban_source_recover: value.0.ban_source_recover,
         }
     }
 }

@@ -58,6 +58,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source_info.clone(),
             params.env.config().developer.connector_message_buffer_size,
             params.info.pk_indices.clone(),
+            false, // fs fetch does not utilize `StreamReaderBuilder`
         );
 
         let source_column_ids: Vec<_> = source_desc_builder

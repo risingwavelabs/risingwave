@@ -38,6 +38,7 @@ pub struct SourceDesc {
     pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+    pub ban_source_recover: bool,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -59,6 +60,7 @@ pub struct SourceDescBuilder {
     source_info: PbStreamSourceInfo,
     connector_message_buffer_size: usize,
     pk_indices: Vec<usize>,
+    ban_source_recover: bool,
 }
 
 impl SourceDescBuilder {
@@ -70,6 +72,7 @@ impl SourceDescBuilder {
         source_info: PbStreamSourceInfo,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
+        ban_source_recover: bool,
     ) -> Self {
         Self {
             columns: columns.into_iter().map(ColumnCatalog::from).collect(),
@@ -79,6 +82,7 @@ impl SourceDescBuilder {
             source_info,
             connector_message_buffer_size,
             pk_indices,
+            ban_source_recover,
         }
     }
 
@@ -130,6 +134,7 @@ impl SourceDescBuilder {
             source,
             columns,
             metrics: self.metrics,
+            ban_source_recover: self.ban_source_recover,
         })
     }
 
@@ -212,6 +217,7 @@ pub mod test_utils {
             source_info,
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
             pk_indices,
+            ban_source_recover: false,
         }
     }
 }

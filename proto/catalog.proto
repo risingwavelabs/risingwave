@@ -146,6 +146,8 @@ message Source {
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
+  // Whether to ban source recover.
+  bool ban_source_recover = 20;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;

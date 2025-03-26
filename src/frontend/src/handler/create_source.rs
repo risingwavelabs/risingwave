@@ -112,6 +112,8 @@ mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
 
+const BAN_SOURCE_RECOVER_KEY: &str = "ban_source_recover";
+
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
@@ -822,6 +824,14 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
+    // handle ban_source_recover option
+    let mut ban_source_recover = false;
+    if let Some(v) = with_properties.remove(BAN_SOURCE_RECOVER_KEY)
+        && v.eq_ignore_ascii_case("true")
+    {
+        ban_source_recover = true;
+    }
+
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_properties,
@@ -933,6 +943,7 @@ pub async fn bind_create_source_or_table_with_connector(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
+        ban_source_recover,
     };
     Ok(source)
 }
