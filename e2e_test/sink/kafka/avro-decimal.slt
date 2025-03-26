@@ -1,0 +1,30 @@
+statement ok
+set sink_decouple = false;
+
+system ok
+rpk topic create test-rw-sink-decimal-encode
+
+system ok
+sr_register test-rw-sink-decimal-encode-value AVRO << EOF
+{
+  "type": "record",
+  "name": "Simple",
+  "fields": [
+    {
+      "name": "decimal_field",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "scale": 0
+      }
+    }
+  ]
+}
+EOF
+
+create table t_sink_decimal(decimal_field decimal);
+
+
+
+statement ok
+set sink_decouple to default;
