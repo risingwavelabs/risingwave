@@ -14,7 +14,7 @@
 
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::DatabaseTransaction;
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
@@ -28,6 +28,7 @@ impl CatalogController {
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
             .one(&txn)
@@ -86,7 +87,6 @@ impl CatalogController {
             },
         };
         removed_objects.push(obj);
-
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
 
