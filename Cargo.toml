@@ -100,7 +100,7 @@ development = ["expect-test", "pretty_assertions"]
 foyer = { git = "https://github.com/foyer-rs/foyer", features = [
     "tracing",
     "nightly",
-], rev = "54ffb3415ebf4905144dd762afa1eae187e43087" }
+], rev = "30e99a7f6399ddc72c247629aed331c4d51d3f12" }
 mixtrics = { version = "0.0.4", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
