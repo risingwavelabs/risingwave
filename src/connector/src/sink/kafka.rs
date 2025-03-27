@@ -394,6 +394,11 @@ impl Sink for KafkaSink {
         }
         Ok(())
     }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        KafkaConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
 }
 
 /// When the `DeliveryFuture` the current `future_delivery_buffer`

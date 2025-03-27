@@ -333,6 +333,11 @@ impl Sink for DeltaLakeSink {
         ))
     }
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        DeltaLakeConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()> {
         if self.config.r#type != SINK_TYPE_APPEND_ONLY
             && self.config.r#type != SINK_USER_FORCE_APPEND_ONLY_OPTION

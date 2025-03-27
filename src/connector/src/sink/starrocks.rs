@@ -302,6 +302,11 @@ impl Sink for StarrocksSink {
         Ok(())
     }
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        StarrocksConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(

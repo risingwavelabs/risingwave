@@ -540,6 +540,11 @@ impl Sink for ClickHouseSink {
         Ok(())
     }
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        ClickHouseConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let writer = ClickHouseSinkWriter::new(
             self.config.clone(),
