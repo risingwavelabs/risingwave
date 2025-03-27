@@ -280,7 +280,8 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 90
+    timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "integration test (madsim) - recovery"
@@ -339,7 +340,7 @@ steps:
     timeout_in_minutes: 70
     retry: *auto-retry
 
-  - label: "end-to-end test (madsim, part %n)"
+  - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
     command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
     if: |
@@ -360,7 +361,7 @@ steps:
     parallelism: 4
     retry: *auto-retry
 
-  - label: "end-to-end test (madsim, random vnode count, part %n)"
+  - label: "end-to-end test (madsim, random vnode count)"
     key: "e2e-test-deterministic-random-vnode-count"
     command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true ci/scripts/deterministic-e2e-test.sh"
     if: |
@@ -381,7 +382,7 @@ steps:
     parallelism: 4
     retry: *auto-retry
 
-  - label: "recovery test (madsim, part %n)"
+  - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
@@ -398,7 +399,7 @@ steps:
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
-  - label: "background_ddl, arrangement_backfill recovery test (madsim, part %n)"
+  - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 90m ci/scripts/deterministic-recovery-test.sh"
     if: |
@@ -430,6 +431,7 @@ steps:
           run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
+    parallelism: 2
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
