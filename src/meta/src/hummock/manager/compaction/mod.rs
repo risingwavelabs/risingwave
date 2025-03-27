@@ -1579,19 +1579,6 @@ impl HummockManager {
     }
 }
 
-// impl WriteLimitType {
-//     pub fn as_str(&self) -> &str {
-//         match self {
-//             Self::Unlimited => "Unlimited",
-//             Self::WriteStop(reason) => reason,
-//         }
-//     }
-
-//     pub fn is_write_stop(&self) -> bool {
-//         matches!(self, Self::WriteStop(_))
-//     }
-// }
-
 #[derive(Debug, Default)]
 pub struct CompactionState {
     scheduled: Mutex<HashSet<(CompactionGroupId, compact_task::TaskType)>>,

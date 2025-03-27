@@ -562,7 +562,6 @@ mod tests {
             "write limit should not be triggered for group 1"
         );
 
-        // set_sub_level_number_threshold_for_group_1(&mut target_groups, 1000);
         set_level_0_max_size_threshold_for_group_1(&mut target_groups, 10);
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
