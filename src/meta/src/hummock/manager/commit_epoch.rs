@@ -108,8 +108,8 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
-            &self.metrics,
             Some(&self.table_committed_epoch_notifiers),
+            &self.metrics,
         );
 
         let state_table_info = &version.latest_version().state_table_info;

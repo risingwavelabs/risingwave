@@ -54,8 +54,8 @@ pub(super) struct HummockVersionTransaction<'a> {
     orig_version: &'a mut HummockVersion,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
     notification_manager: &'a NotificationManager,
-    meta_metrics: &'a MetaMetrics,
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
+    meta_metrics: &'a MetaMetrics,
 
     pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>)>,
     disable_apply_to_txn: bool,
@@ -66,8 +66,8 @@ impl<'a> HummockVersionTransaction<'a> {
         version: &'a mut HummockVersion,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
         notification_manager: &'a NotificationManager,
-        meta_metrics: &'a MetaMetrics,
         table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
+        meta_metrics: &'a MetaMetrics,
     ) -> Self {
         Self {
             orig_version: version,

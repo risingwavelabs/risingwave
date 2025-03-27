@@ -654,8 +654,8 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
-            &self.metrics,
             None,
+            &self.metrics,
         );
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
@@ -1178,8 +1178,8 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
-            &self.metrics,
             None,
+            &self.metrics,
         );
 
         if deterministic_mode {

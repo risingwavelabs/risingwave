@@ -17,10 +17,10 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::lock_api::RwLock;
-use risingwave_common::array::error::anyhow;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -93,7 +93,6 @@ impl TableCommittedEpochNotifiers {
                     committed_epoch = Some(info.committed_epoch);
                 }
             }
-
             if is_dropped {
                 false
             } else if let Some(committed_epoch) = committed_epoch {

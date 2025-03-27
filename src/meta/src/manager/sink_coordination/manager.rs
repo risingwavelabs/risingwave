@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::future::{BoxFuture, Either, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
-use risingwave_common::array::error::anyhow;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
