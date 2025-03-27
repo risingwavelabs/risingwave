@@ -952,8 +952,7 @@ impl SyncedLogStoreBuffer {
         let chunk_size = chunk.cardinality();
 
         tracing::trace!(current_size, chunk_size, max_size=self.max_size, "checking chunk size");
-        // FIXME: should be > max_size
-        let should_flush_chunk = current_size + chunk_size >= self.max_size;
+        let should_flush_chunk = current_size + chunk_size > self.max_size;
         if should_flush_chunk {
             tracing::trace!(
                 start_seq_id,
