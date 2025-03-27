@@ -56,7 +56,7 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
         let rewind_start_offset = sink_writer.rewind_start_offset()?;
         log_reader.start_from(rewind_start_offset).await?;

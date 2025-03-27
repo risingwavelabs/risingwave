@@ -33,6 +33,7 @@ use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::creating_job::CreatingStreamingJobControl;
 use crate::barrier::checkpoint::{BarrierWorkerState, CheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::rpc::{ControlStreamManager, DatabaseInitialBarrierCollector};
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
@@ -435,16 +436,21 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             database_fragment_info,
             mut state_table_committed_epochs,
             subscription_info,
-            mut stream_actors,
+            stream_actors,
+            fragment_relations,
             mut source_splits,
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
+            let mut builder = FragmentEdgeBuilder::new(database_fragment_info.fragment_infos());
+            builder.add_relations(&fragment_relations);
+            let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 database_fragment_info,
                 &mut state_table_committed_epochs,
-                &mut stream_actors,
+                &mut edges,
+                &stream_actors,
                 &mut source_splits,
                 &mut background_jobs,
                 subscription_info,

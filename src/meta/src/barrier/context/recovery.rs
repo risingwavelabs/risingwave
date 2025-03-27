@@ -32,10 +32,7 @@ use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{
-    ActorId, FragmentActorDispatchers, StreamActor, StreamActorWithDispatchers, StreamJobFragments,
-    TableParallelism,
-};
+use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange,
@@ -293,19 +290,16 @@ impl GlobalBarrierWorkerContextImpl {
                         warn!(error = %err.as_report(), "update actors failed");
                     })?;
 
-                    let stream_actor_dispatchers = self
+                    let fragment_relations = self
                         .metadata_manager
                         .catalog_controller
-                        .get_fragment_actor_dispatchers(
+                        .get_fragment_downstream_relations(
                             info.values()
                                 .flat_map(|database| database.fragment_infos())
                                 .map(|fragment| fragment.fragment_id as _)
                                 .collect(),
                         )
                         .await?;
-
-                    let stream_actors =
-                        Self::fill_dispatchers(stream_actors, stream_actor_dispatchers);
 
                     let background_jobs = {
                         let jobs = self
@@ -332,6 +326,7 @@ impl GlobalBarrierWorkerContextImpl {
                         state_table_committed_epochs,
                         subscription_infos,
                         stream_actors,
+                        fragment_relations,
                         source_splits,
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
@@ -436,10 +431,10 @@ impl GlobalBarrierWorkerContextImpl {
             mv_depended_subscriptions,
         };
 
-        let stream_actor_dispatchers = self
+        let fragment_relations = self
             .metadata_manager
             .catalog_controller
-            .get_fragment_actor_dispatchers(
+            .get_fragment_downstream_relations(
                 info.fragment_infos()
                     .map(|fragment| fragment.fragment_id as _)
                     .collect(),
@@ -451,8 +446,6 @@ impl GlobalBarrierWorkerContextImpl {
             warn!(error = %err.as_report(), "update actors failed");
         })?;
 
-        let stream_actors = Self::fill_dispatchers(stream_actors, stream_actor_dispatchers);
-
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
         Ok(Some(DatabaseRuntimeInfoSnapshot {
@@ -460,25 +453,10 @@ impl GlobalBarrierWorkerContextImpl {
             state_table_committed_epochs,
             subscription_info,
             stream_actors,
+            fragment_relations,
             source_splits,
             background_jobs,
         }))
-    }
-
-    fn fill_dispatchers(
-        actors: HashMap<ActorId, StreamActor>,
-        mut dispatchers: FragmentActorDispatchers,
-    ) -> HashMap<ActorId, StreamActorWithDispatchers> {
-        actors
-            .into_iter()
-            .map(|(actor_id, actor)| {
-                let dispatchers = dispatchers
-                    .get_mut(&(actor.fragment_id as _))
-                    .and_then(|dispatchers| dispatchers.remove(&(actor.actor_id as _)))
-                    .unwrap_or_default();
-                (actor_id, (actor, dispatchers))
-            })
-            .collect()
     }
 }
 
