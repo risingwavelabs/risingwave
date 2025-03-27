@@ -225,7 +225,7 @@ impl SstableWriter for BatchUploadWriter {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_context(
+                    self.sstable_store.block_cache().insert_with_hint(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
@@ -336,7 +336,7 @@ impl SstableWriter for StreamingUploadWriter {
                 && !self.blocks.is_empty()
             {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_context(
+                    self.sstable_store.block_cache().insert_with_hint(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
