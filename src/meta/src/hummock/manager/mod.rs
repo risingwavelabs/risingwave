@@ -17,10 +17,11 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::lock_api::RwLock;
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
@@ -37,7 +38,7 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventRequest,
 };
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
@@ -73,6 +74,36 @@ use compaction::*;
 pub use compaction::{EmergencyState, WriteLimitType, check_cg_write_limit, check_emergency_state};
 pub(crate) use utils::*;
 
+struct TableCommittedEpochNotifiers {
+    txs: HashMap<TableId, Vec<UnboundedSender<u64>>>,
+}
+
+impl TableCommittedEpochNotifiers {
+    fn notify_deltas(&mut self, deltas: &[HummockVersionDelta]) {
+        self.txs.retain(|table_id, txs| {
+            let mut is_dropped = false;
+            let mut committed_epoch = None;
+            for delta in deltas {
+                if delta.removed_table_ids.contains(table_id) {
+                    is_dropped = true;
+                    break;
+                }
+                if let Some(info) = delta.state_table_info_delta.get(table_id) {
+                    committed_epoch = Some(info.committed_epoch);
+                }
+            }
+            if is_dropped {
+                false
+            } else if let Some(committed_epoch) = committed_epoch {
+                txs.retain(|tx| tx.send(committed_epoch).is_ok());
+                !txs.is_empty()
+            } else {
+                true
+            }
+        })
+    }
+}
+
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -101,6 +132,7 @@ pub struct HummockManager {
     pause_version_checkpoint: AtomicBool,
     table_write_throughput_statistic_manager:
         parking_lot::RwLock<TableWriteThroughputStatisticManager>,
+    table_committed_epoch_notifiers: parking_lot::Mutex<TableCommittedEpochNotifiers>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -134,6 +166,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use crate::MetaResult;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
@@ -291,6 +324,11 @@ impl HummockManager {
             pause_version_checkpoint: AtomicBool::new(false),
             table_write_throughput_statistic_manager: parking_lot::RwLock::new(
                 TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+            ),
+            table_committed_epoch_notifiers: parking_lot::Mutex::new(
+                TableCommittedEpochNotifiers {
+                    txs: Default::default(),
+                },
             ),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
@@ -502,6 +540,25 @@ impl HummockManager {
 
     pub fn metadata_manager_ref(&self) -> &MetadataManager {
         &self.metadata_manager
+    }
+
+    pub async fn subscribe_table_committed_epoch(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<(u64, UnboundedReceiver<u64>)> {
+        let version = self.versioning.read().await;
+        if let Some(epoch) = version.current_version.table_committed_epoch(table_id) {
+            let (tx, rx) = unbounded_channel();
+            self.table_committed_epoch_notifiers
+                .lock()
+                .txs
+                .entry(table_id)
+                .or_default()
+                .push(tx);
+            Ok((epoch, rx))
+        } else {
+            Err(anyhow!("table {} not exist", table_id).into())
+        }
     }
 }
 

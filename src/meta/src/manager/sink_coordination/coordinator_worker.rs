@@ -34,6 +34,7 @@ use tonic::Status;
 use tracing::{error, warn};
 
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
 
 async fn run_future_with_periodic_fn<F: Future>(
     future: F,
@@ -196,6 +197,7 @@ impl CoordinatorWorker {
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        _subscriber: SinkCommittedEpochSubscriber,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
