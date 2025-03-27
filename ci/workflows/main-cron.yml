@@ -430,6 +430,7 @@ steps:
           run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
+    parallelism: 2
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
