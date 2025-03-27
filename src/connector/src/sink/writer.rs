@@ -14,14 +14,12 @@
 
 use std::future::{Future, Ready};
 use std::pin::pin;
-use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::TryFuture;
 use futures::future::{Either, select};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::bitmap::Bitmap;
 use rw_futures_util::drop_either_future;
 
 use crate::sink::encoder::SerTo;
@@ -47,17 +45,6 @@ pub trait SinkWriter: Send + 'static {
     /// Clean up
     async fn abort(&mut self) -> Result<()> {
         Ok(())
-    }
-
-    /// Update the vnode bitmap of current sink writer
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
-
-    /// Return the starting read offset of the log store, which defaults to None.
-    /// It may only rewind from an intermediate offset in the case of exactly once.
-    fn rewind_start_offset(&mut self) -> Result<Option<u64>> {
-        Ok(None)
     }
 }
 
@@ -200,9 +187,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                             .sink_commit_duration
                             .observe(start_time.elapsed().as_millis() as f64);
                         log_reader.truncate(TruncateOffset::Barrier { epoch })?;
-                        if let Some(new_vnode_bitmap) = new_vnode_bitmap {
-                            sink_writer.update_vnode_bitmap(new_vnode_bitmap).await?;
-                        }
                     } else {
                         assert!(new_vnode_bitmap.is_none());
                         sink_writer.barrier(false).await?;

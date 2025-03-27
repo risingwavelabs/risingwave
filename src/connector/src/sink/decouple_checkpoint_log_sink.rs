@@ -58,8 +58,7 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         let mut sink_writer = self.writer;
-        let rewind_start_offset = sink_writer.rewind_start_offset()?;
-        log_reader.start_from(rewind_start_offset).await?;
+        log_reader.start_from(None).await?;
         #[derive(Debug)]
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -135,9 +134,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                             log_reader.truncate(TruncateOffset::Barrier { epoch })?;
 
                             current_checkpoint = 0;
-                            if let Some(new_vnode_bitmap) = new_vnode_bitmap {
-                                sink_writer.update_vnode_bitmap(new_vnode_bitmap).await?;
-                            }
                         } else {
                             sink_writer.barrier(false).await?;
                         }
