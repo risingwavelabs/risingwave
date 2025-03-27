@@ -24,6 +24,7 @@ plotters = { version = "0.3.5", default-features = false, features = [
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_stream = { workspace = true }
+sea-orm  = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
