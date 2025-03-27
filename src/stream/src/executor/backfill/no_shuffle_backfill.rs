@@ -30,7 +30,7 @@ use crate::executor::backfill::utils::{
     get_new_pos, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgressReporter;
+use crate::task::{CreateMviewProgressReporter, FragmentId};
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -85,6 +85,15 @@ pub struct BackfillExecutor<S: StateStore> {
     chunk_size: usize,
 
     rate_limiter: MonitoredRateLimiter,
+
+    /// This is independent from pausing via rate limit.
+    /// It's added for backfill order control.
+    /// and can only be overwritten by the barrier command: `Command::StartBackfillFragment`.
+    /// This avoids conflicts with alter rate limit.
+    backfill_paused: bool,
+
+    /// Fragment id of the fragment this backfill node belongs to.
+    fragment_id: FragmentId,
 }
 
 impl<S> BackfillExecutor<S>
@@ -101,6 +110,8 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: RateLimit,
+        backfill_paused: bool,
+        fragment_id: FragmentId,
     ) -> Self {
         let actor_id = progress.actor_id();
         let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table.table_id());
@@ -114,6 +125,8 @@ where
             metrics,
             chunk_size,
             rate_limiter,
+            backfill_paused,
+            fragment_id,
         }
     }
 
@@ -136,6 +149,7 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let mut paused = first_barrier.is_pause_on_startup();
+        let mut backfill_paused = self.backfill_paused;
         let first_epoch = first_barrier.epoch;
         let init_epoch = first_barrier.epoch.prev;
         // The first barrier message should be propagated.
@@ -224,8 +238,9 @@ where
 
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
-                    let paused =
-                        paused || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
+                    let paused = paused
+                        || backfill_paused
+                        || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
                     let right_snapshot = pin!(
                         Self::make_snapshot_stream(
                             &self.upstream_table,
@@ -452,6 +467,11 @@ where
                         }
                         Mutation::Resume => {
                             paused = false;
+                        }
+                        Mutation::StartFragmentBackfill { fragment_ids } => {
+                            if fragment_ids.contains(&self.fragment_id) {
+                                backfill_paused = false;
+                            }
                         }
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);

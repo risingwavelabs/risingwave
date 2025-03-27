@@ -18,7 +18,7 @@ use std::ops::Deref;
 use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, TableId};
+use risingwave_common::catalog::{Field, ObjectId, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
     TableFactor,
@@ -482,6 +482,15 @@ impl Binder {
                 alias,
                 as_of,
             )
+        }
+    }
+
+    pub fn bind_relation_id_by_name(&mut self, name: ObjectName) -> Result<ObjectId> {
+        let relation = self.bind_relation_by_name(name, None, None, true)?;
+        match relation {
+            Relation::Source(source) => Ok(source.catalog.id),
+            Relation::BaseTable(base_table) => Ok(base_table.table_catalog.id.table_id),
+            _ => bail!("relation is not a table or source"),
         }
     }
 
