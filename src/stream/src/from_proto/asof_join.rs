@@ -14,8 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::AsOfJoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::AsOfJoinNode;
 
@@ -66,17 +64,10 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec(),
         );
-        let null_safe = node.get_null_safe().to_vec();
         let output_indices = node
             .get_output_indices()
             .iter()
             .map(|&x| x as usize)
-            .collect_vec();
-
-        let join_key_data_types = params_l
-            .join_key_indices
-            .iter()
-            .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
         let state_table_l =
@@ -96,24 +87,42 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             source_r,
             params_l,
             params_r,
-            null_safe,
             output_indices,
             state_table_l,
             state_table_r,
             lru_manager: params.watermark_epoch,
             metrics: params.executor_stats,
             join_type_proto,
-            join_key_data_types,
             chunk_size: params.env.config().developer.chunk_size,
-            high_join_amplification_threshold: params
-                .env
-                .config()
-                .developer
-                .high_join_amplification_threshold,
             asof_desc,
         };
 
-        let exec = args.dispatch()?;
+        macro_rules! build {
+            ($join_type:ident) => {
+                AsOfJoinExecutor::<_, { AsOfJoinType::$join_type }>::new(
+                    args.ctx,
+                    args.info,
+                    args.source_l,
+                    args.source_r,
+                    args.params_l,
+                    args.params_r,
+                    args.output_indices,
+                    args.state_table_l,
+                    args.state_table_r,
+                    args.lru_manager,
+                    args.metrics,
+                    args.chunk_size,
+                    args.asof_desc,
+                )
+                .boxed()
+            };
+        }
+        let exec = match args.join_type_proto {
+            JoinTypeProto::Unspecified => unreachable!(),
+            JoinTypeProto::Inner => build!(Inner),
+            JoinTypeProto::LeftOuter => build!(LeftOuter),
+        };
+
         Ok((params.info, exec).into())
     }
 }
@@ -125,54 +134,12 @@ struct AsOfJoinExecutorDispatcherArgs<S: StateStore> {
     source_r: Executor,
     params_l: JoinParams,
     params_r: JoinParams,
-    null_safe: Vec<bool>,
     output_indices: Vec<usize>,
     state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     lru_manager: AtomicU64Ref,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
-    join_key_data_types: Vec<DataType>,
     chunk_size: usize,
-    high_join_amplification_threshold: usize,
     asof_desc: AsOfDesc,
-}
-
-impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
-    type Output = StreamResult<Box<dyn Execute>>;
-
-    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        /// This macro helps to fill the const generic type parameter.
-        macro_rules! build {
-            ($join_type:ident) => {
-                Ok(AsOfJoinExecutor::<K, S, { AsOfJoinType::$join_type }>::new(
-                    self.ctx,
-                    self.info,
-                    self.source_l,
-                    self.source_r,
-                    self.params_l,
-                    self.params_r,
-                    self.null_safe,
-                    self.output_indices,
-                    self.state_table_l,
-                    self.state_table_r,
-                    self.lru_manager,
-                    self.metrics,
-                    self.chunk_size,
-                    self.high_join_amplification_threshold,
-                    self.asof_desc,
-                )
-                .boxed())
-            };
-        }
-        match self.join_type_proto {
-            JoinTypeProto::Unspecified => unreachable!(),
-            JoinTypeProto::Inner => build!(Inner),
-            JoinTypeProto::LeftOuter => build!(LeftOuter),
-        }
-    }
-
-    fn data_types(&self) -> &[DataType] {
-        &self.join_key_data_types
-    }
 }

@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::alloc::Global;
-use std::cmp::Ordering;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
-use futures::future::{join, try_join};
-use futures::{StreamExt, pin_mut, stream};
+use futures::StreamExt;
 use futures_async_stream::for_await;
 use join_row_set::JoinRowSet;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
@@ -28,7 +26,6 @@ use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
@@ -39,8 +36,8 @@ use thiserror_ext::AsReport;
 use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::{StateTable, StateTablePostCommit};
-use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
+use crate::common::table::state_table::{RowStream, StateTable, StateTablePostCommit};
+use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::StreamExecutorError;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
@@ -49,7 +46,7 @@ use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
 type PkType = Vec<u8>;
-type InequalKeyType = Vec<u8>;
+pub type InequalKeyType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
@@ -164,7 +161,7 @@ impl JoinHashMapMetrics {
 }
 
 /// Inequality key description for `AsOf` join.
-struct InequalityKeyDesc {
+pub struct InequalityKeyDesc {
     idx: usize,
     serializer: OrderedRowSerde,
 }
@@ -545,203 +542,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
-    /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
-    /// `update_state` after some operations to put the state back.
-    ///
-    /// If the state does not exist in the cache, fetch the remote storage and return. If it still
-    /// does not exist in the remote storage, a [`JoinEntryState`] with empty cache will be
-    /// returned.
-    ///
-    /// Note: This will NOT remove anything from remote storage.
-    pub async fn take_state(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
-        self.metrics.total_lookup_count += 1;
-        let state = if self.inner.contains(key) {
-            // Do not update the LRU statistics here with `peek_mut` since we will put the state
-            // back.
-            let mut state = self.inner.peek_mut(key).unwrap();
-            state.take()
-        } else {
-            self.metrics.lookup_miss_count += 1;
-            self.fetch_cached_state(key).await?.into()
-        };
-        Ok(state)
-    }
-
-    /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    /// Will return a empty `JoinEntryState` even when state does not exist in remote.
-    async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key.deserialize(&self.join_key_data_types)?;
-
-        let mut entry_state = JoinEntryState::default();
-
-        if self.need_degree_table {
-            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                &(Bound::Unbounded, Bound::Unbounded);
-            let table_iter_fut = self.state.table.iter_keyed_row_with_prefix(
-                &key,
-                sub_range,
-                PrefetchOptions::default(),
-            );
-            let degree_state = self.degree_state.as_ref().unwrap();
-            let degree_table_iter_fut = degree_state.table.iter_keyed_row_with_prefix(
-                &key,
-                sub_range,
-                PrefetchOptions::default(),
-            );
-
-            let (table_iter, degree_table_iter) =
-                try_join(table_iter_fut, degree_table_iter_fut).await?;
-
-            let mut pinned_table_iter = std::pin::pin!(table_iter);
-            let mut pinned_degree_table_iter = std::pin::pin!(degree_table_iter);
-
-            // For better tolerating inconsistent stream, we have to first buffer all rows and
-            // degree rows, and check the number of them, then iterate on them.
-            let mut rows = vec![];
-            let mut degree_rows = vec![];
-            let mut inconsistency_happened = false;
-            loop {
-                let (row, degree_row) =
-                    join(pinned_table_iter.next(), pinned_degree_table_iter.next()).await;
-                let (row, degree_row) = match (row, degree_row) {
-                    (None, None) => break,
-                    (None, Some(_)) => {
-                        inconsistency_happened = true;
-                        consistency_panic!(
-                            "mismatched row and degree table of join key: {:?}, degree table has more rows",
-                            &key
-                        );
-                        break;
-                    }
-                    (Some(_), None) => {
-                        inconsistency_happened = true;
-                        consistency_panic!(
-                            "mismatched row and degree table of join key: {:?}, input table has more rows",
-                            &key
-                        );
-                        break;
-                    }
-                    (Some(r), Some(d)) => (r, d),
-                };
-
-                let row = row?;
-                let degree_row = degree_row?;
-                rows.push(row);
-                degree_rows.push(degree_row);
-            }
-
-            if inconsistency_happened {
-                // Pk-based row-degree pairing.
-                assert_ne!(rows.len(), degree_rows.len());
-
-                let row_iter = stream::iter(rows.into_iter()).peekable();
-                let degree_row_iter = stream::iter(degree_rows.into_iter()).peekable();
-                pin_mut!(row_iter);
-                pin_mut!(degree_row_iter);
-
-                loop {
-                    match join(row_iter.as_mut().peek(), degree_row_iter.as_mut().peek()).await {
-                        (None, _) | (_, None) => break,
-                        (Some(row), Some(degree_row)) => match row.key().cmp(degree_row.key()) {
-                            Ordering::Greater => {
-                                degree_row_iter.next().await;
-                            }
-                            Ordering::Less => {
-                                row_iter.next().await;
-                            }
-                            Ordering::Equal => {
-                                let row = row_iter.next().await.unwrap();
-                                let degree_row = degree_row_iter.next().await.unwrap();
-
-                                let pk = row
-                                    .as_ref()
-                                    .project(&self.state.pk_indices)
-                                    .memcmp_serialize(&self.pk_serializer);
-                                let degree_i64 = degree_row
-                                    .datum_at(degree_row.len() - 1)
-                                    .expect("degree should not be NULL");
-                                let inequality_key = self
-                                    .inequality_key_desc
-                                    .as_ref()
-                                    .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
-                                entry_state
-                                    .insert(
-                                        pk,
-                                        JoinRow::new(row.row(), degree_i64.into_int64() as u64)
-                                            .encode(),
-                                        inequality_key,
-                                    )
-                                    .with_context(|| self.state.error_context(row.row()))?;
-                            }
-                        },
-                    }
-                }
-            } else {
-                // 1 to 1 row-degree pairing.
-                // Actually it's possible that both the input data table and the degree table missed
-                // some equal number of rows, but let's ignore this case because it should be rare.
-
-                assert_eq!(rows.len(), degree_rows.len());
-
-                #[for_await]
-                for (row, degree_row) in
-                    stream::iter(rows.into_iter().zip_eq_fast(degree_rows.into_iter()))
-                {
-                    let pk1 = row.key();
-                    let pk2 = degree_row.key();
-                    debug_assert_eq!(
-                        pk1, pk2,
-                        "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
-                    );
-                    let pk = row
-                        .as_ref()
-                        .project(&self.state.pk_indices)
-                        .memcmp_serialize(&self.pk_serializer);
-                    let inequality_key = self
-                        .inequality_key_desc
-                        .as_ref()
-                        .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
-                    let degree_i64 = degree_row
-                        .datum_at(degree_row.len() - 1)
-                        .expect("degree should not be NULL");
-                    entry_state
-                        .insert(
-                            pk,
-                            JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode(),
-                            inequality_key,
-                        )
-                        .with_context(|| self.state.error_context(row.row()))?;
-                }
-            }
-        } else {
-            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                &(Bound::Unbounded, Bound::Unbounded);
-            let table_iter = self
-                .state
-                .table
-                .iter_keyed_row_with_prefix(&key, sub_range, PrefetchOptions::default())
-                .await?;
-
-            #[for_await]
-            for entry in table_iter {
-                let row = entry?;
-                let pk = row
-                    .as_ref()
-                    .project(&self.state.pk_indices)
-                    .memcmp_serialize(&self.pk_serializer);
-                let inequality_key = self
-                    .inequality_key_desc
-                    .as_ref()
-                    .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
-                entry_state
-                    .insert(pk, JoinRow::new(row.row(), 0).encode(), inequality_key)
-                    .with_context(|| self.state.error_context(row.row()))?;
-            }
-        };
-
-        Ok(entry_state)
-    }
-
     pub async fn flush(
         &mut self,
         epoch: EpochPair,
@@ -908,24 +708,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn join_key_data_types(&self) -> &[DataType] {
         &self.join_key_data_types
-    }
-
-    /// Return true if the inequality key is null.
-    /// # Panics
-    /// Panics if the inequality key is not set.
-    pub fn check_inequal_key_null(&self, row: &impl Row) -> bool {
-        let desc = self.inequality_key_desc.as_ref().unwrap();
-        row.datum_at(desc.idx).is_none()
-    }
-
-    /// Serialize the inequality key from a row.
-    /// # Panics
-    /// Panics if the inequality key is not set.
-    pub fn serialize_inequal_key_from_row(&self, row: impl Row) -> InequalKeyType {
-        self.inequality_key_desc
-            .as_ref()
-            .unwrap()
-            .serialize_inequal_key_from_row(&row)
     }
 
     pub fn serialize_pk_from_row(&self, row: impl Row) -> PkType {
@@ -1193,6 +975,182 @@ where {
 
     pub fn inequality_index(&self) -> &JoinRowSet<InequalKeyType, JoinRowSet<PkType, ()>> {
         &self.inequality_index
+    }
+}
+
+pub struct AsOfJoinHashMap<S: StateStore> {
+    /// State table. Contains the data from upstream.
+    state: TableInner<S>,
+    /// Inequality key description for `AsOf` join.
+    inequality_key_idx: usize,
+    /// Metrics of the hash map
+    metrics: JoinHashMapMetrics,
+}
+
+impl<S: StateStore> AsOfJoinHashMap<S> {
+    /// Create a [`AsOfJoinHashMap`] with for `AsOf` join without cache.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        state_join_key_indices: Vec<usize>,
+        state_table: StateTable<S>,
+        state_pk_indices: Vec<usize>,
+        inequality_key_idx: usize,
+        metrics: Arc<StreamingMetrics>,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        side: &'static str,
+    ) -> Self {
+        let join_table_id = state_table.table_id();
+        let state = TableInner {
+            pk_indices: state_pk_indices,
+            join_key_indices: state_join_key_indices,
+            order_key_indices: state_table.pk_indices().to_vec(),
+            table: state_table,
+        };
+
+        Self {
+            state,
+            inequality_key_idx,
+            metrics: JoinHashMapMetrics::new(&metrics, actor_id, fragment_id, side, join_table_id),
+        }
+    }
+
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state.table.init_epoch(epoch).await?;
+        Ok(())
+    }
+
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        self.state.table.update_watermark(watermark.clone());
+    }
+
+    /// Insert a row
+    pub fn insert(&mut self, value: impl Row) -> StreamExecutorResult<()> {
+        self.state.table.insert(value);
+        Ok(())
+    }
+
+    /// Delete a row
+    pub fn delete(&mut self, value: impl Row) -> StreamExecutorResult<()> {
+        self.state.table.delete(value);
+        Ok(())
+    }
+
+    /// Flush the state table.
+    pub async fn flush(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<AsOfJoinHashMapPostCommit<'_, S>> {
+        self.metrics.flush();
+        let state_post_commit = self.state.table.commit(epoch).await?;
+        Ok(AsOfJoinHashMapPostCommit {
+            state: state_post_commit,
+        })
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state.table.try_flush().await?;
+        Ok(())
+    }
+
+    pub async fn upper_bound_by_inequality_with_jk_prefix(
+        &self,
+        join_key: impl Row,
+        bound: Bound<&impl Row>,
+    ) -> StreamExecutorResult<Option<OwnedRow>> {
+        let sub_range = (Bound::<OwnedRow>::Unbounded, bound);
+        let table_iter = self
+            .state
+            .table
+            .rev_iter_with_prefix(&join_key, &sub_range, PrefetchOptions::default())
+            .await?;
+        let mut pinned_table_iter = std::pin::pin!(table_iter);
+        let row = pinned_table_iter.next().await.transpose()?;
+        Ok(row)
+    }
+
+    pub async fn lower_bound_by_inequality_with_jk_prefix(
+        &self,
+        join_key: &impl Row,
+        bound: Bound<&impl Row>,
+    ) -> StreamExecutorResult<Option<OwnedRow>> {
+        let sub_range = (bound, Bound::<OwnedRow>::Unbounded);
+        let table_iter = self
+            .state
+            .table
+            .iter_with_prefix(join_key, &sub_range, PrefetchOptions::default())
+            .await?;
+        let mut pinned_table_iter = std::pin::pin!(table_iter);
+        let row = pinned_table_iter.next().await.transpose()?;
+        Ok(row)
+    }
+
+    pub async fn table_iter_by_inequality_with_jk_prefix<'a>(
+        &'a self,
+        join_key: &'a impl Row,
+        inequality_key: &'a impl Row,
+    ) -> StreamExecutorResult<impl RowStream<'a>> {
+        let pk_prefix = join_key.chain(inequality_key);
+        self.state
+            .table
+            .iter_with_prefix(
+                pk_prefix,
+                &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                PrefetchOptions::default(),
+            )
+            .await
+    }
+
+    pub async fn first_by_inequality_with_jk_prefix(
+        &self,
+        join_key: &impl Row,
+        inequality_key: &impl Row,
+    ) -> StreamExecutorResult<Option<OwnedRow>> {
+        let table_iter = self
+            .table_iter_by_inequality_with_jk_prefix(join_key, inequality_key)
+            .await?;
+        let mut pinned_table_iter = std::pin::pin!(table_iter);
+        let row = pinned_table_iter.next().await.transpose()?;
+        Ok(row)
+    }
+
+    pub async fn range_by_inequality_with_jk_prefix<'a>(
+        &'a self,
+        join_key: &'a impl Row,
+        inequality_key_range: (Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<impl RowStream<'a>> {
+        self.state
+            .table
+            .iter_with_prefix(join_key, &inequality_key_range, PrefetchOptions::default())
+            .await
+    }
+
+    /// Return true if the inequality key is null.
+    pub fn check_inequal_key_null(&self, row: &impl Row) -> bool {
+        row.datum_at(self.inequality_key_idx).is_none()
+    }
+
+    pub fn get_pk_from_row<'a>(&'a self, row: impl Row + 'a) -> impl Row + 'a {
+        row.project(&self.state.pk_indices)
+    }
+}
+
+#[must_use]
+pub struct AsOfJoinHashMapPostCommit<'a, S: StateStore> {
+    state: StateTablePostCommit<'a, S>,
+}
+
+impl<S: StateStore> AsOfJoinHashMapPostCommit<'_, S> {
+    pub async fn post_yield_barrier(
+        self,
+        vnode_bitmap: Option<Arc<Bitmap>>,
+    ) -> StreamExecutorResult<Option<bool>> {
+        let vnode_bitmap_changed = self
+            .state
+            .post_yield_barrier(vnode_bitmap.clone())
+            .await?
+            .map(|(_, changed)| changed);
+        Ok(vnode_bitmap_changed)
     }
 }
 
