@@ -678,7 +678,11 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         let table_id = self.table_id;
         async move {
             tracing::trace!(
-                start_seq_id, end_seq_id, chunk_id, item_epoch, "reading flushed chunk"
+                start_seq_id,
+                end_seq_id,
+                chunk_id,
+                item_epoch,
+                "reading flushed chunk"
             );
             let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let range_start =
@@ -695,7 +699,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                                 (Included(range_start), Included(range_end)),
                                 ReadOptions {
                                     prefetch_options:
-                                    PrefetchOptions::prefetch_for_large_range_scan(),
+                                        PrefetchOptions::prefetch_for_large_range_scan(),
                                     cache_policy: CachePolicy::Fill(CacheHint::Low),
                                     table_id,
                                     ..Default::default()
@@ -705,8 +709,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     )
                 }
             }))
-                .instrument_await("Wait Create Iter Stream")
-                .await?;
+            .instrument_await("Wait Create Iter Stream")
+            .await?;
 
             let chunk = serde
                 .deserialize_stream_chunk(
@@ -720,7 +724,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .await?;
 
             Ok((chunk_id, chunk, item_epoch))
-        }.instrument_await("Read Flushed Chunk")
+        }
+        .instrument_await("Read Flushed Chunk")
     }
 }
 

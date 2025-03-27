@@ -403,7 +403,13 @@ impl<S: LocalStateStore> WriteFuture<S> {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
     ) -> Self {
-        tracing::trace!(start_seq_id, end_seq_id, epoch, cardinality=chunk.cardinality(), "write_future: flushing chunk");
+        tracing::trace!(
+            start_seq_id,
+            end_seq_id,
+            epoch,
+            cardinality = chunk.cardinality(),
+            "write_future: flushing chunk"
+        );
         Self::FlushingChunk {
             epoch,
             start_seq_id,
@@ -662,7 +668,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                         let new_seq_id = seq_id + chunk.cardinality() as SeqIdType;
                                         let end_seq_id = new_seq_id - 1;
                                         let epoch = write_state.epoch().curr;
-                                        tracing::trace!(start_seq_id, end_seq_id, new_seq_id, epoch, cardinality=chunk.cardinality(), "received chunk");
+                                        tracing::trace!(
+                                            start_seq_id,
+                                            end_seq_id,
+                                            new_seq_id,
+                                            epoch,
+                                            cardinality = chunk.cardinality(),
+                                            "received chunk"
+                                        );
                                         if let Some(chunk_to_flush) = buffer.add_or_flush_chunk(
                                             start_seq_id,
                                             end_seq_id,
@@ -806,7 +819,13 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         ..
                     } => {
                         metrics.buffer_read_count.inc_by(chunk.cardinality() as _);
-                        tracing::trace!(start_seq_id, end_seq_id, flushed, cardinality=chunk.cardinality(), "read buffered chunk of size");
+                        tracing::trace!(
+                            start_seq_id,
+                            end_seq_id,
+                            flushed,
+                            cardinality = chunk.cardinality(),
+                            "read buffered chunk of size"
+                        );
                         return Ok((chunk, Some((item_epoch, Some(end_seq_id)))));
                     }
                     LogStoreBufferItem::Flushed {
@@ -951,23 +970,18 @@ impl SyncedLogStoreBuffer {
         let current_size = self.current_size;
         let chunk_size = chunk.cardinality();
 
-        tracing::trace!(current_size, chunk_size, max_size=self.max_size, "checking chunk size");
+        tracing::trace!(
+            current_size,
+            chunk_size,
+            max_size = self.max_size,
+            "checking chunk size"
+        );
         let should_flush_chunk = current_size + chunk_size > self.max_size;
         if should_flush_chunk {
-            tracing::trace!(
-                start_seq_id,
-                end_seq_id,
-                epoch,
-                "flushing chunk",
-            );
+            tracing::trace!(start_seq_id, end_seq_id, epoch, "flushing chunk",);
             Some(chunk)
         } else {
-            tracing::trace!(
-                start_seq_id,
-                end_seq_id,
-                epoch,
-                "buffering chunk",
-            );
+            tracing::trace!(start_seq_id, end_seq_id, epoch, "buffering chunk",);
             self.add_chunk_to_buffer(chunk, start_seq_id, end_seq_id, epoch);
             None
         }
@@ -1120,9 +1134,9 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use crate::assert_stream_chunk_eq;
 
     use super::*;
+    use crate::assert_stream_chunk_eq;
     use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         check_stream_chunk_eq, gen_test_log_store_table, test_payload_schema,
