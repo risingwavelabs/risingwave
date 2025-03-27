@@ -25,6 +25,8 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
+use risingwave_pb::stream_plan::{BackfillOrderStrategy, BackfillOrderUnspecified};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -144,6 +146,12 @@ pub async fn handle_execute(
                 with_options: crate::WithOptions::try_from(with_options.as_slice())?,
             };
 
+            // FIXME(kwannoel): We should probably bind it.
+            let strategy = Strategy::Unspecified(BackfillOrderUnspecified {});
+            let backfill_order_strategy = BackfillOrderStrategy {
+                strategy: Some(strategy),
+            };
+
             create_mv::handle_create_mv_bound(
                 handler_args,
                 if_not_exists,
@@ -153,6 +161,7 @@ pub async fn handle_execute(
                 dependent_udfs,
                 columns,
                 emit_mode,
+                backfill_order_strategy,
             )
             .await
         }
