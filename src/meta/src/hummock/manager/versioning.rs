@@ -32,7 +32,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use super::check_cg_write_limit;
+use super::GroupStateValidator;
 use crate::MetaResult;
 use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
@@ -290,8 +290,12 @@ pub(super) fn calc_new_write_limits(
             Some(levels) => levels,
         };
 
-        let write_limit_type = check_cg_write_limit(levels, config.compaction_config.as_ref());
-        if write_limit_type.is_write_stop() {
+        let group_state = GroupStateValidator::check_single_group_write_stop(
+            levels,
+            config.compaction_config.as_ref(),
+        );
+
+        if group_state.is_write_stop() {
             new_write_limits.insert(
                 *id,
                 WriteLimit {
@@ -301,7 +305,7 @@ pub(super) fn calc_new_write_limits(
                         .iter()
                         .map(|table_id| table_id.table_id)
                         .collect(),
-                    reason: write_limit_type.as_str().to_owned(),
+                    reason: group_state.reason().unwrap().to_owned(),
                 },
             );
             continue;
@@ -550,6 +554,7 @@ mod tests {
             }
             .into(),
         ]);
+        version.levels.get_mut(&1).unwrap().l0.total_file_size += 200;
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_eq!(
@@ -557,6 +562,7 @@ mod tests {
             "write limit should not be triggered for group 1"
         );
 
+        // set_sub_level_number_threshold_for_group_1(&mut target_groups, 1000);
         set_level_0_max_size_threshold_for_group_1(&mut target_groups, 10);
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
