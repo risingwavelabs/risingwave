@@ -45,6 +45,7 @@ mod struct_field;
 mod update;
 mod values;
 
+pub use backfill_order_strategy::bind_backfill_order_strategy;
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
