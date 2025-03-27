@@ -34,6 +34,7 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
+use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
@@ -55,6 +56,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror_ext::AsReport;
 use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
@@ -1553,7 +1555,13 @@ impl DdlController {
         let version = self
             .drop_object(object_type, object_id, drop_mode, target_replace_info)
             .await?;
-
+        #[cfg(not(madsim))]
+        if let StreamingJobId::Sink(sink_id) = job_id {
+            // delete system table for exactly once iceberg sink
+            // todo(wcy-fdu): optimize the logic to be Iceberg unique.
+            let db = self.env.meta_store_ref().conn.clone();
+            clean_all_rows_by_sink_id(&db, sink_id).await?;
+        }
         Ok(version)
     }
 
@@ -2178,4 +2186,31 @@ fn report_create_object(
         Some(obj_type),
         attr_info,
     );
+}
+
+async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> MetaResult<()> {
+    match Entity::delete_many()
+        .filter(Column::SinkId.eq(sink_id))
+        .exec(db)
+        .await
+    {
+        Ok(result) => {
+            let deleted_count = result.rows_affected;
+
+            tracing::info!(
+                "Deleted {} items for sink_id = {} in iceberg exactly once system table.",
+                deleted_count,
+                sink_id
+            );
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(
+                "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
+                sink_id,
+                e.as_report()
+            );
+            Err(e.into())
+        }
+    }
 }

@@ -284,7 +284,7 @@ pub enum Command {
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
     MergeSnapshotBackfillStreamingJobs(
-        HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
+        HashMap<TableId, (HashSet<TableId>, InflightStreamingJobInfo)>,
     ),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -763,10 +763,9 @@ impl Command {
                 Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
                     info: jobs_to_merge
                         .iter()
-                        .flat_map(|(table_id, (backfill_info, _))| {
-                            backfill_info
-                                .upstream_mv_table_id_to_backfill_epoch
-                                .keys()
+                        .flat_map(|(table_id, (backfill_upstream_tables, _))| {
+                            backfill_upstream_tables
+                                .iter()
                                 .map(move |upstream_table_id| SubscriptionUpstreamInfo {
                                     subscriber_id: table_id.table_id,
                                     upstream_mv_table_id: upstream_table_id.table_id,

@@ -150,13 +150,13 @@ tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
-# branch dev_rebase_main_20250307
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5f9109880438418d7691b1a2c0ac1fa0b5c288fb", features = [
+# branch dev_rebase_main_20250325
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "14c3387c388f64e99dd2a811cdd5f554fe7680c3", features = [
     "storage-s3",
     "storage-gcs",
 ] }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5f9109880438418d7691b1a2c0ac1fa0b5c288fb" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5f9109880438418d7691b1a2c0ac1fa0b5c288fb" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "14c3387c388f64e99dd2a811cdd5f554fe7680c3" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "14c3387c388f64e99dd2a811cdd5f554fe7680c3" }
 opendal = "0.49"
 arrow-udf-js = "0.6.1"
 arrow-udf-wasm = { version = "0.5.1", features = ["build"] }
