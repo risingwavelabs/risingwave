@@ -33,13 +33,16 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, FragmentTypeFlag, PbStreamNode,
+    BackfillOrderFixed, BackfillOrderStrategy, BackfillOrderUnspecified, DispatchStrategy,
+    DispatcherType, FragmentTypeFlag, PbStreamNode,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
+    backfill_order_strategy,
 };
 
 use crate::MetaResult;
@@ -373,6 +376,9 @@ pub struct StreamFragmentGraph {
     /// upstream fragment graph requires two fragments to be in the same distribution,
     /// thus the same vnode count.
     max_parallelism: usize,
+
+    /// The backfill ordering strategy of the graph.
+    backfill_order_strategy: BackfillOrderStrategy,
 }
 
 impl StreamFragmentGraph {
@@ -445,6 +451,12 @@ impl StreamFragmentGraph {
         };
 
         let max_parallelism = proto.max_parallelism as usize;
+        let backfill_order_strategy =
+            proto
+                .backfill_order_strategy
+                .unwrap_or(BackfillOrderStrategy {
+                    strategy: Some(Strategy::Unspecified(BackfillOrderUnspecified {})),
+                });
 
         Ok(Self {
             fragments,
@@ -453,6 +465,7 @@ impl StreamFragmentGraph {
             dependent_table_ids,
             specified_parallelism,
             max_parallelism,
+            backfill_order_strategy,
         })
     }
 
@@ -681,6 +694,76 @@ impl StreamFragmentGraph {
                 cross_db_info,
             )
         })
+    }
+
+    /// Collect the mapping from table / `source_id` -> `fragment_id`
+    pub fn collect_backfill_mapping(&self) -> HashMap<u32, Vec<FragmentId>> {
+        let mut mapping = HashMap::new();
+        for (fragment_id, fragment) in &self.fragments {
+            let fragment_id = fragment_id.as_global_id();
+            let fragment_mask = fragment.fragment_type_mask;
+            let candidates = [
+                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                FragmentTypeFlag::SnapshotBackfillStreamScan,
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+            ];
+            let has_some_scan = candidates
+                .into_iter()
+                .any(|flag| (fragment_mask & flag as u32) > 0);
+            if has_some_scan {
+                visit_stream_node_cont(fragment.node.as_ref().unwrap(), |node| {
+                    match node.node_body.as_ref() {
+                        Some(NodeBody::StreamScan(stream_scan)) => {
+                            let table_id = stream_scan.table_id;
+                            let fragments: &mut Vec<_> = mapping.entry(table_id).or_default();
+                            fragments.push(fragment_id);
+                            // each fragment should have only 1 scan node.
+                            false
+                        }
+                        Some(NodeBody::SourceBackfill(source_backfill)) => {
+                            let source_id = source_backfill.upstream_source_id;
+                            let fragments = mapping.entry(source_id).or_default();
+                            fragments.push(fragment_id);
+                            // each fragment should have only 1 scan node.
+                            false
+                        }
+                        _ => true,
+                    }
+                })
+            }
+        }
+        mapping
+    }
+
+    /// Initially the mapping that comes from frontend is between `table_ids`.
+    /// We should remap it to fragment level, since we track progress by actor, and we can get
+    /// a fragment <-> actor mapping
+    pub fn create_fragment_backfill_ordering(
+        &self,
+    ) -> Option<HashMap<FragmentId, Vec<FragmentId>>> {
+        match self.backfill_order_strategy.strategy.as_ref().unwrap() {
+            backfill_order_strategy::Strategy::Unspecified(_) => None,
+            backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order }) => {
+                let mapping = self.collect_backfill_mapping();
+                let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
+                for (rel_id, downstream_rel_ids) in order {
+                    let fragment_ids = mapping.get(rel_id).unwrap();
+                    for fragment_id in fragment_ids {
+                        let downstream_fragment_ids = downstream_rel_ids
+                            .data
+                            .iter()
+                            .flat_map(|downstream_rel_id| {
+                                mapping.get(downstream_rel_id).unwrap().iter()
+                            })
+                            .copied()
+                            .collect();
+                        fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
+                    }
+                }
+                Some(fragment_ordering)
+            }
+        }
     }
 }
 

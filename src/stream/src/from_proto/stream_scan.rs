@@ -94,6 +94,8 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     params.executor_stats.clone(),
                     params.env.config().developer.chunk_size,
                     node.rate_limit.into(),
+                    node.backfill_paused,
+                    params.fragment_id,
                 )
                 .boxed()
             }
@@ -136,7 +138,9 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             progress,
                             params.executor_stats.clone(),
                             params.env.config().developer.chunk_size,
-                            node.rate_limit.into()
+                            node.rate_limit.into(),
+                            node.backfill_paused,
+                            params.fragment_id,
                         )
                         .boxed()
                     }};

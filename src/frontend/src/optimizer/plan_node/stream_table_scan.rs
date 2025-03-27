@@ -283,6 +283,13 @@ impl StreamTableScan {
     ) -> SchedulerResult<PbStreamNode> {
         use risingwave_pb::stream_plan::*;
 
+        let backfill_paused = self
+            .core
+            .ctx
+            .with_options()
+            .backfill_order_strategy()
+            .is_some();
+
         let stream_key = self
             .stream_key()
             .unwrap_or(&[])
@@ -391,6 +398,7 @@ impl StreamTableScan {
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            backfill_paused,
             ..Default::default()
         }));
 

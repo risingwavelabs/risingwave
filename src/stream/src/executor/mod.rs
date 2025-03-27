@@ -43,7 +43,8 @@ use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
     PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -316,6 +317,9 @@ pub enum Mutation {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
     },
+    StartFragmentBackfill {
+        fragment_ids: Vec<FragmentId>,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -517,7 +521,8 @@ impl Barrier {
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
-            | Mutation::ConnectorPropsChange(_) => false,
+            | Mutation::ConnectorPropsChange(_)
+            | Mutation::StartFragmentBackfill { .. } => false,
         }
     }
 
@@ -760,6 +765,11 @@ impl Mutation {
                         .collect(),
                 })
             }
+            Mutation::StartFragmentBackfill { fragment_ids } => {
+                PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                    fragment_ids: fragment_ids.clone(),
+                })
+            }
         }
     }
 
@@ -895,6 +905,11 @@ impl Mutation {
                         })
                         .collect(),
                 )
+            }
+            PbMutation::StartFragmentBackfill(start_fragment_backfill) => {
+                Mutation::StartFragmentBackfill {
+                    fragment_ids: start_fragment_backfill.fragment_ids.clone(),
+                }
             }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [

@@ -79,12 +79,14 @@ impl CreatingStreamingJobControl {
             "new creating job"
         );
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
+        // FIXME(kwannoel): support backfill order control for snapshot backfill
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(
                 job_id,
                 (info.definition.clone(), &*info.stream_job_fragments),
             )],
             version_stat,
+            HashMap::new(),
         );
         let fragment_infos: HashMap<_, _> = info.stream_job_fragments.new_fragment_info().collect();
 
@@ -224,6 +226,7 @@ impl CreatingStreamingJobControl {
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(job_id, (definition.clone(), &stream_job_fragments))],
             version_stat,
+            HashMap::new(),
         );
         let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
             &mut prev_epoch_fake_physical_time,
