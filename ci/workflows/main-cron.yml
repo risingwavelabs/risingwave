@@ -280,7 +280,8 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 90
+    timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "integration test (madsim) - recovery"

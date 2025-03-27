@@ -102,7 +102,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (part %n)"
+  - label: "end-to-end test"
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -149,7 +149,7 @@ steps:
     timeout_in_minutes: 45
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, part %n)"
+  - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -187,7 +187,7 @@ steps:
     timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "end-to-end source test (part %n)"
+  - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -206,7 +206,7 @@ steps:
     parallelism: 2
     retry: *auto-retry
 
-  - label: "end-to-end sink test (part %n)"
+  - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -550,7 +550,7 @@ steps:
     timeout_in_minutes: 22
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation, part %n)"
+  - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=4 ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -571,7 +571,7 @@ steps:
     cancel_on_build_failing: true
     retry: *auto-retry
 
-  - label: "recovery test (deterministic simulation, part %n)"
+  - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
