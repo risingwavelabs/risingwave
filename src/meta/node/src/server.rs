@@ -459,8 +459,11 @@ pub async fn start_service_as_election_leader(
     );
     tracing::info!("SourceManager started");
 
-    let (sink_manager, shutdown_handle) =
-        SinkCoordinatorManager::start_worker(hummock_manager.clone(), metadata_manager.clone());
+    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker(
+        env.meta_store_ref().conn.clone(),
+        hummock_manager.clone(),
+        metadata_manager.clone(),
+    );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];

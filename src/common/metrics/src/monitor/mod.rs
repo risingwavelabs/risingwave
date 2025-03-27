@@ -16,6 +16,7 @@ pub use connection::{EndpointExt, RouterExt, TcpConfig, monitor_connector};
 pub use rwlock::MonitoredRwLock;
 
 mod connection;
+pub mod in_mem;
 mod process;
 mod rwlock;
 

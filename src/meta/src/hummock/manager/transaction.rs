@@ -29,7 +29,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use crate::hummock::manager::TableCommittedEpochNotifiers;
+use super::TableCommittedEpochNotifiers;
 use crate::hummock::model::CompactionGroup;
 use crate::manager::NotificationManager;
 use crate::model::{

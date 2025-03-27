@@ -24,8 +24,11 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::{Sink, SinkCommitCoordinator, SinkParam, build_sink};
+use risingwave_connector::sink::{
+    Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkParam, build_sink,
+};
 use risingwave_pb::connector_service::SinkMetadata;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -34,7 +37,6 @@ use tonic::Status;
 use tracing::{error, warn};
 
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
-use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
 
 async fn run_future_with_periodic_fn<F: Future>(
     future: F,
@@ -197,7 +199,8 @@ impl CoordinatorWorker {
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
-        _subscriber: SinkCommittedEpochSubscriber,
+        db: DatabaseConnection,
+        subscriber: SinkCommittedEpochSubscriber,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
@@ -210,8 +213,9 @@ impl CoordinatorWorker {
                 return;
             }
         };
+
         dispatch_sink!(sink, sink, {
-            let coordinator = match sink.new_coordinator().await {
+            let coordinator = match sink.new_coordinator(db).await {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(
@@ -222,7 +226,7 @@ impl CoordinatorWorker {
                     return;
                 }
             };
-            Self::execute_coordinator(param, request_rx, coordinator).await
+            Self::execute_coordinator(param, request_rx, coordinator, subscriber).await
         });
     }
 
@@ -230,6 +234,7 @@ impl CoordinatorWorker {
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: impl SinkCommitCoordinator,
+        subscriber: SinkCommittedEpochSubscriber,
     ) {
         let mut worker = CoordinatorWorker {
             handle_manager: CoordinationHandleManager {
@@ -242,7 +247,7 @@ impl CoordinatorWorker {
             pending_epochs: Default::default(),
         };
 
-        if let Err(e) = worker.run_coordination(coordinator).await {
+        if let Err(e) = worker.run_coordination(coordinator, subscriber).await {
             for handle in worker.handle_manager.writer_handles.into_values() {
                 handle.abort(Status::internal(format!(
                     "failed to run coordination: {:?}",
@@ -255,8 +260,10 @@ impl CoordinatorWorker {
     async fn run_coordination(
         &mut self,
         mut coordinator: impl SinkCommitCoordinator,
+        subscriber: SinkCommittedEpochSubscriber,
     ) -> anyhow::Result<()> {
-        self.handle_manager.initial_log_store_rewind_start_epoch = coordinator.init().await?;
+        self.handle_manager.initial_log_store_rewind_start_epoch =
+            coordinator.init(subscriber).await?;
         loop {
             let (handle_id, vnode_bitmap, epoch, metadata) =
                 self.handle_manager.next_commit_request().await?;
@@ -272,7 +279,7 @@ impl CoordinatorWorker {
                 .can_commit()
             {
                 let (epoch, requests) = self.pending_epochs.pop_first().expect("non-empty");
-                // TODO: measure commit time
+
                 let start_time = Instant::now();
                 run_future_with_periodic_fn(
                     coordinator.commit(epoch, requests.metadatas),

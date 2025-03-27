@@ -33,4 +33,7 @@ verify_data = """
 113,113,113
 """
 
-drop_sqls = []
+drop_sqls = [
+    'DROP TABLE IF EXISTS demo_db.demo_table',
+    'DROP SCHEMA IF EXISTS demo_db'
+]

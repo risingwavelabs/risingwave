@@ -33,6 +33,7 @@ pub mod compaction_status;
 pub mod compaction_task;
 pub mod connection;
 pub mod database;
+pub mod exactly_once_iceberg_sink;
 pub mod fragment;
 pub mod fragment_relation;
 pub mod function;

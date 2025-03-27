@@ -42,6 +42,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
+use crate::MetaResult;
 use crate::hummock::CompactorManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
@@ -103,7 +104,6 @@ impl TableCommittedEpochNotifiers {
         })
     }
 }
-
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -166,7 +166,6 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
-use crate::MetaResult;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;

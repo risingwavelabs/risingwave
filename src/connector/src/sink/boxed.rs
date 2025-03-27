@@ -20,6 +20,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
 
+use super::SinkCommittedEpochSubscriber;
 use crate::sink::{SinkCommitCoordinator, SinkWriter};
 
 pub type BoxWriter<CM> = Box<dyn SinkWriter<CommitMetadata = CM> + Send + 'static>;
@@ -52,8 +53,11 @@ impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
 
 #[async_trait]
 impl SinkCommitCoordinator for BoxCoordinator {
-    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
-        self.deref_mut().init().await
+    async fn init(
+        &mut self,
+        subscriber: SinkCommittedEpochSubscriber,
+    ) -> crate::sink::Result<Option<u64>> {
+        self.deref_mut().init(subscriber).await
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> crate::sink::Result<()> {
