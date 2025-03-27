@@ -48,7 +48,7 @@ pub fn check_mongodb_cdc_encode(
         DataType::Jsonb,
     ]
     .contains(&columns[0].column_desc.data_type);
-    if non_user_generated.is_empty()
+    if non_user_generated.len() < 1
         || non_user_generated[0].column_desc.name != "_id"
         || !type_matches
     {
