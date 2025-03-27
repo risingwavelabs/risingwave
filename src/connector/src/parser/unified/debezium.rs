@@ -613,7 +613,7 @@ pub fn extract_bson_field(
         }
 
         DataType::Date | DataType::Timestamp | DataType::Timestamptz => {
-            if let serde_json::Value::Object(ref mp) = datum {
+            if let serde_json::Value::Object(mp) = datum {
                 if mp.contains_key("$timestamp") && mp["$timestamp"].is_object() {
                     bson_extract_timestamp(datum, type_expected)?
                 } else if mp.contains_key("$date") {
@@ -626,7 +626,7 @@ pub fn extract_bson_field(
             }
         }
         DataType::Decimal => {
-            if let serde_json::Value::Object(ref obj) = datum
+            if let serde_json::Value::Object(obj) = datum
                 && obj.contains_key("$numberDecimal")
                 && obj["$numberDecimal"].is_string()
             {
@@ -646,7 +646,7 @@ pub fn extract_bson_field(
         }
 
         DataType::Bytea => {
-            if let serde_json::Value::Object(ref obj) = datum
+            if let serde_json::Value::Object(obj) = datum
                 && obj.contains_key("$binary")
                 && obj["$binary"].is_object()
             {
