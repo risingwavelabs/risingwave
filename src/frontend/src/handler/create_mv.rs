@@ -12,23 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
+use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::common::Uint32Vector;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
-use risingwave_pb::stream_plan::BackfillOrderStrategy;
-use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
+use risingwave_pb::stream_plan::{BackfillOrderFixed, BackfillOrderUnspecified};
+use risingwave_sqlparser::ast::{BackfillOrderStrategy, EmitMode, Ident, ObjectName, Query};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::WithOptions;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::check_column_name_not_reserved;
+use crate::catalog::{CatalogError, check_column_name_not_reserved};
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
@@ -153,6 +155,83 @@ pub fn gen_create_mv_plan_bound(
     Ok((plan, table))
 }
 
+use risingwave_pb::stream_plan::BackfillOrderStrategy as PbBackfillOrderStrategy;
+use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
+
+// FIXME(kwannoel): we can flatten the strategy earlier
+pub fn bind_backfill_order_strategy(
+    session: &SessionImpl,
+    backfill_order_strategy: Option<BackfillOrderStrategy>,
+) -> Result<PbBackfillOrderStrategy> {
+    fn bind_backfill_relation_id_by_name(
+        session: &SessionImpl,
+        name: ObjectName,
+    ) -> Result<ObjectId> {
+        let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(name)?;
+        let db_name = db_name.unwrap_or(session.database());
+
+        let reader = session.env().catalog_reader().read_guard();
+
+        match schema_name {
+            Some(name) => {
+                let schema_catalog = reader.get_schema_by_name(&db_name, &name)?;
+                if let Some(table) =
+                    schema_catalog.get_created_table_or_any_internal_table_by_name(&rel_name)
+                {
+                    Ok(table.id().table_id)
+                } else if let Some(source) = schema_catalog.get_source_by_name(&rel_name) {
+                    Ok(source.id)
+                } else {
+                    Err(CatalogError::NotFound("table or source", rel_name.to_owned()).into())
+                }
+            }
+            None => {
+                let search_path = session.config().search_path();
+                for path in search_path.path() {
+                    let schema_name = if path == USER_NAME_WILD_CARD {
+                        &session.user_name()
+                    } else {
+                        path
+                    };
+                    if let Ok(schema_catalog) = reader.get_schema_by_name(&db_name, schema_name) {
+                        if let Some(table) = schema_catalog
+                            .get_created_table_or_any_internal_table_by_name(&rel_name)
+                        {
+                            return Ok(table.id().table_id);
+                        } else if let Some(source) = schema_catalog.get_source_by_name(&rel_name) {
+                            return Ok(source.id);
+                        }
+                    }
+                }
+                Err(CatalogError::NotFound("table or source", rel_name.to_owned()).into())
+            }
+        }
+    }
+
+    let strategy = backfill_order_strategy.unwrap_or(BackfillOrderStrategy::None);
+    let pb_strategy = match strategy {
+        BackfillOrderStrategy::Auto
+        | BackfillOrderStrategy::Default
+        | BackfillOrderStrategy::None => PbStrategy::Unspecified(BackfillOrderUnspecified {}),
+        BackfillOrderStrategy::Fixed(orders) => {
+            let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
+            for (start_name, end_name) in orders {
+                let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
+                let end_relation_id = bind_backfill_relation_id_by_name(session, end_name)?;
+                order
+                    .entry(start_relation_id)
+                    .or_default()
+                    .data
+                    .push(end_relation_id);
+            }
+            PbStrategy::Fixed(BackfillOrderFixed { order })
+        }
+    };
+    Ok(PbBackfillOrderStrategy {
+        strategy: Some(pb_strategy),
+    })
+}
+
 pub async fn handle_create_mv(
     handler_args: HandlerArgs,
     if_not_exists: bool,
@@ -164,8 +243,11 @@ pub async fn handle_create_mv(
     let (dependent_relations, dependent_udfs, bound_query, backfill_order_strategy) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound_query = binder.bind_query(query)?;
-        let backfill_order_strategy = binder
-            .bind_backfill_order_strategy(handler_args.with_options.backfill_order_strategy())?;
+        let backfill_order_strategy = bind_backfill_order_strategy(
+            handler_args.session.as_ref(),
+            handler_args.with_options.backfill_order_strategy(),
+        )?;
+
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
@@ -226,7 +308,7 @@ pub async fn handle_create_mv_bound(
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-    backfill_order_strategy: BackfillOrderStrategy,
+    backfill_order_strategy: PbBackfillOrderStrategy,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
