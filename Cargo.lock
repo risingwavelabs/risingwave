@@ -6252,7 +6252,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c9da916ab29b13adcb137ba40bad9e2dc10309c4#c9da916ab29b13adcb137ba40bad9e2dc10309c4"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=14c3387c388f64e99dd2a811cdd5f554fe7680c3#14c3387c388f64e99dd2a811cdd5f554fe7680c3"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6304,7 +6304,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c9da916ab29b13adcb137ba40bad9e2dc10309c4#c9da916ab29b13adcb137ba40bad9e2dc10309c4"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=14c3387c388f64e99dd2a811cdd5f554fe7680c3#14c3387c388f64e99dd2a811cdd5f554fe7680c3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6321,7 +6321,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c9da916ab29b13adcb137ba40bad9e2dc10309c4#c9da916ab29b13adcb137ba40bad9e2dc10309c4"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=14c3387c388f64e99dd2a811cdd5f554fe7680c3#14c3387c388f64e99dd2a811cdd5f554fe7680c3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -10592,6 +10592,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_stream",
+ "sea-orm",
  "serde",
  "serde_yaml",
  "thiserror-ext",
@@ -11083,6 +11084,7 @@ dependencies = [
  "risingwave_common_rate_limit",
  "risingwave_connector_codec",
  "risingwave_jni_core",
+ "risingwave_meta_model",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rumqttc",
@@ -11092,6 +11094,7 @@ dependencies = [
  "rustls-pki-types",
  "rw_futures_util",
  "scopeguard",
+ "sea-orm",
  "sea-schema",
  "serde",
  "serde_derive",
