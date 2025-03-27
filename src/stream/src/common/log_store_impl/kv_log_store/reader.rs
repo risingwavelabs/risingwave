@@ -678,7 +678,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         let table_id = self.table_id;
         async move {
             tracing::trace!(
-                "reading flushed chunk from buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}"
+                start_seq_id, end_seq_id, chunk_id, item_epoch, "reading flushed chunk"
             );
             let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let range_start =
