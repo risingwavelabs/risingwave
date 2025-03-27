@@ -622,6 +622,8 @@ impl CommandContext {
 
 impl Command {
     /// Generate a mutation for the given command.
+    ///
+    /// `edges` contains the information of `dispatcher`s of `DispatchExecutor` and `actor_upstreams`s of `MergeNode`
     pub(super) fn to_mutation(
         &self,
         is_currently_paused: bool,

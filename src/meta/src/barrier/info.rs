@@ -303,6 +303,11 @@ impl InflightDatabaseInfo {
                 Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job)),
             },
         };
+        // `existing_fragment_ids` consists of
+        //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
+        //  - keys of `replace_job.upstream_fragment_downstreams`, which are the `fragment_id` of upstream fragment of replace_job,
+        // if the upstream fragment previously exists
+        //  - keys of `replace_upstream`, which are the `fragment_id` of downstream fragments that will update their upstream fragments.
         let existing_fragment_ids = info
             .into_iter()
             .flat_map(|info| info.upstream_fragment_downstreams.keys())

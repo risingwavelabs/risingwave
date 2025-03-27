@@ -247,9 +247,6 @@ impl SourceManager {
 
         for (_source_id, fragments) in source_backfill_fragments {
             for (fragment_id, upstream_source_fragment_id) in fragments {
-                let source_upstream_new_no_shuffle =
-                    upstream_new_no_shuffle.get(&upstream_source_fragment_id);
-
                 let upstream_actors = upstream_actors
                     .get(&upstream_source_fragment_id)
                     .ok_or_else(|| {
@@ -260,23 +257,31 @@ impl SourceManager {
                         )
                     })?;
                 let mut backfill_actors = vec![];
+                let Some(source_new_no_shuffle) = upstream_new_no_shuffle
+                    .get(&upstream_source_fragment_id)
+                    .and_then(|source_upstream_new_no_shuffle| {
+                        source_upstream_new_no_shuffle.get(&fragment_id)
+                    })
+                else {
+                    return Err(anyhow::anyhow!(
+                            "source backfill fragment's upstream fragment should have one-on-one no_shuffle mapping, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_new_no_shuffle: {upstream_new_no_shuffle:?}",
+                            fragment_id = fragment_id,
+                            upstream_source_fragment_id = upstream_source_fragment_id,
+                            upstream_new_no_shuffle = upstream_new_no_shuffle,
+                        ).into());
+                };
                 for upstream_actor in upstream_actors {
-                    if let Some(no_shuffle_backfill_actor) = source_upstream_new_no_shuffle
-                        .and_then(|source_upstream_new_no_shuffle| {
-                            source_upstream_new_no_shuffle.get(&fragment_id)
-                        })
-                        .and_then(|new_no_shuffle| new_no_shuffle.get(upstream_actor))
-                    {
-                        backfill_actors.push((*no_shuffle_backfill_actor, *upstream_actor));
-                    } else {
+                    let Some(no_shuffle_backfill_actor) = source_new_no_shuffle.get(upstream_actor)
+                    else {
                         return Err(anyhow::anyhow!(
-                            "source backfill fragment's upstream fragment should have one-on-one no_shuffle mapping, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, source_upstream_new_no_shuffle: {source_upstream_new_no_shuffle:?}",
+                            "source backfill fragment's upstream fragment should have one-on-one no_shuffle mapping, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, source_new_no_shuffle: {source_new_no_shuffle:?}",
                             fragment_id = fragment_id,
                             upstream_source_fragment_id = upstream_source_fragment_id,
                             upstream_actor = upstream_actor,
-                            source_upstream_new_no_shuffle = source_upstream_new_no_shuffle
+                            source_new_no_shuffle = source_new_no_shuffle
                         ).into());
-                    }
+                    };
+                    backfill_actors.push((*no_shuffle_backfill_actor, *upstream_actor));
                 }
                 assigned.insert(
                     fragment_id,
