@@ -70,6 +70,20 @@ impl InflightStreamingJobInfo {
     pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
         self.fragment_infos.values()
     }
+
+    pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
+    type Item = &'a InflightFragmentInfo;
+
+    type IntoIter = impl Iterator<Item = &'a InflightFragmentInfo> + 'a;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.fragment_infos()
+    }
 }
 
 #[derive(Clone, Debug)]
