@@ -18,9 +18,7 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, anyhow};
 use either::Either;
-use external_schema::debezium::{
-    check_kafka_encode, check_mongodb_cdc_encode, extract_debezium_avro_table_pk_columns,
-};
+use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
@@ -318,14 +316,23 @@ pub(crate) fn bind_all_columns(
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
         match (&format_encode.format, &format_encode.row_encode) {
             (Format::DebeziumMongo, Encode::Json) => {
-                let mut columns = vec![ColumnCatalog {
-                    column_desc: ColumnDesc::named("_id", 0.into(), DataType::Varchar),
-                    is_hidden: false,
-                }];
-                if non_generated_sql_defined_columns[0].name.real_value() != columns[0].name() {
+                let mut columns = vec![
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named("_id", 0.into(), DataType::Varchar),
+                        is_hidden: false,
+                    },
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::named("payload", 0.into(), DataType::Jsonb),
+                        is_hidden: false,
+                    },
+                ];
+                if non_generated_sql_defined_columns.len() != 2
+                    || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
+                    || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
+                {
                     return Err(RwError::from(ProtocolError(
                         "the not generated columns of the source with row format DebeziumMongoJson
-        must have a '_id' field typed [Jsonb | Varchar | Int32 | Int64]."
+        must be (_id [Jsonb | Varchar | Int32 | Int64], payload jsonb)."
                             .to_owned(),
                     )));
                 }
@@ -349,6 +356,20 @@ pub(crate) fn bind_all_columns(
                     }
                 }
 
+                // ok to unwrap since it was checked at `bind_sql_columns`
+                let value_data_type = bind_data_type(
+                    non_generated_sql_defined_columns[1]
+                        .data_type
+                        .as_ref()
+                        .unwrap(),
+                )?;
+                if !matches!(value_data_type, DataType::Jsonb) {
+                    return Err(RwError::from(ProtocolError(
+                        "the `payload` column of the source with row format DebeziumMongoJson
+        must be Jsonb datatype"
+                            .to_owned(),
+                    )));
+                }
                 Ok(columns)
             }
             (Format::Plain, Encode::Bytes) => {
@@ -607,16 +628,14 @@ pub(super) fn check_format_encode(
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
 ) -> Result<()> {
-    // nexmark connector
     let Some(connector) = props.get_connector() else {
         return Ok(());
     };
 
-    match connector.as_str() {
-        NEXMARK_CONNECTOR => check_nexmark_schema(props, row_id_index, columns),
-        MONGODB_CDC_CONNECTOR => check_mongodb_cdc_encode(props, columns),
-        KAFKA_CONNECTOR => check_kafka_encode(props, columns),
-        _ => Ok(()),
+    if connector == NEXMARK_CONNECTOR {
+        check_nexmark_schema(props, row_id_index, columns)
+    } else {
+        Ok(())
     }
 }
 
