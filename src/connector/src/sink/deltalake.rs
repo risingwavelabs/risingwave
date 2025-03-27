@@ -294,6 +294,7 @@ impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -331,6 +332,11 @@ impl Sink for DeltaLakeSink {
             metrics,
             commit_checkpoint_interval,
         ))
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        DeltaLakeConfig::from_btreemap(config.clone())?;
+        Ok(())
     }
 
     async fn validate(&self) -> Result<()> {

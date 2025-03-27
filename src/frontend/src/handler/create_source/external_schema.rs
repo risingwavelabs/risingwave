@@ -66,7 +66,7 @@ async fn bind_columns_from_source_for_non_cdc(
             let (sec_resolve_props, connection_type, _) = resolve_connection_ref_and_secret_ref(
                 options.clone(),
                 session,
-                TelemetryDatabaseObject::Source,
+                Some(TelemetryDatabaseObject::Source),
             )?;
             if !SOURCE_ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
                 return Err(RwError::from(ProtocolError(format!(
@@ -87,7 +87,7 @@ async fn bind_columns_from_source_for_non_cdc(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(format_encode.row_options())?,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
 

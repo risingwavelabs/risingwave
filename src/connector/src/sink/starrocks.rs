@@ -261,6 +261,7 @@ impl Sink for StarrocksSink {
     type Coordinator = StarrocksSinkCommitter;
     type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<StarrocksSinkWriter>>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -299,6 +300,11 @@ impl Sink for StarrocksSink {
         let starrocks_columns_desc = client.get_columns_from_starrocks().await?;
 
         self.check_column_name_and_type(starrocks_columns_desc)?;
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        StarrocksConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 
