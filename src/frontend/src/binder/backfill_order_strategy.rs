@@ -26,6 +26,7 @@ use crate::Binder;
 use crate::error::Result;
 
 impl Binder {
+    // TODO(kwannoel): Detect cycles
     pub fn bind_backfill_order_strategy(
         &mut self,
         backfill_order_strategy: Option<BackfillOrderStrategy>,
@@ -38,8 +39,8 @@ impl Binder {
             BackfillOrderStrategy::Fixed(orders) => {
                 let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
                 for (start_name, end_name) in orders {
-                    let start_relation_id = self.bind_relation_id_by_name(start_name)?;
-                    let end_relation_id = self.bind_relation_id_by_name(end_name)?;
+                    let start_relation_id = self.bind_backfill_relation_id_by_name(start_name)?;
+                    let end_relation_id = self.bind_backfill_relation_id_by_name(end_name)?;
                     order
                         .entry(start_relation_id)
                         .or_default()

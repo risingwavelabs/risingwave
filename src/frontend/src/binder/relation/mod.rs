@@ -485,7 +485,7 @@ impl Binder {
         }
     }
 
-    pub fn bind_relation_id_by_name(&mut self, name: ObjectName) -> Result<ObjectId> {
+    pub fn bind_backfill_relation_id_by_name(&mut self, name: ObjectName) -> Result<ObjectId> {
         let relation = self.bind_relation_by_name(name, None, None, true)?;
         match relation {
             Relation::Source(source) => Ok(source.catalog.id),
