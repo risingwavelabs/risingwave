@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
     ROW_ID_COLUMN_NAME, TableId, debug_assert_column_ids_distinct,
 };
+use risingwave_common::hash::Buffer;
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
@@ -49,9 +50,10 @@ use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME, SchemaRegistryAuth, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
-    CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
-    MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
+    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -316,6 +318,63 @@ pub(crate) fn bind_all_columns(
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
         match (&format_encode.format, &format_encode.row_encode) {
             (Format::DebeziumMongo, Encode::Json) => {
+                let strong_schema = format_encode
+                    .row_options
+                    .iter()
+                    .find(|&s| s.to_string() == CDC_MONGODB_STRONG_SCHEMA_KEY)
+                    .is_some_and(|opt| opt.value.to_string().to_ascii_lowercase() == "true");
+
+                // strong schema requires a '_id' column at the first position with a specific type
+                if strong_schema {
+                    let (_, id_column) = non_generated_sql_defined_columns
+                        .iter()
+                        .enumerate()
+                        .find(|(idx, col)| *idx == 0 && col.name.real_value() == "_id")
+                        .ok_or_else(|| {
+                            RwError::from(ProtocolError(
+                                "The `_id` column of the source with row format DebeziumMongoJson must be defined as the first column in SQL".to_owned(),
+                            ))
+                        })?;
+
+                    let id_data_type = bind_data_type(id_column.data_type.as_ref().unwrap())?;
+                    if !matches!(
+                        id_data_type,
+                        DataType::Varchar | DataType::Int32 | DataType::Int64 | DataType::Jsonb
+                    ) {
+                        return Err(RwError::from(ProtocolError(
+                            "the `_id` column of the source with row format DebeziumMongoJson must be [Jsonb | Varchar | Int32 | Int64]".to_owned(),
+                        )));
+                    }
+
+                    let mut columns = Vec::with_capacity(non_generated_sql_defined_columns.len());
+                    columns.push(
+                        // id column
+                        ColumnCatalog {
+                            column_desc: ColumnDesc::named("_id", 0.into(), id_data_type),
+                            is_hidden: false,
+                        },
+                    );
+
+                    // bind rest of the columns
+                    for (idx, col) in non_generated_sql_defined_columns
+                        .into_iter()
+                        // skip the first column
+                        .skip(1)
+                        .enumerate()
+                    {
+                        columns.push(ColumnCatalog {
+                            column_desc: ColumnDesc::named(
+                                col.name.real_value(),
+                                (idx as i32).into(),
+                                bind_data_type(col.data_type.as_ref().unwrap())?,
+                            ),
+                            is_hidden: false,
+                        });
+                    }
+
+                    return Ok(columns);
+                }
+
                 let mut columns = vec![
                     ColumnCatalog {
                         column_desc: ColumnDesc::named("_id", 0.into(), DataType::Varchar),
@@ -326,6 +385,7 @@ pub(crate) fn bind_all_columns(
                         is_hidden: false,
                     },
                 ];
+
                 if non_generated_sql_defined_columns.len() != 2
                     || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
                     || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
