@@ -483,17 +483,20 @@ impl StarrocksSinkWriter {
     async fn prepare_and_commit(&self, txn_label: String) -> Result<()> {
         tracing::debug!(?txn_label, "prepare transaction");
         let txn_label_res = self.txn_client.prepare(txn_label.clone()).await?;
-        assert_eq!(
-            txn_label, txn_label_res,
-            "label returned from prepare transaction differs from the current one"
-        );
+        if txn_label != txn_label_res {
+            return Err(SinkError::Starrocks(format!(
+                "label {} returned from prepare transaction {} differs from the current one",
+                txn_label, txn_label_res
+            )));
+        }
         tracing::debug!(?txn_label, "commit transaction");
         let txn_label_res = self.txn_client.commit(txn_label.clone()).await?;
-        assert_eq!(
-            txn_label, txn_label_res,
-            "label returned from commit transaction differs from the current one"
-        );
-
+        if txn_label != txn_label_res {
+            return Err(SinkError::Starrocks(format!(
+                "label {} returned from commit transaction {} differs from the current one",
+                txn_label, txn_label_res
+            )));
+        }
         Ok(())
     }
 }
@@ -529,11 +532,12 @@ impl SinkWriter for StarrocksSinkWriter {
             let txn_label = self.new_txn_label();
             tracing::debug!(?txn_label, "begin transaction");
             let txn_label_res = self.txn_client.begin(txn_label.clone()).await?;
-            assert_eq!(
-                txn_label, txn_label_res,
-                "label returned from StarRocks: {} differs from generated one: {}",
-                txn_label, txn_label_res
-            );
+            if txn_label != txn_label_res {
+                return Err(SinkError::Starrocks(format!(
+                    "label {} returned from StarRocks {} differs from generated one",
+                    txn_label, txn_label_res
+                )));
+            }
             self.curr_txn_label = Some(txn_label.clone());
         }
         if self.client.is_none() {
