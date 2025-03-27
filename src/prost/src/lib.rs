@@ -511,15 +511,10 @@ impl std::fmt::Debug for meta::SystemParams {
 impl std::fmt::Debug for data::DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data::DataType {
-            precision,
-            scale,
-            interval_type,
             field_type,
             field_names,
             field_ids,
             type_name,
-            // currently all data types are nullable
-            is_nullable: _,
         } = self;
 
         let type_name = data::data_type::TypeName::try_from(*type_name)
@@ -527,15 +522,6 @@ impl std::fmt::Debug for data::DataType {
             .unwrap_or("Unknown");
 
         let mut s = f.debug_struct(type_name);
-        if self.precision != 0 {
-            s.field("precision", precision);
-        }
-        if self.scale != 0 {
-            s.field("scale", scale);
-        }
-        if self.interval_type != 0 {
-            s.field("interval_type", interval_type);
-        }
         if !self.field_type.is_empty() {
             s.field("field_type", field_type);
         }

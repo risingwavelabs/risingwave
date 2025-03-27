@@ -7,6 +7,8 @@ import "common.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+// Only used in `HopWindowNode`
+// More specific compared to `data.Datum` or `expr.ExprNode`
 message Interval {
   int32 months = 1;
   int32 days = 2;
@@ -14,22 +16,22 @@ message Interval {
 }
 
 message DataType {
-  enum IntervalType {
-    UNSPECIFIED = 0;
-    YEAR = 1;
-    MONTH = 2;
-    DAY = 3;
-    HOUR = 4;
-    MINUTE = 5;
-    SECOND = 6;
-    YEAR_TO_MONTH = 7;
-    DAY_TO_HOUR = 8;
-    DAY_TO_MINUTE = 9;
-    DAY_TO_SECOND = 10;
-    HOUR_TO_MINUTE = 11;
-    HOUR_TO_SECOND = 12;
-    MINUTE_TO_SECOND = 13;
-  }
+  // enum IntervalType {
+  //   UNSPECIFIED = 0;
+  //   YEAR = 1;
+  //   MONTH = 2;
+  //   DAY = 3;
+  //   HOUR = 4;
+  //   MINUTE = 5;
+  //   SECOND = 6;
+  //   YEAR_TO_MONTH = 7;
+  //   DAY_TO_HOUR = 8;
+  //   DAY_TO_MINUTE = 9;
+  //   DAY_TO_SECOND = 10;
+  //   HOUR_TO_MINUTE = 11;
+  //   HOUR_TO_SECOND = 12;
+  //   MINUTE_TO_SECOND = 13;
+  // }
   enum TypeName {
     TYPE_UNSPECIFIED = 0;
     INT16 = 1;
@@ -58,11 +60,16 @@ message DataType {
   // Data length for char.
   // Max data length for varchar.
   // Precision for time, decimal.
-  uint32 precision = 2;
+  // uint32 precision = 2;
+  reserved "precision";
+  reserved 2;
   // Scale for decimal.
-  uint32 scale = 3;
-  bool is_nullable = 4;
-  IntervalType interval_type = 5;
+  reserved "scale";
+  reserved 3;
+  reserved "is_nullable";
+  reserved 4;
+  reserved "interval_type";
+  reserved 5;
   // For struct type, it represents all the fields in the struct.
   // For list type it only contains 1 element which is the inner item type of the List.
   // For example, `ARRAY<INTEGER>` will be represented as `vec![DataType::Int32]`.
