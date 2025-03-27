@@ -64,6 +64,7 @@ use risingwave_connector::source::{
 };
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
+use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Deserializer};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
@@ -134,6 +135,10 @@ impl LogReader for MockRangeLogReader {
 
     async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind"))
+    }
+
+    async fn start_from(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
+        Ok(())
     }
 }
 
@@ -378,7 +383,7 @@ where
     <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
     <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
 {
-    if let Ok(coordinator) = sink.new_coordinator().await {
+    if let Ok(coordinator) = sink.new_coordinator(DatabaseConnection::Disconnected).await {
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
             Box::new(coordinator),
         )));

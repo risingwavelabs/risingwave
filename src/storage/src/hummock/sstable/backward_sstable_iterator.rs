@@ -253,6 +253,7 @@ impl SstableIteratorType for BackwardSstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use rand::rng as thread_rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;

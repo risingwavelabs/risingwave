@@ -200,3 +200,15 @@ impl From<MetaStoreError> for MetaError {
         }
     }
 }
+
+impl From<MetaErrorInner> for SinkError {
+    fn from(e: MetaErrorInner) -> Self {
+        SinkError::Coordinator(e.into())
+    }
+}
+
+impl From<MetaError> for SinkError {
+    fn from(e: MetaError) -> Self {
+        SinkError::Coordinator(e.into())
+    }
+}

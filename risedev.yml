@@ -330,9 +330,15 @@ profile:
       - use: compute-node
       - use: frontend
 
-  ci-iceberg-engine:
+  ci-iceberg-test:
     steps:
       - use: minio
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        user-managed: true
       - use: postgres
         port: 5432
         address: db
@@ -1020,16 +1026,6 @@ profile:
       - use: sqlite
       - use: minio
 
-  ci-iceberg-test:
-    config-path: src/config/ci-iceberg-test.toml
-    steps:
-      - use: minio
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-
   ci-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1059,19 +1055,6 @@ profile:
       - use: frontend
       - use: compactor
 
-  full-iceberg-bench:
-    config-path: src/config/full-iceberg-bench.toml
-    steps:
-      - use: aws-s3
-        bucket: renjie-iceberg-bench
-      - use: sqlite
-      - use: meta-node
-        meta-backend: sqlite
-      - use: compute-node
-      - use: frontend
-      - use: compactor
-      - use: prometheus
-      - use: grafana
 
   full-with-batch-query-limit:
     config-path: src/config/full-with-batch-query-limit.toml

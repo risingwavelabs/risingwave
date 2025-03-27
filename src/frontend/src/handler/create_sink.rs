@@ -60,19 +60,22 @@ use crate::optimizer::plan_node::{LogicalSource, PartitionComputeInfo, StreamPro
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
-static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
-    hashset! {
-        PbConnectionType::Unspecified,
-        PbConnectionType::Kafka,
-        PbConnectionType::Iceberg,
-    }
-});
+static SINK_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
+    LazyLock::new(|| {
+        hashset! {
+            PbConnectionType::Unspecified,
+            PbConnectionType::Kafka,
+            PbConnectionType::Iceberg,
+            PbConnectionType::Elasticsearch,
+        }
+    });
 
-static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
+static SINK_ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
     LazyLock::new(|| {
         hashset! {
             PbConnectionType::Unspecified,
@@ -110,7 +113,7 @@ pub async fn gen_sink_plan(
             session,
             TelemetryDatabaseObject::Sink,
         )?;
-    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+    ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
@@ -248,6 +251,16 @@ pub async fn gen_sink_plan(
                     ))));
                 }
             }
+        }
+        if target_table_catalog
+            .columns()
+            .iter()
+            .any(|col| !col.nullable())
+        {
+            notice_to_user(format!(
+                "The target table `{}` contains columns with NOT NULL constraints. Any sinked rows violating the constraints will be ignored silently.",
+                target_table_catalog.name(),
+            ));
         }
     }
 
@@ -682,7 +695,10 @@ fn bind_sink_format_desc(
             session,
             TelemetryDatabaseObject::Sink,
         )?;
-    ensure_connection_type_allowed(connection_type_flag, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    ensure_connection_type_allowed(
+        connection_type_flag,
+        &SINK_ALLOWED_CONNECTION_SCHEMA_REGISTRY,
+    )?;
     let (mut options, secret_refs) = props.into_parts();
 
     options

@@ -535,7 +535,7 @@ pub(crate) fn filter_with_delete_range<'a>(
             range_end
         );
     }
-    kv_iter.filter(move |(ref key, _)| {
+    kv_iter.filter(move |(key, _)| {
         if let Some(range_bound) = range {
             if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
                 == Ordering::Less
@@ -815,7 +815,7 @@ mod tests {
 
     use futures::FutureExt;
     use futures::future::join_all;
-    use rand::random;
+    use rand::random_range;
 
     use crate::hummock::utils::MemoryLimiter;
 
@@ -859,7 +859,7 @@ mod tests {
             let limiter = memory_limiter.clone();
             let h = tokio::spawn(async move {
                 let mut buffers = vec![];
-                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
+                let mut current_buffer_usage = random_range(2..=9);
                 for _ in 0..1000 {
                     if buffers.len() < current_buffer_usage
                         && let Some(tracker) = limiter.try_require_memory(QUOTA)
@@ -867,7 +867,7 @@ mod tests {
                         buffers.push(tracker);
                     } else {
                         buffers.clear();
-                        current_buffer_usage = (random::<usize>() % 8) + 2;
+                        current_buffer_usage = random_range(2..=9);
                         let req = limiter.require_memory(QUOTA);
                         match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
                             Ok(tracker) => {
@@ -878,7 +878,7 @@ mod tests {
                             }
                         }
                     }
-                    let sleep_time = random::<u64>() % 3 + 1;
+                    let sleep_time = random_range(1..=3);
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 }
             });

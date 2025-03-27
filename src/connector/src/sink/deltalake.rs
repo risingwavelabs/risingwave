@@ -37,6 +37,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::DatabaseConnection;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
@@ -48,7 +49,7 @@ use super::decouple_checkpoint_log_sink::{
 use super::writer::SinkWriter;
 use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::connector_common::AwsAuthProps;
 
@@ -384,7 +385,7 @@ impl Sink for DeltaLakeSink {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
         })
@@ -496,9 +497,9 @@ pub struct DeltaLakeSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

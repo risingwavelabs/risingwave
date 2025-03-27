@@ -147,6 +147,11 @@ impl StructType {
         self.0.fields.iter().map(|(_, ty)| ty)
     }
 
+    /// Gets the type of a field by index.
+    pub fn type_at(&self, index: usize) -> &DataType {
+        &self.0.fields[index].1
+    }
+
     /// Gets an iterator over the fields.
     ///
     /// If fields are unnamed, the field names will be `f1`, `f2`, etc.

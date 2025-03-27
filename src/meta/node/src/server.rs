@@ -406,7 +406,7 @@ pub async fn start_service_as_election_leader(
             prometheus_client,
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
-            compute_clients: ComputeClientPool::new(1), // typically no need for plural clients
+            compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
             diagnose_command,
             trace_state,
         };
@@ -459,7 +459,11 @@ pub async fn start_service_as_election_leader(
     );
     tracing::info!("SourceManager started");
 
-    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
+    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker(
+        env.meta_store_ref().conn.clone(),
+        hummock_manager.clone(),
+        metadata_manager.clone(),
+    );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];

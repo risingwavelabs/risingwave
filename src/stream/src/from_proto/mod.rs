@@ -32,6 +32,7 @@ mod hash_join;
 mod hop_window;
 mod lookup;
 mod lookup_union;
+mod materialized_exprs;
 mod merge;
 mod mview;
 mod no_op;
@@ -84,6 +85,7 @@ use self::hash_join::*;
 use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
+use self::materialized_exprs::MaterializedExprsExecutorBuilder;
 pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
@@ -192,5 +194,6 @@ pub async fn create_executor(
         NodeBody::RowMerge => RowMergeExecutorBuilder,
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
         NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
+        NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
     }
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
@@ -40,7 +40,6 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -59,12 +58,13 @@ use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings, get_internal_tables_by_id, rebuild_fragment_mapping_from_actors,
+    get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations,
+    rebuild_fragment_mapping_from_actors,
 };
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
-    FragmentActorDispatchers, StreamActor, StreamContext, StreamJobFragmentsToCreate,
-    TableParallelism,
+    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
+    StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
@@ -405,51 +405,6 @@ impl CatalogController {
         let mut objects = vec![];
         let txn = inner.db.begin().await?;
 
-        let mut fragment_relations = BTreeMap::new();
-
-        // Fill in the fragment relation based on the actor dispatcher.
-        for (fragment, actors) in &fragment_actors {
-            let actor_dispatchers = stream_job_fragments
-                .dispatchers
-                .get(&(fragment.fragment_id as _));
-            for actor in actors {
-                if let Some(dispatcher) = actor_dispatchers
-                    .and_then(|actor_dispatchers| actor_dispatchers.get(&(actor.actor_id as _)))
-                {
-                    for dispatcher in dispatcher {
-                        let key = (fragment.fragment_id, dispatcher.dispatcher_id);
-
-                        if fragment_relations.contains_key(&key) {
-                            continue;
-                        }
-
-                        let target_fragment_id = dispatcher.dispatcher_id as FragmentId;
-
-                        fragment_relations.insert(
-                            key,
-                            fragment_relation::Model {
-                                source_fragment_id: fragment.fragment_id,
-                                target_fragment_id,
-                                dispatcher_type: dispatcher.get_type().unwrap().into(),
-                                dist_key_indices: dispatcher
-                                    .dist_key_indices
-                                    .iter()
-                                    .map(|idx| *idx as i32)
-                                    .collect_vec()
-                                    .into(),
-                                output_indices: dispatcher
-                                    .output_indices
-                                    .iter()
-                                    .map(|idx| *idx as i32)
-                                    .collect_vec()
-                                    .into(),
-                            },
-                        );
-                    }
-                }
-            }
-        }
-
         // Add fragments.
         let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
         for fragment in fragments {
@@ -492,11 +447,7 @@ impl CatalogController {
             }
         }
 
-        for (_, relation) in fragment_relations {
-            FragmentRelation::insert(relation.into_active_model())
-                .exec(&txn)
-                .await?;
-        }
+        insert_fragment_relations(&txn, &stream_job_fragments.downstreams).await?;
 
         // Add actors and actor dispatchers.
         for actors in actors {
@@ -652,13 +603,13 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: &FragmentActorDispatchers,
+        upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
     ) -> MetaResult<()> {
         self.post_collect_job_fragments_inner(
             job_id,
             actor_ids,
-            new_actor_dispatchers,
+            upstream_fragment_new_downstreams,
             split_assignment,
             false,
         )
@@ -669,7 +620,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
-        new_actor_dispatchers: &FragmentActorDispatchers,
+        upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
         is_mv: bool,
     ) -> MetaResult<()> {
@@ -702,37 +653,7 @@ impl CatalogController {
             }
         }
 
-        let mut fragment_relations = BTreeMap::new();
-
-        // Fill in the fragment relation based on the new creating actor dispatchers.
-        for (&fragment_id, actor_dispatchers) in new_actor_dispatchers {
-            for dispatchers in actor_dispatchers.values() {
-                for dispatcher in dispatchers {
-                    let key = (fragment_id, dispatcher.dispatcher_id);
-
-                    if fragment_relations.contains_key(&key) {
-                        continue;
-                    }
-
-                    fragment_relations.insert(
-                        key,
-                        fragment_relation::Model {
-                            source_fragment_id: fragment_id as FragmentId,
-                            target_fragment_id: dispatcher.dispatcher_id as FragmentId,
-                            dispatcher_type: dispatcher.r#type().into(),
-                            dist_key_indices: I32Array::from(dispatcher.dist_key_indices.clone()),
-                            output_indices: I32Array::from(dispatcher.output_indices.clone()),
-                        },
-                    );
-                }
-            }
-        }
-
-        for (_, relation) in fragment_relations {
-            FragmentRelation::insert(relation.into_active_model())
-                .exec(&txn)
-                .await?;
-        }
+        insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
 
         // Mark job as CREATING.
         streaming_job::ActiveModel {
@@ -981,7 +902,7 @@ impl CatalogController {
         let replace_table_mapping_update = match replace_stream_job_info {
             Some(ReplaceStreamJobPlan {
                 streaming_job,
-                merge_updates,
+                replace_upstream,
                 tmp_id,
                 ..
             }) => {
@@ -989,7 +910,7 @@ impl CatalogController {
 
                 let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
                     tmp_id as ObjectId,
-                    merge_updates,
+                    replace_upstream,
                     None,
                     SinkIntoTableContext {
                         creating_sink_id: Some(incoming_sink_id as _),
@@ -1047,7 +968,7 @@ impl CatalogController {
         &self,
         tmp_id: ObjectId,
         streaming_job: StreamingJob,
-        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
+        replace_upstream: FragmentReplaceUpstream,
         col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
@@ -1058,7 +979,7 @@ impl CatalogController {
         let (objects, fragment_mapping, delete_notification_objs) =
             Self::finish_replace_streaming_job_inner(
                 tmp_id,
-                merge_updates,
+                replace_upstream,
                 col_index_mapping,
                 sink_into_table_context,
                 &txn,
@@ -1098,7 +1019,7 @@ impl CatalogController {
 
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
-        merge_updates: HashMap<crate::model::FragmentId, Vec<MergeUpdate>>,
+        replace_upstream: FragmentReplaceUpstream,
         col_index_mapping: Option<ColIndexMapping>,
         SinkIntoTableContext {
             creating_sink_id,
@@ -1213,7 +1134,7 @@ impl CatalogController {
 
         // 2. update merges.
         // update downstream fragment's Merge node, and upstream_fragment_id
-        for (fragment_id, merge_updates) in merge_updates {
+        for (fragment_id, fragment_replace_map) in replace_upstream {
             let (fragment_id, mut stream_node) = Fragment::find_by_id(fragment_id as FragmentId)
                 .select_only()
                 .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
@@ -1222,15 +1143,6 @@ impl CatalogController {
                 .await?
                 .map(|(id, node)| (id, node.to_protobuf()))
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-            let fragment_replace_map: HashMap<_, _> = merge_updates
-                .iter()
-                .map(|update| {
-                    (
-                        update.upstream_fragment_id,
-                        update.new_upstream_fragment_id.unwrap(),
-                    )
-                })
-                .collect();
 
             visit_stream_node_mut(&mut stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body
@@ -1752,7 +1664,7 @@ impl CatalogController {
                     _,
                 ),
                 worker_id,
-            ) in newly_created_actors
+            ) in newly_created_actors.into_values()
             {
                 let splits = actor_splits
                     .get(&actor_id)

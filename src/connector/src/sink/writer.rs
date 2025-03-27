@@ -53,6 +53,12 @@ pub trait SinkWriter: Send + 'static {
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
+
+    /// Return the starting read offset of the log store, which defaults to None.
+    /// It may only rewind from an intermediate offset in the case of exactly once.
+    fn rewind_start_offset(&mut self) -> Result<Option<u64>> {
+        Ok(None)
+    }
 }
 
 pub type DummyDeliveryFuture = Ready<std::result::Result<(), SinkError>>;
@@ -126,7 +132,8 @@ impl<W> LogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         let mut sink_writer = self.writer;
         let metrics = self.sink_writer_metrics;
         #[derive(Debug)]
@@ -242,7 +249,8 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             let select_result = drop_either_future(
                 select(
