@@ -22,7 +22,6 @@ use bytes::Bytes;
 use mysql_async::Opts;
 use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -45,10 +44,9 @@ use super::doris_starrocks_connector::{
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam,
 };
-use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
+use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
@@ -259,7 +257,7 @@ impl StarrocksSink {
 
 impl Sink for StarrocksSink {
     type Coordinator = StarrocksSinkCommitter;
-    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<StarrocksSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<StarrocksSinkWriter>;
 
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
@@ -316,27 +314,14 @@ impl Sink for StarrocksSink {
             writer_param.executor_id,
         )?;
 
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let writer = CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
+        let writer = CoordinatedLogSinker::new(
+            &writer_param,
             self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
             inner,
+            commit_checkpoint_interval,
         )
         .await?;
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
-            commit_checkpoint_interval,
-        ))
+        Ok(writer)
     }
 
     fn is_coordinated_sink(&self) -> bool {
@@ -623,10 +608,6 @@ impl SinkWriter for StarrocksSinkWriter {
             tracing::debug!(?txn_label, "rollback transaction");
             self.txn_client.rollback(txn_label).await?;
         }
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -21,7 +20,6 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
@@ -402,10 +400,6 @@ impl SinkWriter for DorisSinkWriter {
                 .ok_or_else(|| SinkError::Doris("Can't find doris inserter".to_owned()))?;
             client.finish().await?;
         }
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }

@@ -12,102 +12,171 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::num::NonZeroU64;
+use std::time::Instant;
 
 use anyhow::anyhow;
-use futures::FutureExt;
-use risingwave_common::array::StreamChunk;
+use async_trait::async_trait;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_rpc_client::CoordinatorStreamHandle;
-use thiserror_ext::AsReport;
 use tracing::warn;
 
-use super::SinkCoordinationRpcClientEnum;
+use super::{
+    LogSinker, SinkCoordinationRpcClientEnum, SinkError, SinkLogReader, SinkWriterMetrics,
+    SinkWriterParam,
+};
 use crate::sink::writer::SinkWriter;
-use crate::sink::{Result, SinkError, SinkParam};
+use crate::sink::{LogStoreReadItem, Result, SinkParam, TruncateOffset};
 
-pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
-    epoch: u64,
-    coordinator_stream_handle: CoordinatorStreamHandle,
-    inner: W,
-    pub(crate) log_store_rewind_start_epoch: Option<u64>,
+pub struct CoordinatedLogSinker<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
+    writer: W,
+    sink_coordinate_client: SinkCoordinationRpcClientEnum,
+    param: SinkParam,
+    vnode_bitmap: Bitmap,
+    commit_checkpoint_interval: NonZeroU64,
+    sink_writer_metrics: SinkWriterMetrics,
 }
 
-impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedSinkWriter<W> {
+impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<W> {
     pub async fn new(
-        client: SinkCoordinationRpcClientEnum,
+        writer_param: &SinkWriterParam,
         param: SinkParam,
-        vnode_bitmap: Bitmap,
-        inner: W,
+        writer: W,
+        commit_checkpoint_interval: NonZeroU64,
     ) -> Result<Self> {
-        let (coordinator_stream_handle, log_store_rewind_start_epoch) =
-            client.new_stream_handle(param, vnode_bitmap).await?;
         Ok(Self {
-            epoch: 0,
-            coordinator_stream_handle,
-            inner,
-            log_store_rewind_start_epoch,
+            writer,
+            sink_coordinate_client: writer_param
+                .meta_client
+                .as_ref()
+                .ok_or_else(|| anyhow!("should have meta client"))?
+                .clone()
+                .sink_coordinate_client()
+                .await,
+            param,
+            vnode_bitmap: writer_param
+                .vnode_bitmap
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow!("sink needs coordination and should not have singleton input")
+                })?
+                .clone(),
+            commit_checkpoint_interval,
+            sink_writer_metrics: SinkWriterMetrics::new(writer_param),
         })
     }
 }
 
-#[async_trait::async_trait]
-impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for CoordinatedSinkWriter<W> {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = epoch;
-        self.inner.begin_epoch(epoch).await
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.inner.write_batch(chunk).await
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        let metadata = self.inner.barrier(is_checkpoint).await?;
-        if is_checkpoint {
-            let metadata = metadata.ok_or_else(|| {
-                SinkError::Coordinator(anyhow!("should get metadata on checkpoint barrier"))
-            })?;
-            // TODO: add metrics to measure time to commit
-            self.coordinator_stream_handle
-                .commit(self.epoch, metadata)
-                .await?;
-            Ok(())
-        } else {
-            if metadata.is_some() {
-                warn!("get metadata on non-checkpoint barrier");
-            }
-            Ok(())
-        }
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        self.inner.abort().await
-    }
-
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        self.coordinator_stream_handle
-            .update_vnode_bitmap(&vnode_bitmap)
+#[async_trait]
+impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for CoordinatedLogSinker<W> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        let (mut coordinator_stream_handle, log_store_rewind_start_epoch) = self
+            .sink_coordinate_client
+            .new_stream_handle(self.param, self.vnode_bitmap)
             .await?;
-        self.inner.update_vnode_bitmap(vnode_bitmap).await
-    }
+        let mut sink_writer = self.writer;
+        log_reader.start_from(log_store_rewind_start_epoch).await?;
+        #[derive(Debug)]
+        enum LogConsumerState {
+            /// Mark that the log consumer is not initialized yet
+            Uninitialized,
 
-    fn rewind_start_offset(&mut self) -> Result<Option<u64>> {
-        Ok(self.log_store_rewind_start_epoch)
-    }
-}
+            /// Mark that a new epoch has begun.
+            EpochBegun { curr_epoch: u64 },
 
-impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> Drop for CoordinatedSinkWriter<W> {
-    fn drop(&mut self) {
-        match self.coordinator_stream_handle.stop().now_or_never() {
-            None => {
-                warn!("unable to send stop due to channel full")
+            /// Mark that the consumer has just received a barrier
+            BarrierReceived { prev_epoch: u64 },
+        }
+
+        let mut state = LogConsumerState::Uninitialized;
+
+        let mut current_checkpoint: u64 = 0;
+        let commit_checkpoint_interval = self.commit_checkpoint_interval;
+        let sink_writer_metrics = self.sink_writer_metrics;
+
+        loop {
+            let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
+            // begin_epoch when not previously began
+            state = match state {
+                LogConsumerState::Uninitialized => {
+                    sink_writer.begin_epoch(epoch).await?;
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+                LogConsumerState::EpochBegun { curr_epoch } => {
+                    assert!(
+                        epoch >= curr_epoch,
+                        "new epoch {} should not be below the current epoch {}",
+                        epoch,
+                        curr_epoch
+                    );
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+                LogConsumerState::BarrierReceived { prev_epoch, .. } => {
+                    assert!(
+                        epoch > prev_epoch,
+                        "new epoch {} should be greater than prev epoch {}",
+                        epoch,
+                        prev_epoch
+                    );
+
+                    sink_writer.begin_epoch(epoch).await?;
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+            };
+            match item {
+                LogStoreReadItem::StreamChunk { chunk, .. } => {
+                    if let Err(e) = sink_writer.write_batch(chunk).await {
+                        sink_writer.abort().await?;
+                        return Err(e);
+                    }
+                }
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    new_vnode_bitmap,
+                } => {
+                    let prev_epoch = match state {
+                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
+                        _ => unreachable!("epoch must have begun before handling barrier"),
+                    };
+                    if is_checkpoint {
+                        current_checkpoint += 1;
+                        if current_checkpoint >= commit_checkpoint_interval.get()
+                            || new_vnode_bitmap.is_some()
+                        {
+                            let start_time = Instant::now();
+                            let metadata = sink_writer.barrier(true).await?;
+                            let metadata = metadata.ok_or_else(|| {
+                                SinkError::Coordinator(anyhow!(
+                                    "should get metadata on checkpoint barrier"
+                                ))
+                            })?;
+                            coordinator_stream_handle.commit(epoch, metadata).await?;
+                            sink_writer_metrics
+                                .sink_commit_duration
+                                .observe(start_time.elapsed().as_millis() as f64);
+                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+
+                            current_checkpoint = 0;
+                            if let Some(new_vnode_bitmap) = new_vnode_bitmap {
+                                coordinator_stream_handle
+                                    .update_vnode_bitmap(&new_vnode_bitmap)
+                                    .await?;
+                            }
+                        } else {
+                            let metadata = sink_writer.barrier(false).await?;
+                            if let Some(metadata) = metadata {
+                                warn!(?metadata, "get metadata on non-checkpoint barrier");
+                            }
+                        }
+                    } else {
+                        let metadata = sink_writer.barrier(false).await?;
+                        if let Some(metadata) = metadata {
+                            warn!(?metadata, "get metadata on non-checkpoint barrier");
+                        }
+                    }
+                    state = LogConsumerState::BarrierReceived { prev_epoch }
+                }
             }
-            Some(Err(e)) => {
-                warn!(e = ?e.as_report(), "failed to stop the coordinator");
-            }
-            Some(Ok(_)) => {}
         }
     }
 }

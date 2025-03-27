@@ -15,14 +15,12 @@
 use core::fmt::Debug;
 use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
@@ -764,10 +762,6 @@ impl SinkWriter for ClickHouseSinkWriter {
         if is_checkpoint && let Some(inserter) = self.inserter.take() {
             inserter.end().await?;
         }
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }
