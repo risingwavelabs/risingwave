@@ -81,8 +81,8 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.14.0", features = ["tracing", "nightly"] }
-mixtrics ={ version = "0.0.2", features = ["prometheus"] }
+foyer = { version = "0.15.2", features = ["tracing", "nightly"] }
+mixtrics ={ version = "0.0.4", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
