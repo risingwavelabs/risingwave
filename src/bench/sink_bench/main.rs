@@ -109,6 +109,7 @@ impl LogReader for MockRangeLogReader {
                             prev_epoch,
                             LogStoreReadItem::Barrier {
                                 is_checkpoint: true,
+                                new_vnode_bitmap: None
                             },
                         ))
                     }

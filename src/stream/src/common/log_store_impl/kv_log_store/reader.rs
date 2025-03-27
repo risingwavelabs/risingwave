@@ -491,7 +491,10 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                             }
                             KvLogStoreItem::Barrier { is_checkpoint } => {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
-                                LogStoreReadItem::Barrier { is_checkpoint }
+                                LogStoreReadItem::Barrier {
+                                    is_checkpoint,
+                                    new_vnode_bitmap: None,
+                                }
                             }
                         };
                         return Ok((epoch, item));
@@ -600,7 +603,13 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     item_epoch
                 );
                 self.latest_offset = Some(TruncateOffset::Barrier { epoch: item_epoch });
-                (item_epoch, LogStoreReadItem::Barrier { is_checkpoint })
+                (
+                    item_epoch,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint,
+                        new_vnode_bitmap: None,
+                    },
+                )
             }
         })
     }
