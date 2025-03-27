@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement}
 
 use crate::error::Result;
 
+mod backfill_order_strategy;
 mod bind_context;
 mod bind_param;
 mod create;

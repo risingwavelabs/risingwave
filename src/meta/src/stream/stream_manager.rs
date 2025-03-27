@@ -35,8 +35,8 @@ use super::{
     JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
 };
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BackfillOrderState, BarrierScheduler, Command, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::error::bail_invalid_parameter;
@@ -97,6 +97,8 @@ pub struct CreateStreamingJobContext {
     pub option: CreateStreamingJobOption,
 
     pub streaming_job: StreamingJob,
+
+    pub backfill_order_state: Option<BackfillOrderState>,
 }
 
 impl CreateStreamingJobContext {
@@ -387,6 +389,7 @@ impl GlobalStreamManager {
             internal_tables,
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
+            backfill_order_state,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<(SourceChange, StreamingJob)> {
@@ -452,6 +455,7 @@ impl GlobalStreamManager {
             internal_tables: internal_tables.into_values().collect_vec(),
             job_type,
             create_type,
+            backfill_order_state,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {

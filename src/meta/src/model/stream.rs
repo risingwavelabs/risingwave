@@ -405,6 +405,13 @@ impl StreamJobFragments {
         self.fragments.values()
     }
 
+    pub fn fragment_actors(&self, fragment_id: FragmentId) -> &[StreamActor] {
+        self.fragments
+            .get(&fragment_id)
+            .map(|f| f.actors.as_slice())
+            .unwrap_or_default()
+    }
+
     /// Returns the table id.
     pub fn stream_job_id(&self) -> TableId {
         self.stream_job_id
