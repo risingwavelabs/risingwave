@@ -21,6 +21,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
+use risingwave_pb::stream_plan::BackfillOrderStrategy;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use thiserror_ext::AsReport;
 
@@ -37,7 +38,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
-use crate::stream_fragmenter::{GraphJobType, build_graph};
+use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::ordinal;
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -160,24 +161,28 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, dependent_udfs, bound) = {
+    let (dependent_relations, dependent_udfs, bound_query, backfill_order_strategy) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound = binder.bind_query(query)?;
+        let bound_query = binder.bind_query(query)?;
+        let backfill_order_strategy = binder
+            .bind_backfill_order_strategy(handler_args.with_options.backfill_order_strategy())?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
-            bound,
+            bound_query,
+            backfill_order_strategy,
         )
     };
     handle_create_mv_bound(
         handler_args,
         if_not_exists,
         name,
-        bound,
+        bound_query,
         dependent_relations,
         dependent_udfs,
         columns,
         emit_mode,
+        backfill_order_strategy,
     )
     .await
 }
@@ -221,6 +226,7 @@ pub async fn handle_create_mv_bound(
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    backfill_order_strategy: BackfillOrderStrategy,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -327,7 +333,11 @@ It only indicates the physical clustering of the data, which may improve the per
                 )
                 .collect();
 
-        let graph = build_graph(plan, Some(GraphJobType::MaterializedView))?;
+        let graph = build_graph_with_strategy(
+            plan,
+            Some(GraphJobType::MaterializedView),
+            Some(backfill_order_strategy),
+        )?;
 
         (table, graph, dependencies, resource_group)
     };
