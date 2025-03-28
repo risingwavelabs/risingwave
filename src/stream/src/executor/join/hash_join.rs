@@ -1088,16 +1088,12 @@ impl<S: StateStore> AsOfJoinHashMap<S> {
     pub async fn table_iter_by_inequality_with_jk_prefix<'a>(
         &'a self,
         join_key: &'a impl Row,
-        inequality_key: &'a impl Row,
+        range: &'a (Bound<impl Row>, Bound<impl Row>),
     ) -> StreamExecutorResult<impl RowStream<'a>> {
-        let pk_prefix = join_key.chain(inequality_key);
+        // let pk_prefix = join_key.chain(inequality_key);
         self.state
             .table
-            .iter_with_prefix(
-                pk_prefix,
-                &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                PrefetchOptions::default(),
-            )
+            .iter_with_prefix(join_key, range, PrefetchOptions::default())
             .await
     }
 
@@ -1106,8 +1102,12 @@ impl<S: StateStore> AsOfJoinHashMap<S> {
         join_key: &impl Row,
         inequality_key: &impl Row,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
+        let range = (
+            Bound::Included(inequality_key),
+            Bound::Included(inequality_key),
+        );
         let table_iter = self
-            .table_iter_by_inequality_with_jk_prefix(join_key, inequality_key)
+            .table_iter_by_inequality_with_jk_prefix(join_key, &range)
             .await?;
         let mut pinned_table_iter = std::pin::pin!(table_iter);
         let row = pinned_table_iter.next().await.transpose()?;
@@ -1117,11 +1117,11 @@ impl<S: StateStore> AsOfJoinHashMap<S> {
     pub async fn range_by_inequality_with_jk_prefix<'a>(
         &'a self,
         join_key: &'a impl Row,
-        inequality_key_range: (Bound<impl Row>, Bound<impl Row>),
+        inequality_key_range: &'a (Bound<impl Row + 'a>, Bound<impl Row + 'a>),
     ) -> StreamExecutorResult<impl RowStream<'a>> {
         self.state
             .table
-            .iter_with_prefix(join_key, &inequality_key_range, PrefetchOptions::default())
+            .iter_with_prefix(join_key, inequality_key_range, PrefetchOptions::default())
             .await
     }
 

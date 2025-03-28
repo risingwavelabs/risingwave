@@ -633,9 +633,10 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor<S, T> {
 
             if !inequal_key_is_null {
                 let (row_to_delete_r, row_to_insert_r) = {
+                    let range = (Bound::Included(&inequal_key), Bound::Included(&inequal_key));
                     let table_iter = side_update
                         .ht
-                        .table_iter_by_inequality_with_jk_prefix(&join_key, &inequal_key)
+                        .table_iter_by_inequality_with_jk_prefix(&join_key, &range)
                         .await?;
                     let mut pinned_table_iter = std::pin::pin!(table_iter);
                     let first_row = pinned_table_iter.next().await.transpose()?;
@@ -701,8 +702,8 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor<S, T> {
                         .map(|r| r.project(&inequal_key_indices_update));
 
                     let affected_inequality_key_r = match asof_desc.inequality_type {
-                        AsOfInequalityType::Lt | AsOfInequalityType::Le => &prev_inequality_key,
-                        AsOfInequalityType::Gt | AsOfInequalityType::Ge => &next_inequality_key,
+                        AsOfInequalityType::Lt | AsOfInequalityType::Le => &next_inequality_key,
+                        AsOfInequalityType::Gt | AsOfInequalityType::Ge => &prev_inequality_key,
                     };
                     let affected_row_r =
                         if let Some(affected_inequality_key_r) = affected_inequality_key_r {
@@ -754,7 +755,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor<S, T> {
 
                     let rows_l = side_match
                         .ht
-                        .range_by_inequality_with_jk_prefix(&join_key, range)
+                        .range_by_inequality_with_jk_prefix(&join_key, &range)
                         .await?;
                     #[for_await]
                     for row_l in rows_l {
@@ -900,7 +901,7 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo {
             schema,
-            pk_indices: vec![1],
+            pk_indices: vec![0, 1, 3, 4],
             identity: "HashJoinExecutor".to_owned(),
         };
 
@@ -996,6 +997,7 @@ mod tests {
         // push the 1st right chunk
         tx_r.push_chunk(chunk_r1);
         let chunk = hash_join.next_unwrap_ready_chunk()?;
+        dbg!(&chunk);
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
