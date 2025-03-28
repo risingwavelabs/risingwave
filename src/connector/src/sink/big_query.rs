@@ -178,7 +178,6 @@ impl LogSinker for BigQueryLogSinker {
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Barrier { epoch },0);
                         }
-                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }
                 }
             )

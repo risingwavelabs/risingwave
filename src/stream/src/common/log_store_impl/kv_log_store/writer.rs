@@ -143,6 +143,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
@@ -176,9 +177,11 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         let tx = &mut self.tx;
         let align_epoch_on_init = self.align_epoch_on_init;
         self.seq_id = FIRST_SEQ_ID;
-        Ok(LogWriterPostFlushCurrentEpoch::new(
-            move |new_vnodes: Option<Arc<Bitmap>>| {
-                async move {
+        Ok(LogWriterPostFlushCurrentEpoch::new(move || {
+            async move {
+                {
+                    let new_vnodes = new_vnode_bitmap;
+
                     let state = post_seal_epoch
                         .post_yield_barrier(new_vnodes.clone())
                         .await?;
@@ -195,9 +198,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                     }
                     Ok(())
                 }
-                .boxed()
-            },
-        ))
+            }
+            .boxed()
+        }))
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {

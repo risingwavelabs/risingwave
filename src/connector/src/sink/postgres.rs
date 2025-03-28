@@ -533,7 +533,6 @@ impl LogSinker for PostgresSinkWriter {
                 LogStoreReadItem::Barrier { .. } => {
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }
         }
     }
