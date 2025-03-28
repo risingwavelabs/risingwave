@@ -21,6 +21,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;
 
 use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
@@ -541,9 +542,47 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         // Group C: experimental
-        DataType::Int16 => return no_match_err(),
-        DataType::Decimal => return no_match_err(),
-        DataType::Jsonb => return no_match_err(),
+        DataType::Int16 => match inner {
+            AvroSchema::Int => maybe.on_base(|s| Ok(Value::Int(s.into_int16() as i32)))?,
+            _ => return no_match_err(),
+        },
+        DataType::Decimal => match inner {
+            AvroSchema::Decimal(decimal_schema) => {
+                maybe.on_base(|s| {
+                    match s.into_decimal() {
+                        risingwave_common::types::Decimal::Normalized(decimal) => {
+                            // convert to bigint with scale
+                            // rescale the rust_decimal to the scale of the avro decimal
+                            //
+                            // From bigdecimal::BigDecimal::with_scale:
+                            // If the new_scale is lower than the current value (indicating a larger
+                            // power of 10), digits will be dropped (as precision is lower)
+                            let signed_bigint_bytes =
+                                rust_decimal_to_scaled_bigint(decimal, decimal_schema.scale)
+                                    .map_err(FieldEncodeError::new)?;
+                            Ok(Value::Decimal(apache_avro::Decimal::from(
+                                &signed_bigint_bytes,
+                            )))
+                        }
+                        d @ risingwave_common::types::Decimal::NaN
+                        | d @ risingwave_common::types::Decimal::NegativeInf
+                        | d @ risingwave_common::types::Decimal::PositiveInf => {
+                            Err(FieldEncodeError::new(format!(
+                                "Avro Decimal does not support NaN or Inf, but got {}",
+                                d
+                            )))
+                        }
+                    }
+                })?
+            }
+            _ => return no_match_err(),
+        },
+        DataType::Jsonb => match inner {
+            AvroSchema::String => {
+                maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
+            }
+            _ => return no_match_err(),
+        },
         // Group D: unsupported
         DataType::Int256 => {
             return no_match_err();
@@ -564,8 +603,8 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
-        Date, Datum, Interval, ListValue, MapType, MapValue, Scalar, ScalarImpl, StructValue, Time,
-        Timestamptz, ToDatumRef,
+        Date, Datum, Interval, JsonbVal, ListValue, MapType, MapValue, Scalar, ScalarImpl,
+        StructValue, Time, Timestamptz, ToDatumRef,
     };
 
     use super::*;
@@ -771,6 +810,29 @@ mod tests {
         );
 
         test_ok(
+            &DataType::Int16,
+            Some(ScalarImpl::Int16(i16::MAX)),
+            r#""int""#,
+            Value::Int(i16::MAX as i32),
+        );
+
+        test_ok(
+            &DataType::Int16,
+            Some(ScalarImpl::Int16(i16::MIN)),
+            r#""int""#,
+            Value::Int(i16::MIN as i32),
+        );
+
+        test_ok(
+            &DataType::Jsonb,
+            Some(ScalarImpl::Jsonb(
+                JsonbVal::from_str(r#"{"a": 1}"#).unwrap(),
+            )),
+            r#""string""#,
+            Value::String(r#"{"a": 1}"#.into()),
+        );
+
+        test_ok(
             &DataType::Interval,
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
@@ -906,6 +968,53 @@ mod tests {
                 ),
             ]),
         );
+
+        // Test complex JSON with nested structures - using serde_json::Value comparison
+        let complex_json = r#"{
+            "person": {
+                "name": "John Doe",
+                "age": 30,
+                "address": {
+                    "street": "123 Main St.",
+                    "city": "New York",
+                    "coordinates": [40.7128, -74.0060]
+                },
+                "contacts": [
+                    {"type": "email", "value": "john@example.com"},
+                    {"type": "phone", "value": "+1-555-123-4567"}
+                ],
+                "active": true,
+                "preferences": {
+                    "notifications": true,
+                    "theme": "dark",
+                    "languages": ["en", "es"],
+                    "lastLogin": null
+                },
+                "tags": ["premium", "verified"],
+                "unicode_test": "Hello, 世界! 🌍"
+            }
+        }"#;
+
+        let input_json = JsonbVal::from_str(complex_json).unwrap();
+        let result = on_field(
+            &DataType::Jsonb,
+            Some(ScalarImpl::Jsonb(input_json.clone())).to_datum_ref(),
+            &AvroSchema::parse_str(r#""string""#).unwrap(),
+            &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap(),
+        )
+        .unwrap();
+
+        // Compare as parsed JSON values to handle key order randomness
+        if let Value::String(result_str) = result {
+            let expected_json: serde_json::Value = serde_json::from_str(complex_json).unwrap();
+            let actual_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+            assert_eq!(
+                expected_json, actual_json,
+                "JSON values should be equivalent regardless of key order"
+            );
+        } else {
+            panic!("Expected String value");
+        };
     }
 
     #[test]
