@@ -163,11 +163,11 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = Executor::new(
-        ExecutorInfo {
-            schema: all_schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: format!("SourceExecutor {:X}", 1),
-        },
+        ExecutorInfo::new_for_test(
+            all_schema.clone(),
+            pk_indices.clone(),
+            format!("SourceExecutor {:X}", 1),
+        ),
         SourceExecutor::<PanicStateStore>::new(
             actor_ctx.clone(),
             None, // There is no external stream source.
@@ -182,11 +182,11 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = Executor::new(
-        ExecutorInfo {
-            schema: all_schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: format!("DmlExecutor {:X}", 2),
-        },
+        ExecutorInfo::new_for_test(
+            all_schema.clone(),
+            pk_indices.clone(),
+            format!("DmlExecutor {:X}", 2),
+        ),
         DmlExecutor::new(
             ActorContext::for_test(0),
             source_executor,
@@ -201,11 +201,11 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     let row_id_gen_executor = Executor::new(
-        ExecutorInfo {
-            schema: all_schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: format!("RowIdGenExecutor {:X}", 3),
-        },
+        ExecutorInfo::new_for_test(
+            all_schema.clone(),
+            pk_indices.clone(),
+            format!("RowIdGenExecutor {:X}", 3),
+        ),
         RowIdGenExecutor::new(actor_ctx, dml_executor, row_id_index, vnodes).boxed(),
     );
 

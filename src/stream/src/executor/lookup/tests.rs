@@ -109,11 +109,11 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
     .into_executor(schema, vec![0]);
 
     Executor::new(
-        ExecutorInfo {
-            schema: source.schema().clone(),
-            pk_indices: source.pk_indices().to_vec(),
-            identity: "MaterializeExecutor".to_owned(),
-        },
+        ExecutorInfo::new_for_test(
+            source.schema().clone(),
+            source.pk_indices().to_vec(),
+            "MaterializeExecutor".to_owned(),
+        ),
         MaterializeExecutor::for_test(
             source,
             memory_state_store,
@@ -189,16 +189,16 @@ async fn test_lookup_this_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo {
-        schema: Schema::new(vec![
+    let info = ExecutorInfo::new_for_test(
+        Schema::new(vec![
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
-        pk_indices: vec![1, 2],
-        identity: "LookupExecutor".to_owned(),
-    };
+        vec![1, 2],
+        "LookupExecutor".to_owned(),
+    );
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         ctx: ActorContext::for_test(0),
         info,
@@ -263,16 +263,16 @@ async fn test_lookup_last_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo {
-        schema: Schema::new(vec![
+    let info = ExecutorInfo::new_for_test(
+        Schema::new(vec![
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
-        pk_indices: vec![1, 2],
-        identity: "LookupExecutor".to_owned(),
-    };
+        vec![1, 2],
+        "LookupExecutor".to_owned(),
+    );
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         ctx: ActorContext::for_test(0),
         info,

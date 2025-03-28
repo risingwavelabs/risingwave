@@ -182,6 +182,24 @@ pub struct ExecutorInfo {
 
     /// Identity of the executor.
     pub identity: String,
+
+    /// The executor id of the executor.
+    pub id: u64,
+}
+
+impl ExecutorInfo {
+    pub fn new(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            identity,
+            id,
+        }
+    }
+
+    pub fn new_for_test(schema: Schema, pk_indices: PkIndices, identity: String) -> Self {
+        Self::new(schema, pk_indices, identity, 0)
+    }
 }
 
 /// [`Execute`] describes the methods an executor should implement to handle control messages.
