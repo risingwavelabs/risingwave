@@ -19,7 +19,7 @@ use tokio::time::Duration;
 
 use crate::error::Result;
 use crate::handler::explain_analyze_stream_job::graph::{
-    extract_executor_ids, extract_stream_node_infos, render_graph_with_metrics,
+    extract_executor_infos, extract_stream_node_infos, render_graph_with_metrics,
 };
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 
@@ -43,11 +43,11 @@ pub async fn handle_explain_analyze_stream_job(
     let fragments = net::get_fragments(meta_client, job_id).await?;
 
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
-    let executor_ids = extract_executor_ids(&adjacency_list);
+    let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
 
-    let aggregated_stats = net::get_aggregated_stats(
+    let executor_stats = net::get_executor_stats(
         &handler_args,
         &worker_nodes,
         &executor_ids,
@@ -55,6 +55,7 @@ pub async fn handle_explain_analyze_stream_job(
         profiling_duration,
     )
     .await?;
+    let aggregated_stats = metrics::OperatorStats::aggregate(operator_to_executor, &executor_stats);
 
     // Render graph with metrics
     let rows = render_graph_with_metrics(
@@ -171,7 +172,7 @@ mod net {
         Ok(table_fragment_info.fragments)
     }
 
-    pub(super) async fn get_aggregated_stats(
+    pub(super) async fn get_executor_stats(
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &[ExecutorId],
@@ -239,8 +240,8 @@ mod metrics {
             }
         }
 
-        pub fn get(&self, operator_id: &ExecutorId) -> Option<&ExecutorMetrics> {
-            self.inner.get(operator_id)
+        pub fn get(&self, executor_id: &ExecutorId) -> Option<&ExecutorMetrics> {
+            self.inner.get(executor_id)
         }
 
         /// Establish metrics baseline for profiling
@@ -293,8 +294,9 @@ mod metrics {
         }
     }
 
+    #[expect(dead_code)]
     pub(super) struct OperatorMetrics {
-        pub executor_id: OperatorId,
+        pub operator_id: OperatorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
         pub total_output_pending_ms: u64,
@@ -306,7 +308,7 @@ mod metrics {
 
     impl OperatorStats {
         /// Aggregates executor-level stats into operator-level stats
-        fn aggregate(
+        pub(super) fn aggregate(
             operator_map: HashMap<OperatorId, Vec<ExecutorId>>,
             executor_stats: &ExecutorStats,
         ) -> Self {
@@ -327,7 +329,7 @@ mod metrics {
                 operator_stats.insert(
                     operator_id,
                     OperatorMetrics {
-                        executor_id: operator_id,
+                        operator_id,
                         epoch: 0,
                         total_output_throughput,
                         total_output_pending_ms,
@@ -337,6 +339,10 @@ mod metrics {
             OperatorStats {
                 inner: operator_stats,
             }
+        }
+
+        pub fn get(&self, operator_id: &OperatorId) -> Option<&OperatorMetrics> {
+            self.inner.get(operator_id)
         }
     }
 }
@@ -355,7 +361,7 @@ mod graph {
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
-    use crate::handler::explain_analyze_stream_job::metrics::ExecutorStats;
+    use crate::handler::explain_analyze_stream_job::metrics::OperatorStats;
 
     pub(super) type OperatorId = u64;
     pub(super) type ExecutorId = u64;
@@ -496,17 +502,24 @@ mod graph {
         (root_node.unwrap(), operator_id_to_stream_node)
     }
 
-    pub(super) fn extract_executor_ids(adjacency_list: &HashMap<u64, StreamNode>) -> Vec<u64> {
-        let mut executor_ids = HashSet::new();
+    pub(super) fn extract_executor_infos(
+        adjacency_list: &HashMap<u64, StreamNode>,
+    ) -> (Vec<u64>, HashMap<u64, Vec<u64>>) {
+        let mut executor_ids: Vec<_> = Default::default();
+        let mut operator_to_executor: HashMap<_, _> = Default::default();
         for node in adjacency_list.values() {
             let operator_id = node.operator_id;
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                executor_ids.insert(executor_id);
+                executor_ids.push(executor_id);
+                operator_to_executor
+                    .entry(operator_id)
+                    .or_insert_with(Vec::new)
+                    .push(executor_id);
             }
         }
-        executor_ids.into_iter().collect()
+        (executor_ids, operator_to_executor)
     }
 
     // Do a DFS based rendering. Each node will occupy its own row.
@@ -516,7 +529,7 @@ mod graph {
     pub(super) fn render_graph_with_metrics(
         adjacency_list: &HashMap<u64, StreamNode>,
         root_node: u64,
-        stats: &ExecutorStats,
+        stats: &OperatorStats,
         profiling_duration: &Duration,
     ) -> Vec<ExplainAnalyzeStreamJobOutput> {
         let profiling_duration_secs = profiling_duration.as_secs_f64();
