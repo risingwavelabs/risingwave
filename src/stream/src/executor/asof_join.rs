@@ -997,7 +997,6 @@ mod tests {
         // push the 1st right chunk
         tx_r.push_chunk(chunk_r1);
         let chunk = hash_join.next_unwrap_ready_chunk()?;
-        dbg!(&chunk);
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
