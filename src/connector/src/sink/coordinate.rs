@@ -97,7 +97,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> Drop for CoordinatedS
                 warn!("unable to send stop due to channel full")
             }
             Some(Err(e)) => {
-                warn!(e = ?e.as_report(), "failed to stop the coordinator");
+                warn!(e = %e.as_report(), "failed to stop the coordinator");
             }
             Some(Ok(_)) => {}
         }

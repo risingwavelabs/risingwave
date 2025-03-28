@@ -429,7 +429,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 };
             }
             Err(e) => {
-                warn!(database_id = self.database_id.database_id,e = ?e.as_report(), "failed to inject initial barrier");
+                warn!(database_id = self.database_id.database_id,e = %e.as_report(), "failed to inject initial barrier");
                 let (backoff_future, reset_request_id) = status.next_retry();
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
