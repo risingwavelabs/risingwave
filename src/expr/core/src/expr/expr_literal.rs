@@ -92,7 +92,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{Decimal, Interval, IntoOrdered, Scalar, ScalarImpl};
     use risingwave_common::util::value_encoding::{DatumToProtoExt, serialize_datum};
-    use risingwave_pb::data::data_type::{IntervalType, TypeName};
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::RexNode::{self, Constant};
     use risingwave_pb::expr::expr_node::Type;
@@ -206,7 +206,6 @@ mod tests {
             function_type: Type::Unspecified as i32,
             return_type: Some(PbDataType {
                 type_name: data_type as i32,
-                interval_type: IntervalType::Month as i32,
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(PbDatum { body: bytes })),

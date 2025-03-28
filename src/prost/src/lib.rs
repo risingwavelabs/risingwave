@@ -638,21 +638,24 @@ impl expr::UserDefinedFunctionMetadata {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{DataType, data_type};
+    use crate::data::{DataChunk, DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 
     #[test]
     fn test_getter() {
         let data_type: DataType = DataType {
-            is_nullable: true,
+            type_name: data_type::TypeName::Double.into(),
             ..Default::default()
         };
         let field = Field {
             data_type: Some(data_type),
             name: "".to_owned(),
         };
-        assert!(field.get_data_type().unwrap().is_nullable);
+        assert_eq!(
+            field.get_data_type().unwrap().type_name(),
+            data_type::TypeName::Double
+        );
     }
 
     #[test]
@@ -674,12 +677,12 @@ mod tests {
 
     #[test]
     fn test_primitive_getter() {
-        let data_type: DataType = DataType::default();
-        let new_data_type = DataType {
-            is_nullable: data_type.get_is_nullable(),
+        let chunk = DataChunk::default();
+        let new_chunk = DataChunk {
+            cardinality: chunk.get_cardinality(),
             ..Default::default()
         };
-        assert!(!new_data_type.is_nullable);
+        assert_eq!(new_chunk.cardinality, 0);
     }
 
     #[test]
