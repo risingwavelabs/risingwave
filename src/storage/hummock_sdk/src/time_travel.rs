@@ -16,9 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{PbChangeLogDelta, PbGroupDeltas};
-use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo};
+use risingwave_pb::hummock::PbSstableInfo;
 
-use crate::change_log::{TableChangeLog, TableChangeLogCommon};
 use crate::level::Level;
 use crate::sstable_info::SstableInfo;
 use crate::version::{
@@ -48,31 +47,11 @@ pub fn refill_version(
             .table_infos
             .retain(|t| t.table_ids.contains(&table_id));
     }
-    version
-        .table_change_log
-        .retain(|t, _| t.table_id == table_id);
-    for t in version.table_change_log.values_mut() {
-        refill_table_change_log(t, sst_id_to_info);
-    }
 }
 
 fn refill_level(level: &mut Level, sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>) {
     for s in &mut level.table_infos {
         refill_sstable_info(s, sst_id_to_info);
-    }
-}
-
-fn refill_table_change_log(
-    table_change_log: &mut TableChangeLog,
-    sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
-) {
-    for c in &mut table_change_log.0 {
-        for s in &mut c.old_value {
-            refill_sstable_info(s, sst_id_to_info);
-        }
-        for s in &mut c.new_value {
-            refill_sstable_info(s, sst_id_to_info);
-        }
     }
 }
 
@@ -110,19 +89,8 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version.table_watermarks.clone(),
-            // TODO: optimization: strip table change log based on select_group
-            table_change_log: version
-                .table_change_log
-                .iter()
-                .map(|(table_id, change_log)| {
-                    let incomplete_table_change_log = change_log
-                        .0
-                        .iter()
-                        .map(|e| PbEpochNewChangeLog::from(e).into())
-                        .collect();
-                    (*table_id, TableChangeLogCommon(incomplete_table_change_log))
-                })
-                .collect(),
+            // time travel metadata doesn't include table change log
+            table_change_log: HashMap::default(),
             state_table_info: version.state_table_info.clone(),
         }
     }

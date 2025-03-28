@@ -148,7 +148,7 @@ impl HummockManager {
         // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = object_size_map(&old_checkpoint.version);
         // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids = old_checkpoint.version.get_object_ids();
+        let mut versions_object_ids = old_checkpoint.version.get_object_ids(false);
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
@@ -189,11 +189,11 @@ impl HummockManager {
                         ),
                 );
             }
-            versions_object_ids.extend(version_delta.newly_added_object_ids());
+            versions_object_ids.extend(version_delta.newly_added_object_ids(false));
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
-        let removed_object_ids = &versions_object_ids - &current_version.get_object_ids();
+        let removed_object_ids = &versions_object_ids - &current_version.get_object_ids(false);
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {

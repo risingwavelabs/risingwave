@@ -79,25 +79,41 @@ impl HummockVersion {
             .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
     }
 
-    pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.object_id).collect()
+    pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos(exclude_change_log)
+            .map(|s| s.object_id)
+            .collect()
     }
 
-    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.sst_id).collect()
+    pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos(exclude_change_log)
+            .map(|s| s.sst_id)
+            .collect()
     }
 
-    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
+    pub fn get_sst_infos(&self, exclude_change_log: bool) -> impl Iterator<Item = &SstableInfo> {
+        let may_table_change_log = if exclude_change_log {
+            None
+        } else {
+            Some(self.table_change_log.values())
+        };
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
-            .chain(self.table_change_log.values().flat_map(|change_log| {
-                change_log.0.iter().flat_map(|epoch_change_log| {
-                    epoch_change_log
-                        .old_value
-                        .iter()
-                        .chain(epoch_change_log.new_value.iter())
-                })
-            }))
+            .chain(
+                may_table_change_log
+                    .map(|v| {
+                        v.flat_map(|table_change_log| {
+                            table_change_log.0.iter().flat_map(|epoch_change_log| {
+                                epoch_change_log
+                                    .old_value
+                                    .iter()
+                                    .chain(epoch_change_log.new_value.iter())
+                            })
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
     }
 
     // only scan the sst infos from levels in the specified compaction group (without table change log)
@@ -122,7 +138,7 @@ impl HummockVersion {
     /// `get_sst_infos_from_groups` doesn't guarantee that all returned sst info belongs to `select_group`.
     /// i.e. `select_group` is just a hint.
     /// We separate `get_sst_infos_from_groups` and `get_sst_infos` because `get_sst_infos_from_groups` may be further customized in the future.
-    pub fn get_sst_infos_from_groups<'a>(
+    pub fn get_sst_infos_from_groups_exclude_table_change_log<'a>(
         &'a self,
         select_group: &'a HashSet<CompactionGroupId>,
     ) -> impl Iterator<Item = &SstableInfo> + 'a {
@@ -137,15 +153,6 @@ impl HummockVersion {
             })
             .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
             .flat_map(|level| level.table_infos.iter())
-            .chain(self.table_change_log.values().flat_map(|change_log| {
-                // TODO: optimization: strip table change log
-                change_log.0.iter().flat_map(|epoch_change_log| {
-                    epoch_change_log
-                        .old_value
-                        .iter()
-                        .chain(epoch_change_log.new_value.iter())
-                })
-            }))
     }
 
     pub fn level_iter<F: FnMut(&Level) -> bool>(
@@ -1545,7 +1552,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids().len(), 0);
+        assert_eq!(version.get_object_ids(false).len(), 0);
 
         // Add to sub level
         version
@@ -1563,7 +1570,7 @@ mod tests {
                 .into()],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids().len(), 1);
+        assert_eq!(version.get_object_ids(false).len(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
@@ -1575,7 +1582,7 @@ mod tests {
             .into()],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids().len(), 2);
+        assert_eq!(version.get_object_ids(false).len(), 2);
     }
 
     #[test]
