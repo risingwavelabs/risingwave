@@ -9,7 +9,6 @@ repository = { workspace = true }
 description = "Local allocator with statistics"
 
 [dev-dependencies]
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
