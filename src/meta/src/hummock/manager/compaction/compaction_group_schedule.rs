@@ -20,6 +20,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_hummock_sdk::compact_task::{ReportTask, is_compaction_task_expired};
 use risingwave_hummock_sdk::compaction_group::{
     StateTableId, StaticCompactionGroupId, group_split,
@@ -33,9 +34,10 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
-use super::{CompactionGroupStatistic, EmergencyState, check_emergency_state};
+use super::{CompactionGroupStatistic, GroupStateValidator};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
+use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
@@ -770,7 +772,7 @@ impl HummockManager {
             return;
         }
 
-        let is_high_write_throughput = is_table_high_write_throughput(
+        let is_high_write_throughput = GroupMergeValidator::is_table_high_write_throughput(
             table_throughput,
             self.env.opts.table_high_write_throughput_threshold,
             self.env
@@ -868,6 +870,138 @@ impl HummockManager {
         next_group: &CompactionGroupStatistic,
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
+        GroupMergeValidator::validate_group_merge(
+            group,
+            next_group,
+            created_tables,
+            table_write_throughput_statistic_manager,
+            &self.env.opts,
+            &self.versioning,
+        )
+        .await?;
+
+        match self
+            .merge_compaction_group(group.group_id, next_group.group_id)
+            .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    "merge group-{} to group-{}",
+                    next_group.group_id,
+                    group.group_id,
+                );
+
+                self.metrics
+                    .merge_compaction_group_count
+                    .with_label_values(&[&group.group_id.to_string()])
+                    .inc();
+            }
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to merge group-{} group-{}",
+                    next_group.group_id,
+                    group.group_id,
+                )
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct GroupMergeValidator {}
+
+impl GroupMergeValidator {
+    /// Check if the table is high write throughput with the given threshold and ratio.
+    pub fn is_table_high_write_throughput(
+        table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
+        threshold: u64,
+        high_write_throughput_ratio: f64,
+    ) -> bool {
+        let mut sample_size = 0;
+        let mut high_write_throughput_count = 0;
+        for statistic in table_throughput {
+            sample_size += 1;
+            if statistic.throughput > threshold {
+                high_write_throughput_count += 1;
+            }
+        }
+
+        high_write_throughput_count as f64 > sample_size as f64 * high_write_throughput_ratio
+    }
+
+    pub fn is_table_low_write_throughput(
+        table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
+        threshold: u64,
+        low_write_throughput_ratio: f64,
+    ) -> bool {
+        let mut sample_size = 0;
+        let mut low_write_throughput_count = 0;
+        for statistic in table_throughput {
+            sample_size += 1;
+            if statistic.throughput <= threshold {
+                low_write_throughput_count += 1;
+            }
+        }
+
+        low_write_throughput_count as f64 > sample_size as f64 * low_write_throughput_ratio
+    }
+
+    fn check_is_low_write_throughput_compaction_group(
+        table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
+        group: &CompactionGroupStatistic,
+        opts: &Arc<MetaOpts>,
+    ) -> bool {
+        let mut table_with_statistic = Vec::with_capacity(group.table_statistic.len());
+        for table_id in group.table_statistic.keys() {
+            let mut table_throughput = table_write_throughput_statistic_manager
+                .get_table_throughput_descending(
+                    *table_id,
+                    opts.table_stat_throuput_window_seconds_for_merge as i64,
+                )
+                .peekable();
+            if table_throughput.peek().is_none() {
+                continue;
+            }
+
+            table_with_statistic.push(table_throughput);
+        }
+
+        // if all tables in the group do not have enough statistics, return true
+        if table_with_statistic.is_empty() {
+            return true;
+        }
+
+        // check if all tables in the group are low write throughput with enough statistics
+        table_with_statistic.into_iter().all(|table_throughput| {
+            Self::is_table_low_write_throughput(
+                table_throughput,
+                opts.table_low_write_throughput_threshold,
+                opts.table_stat_low_write_throughput_ratio_for_merge,
+            )
+        })
+    }
+
+    fn check_is_creating_compaction_group(
+        group: &CompactionGroupStatistic,
+        created_tables: &HashSet<u32>,
+    ) -> bool {
+        group
+            .table_statistic
+            .keys()
+            .any(|table_id| !created_tables.contains(table_id))
+    }
+
+    async fn validate_group_merge(
+        group: &CompactionGroupStatistic,
+        next_group: &CompactionGroupStatistic,
+        created_tables: &HashSet<u32>,
+        table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
+        opts: &Arc<MetaOpts>,
+        versioning: &MonitoredRwLock<Versioning>,
+    ) -> Result<()> {
         // TODO: remove this check after refactor group id
         if (group.group_id == StaticCompactionGroupId::StateDefault as u64
             && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64)
@@ -905,7 +1039,7 @@ impl HummockManager {
         }
 
         // do not merge the compaction group which is creating
-        if check_is_creating_compaction_group(group, created_tables) {
+        if Self::check_is_creating_compaction_group(group, created_tables) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge creating group {} next_group {}",
                 group.group_id, next_group.group_id
@@ -913,10 +1047,10 @@ impl HummockManager {
         }
 
         // do not merge high throughput group
-        if !check_is_low_write_throughput_compaction_group(
+        if !Self::check_is_low_write_throughput_compaction_group(
             table_write_throughput_statistic_manager,
             group,
-            &self.env.opts,
+            opts,
         ) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge high throughput group {} next_group {}",
@@ -925,7 +1059,7 @@ impl HummockManager {
         }
 
         let size_limit = (group.compaction_group_config.max_estimated_group_size() as f64
-            * self.env.opts.split_group_size_ratio) as u64;
+            * opts.split_group_size_ratio) as u64;
 
         if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
@@ -938,17 +1072,17 @@ impl HummockManager {
             )));
         }
 
-        if check_is_creating_compaction_group(next_group, created_tables) {
+        if Self::check_is_creating_compaction_group(next_group, created_tables) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge creating group {} next group {}",
                 group.group_id, next_group.group_id
             )));
         }
 
-        if !check_is_low_write_throughput_compaction_group(
+        if !Self::check_is_low_write_throughput_compaction_group(
             table_write_throughput_statistic_manager,
             next_group,
-            &self.env.opts,
+            opts,
         ) {
             return Err(Error::CompactionGroup(format!(
                 "Not Merge high throughput group {} next group {}",
@@ -958,7 +1092,7 @@ impl HummockManager {
 
         {
             // Avoid merge when the group is in emergency state
-            let versioning_guard = self.versioning.read().await;
+            let versioning_guard = versioning.read().await;
             let levels = &versioning_guard.current_version.levels;
             if !levels.contains_key(&group.group_id) {
                 return Err(Error::CompactionGroup(format!(
@@ -974,140 +1108,91 @@ impl HummockManager {
                 )));
             }
 
-            if let EmergencyState::Emergency = check_emergency_state(
-                versioning_guard
-                    .current_version
-                    .get_compaction_group_levels(group.group_id),
+            let group_levels = versioning_guard
+                .current_version
+                .get_compaction_group_levels(group.group_id);
+
+            let next_group_levels = versioning_guard
+                .current_version
+                .get_compaction_group_levels(next_group.group_id);
+
+            let group_state = GroupStateValidator::group_state(
+                group_levels,
                 group.compaction_group_config.compaction_config().deref(),
-            ) {
+            );
+
+            if group_state.is_write_stop() || group_state.is_emergency() {
                 return Err(Error::CompactionGroup(format!(
                     "Not Merge write limit group {} next group {}",
                     group.group_id, next_group.group_id
                 )));
             }
 
-            if let EmergencyState::Emergency = check_emergency_state(
-                versioning_guard
-                    .current_version
-                    .get_compaction_group_levels(next_group.group_id),
+            let next_group_state = GroupStateValidator::group_state(
+                next_group_levels,
                 next_group
                     .compaction_group_config
                     .compaction_config()
                     .deref(),
-            ) {
+            );
+
+            if next_group_state.is_write_stop() || next_group_state.is_emergency() {
                 return Err(Error::CompactionGroup(format!(
                     "Not Merge write limit next group {} group {}",
                     next_group.group_id, group.group_id
                 )));
             }
-        }
 
-        match self
-            .merge_compaction_group(group.group_id, next_group.group_id)
-            .await
-        {
-            Ok(()) => {
-                tracing::info!(
-                    "merge group-{} to group-{}",
-                    next_group.group_id,
-                    group.group_id,
-                );
-
-                self.metrics
-                    .merge_compaction_group_count
-                    .with_label_values(&[&group.group_id.to_string()])
-                    .inc();
+            // check whether the group is in the write stop state after merge
+            let l0_sub_level_count_after_merge =
+                group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
+            if GroupStateValidator::write_stop_l0_file_count(
+                l0_sub_level_count_after_merge,
+                group.compaction_group_config.compaction_config().deref(),
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge write limit group {} next group {}, will trigger write stop after merge",
+                    group.group_id, next_group.group_id
+                )));
             }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to merge group-{} group-{}",
-                    next_group.group_id,
-                    group.group_id,
-                )
+
+            let l0_file_count_after_merge =
+                group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
+            if GroupStateValidator::write_stop_l0_file_count(
+                l0_file_count_after_merge,
+                group.compaction_group_config.compaction_config().deref(),
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge write limit next group {} group {}, will trigger write stop after merge",
+                    next_group.group_id, group.group_id
+                )));
+            }
+
+            let l0_size_after_merge =
+                group_levels.l0.total_file_size + next_group_levels.l0.total_file_size;
+
+            if GroupStateValidator::write_stop_l0_size(
+                l0_size_after_merge,
+                group.compaction_group_config.compaction_config().deref(),
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge write limit next group {} group {}, will trigger write stop after merge",
+                    next_group.group_id, group.group_id
+                )));
+            }
+
+            // check whether the group is in the emergency state after merge
+            if GroupStateValidator::emergency_l0_file_count(
+                l0_sub_level_count_after_merge,
+                group.compaction_group_config.compaction_config().deref(),
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Not Merge emergency group {} next group {}, will trigger emergency after merge",
+                    group.group_id, next_group.group_id
+                )));
             }
         }
 
         Ok(())
     }
-}
-
-/// Check if the table is high write throughput with the given threshold and ratio.
-pub fn is_table_high_write_throughput(
-    table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
-    threshold: u64,
-    high_write_throughput_ratio: f64,
-) -> bool {
-    let mut sample_size = 0;
-    let mut high_write_throughput_count = 0;
-    for statistic in table_throughput {
-        sample_size += 1;
-        if statistic.throughput > threshold {
-            high_write_throughput_count += 1;
-        }
-    }
-
-    high_write_throughput_count as f64 > sample_size as f64 * high_write_throughput_ratio
-}
-
-pub fn is_table_low_write_throughput(
-    table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
-    threshold: u64,
-    low_write_throughput_ratio: f64,
-) -> bool {
-    let mut sample_size = 0;
-    let mut low_write_throughput_count = 0;
-    for statistic in table_throughput {
-        sample_size += 1;
-        if statistic.throughput <= threshold {
-            low_write_throughput_count += 1;
-        }
-    }
-
-    low_write_throughput_count as f64 > sample_size as f64 * low_write_throughput_ratio
-}
-
-fn check_is_low_write_throughput_compaction_group(
-    table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
-    group: &CompactionGroupStatistic,
-    opts: &Arc<MetaOpts>,
-) -> bool {
-    let mut table_with_statistic = Vec::with_capacity(group.table_statistic.len());
-    for table_id in group.table_statistic.keys() {
-        let mut table_throughput = table_write_throughput_statistic_manager
-            .get_table_throughput_descending(
-                *table_id,
-                opts.table_stat_throuput_window_seconds_for_merge as i64,
-            )
-            .peekable();
-        if table_throughput.peek().is_none() {
-            continue;
-        }
-
-        table_with_statistic.push(table_throughput);
-    }
-
-    // if all tables in the group do not have enough statistics, return true
-    if table_with_statistic.is_empty() {
-        return true;
-    }
-
-    // check if all tables in the group are low write throughput with enough statistics
-    table_with_statistic.into_iter().all(|table_throughput| {
-        is_table_low_write_throughput(
-            table_throughput,
-            opts.table_low_write_throughput_threshold,
-            opts.table_stat_low_write_throughput_ratio_for_merge,
-        )
-    })
-}
-
-fn check_is_creating_compaction_group(
-    group: &CompactionGroupStatistic,
-    created_tables: &HashSet<u32>,
-) -> bool {
-    group
-        .table_statistic
-        .keys()
-        .any(|table_id| !created_tables.contains(table_id))
 }
