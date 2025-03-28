@@ -472,7 +472,7 @@ dependencies = [
  "arrow-schema 52.2.0",
  "arrow-select 52.2.0",
  "atoi",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "comfy-table",
  "half 2.3.1",
@@ -493,7 +493,7 @@ dependencies = [
  "arrow-schema 53.2.0",
  "arrow-select 53.2.0",
  "atoi",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "half 2.3.1",
  "lexical-core 1.0.2",
@@ -513,7 +513,7 @@ dependencies = [
  "arrow-schema 54.2.1",
  "arrow-select 54.2.1",
  "atoi",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "half 2.3.1",
  "lexical-core 1.0.2",
@@ -587,7 +587,7 @@ dependencies = [
  "arrow-cast 54.2.1",
  "arrow-ipc 54.2.1",
  "arrow-schema 54.2.1",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "futures",
  "prost 0.13.4",
@@ -916,7 +916,7 @@ dependencies = [
  "arrow-ipc 54.2.1",
  "arrow-schema 54.2.1",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "genawaiter2",
  "itertools 0.14.0",
  "tempfile",
@@ -1047,7 +1047,7 @@ version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e23419d455dc57d3ae60a2f4278cf561fc74fe866e548e14d2b0ad3e1b8ca0b2"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "futures",
  "memchr",
@@ -1340,7 +1340,7 @@ dependencies = [
  "aws-sdk-sts",
  "aws-sigv4",
  "aws-types",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "futures",
  "thiserror 1.0.63",
@@ -1944,9 +1944,9 @@ checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "base64"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64-simd"
@@ -1964,7 +1964,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38e2b6c78c06f7288d5e3c3d683bde35a79531127c83b087e5d0d77c974b4b28"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
 ]
 
 [[package]]
@@ -2259,17 +2259,19 @@ dependencies = [
 
 [[package]]
 name = "bson"
-version = "2.11.0"
-source = "git+https://github.com/risingwavelabs/bson-rust?rev=e5175ec#e5175ecfe3bebaaf58df543a1ae2bf868e476052"
+version = "2.14.0"
+source = "git+https://github.com/risingwavelabs/bson-rust?tag=v2.14.0-json-no-preserve_order#a9ef07735285ca1989409db99678e94983bee5d1"
 dependencies = [
  "ahash 0.8.11",
- "base64 0.13.1",
+ "base64 0.22.1",
  "bitvec",
+ "getrandom 0.2.11",
+ "getrandom 0.3.1",
  "hex",
  "indexmap 2.8.0",
  "js-sys",
  "once_cell",
- "rand 0.8.5",
+ "rand 0.9.0",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -3643,7 +3645,7 @@ checksum = "a8e481cf34d2a444bd8fa09b65945f0ce83dc92df8665b761505b3d9f351bebb"
 dependencies = [
  "arrow 52.2.0",
  "arrow-buffer 52.2.0",
- "base64 0.22.0",
+ "base64 0.22.1",
  "blake2",
  "blake3",
  "chrono",
@@ -3735,7 +3737,7 @@ dependencies = [
  "arrow-ord 52.2.0",
  "arrow-schema 52.2.0",
  "arrow-string 52.2.0",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "datafusion-common",
  "datafusion-execution",
@@ -4432,7 +4434,7 @@ version = "8.17.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52be486463ef0b89e45191803db146387d5f594c26a0c8790807bb3e988ec5f6"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "dyn-clone",
  "flate2",
@@ -8208,7 +8210,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6da452820c715ce78221e8202ccc599b4a52f3e1eb3eedb487b680c81a8e3f3"
 dependencies = [
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures",
@@ -8253,7 +8255,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "backon 0.4.4",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "crc32c",
@@ -8284,7 +8286,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "backon 1.2.0",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "crc32c",
@@ -8342,7 +8344,7 @@ version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a62b025c3503d3d53eaba3b6f14adb955af9f69fc71141b4d030a4e5331f5d42"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "dyn-clone",
  "lazy_static",
@@ -8712,7 +8714,7 @@ dependencies = [
  "arrow-ipc 52.2.0",
  "arrow-schema 52.2.0",
  "arrow-select 52.2.0",
- "base64 0.22.0",
+ "base64 0.22.1",
  "brotli 6.0.0",
  "bytes",
  "chrono",
@@ -8748,7 +8750,7 @@ dependencies = [
  "arrow-ipc 54.2.1",
  "arrow-schema 54.2.1",
  "arrow-select 54.2.1",
- "base64 0.22.0",
+ "base64 0.22.1",
  "brotli 7.0.0",
  "bytes",
  "chrono",
@@ -9654,7 +9656,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55a6a9143ae25c25fa7b6a48d6cc08b10785372060009c25140a4e7c340e95af"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "logos",
  "miette",
  "once_cell",
@@ -10216,7 +10218,7 @@ checksum = "eb0075a66c8bfbf4cc8b70dca166e722e1f55a3ea9250ecbb85f4d92a5f64149"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "form_urlencoded",
  "getrandom 0.2.11",
@@ -10288,7 +10290,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
 dependencies = [
  "async-compression",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "encoding_rs",
  "futures-channel",
@@ -11019,7 +11021,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "aws-types",
- "base64 0.22.0",
+ "base64 0.22.1",
  "byteorder",
  "bytes",
  "cfg-or-panic",
@@ -11368,7 +11370,7 @@ dependencies = [
  "auto_enums",
  "auto_impl",
  "axum",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bk-tree",
  "bytes",
  "chrono",
@@ -13233,7 +13235,7 @@ version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ad483d2ab0149d5a5ebcd9972a3852711e0153d863bf5a5d0391d28883c4a20"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -13849,7 +13851,7 @@ version = "0.8.2"
 source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bigdecimal 0.4.5",
  "bitflags 2.9.0",
  "byteorder",
@@ -13895,7 +13897,7 @@ version = "0.8.2"
 source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bigdecimal 0.4.5",
  "bitflags 2.9.0",
  "byteorder",
@@ -14738,7 +14740,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f591660438b3038dd04d16c938271c79e7e06260ad2ea2885a4861bfb238605d"
 dependencies = [
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "futures-core",
  "futures-sink",
@@ -14818,7 +14820,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum",
- "base64 0.22.0",
+ "base64 0.22.1",
  "bytes",
  "flate2",
  "h2 0.4.7",
@@ -15385,8 +15387,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "458f7a779bf54acc9f347480ac654f68407d3aab21269a6e3c9f922acd9e2da9"
 dependencies = [
  "getrandom 0.3.1",
+ "js-sys",
  "rand 0.9.0",
  "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
