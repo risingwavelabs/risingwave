@@ -96,11 +96,7 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-# foyer = { version = "0.15.2", features = ["tracing", "nightly"] }
-foyer = { git = "https://github.com/foyer-rs/foyer", features = [
-    "tracing",
-    "nightly",
-], rev = "04c59acbe846dc3e49b6e49eddcb81707c4d0e78" }
+foyer = { version = "0.15.3", features = ["tracing", "nightly"] }
 mixtrics = { version = "0.0.4", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
