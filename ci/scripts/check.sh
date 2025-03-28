@@ -30,6 +30,7 @@ buf lint
 cd ..
 
 echo "--- Rust cargo-sort check"
+cargo install --git https://github.com/risingwavelabs/cargo-sort --rev e473cff
 cargo sort --check --workspace --grouped
 
 # Disable hakari until we make sure it's useful
@@ -73,4 +74,5 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Check unused dependencies"
+cargo binstall -y cargo-machete
 cargo machete

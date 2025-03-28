@@ -16,8 +16,8 @@ easy-ext = { workspace = true }
 futures = { workspace = true, features = ["alloc"] }
 http = { workspace = true }
 http-02 = { workspace = true }
-hyper = { version = "1" }
-hyper-014 = { package = "hyper", version = "0.14", features = ["client"] }
+hyper = { workspace = true }
+hyper-014 = { workspace = true }
 hyper-util = { workspace = true, features = ["client-legacy"] }
 hytra = { workspace = true }
 itertools = { workspace = true }

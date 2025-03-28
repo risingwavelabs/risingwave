@@ -236,9 +236,10 @@ hmac = "0.12"
 home = "0.5"
 hostname = "0.4"
 http = "1"
-http-02 = "0.2"
+http-02 = { package = "http", version = "0.2" }
 humantime = "2.2"
-hyper-014 = "0.14"
+hyper = "1"
+hyper-014 = { package = "hyper", version = "0.14", features = ["client"] }
 hyper-rustls = "0.24.2"
 hyper-util = "0.1"
 hytra = "0.1"
