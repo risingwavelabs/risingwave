@@ -201,7 +201,7 @@ impl KinesisSplitReader {
                 Err(SdkError::ServiceError(e))
                     if e.err().is_provisioned_throughput_exceeded_exception() =>
                 {
-                    tracing::warn!(
+                    tracing::debug!(
                         "stream {:?} shard {:?} throughput exceeded, retry",
                         self.stream_name,
                         self.shard_id
