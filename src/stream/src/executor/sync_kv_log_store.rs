@@ -729,15 +729,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 &mut write_future_state
                             {
                                 tracing::trace!("resuming paused future");
-                                if let Some(sleep_future) = sleep_future {
-                                    let deadline = sleep_future.deadline();
-                                    let now = Instant::now();
-                                    if deadline < now {
-                                        tracing::warn!(deadline = ?deadline, now = ?now, "sleep deadline is in the past, should have polled write future");
-                                    } else {
-                                        tracing::trace!(deadline = ?deadline, now = ?now, "sleep deadline is after now");
-                                    }
-                                }
                                 assert!(buffer.current_size < self.max_buffer_size);
                                 *sleep_future = None;
                             }
