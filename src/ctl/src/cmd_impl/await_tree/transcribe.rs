@@ -12,11 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::common::WorkerType;
-use risingwave_pb::monitor_service::StackTraceRequest;
-use risingwave_rpc_client::ComputeClientPool;
-
-use crate::CtlContext;
 use crate::cmd_impl::await_tree::tree::TreeView;
 use crate::cmd_impl::await_tree::utils::extract_actor_traces;
 
