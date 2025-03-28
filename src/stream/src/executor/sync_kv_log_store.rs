@@ -428,11 +428,10 @@ impl<S: LocalStateStore> WriteFuture<S> {
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>,
     ) -> Self {
-        let instant = Instant::now() + duration;
-        tracing::trace!(?instant, ?duration, "write_future_pause");
+        tracing::trace!(now = ?Instant::now(), ?duration, "write_future_pause");
         Self::Paused {
             start_instant: Instant::now(),
-            sleep_future: Some(Box::pin(sleep_until(instant))),
+            sleep_future: Some(Box::pin(sleep_until(Instant::now() + duration))),
             message,
             stream,
             write_state,
