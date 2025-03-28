@@ -30,7 +30,6 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
     ROW_ID_COLUMN_NAME, TableId, debug_assert_column_ids_distinct,
 };
-use risingwave_common::hash::Buffer;
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
@@ -322,7 +321,7 @@ pub(crate) fn bind_all_columns(
                     .row_options
                     .iter()
                     .find(|&s| s.to_string() == CDC_MONGODB_STRONG_SCHEMA_KEY)
-                    .is_some_and(|opt| opt.value.to_string().to_ascii_lowercase() == "true");
+                    .is_some_and(|opt| opt.value.to_string().eq_ignore_ascii_case("true"));
 
                 // strong schema requires a '_id' column at the first position with a specific type
                 if strong_schema {
