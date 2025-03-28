@@ -96,7 +96,7 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-foyer = { version = "0.15.2", features = ["tracing", "nightly"] }
+foyer = { version = "0.15.3", features = ["tracing", "nightly"] }
 mixtrics = { version = "0.0.4", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
@@ -143,7 +143,11 @@ hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.3", features = [
     "cmake-build",
 ] }
-hashbrown = { version = "0.15", features = ["default-hasher", "inline-more", "nightly"] }
+hashbrown = { version = "0.15", features = [
+    "default-hasher",
+    "inline-more",
+    "nightly",
+] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
