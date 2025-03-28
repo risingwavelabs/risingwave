@@ -5020,7 +5020,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.15.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994#00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994"
+source = "git+https://github.com/foyer-rs/foyer?rev=04c59acbe846dc3e49b6e49eddcb81707c4d0e78#04c59acbe846dc3e49b6e49eddcb81707c4d0e78"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5040,7 +5040,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.15.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994#00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994"
+source = "git+https://github.com/foyer-rs/foyer?rev=04c59acbe846dc3e49b6e49eddcb81707c4d0e78#04c59acbe846dc3e49b6e49eddcb81707c4d0e78"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
@@ -5067,7 +5067,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.15.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994#00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994"
+source = "git+https://github.com/foyer-rs/foyer?rev=04c59acbe846dc3e49b6e49eddcb81707c4d0e78#04c59acbe846dc3e49b6e49eddcb81707c4d0e78"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -5092,7 +5092,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.15.2"
-source = "git+https://github.com/foyer-rs/foyer?rev=00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994#00c8fdfcd0d8dc916ccc45e7ebb0ca45b8e21994"
+source = "git+https://github.com/foyer-rs/foyer?rev=04c59acbe846dc3e49b6e49eddcb81707c4d0e78#04c59acbe846dc3e49b6e49eddcb81707c4d0e78"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
