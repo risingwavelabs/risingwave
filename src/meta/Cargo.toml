@@ -7,6 +7,10 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+test = []
+failpoints = ["fail/failpoints"]
+
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
@@ -75,16 +79,6 @@ tower = { workspace = true, features = ["util", "load-shed"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
-[target.'cfg(not(madsim))'.dependencies]
-axum = { workspace = true }
-tower-http = { version = "0.6", features = [
-    "add-extension",
-    "cors",
-    "fs",
-    "compression-gzip",
-] }
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 assert_matches = { workspace = true }
 expect-test = { workspace = true }
@@ -94,9 +88,15 @@ risingwave_test_runner = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-[features]
-test = []
-failpoints = ["fail/failpoints"]
+[target.'cfg(not(madsim))'.dependencies]
+axum = { workspace = true }
+tower-http = { version = "0.6", features = [
+    "add-extension",
+    "cors",
+    "fs",
+    "compression-gzip",
+] }
+workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true

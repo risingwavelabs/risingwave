@@ -35,10 +35,10 @@ tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
-
-[dev-dependencies]
 
 [lints]
 workspace = true

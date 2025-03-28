@@ -70,9 +70,6 @@ tonic = { version = "0.12", optional = true }
 tracing = { workspace = true }
 zstd = { workspace = true, optional = true }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 criterion = { workspace = true }
 expect-test = { workspace = true }
@@ -80,6 +77,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",
 ] }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[bench]]
 name = "expr"

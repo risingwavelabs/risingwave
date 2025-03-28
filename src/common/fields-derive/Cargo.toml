@@ -7,9 +7,6 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[lib]
-proc-macro = true
-
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
@@ -19,3 +16,6 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 expect-test = { workspace = true }
 indoc = { workspace = true }
 prettyplease = { workspace = true, features = ["verbatim"] }
+
+[lib]
+proc-macro = true

@@ -20,15 +20,15 @@ thiserror-ext = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 
-[dev-dependencies]
-tokio = { version = "1", features = ["full"] }
-tracing-subscriber = { workspace = true }
-
 [build-dependencies]
 anyhow = { workspace = true }
 cargo-emit = { workspace = true }
 dircpy = { workspace = true }
 npm_rs = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

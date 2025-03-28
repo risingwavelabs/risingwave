@@ -7,6 +7,13 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+# rocksdb-local = ["rocksdb"]
+# tikv = ["tikv-client"]
+test = ["risingwave_hummock_sdk/test"]
+failpoints = ["fail/failpoints"]
+hm-trace = []
+
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
@@ -70,19 +77,6 @@ xorf = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh32", "xxh64"] }
 zstd = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.17", default-features = false }
-libc = "0.2"
-nix = { version = "0.29", features = ["fs", "mman"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.148"
-mach2 = "0.4"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
@@ -91,15 +85,21 @@ risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = { version = "0.17", default-features = false }
+libc = "0.2"
+nix = { version = "0.29", features = ["fs", "mman"] }
+
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 fiemap = "0.1.1"
 
-[features]
-# rocksdb-local = ["rocksdb"]
-# tikv = ["tikv-client"]
-test = ["risingwave_hummock_sdk/test"]
-failpoints = ["fail/failpoints"]
-hm-trace = []
+[target.'cfg(target_os = "macos")'.dependencies]
+darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
+libc = "0.2.148"
+mach2 = "0.4"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [[bench]]
 name = "bench_block_iter"

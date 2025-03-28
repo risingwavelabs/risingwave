@@ -148,9 +148,6 @@ uuid = { workspace = true, features = ["v4", "fast-rng"] }
 with_options = { workspace = true }
 yup-oauth2 = { workspace = true }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 assert_matches = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
@@ -169,6 +166,9 @@ tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-test = { workspace = true }
 walkdir = { workspace = true }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [[bench]]
 name = "debezium_json_parser"

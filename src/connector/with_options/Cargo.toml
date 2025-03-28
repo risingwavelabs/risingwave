@@ -12,10 +12,10 @@ repository = { workspace = true }
 quote = { workspace = true }
 syn = "2"
 
+[dev-dependencies]
+
 [lib]
 proc-macro = true
-
-[dev-dependencies]
 
 [lints]
 workspace = true

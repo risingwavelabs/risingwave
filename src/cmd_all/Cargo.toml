@@ -7,6 +7,12 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
+
+[package.metadata.cargo-udeps.ignore]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
+
 [features]
 default = ["rw-static-link"]
 rw-static-link = ["workspace-config/rw-static-link"]
@@ -18,12 +24,6 @@ wasm-udf = ["risingwave_expr_impl/wasm-udf"]
 js-udf = ["risingwave_expr_impl/js-udf"]
 python-udf = ["risingwave_expr_impl/python-udf"]
 fips = ["workspace-config/fips"]
-
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
-
-[package.metadata.cargo-udeps.ignore]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
 
 [dependencies]
 clap = { workspace = true }
@@ -59,12 +59,12 @@ tracing = { workspace = true }
 workspace-config = { workspace = true }
 workspace-hack = { workspace = true }
 
-[dev-dependencies]
-expect-test = { workspace = true }
-
 [build-dependencies]
 thiserror-ext = { workspace = true }
 vergen = { workspace = true, features = ["build", "git", "gitcl"] }
+
+[dev-dependencies]
+expect-test = { workspace = true }
 
 [[bin]]
 name = "risingwave"

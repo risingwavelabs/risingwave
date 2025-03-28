@@ -114,6 +114,16 @@ twox-hash = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+[dev-dependencies]
+coarsetime = { workspace = true }
+criterion = { workspace = true }
+expect-test = { workspace = true }
+more-asserts = { workspace = true }
+pretty_assertions = { workspace = true }
+rand = { workspace = true }
+rusty-fork = { workspace = true }
+tempfile = { workspace = true }
+
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 http-body = "0.4.5"
@@ -128,16 +138,6 @@ libc = "0.2"
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2"
 mach2 = "0.4"
-
-[dev-dependencies]
-coarsetime = { workspace = true }
-criterion = { workspace = true }
-expect-test = { workspace = true }
-more-asserts = { workspace = true }
-pretty_assertions = { workspace = true }
-rand = { workspace = true }
-rusty-fork = { workspace = true }
-tempfile = { workspace = true }
 
 [[bench]]
 name = "bench_encoding"

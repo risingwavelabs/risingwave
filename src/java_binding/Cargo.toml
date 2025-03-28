@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = { workspace = true }
 bytes = { workspace = true }
 cfg-or-panic = { workspace = true }
-foyer ={ workspace = true }
+foyer = { workspace = true }
 futures = { workspace = true, features = ["alloc"] }
 jni = { workspace = true }
 prost = { workspace = true }

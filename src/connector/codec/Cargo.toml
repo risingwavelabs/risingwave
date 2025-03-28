@@ -32,14 +32,14 @@ time = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 
+[build-dependencies]
+prost-build = { workspace = true }
+
 [dev-dependencies]
 expect-test = { workspace = true }
 fs-err = { workspace = true }
 hex = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
-
-[build-dependencies]
-prost-build = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

@@ -25,13 +25,13 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tracing = { workspace = true }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 assert_matches = { workspace = true }
 paste = { workspace = true }
 tempfile = { workspace = true }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true

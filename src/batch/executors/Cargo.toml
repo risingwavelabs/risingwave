@@ -49,9 +49,6 @@ tokio-postgres = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = { workspace = true }
@@ -60,6 +57,9 @@ risingwave_hummock_sdk = { workspace = true }
 tempfile = { workspace = true }
 tikv-jemallocator = { workspace = true }
 tokio-stream = { workspace = true }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[bench]]
 name = "filter"

@@ -6,6 +6,11 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+
+[features]
+failpoints = ["risingwave_storage/failpoints"]
+sync_point = ["sync-point/sync_point", "serial_test"]
+test = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -31,9 +36,6 @@ risingwave_storage = { workspace = true, features = ["test"] }
 serial_test = { workspace = true, optional = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
 expect-test = { workspace = true }
@@ -44,10 +46,8 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 sync-point = { workspace = true }
 
-[features]
-failpoints = ["risingwave_storage/failpoints"]
-sync_point = ["sync-point/sync_point", "serial_test"]
-test = []
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[bench]]
 name = "bench_hummock_iter"

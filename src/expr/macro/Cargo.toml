@@ -2,16 +2,16 @@
 name = "risingwave_expr_macro"
 version = "0.1.0"
 edition = "2021"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[lib]
-proc-macro = true
 
 [dependencies]
 itertools = { workspace = true }
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { version = "2", features = ["full", "extra-traits"] }
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
 
 [lints]
 workspace = true
