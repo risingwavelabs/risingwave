@@ -25,7 +25,7 @@ pub type Count = Arc<AtomicU64>;
 
 pub struct GuardedCount {
     id: u64,
-    count: Count,
+    pub count: Count,
     parent: Weak<Mutex<InnerCountMap>>,
 }
 
@@ -52,7 +52,7 @@ impl Drop for GuardedCount {
 }
 
 pub struct InnerCountMap {
-    inner: HashMap<u64, GuardedCount>,
+    inner: HashMap<u64, Count>,
 }
 
 #[derive(Clone)]
@@ -66,12 +66,12 @@ impl CountMap {
         CountMap(inner)
     }
 
-    pub fn new_count(&self, id: u64) -> Count {
+    pub fn new_count(&self, id: u64) -> GuardedCount {
         let inner = &self.0;
         let (count, guarded_count) = GuardedCount::new(id, inner);
         let mut map = inner.lock();
-        map.inner.insert(id, guarded_count);
-        count
+        map.inner.insert(id, count);
+        guarded_count
     }
 
     pub fn collect(&self, ids: &[u64]) -> HashMap<u64, u64> {
@@ -80,8 +80,41 @@ impl CountMap {
             .filter_map(|id| {
                 map.inner
                     .get(id)
-                    .map(|v| (*id, v.count.load(std::sync::atomic::Ordering::Relaxed)))
+                    .map(|v| (*id, v.load(std::sync::atomic::Ordering::Relaxed)))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_count_map() {
+        let count_map = CountMap::new();
+        let count1 = count_map.new_count(1);
+        let count2 = count_map.new_count(2);
+        count1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        count2.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+        let counts = count_map.collect(&[1, 2]);
+        assert_eq!(counts[&1], 1);
+        assert_eq!(counts[&2], 2);
+    }
+
+    #[test]
+    fn test_count_map_drop() {
+        let count_map = CountMap::new();
+        let count1 = count_map.new_count(1);
+        let count2 = count_map.new_count(2);
+        count1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        count2.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+        let counts = count_map.collect(&[1, 2]);
+        assert_eq!(counts[&1], 1);
+        assert_eq!(counts[&2], 2);
+        drop(count1);
+        let counts = count_map.collect(&[1, 2]);
+        assert_eq!(counts[&1], 0);
+        assert_eq!(counts[&2], 2);
     }
 }

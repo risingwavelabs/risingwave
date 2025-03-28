@@ -14,7 +14,7 @@
 
 use std::sync::atomic::Ordering;
 
-use risingwave_common::monitor::in_mem::Count;
+use risingwave_common::monitor::in_mem::GuardedCount;
 
 use crate::executor::monitor::StreamingMetrics;
 
@@ -45,8 +45,8 @@ impl ProfileMetricsImpl {
 }
 
 pub struct ProfileMetrics {
-    pub stream_node_output_row_count: Count,
-    pub stream_node_output_blocking_duration_ms: Count,
+    pub stream_node_output_row_count: GuardedCount,
+    pub stream_node_output_blocking_duration_ms: GuardedCount,
 }
 
 pub trait ProfileMetricsExt {
@@ -57,11 +57,13 @@ pub trait ProfileMetricsExt {
 impl ProfileMetricsExt for ProfileMetrics {
     fn inc_row_count(&self, count: u64) {
         self.stream_node_output_row_count
+            .count
             .fetch_add(count, Ordering::Relaxed);
     }
 
     fn inc_blocking_duration_ms(&self, duration_ms: u64) {
         self.stream_node_output_blocking_duration_ms
+            .count
             .fetch_add(duration_ms, Ordering::Relaxed);
     }
 }
