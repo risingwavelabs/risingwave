@@ -310,6 +310,7 @@ mod graph {
     /// This is an internal struct used ONLY for explain analyze stream job.
     #[derive(Debug)]
     pub(super) struct StreamNode {
+        operator_id: OperatorId,
         fragment_id: u32,
         identity: String,
         actor_ids: Vec<u32>,
@@ -319,6 +320,7 @@ mod graph {
     impl StreamNode {
         fn new_for_dispatcher(fragment_id: u32) -> Self {
             StreamNode {
+                operator_id: 0,
                 fragment_id,
                 identity: "Dispatcher".to_owned(),
                 actor_ids: vec![],
@@ -376,6 +378,7 @@ mod graph {
                         .map(|input| unique_operator_id(fragment_id, input.operator_id))
                         .collect();
                     StreamNode {
+                        operator_id,
                         fragment_id,
                         identity,
                         actor_ids: vec![],
