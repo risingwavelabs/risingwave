@@ -118,7 +118,7 @@ pub mod metrics {
         // Write metrics
         pub storage_write_count: LabelGuardedIntCounter<4>,
         pub storage_write_size: LabelGuardedIntCounter<4>,
-        pub storage_pause_duration_ns: LabelGuardedIntCounter<4>,
+        pub pause_duration_ns: LabelGuardedIntCounter<4>,
 
         // Buffer metrics
         pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
@@ -258,7 +258,7 @@ pub mod metrics {
                 wait_next_poll_ns,
                 storage_write_size,
                 storage_write_count,
-                storage_pause_duration_ns,
+                pause_duration_ns: storage_pause_duration_ns,
                 buffer_unconsumed_item_count,
                 buffer_unconsumed_row_count,
                 buffer_unconsumed_epoch_count,
@@ -286,7 +286,7 @@ pub mod metrics {
                 wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_count: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-                storage_pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
+                pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
                 buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
                 buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
                 buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
@@ -447,7 +447,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
                     let now = tokio::time::Instant::now();
                     sleep_future.await;
                     metrics
-                        .storage_pause_duration_ns
+                        .pause_duration_ns
                         .inc_by(now.elapsed().as_nanos() as _);
                     tracing::trace!("resuming write future");
                 }
