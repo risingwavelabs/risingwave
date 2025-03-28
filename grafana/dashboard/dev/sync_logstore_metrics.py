@@ -99,7 +99,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Kv Log Store Buffer State (0-clean, 1-dirty)",
+                    "Kv Log Store Buffer State (clean <= 0, dirty > 0)",
                     "",
                     [
                         panels.target_hidden(
