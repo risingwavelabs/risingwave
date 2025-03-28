@@ -69,12 +69,10 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
-    /// Dump the await-tree of compute nodes and compactors
+    /// Commands for await-tree, such as dumping, analyzing and transcribing
+    #[clap(subcommand)]
     #[clap(visible_alias("trace"))]
-    AwaitTree,
-    /// Detect the bottleneck actors from the await-tree of compute nodes
-    #[clap(visible_alias("trace-analyze"))]
-    AwaitTreeAnalyze,
+    AwaitTree(AwaitTreeCommands),
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
@@ -467,6 +465,28 @@ enum MetaCommands {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+pub enum AwaitTreeCommands {
+    /// Dump Await Tree
+    Dump {
+        /// Dump format
+        #[clap(short, long = "format")]
+        format: Option<String>,
+    },
+    /// Analyze Await Tree
+    Analyze {
+        /// The path to the await tree file, if None, ctl will first pull one from the cluster
+        #[clap(long = "path")]
+        path: Option<String>,
+    },
+    /// Transcribe Await Tree From JSON to Text format
+    Transcribe {
+        /// The path to the await tree file to be transcribed
+        #[clap(long = "path")]
+        path: String,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
 enum ThrottleCommands {
     Source(ThrottleCommandArgs),
     Mv(ThrottleCommandArgs),
@@ -850,8 +870,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
             cmd_impl::meta::graph_check(endpoint).await?
         }
-        Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
-        Commands::AwaitTreeAnalyze => cmd_impl::await_tree::bottleneck_detect(context).await?,
+        Commands::AwaitTree(AwaitTreeCommands::Dump { format }) => {
+            cmd_impl::await_tree::dump(context, format).await?
+        }
+        Commands::AwaitTree(AwaitTreeCommands::Analyze { path }) => {
+            cmd_impl::await_tree::bottleneck_detect(context, path).await?
+        }
+        Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
+            cmd_impl::await_tree::transcribe(path).await?
+        }
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }

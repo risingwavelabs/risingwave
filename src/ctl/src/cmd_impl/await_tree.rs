@@ -14,7 +14,10 @@
 
 mod analyze;
 mod dump;
+mod transcribe;
 mod tree;
+mod utils;
 
 pub use analyze::*;
 pub use dump::*;
+pub use transcribe::*;
