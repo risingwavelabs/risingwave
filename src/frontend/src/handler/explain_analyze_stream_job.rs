@@ -215,18 +215,18 @@ mod metrics {
 
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
-    use crate::handler::explain_analyze_stream_job::graph::OperatorId;
+    use crate::handler::explain_analyze_stream_job::graph::ExecutorId;
 
     #[derive(Default)]
     pub(super) struct StreamNodeMetrics {
-        pub operator_id: OperatorId,
+        pub executor_id: ExecutorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
         pub total_output_pending_ms: u64,
     }
 
     pub(super) struct StreamNodeStats {
-        inner: HashMap<OperatorId, StreamNodeMetrics>,
+        inner: HashMap<ExecutorId, StreamNodeMetrics>,
     }
 
     impl StreamNodeStats {
@@ -236,28 +236,28 @@ mod metrics {
             }
         }
 
-        pub fn get(&self, operator_id: &OperatorId) -> Option<&StreamNodeMetrics> {
+        pub fn get(&self, operator_id: &ExecutorId) -> Option<&StreamNodeMetrics> {
             self.inner.get(operator_id)
         }
 
         /// Establish metrics baseline for profiling
         pub(super) fn start_record<'a>(
             &mut self,
-            operator_ids: impl Iterator<Item = &'a OperatorId>,
+            executor_ids: impl Iterator<Item = &'a ExecutorId>,
             metrics: &'a GetProfileStatsResponse,
         ) {
-            for operator_id in operator_ids {
-                let stats = self.inner.entry(*operator_id).or_default();
-                stats.operator_id = *operator_id;
+            for executor_id in executor_ids {
+                let stats = self.inner.entry(*executor_id).or_default();
+                stats.executor_id = *executor_id;
                 stats.epoch = 0;
                 stats.total_output_throughput += metrics
                     .stream_node_output_row_count
-                    .get(operator_id)
+                    .get(executor_id)
                     .cloned()
                     .unwrap_or(0);
                 stats.total_output_pending_ms += metrics
                     .stream_node_output_blocking_duration_ms
-                    .get(operator_id)
+                    .get(executor_id)
                     .cloned()
                     .unwrap_or(0);
             }
@@ -266,20 +266,20 @@ mod metrics {
         /// Compute the deltas for reporting
         pub(super) fn finish_record<'a>(
             &mut self,
-            operator_ids: impl Iterator<Item = &'a OperatorId>,
+            executor_ids: impl Iterator<Item = &'a ExecutorId>,
             metrics: &'a GetProfileStatsResponse,
         ) {
-            for operator_id in operator_ids {
-                if let Some(stats) = self.inner.get_mut(operator_id) {
+            for executor_id in executor_ids {
+                if let Some(stats) = self.inner.get_mut(executor_id) {
                     stats.total_output_throughput = metrics
                         .stream_node_output_row_count
-                        .get(operator_id)
+                        .get(executor_id)
                         .cloned()
                         .unwrap_or(0)
                         - stats.total_output_throughput;
                     stats.total_output_pending_ms = metrics
                         .stream_node_output_blocking_duration_ms
-                        .get(operator_id)
+                        .get(executor_id)
                         .cloned()
                         .unwrap_or(0)
                         - stats.total_output_pending_ms;
