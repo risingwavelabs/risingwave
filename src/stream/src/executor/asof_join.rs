@@ -1026,11 +1026,7 @@ mod tests {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new_for_test(schema, vec![1], "HashJoinExecutor".to_owned());
 
         let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::for_test(123),

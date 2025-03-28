@@ -718,11 +718,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new_for_test(schema, pk_indices, "SinkExecutor".to_owned());
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -851,11 +847,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![0, 1],
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new_for_test(schema, vec![0, 1], "SinkExecutor".to_owned());
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -957,11 +949,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new_for_test(schema, pk_indices, "SinkExecutor".to_owned());
 
         let sink = build_sink(sink_param.clone()).unwrap();
 

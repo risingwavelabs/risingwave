@@ -149,11 +149,7 @@ impl MockSource {
 
     pub fn into_executor(self, schema: Schema, pk_indices: Vec<usize>) -> Executor {
         Executor::new(
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "MockSource".to_owned(),
-            },
+            ExecutorInfo::new_for_test(schema, pk_indices, "MockSource".to_owned()),
             self.boxed(),
         )
     }
@@ -474,11 +470,11 @@ pub mod agg_executor {
         .await;
 
         let schema = generate_agg_schema(&input, &agg_calls, Some(&group_key_indices));
-        let info = ExecutorInfo {
+        let info = ExecutorInfo::new_for_test(
             schema,
             pk_indices,
-            identity: format!("HashAggExecutor {:X}", executor_id),
-        };
+            format!("HashAggExecutor {:X}", executor_id),
+        );
 
         let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
             version: PbAggNodeVersion::LATEST,
@@ -542,11 +538,11 @@ pub mod agg_executor {
         .await;
 
         let schema = generate_agg_schema(&input, &agg_calls, None);
-        let info = ExecutorInfo {
+        let info = ExecutorInfo::new_for_test(
             schema,
             pk_indices,
-            identity: format!("SimpleAggExecutor {:X}", executor_id),
-        };
+            format!("SimpleAggExecutor {:X}", executor_id),
+        );
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
             version: PbAggNodeVersion::LATEST,
@@ -743,11 +739,11 @@ pub mod hash_join_executor {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema: Schema { fields: schema },
-            pk_indices: vec![0, 1, 3, 4],
-            identity: "HashJoinExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new_for_test(
+            Schema { fields: schema },
+            vec![0, 1, 3, 4],
+            "HashJoinExecutor".to_owned(),
+        );
 
         // join-key is [0], primary-key is [1].
         let params_l = JoinParams::new(vec![0], vec![1]);
