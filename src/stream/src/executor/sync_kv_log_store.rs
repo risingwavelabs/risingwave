@@ -113,7 +113,7 @@ pub mod metrics {
         // state of the log store
         pub unclean_state: LabelGuardedIntCounter<5>,
         pub clean_state: LabelGuardedIntCounter<5>,
-        pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
+        pub wait_next_poll_ns: Option<LabelGuardedIntCounter<4>>, // Allow us to take it later.
 
         // Write metrics
         pub storage_write_count: LabelGuardedIntCounter<4>,
@@ -167,9 +167,11 @@ pub mod metrics {
                 &id_str,
                 name,
             ]);
-            let wait_next_poll_ns = metrics
-                .sync_kv_log_store_wait_next_poll_ns
-                .with_guarded_label_values(labels);
+            let wait_next_poll_ns = Some(
+                metrics
+                    .sync_kv_log_store_wait_next_poll_ns
+                    .with_guarded_label_values(labels),
+            );
 
             let storage_write_size = metrics
                 .sync_kv_log_store_storage_write_size
@@ -283,7 +285,7 @@ pub mod metrics {
             SyncedKvLogStoreMetrics {
                 unclean_state: LabelGuardedIntCounter::test_int_counter(),
                 clean_state: LabelGuardedIntCounter::test_int_counter(),
-                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
+                wait_next_poll_ns: Some(LabelGuardedIntCounter::test_int_counter()),
                 storage_write_count: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_size: LabelGuardedIntCounter::test_int_counter(),
                 pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
@@ -493,8 +495,23 @@ impl<S: LocalStateStore> WriteFuture<S> {
 
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
+    #[try_stream(ok= Message, error = StreamExecutorError)]
+    pub async fn execute_monitored(mut self) {
+        let wait_next_poll_ns = self
+            .metrics
+            .wait_next_poll_ns
+            .take()
+            .expect("always initialized");
+        #[for_await]
+        for message in self.execute_inner() {
+            let current_time = Instant::now();
+            yield message?;
+            wait_next_poll_ns.inc_by(current_time.elapsed().as_nanos() as _);
+        }
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    pub async fn execute_inner(self) {
+    async fn execute_inner(self) {
         let mut input = self.upstream.execute();
 
         // init first epoch + local state store
@@ -617,11 +634,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                 .as_update_vnode_bitmap(self.actor_context.id);
                                             let barrier_epoch = barrier.epoch;
 
-                                            let current_time = Instant::now();
                                             yield Message::Barrier(barrier);
-                                            self.metrics
-                                                .wait_next_poll_ns
-                                                .inc_by(current_time.elapsed().as_nanos() as _);
 
                                             write_state_post_write_barrier
                                                 .post_yield_barrier(update_vnode_bitmap.clone())
@@ -741,11 +754,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             .total_read_count
                             .inc_by(chunk.cardinality() as _);
 
-                        let current_time = Instant::now();
                         yield Message::Chunk(chunk);
-                        self.metrics
-                            .wait_next_poll_ns
-                            .inc_by(current_time.elapsed().as_nanos() as _);
                     }
                 }
             }
@@ -1093,7 +1102,7 @@ where
     S: StateStore,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        self.execute_monitored().boxed()
     }
 }
 
