@@ -452,11 +452,11 @@ impl CheckpointControl {
                 );
                 match join_handle.await {
                     Err(e) => {
-                        warn!(err = ?e.as_report(), "failed to join completing task");
+                        warn!(err = %e.as_report(), "failed to join completing task");
                         true
                     }
                     Ok(Err(e)) => {
-                        warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                        warn!(err = %e.as_report(), "failed to complete barrier during clear");
                         true
                     }
                     Ok(Ok(_)) => false,
@@ -466,11 +466,11 @@ impl CheckpointControl {
             CompletingCommand::CreatingStreamingJob { join_handle, .. } => {
                 match join_handle.await {
                     Err(e) => {
-                        warn!(err = ?e.as_report(), "failed to join completing task");
+                        warn!(err = %e.as_report(), "failed to join completing task");
                         true
                     }
                     Ok(Err(e)) => {
-                        warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                        warn!(err = %e.as_report(), "failed to complete barrier during clear");
                         true
                     }
                     Ok(Ok(_)) => false,
@@ -499,7 +499,7 @@ impl CheckpointControl {
                     error!(
                         prev_epoch,
                         curr_epoch,
-                        err = ?e.as_report(),
+                        err = %e.as_report(),
                         "failed to complete barrier during recovery"
                     );
                     break;
@@ -829,7 +829,7 @@ impl GlobalBarrierManager {
                                 }
                             }
                             Err(e) => {
-                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                                warn!(e = %e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
                             }
                         }
                     }
