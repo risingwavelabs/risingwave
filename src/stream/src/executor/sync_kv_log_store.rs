@@ -371,9 +371,9 @@ enum WriteFuture<S: LocalStateStore> {
     /// - After the pause duration.
     /// - After the read future consumes a chunk.
     Paused {
-        message: Message,
         start_instant: Instant,
         sleep_future: Option<Pin<Box<Sleep>>>,
+        barrier: Barrier,
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>, // Just used to hold the state
     },
@@ -438,7 +438,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
 
     fn paused(
         duration: Duration,
-        message: Message,
+        barrier: Barrier,
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>,
     ) -> Self {
@@ -446,7 +446,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         Self::Paused {
             start_instant: Instant::now(),
             sleep_future: Some(Box::pin(sleep_until(Instant::now() + duration))),
-            message,
+            barrier,
             stream,
             write_state,
         }
@@ -469,8 +469,8 @@ impl<S: LocalStateStore> WriteFuture<S> {
                         .inc_by(start_instant.elapsed().as_nanos() as _);
                     tracing::trace!("resuming write future");
                 }
-                must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { stream, write_state, message, .. } => {
-                    Ok((stream, write_state, WriteFutureEvent::UpstreamMessageReceived(message)))
+                must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { stream, write_state, barrier, .. } => {
+                    Ok((stream, write_state, WriteFutureEvent::UpstreamMessageReceived(Message::Barrier(barrier))))
                 })
             }
             WriteFuture::ReceiveFromUpstream { future, .. } => {
@@ -615,7 +615,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                         {
                                             write_future_state = WriteFuture::paused(
                                                 self.pause_duration_ms,
-                                                Message::Barrier(barrier),
+                                                barrier,
                                                 stream,
                                                 write_state,
                                             );
@@ -739,7 +739,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     Either::Right(result) => {
                         if !clean_state
                             && matches!(read_future_state, ReadFuture::Idle)
-                            && buffer.no_flushed_items()
                             && buffer.is_empty()
                         {
                             clean_state = true;
@@ -956,11 +955,6 @@ struct SyncedLogStoreBuffer {
 }
 
 impl SyncedLogStoreBuffer {
-    /// Returns true if there are flushed items in the buffer.
-    fn no_flushed_items(&self) -> bool {
-        self.flushed_count == 0
-    }
-
     fn is_empty(&self) -> bool {
         self.current_size == 0
     }
