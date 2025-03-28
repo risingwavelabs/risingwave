@@ -469,8 +469,8 @@ pub enum AwaitTreeCommands {
     /// Dump Await Tree
     Dump {
         /// Dump format
-        #[clap(short, long = "format")]
-        format: Option<String>,
+        #[clap(short, long = "actor-traces-format")]
+        actor_traces_format: Option<String>,
     },
     /// Analyze Await Tree
     Analyze {
@@ -870,9 +870,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
             cmd_impl::meta::graph_check(endpoint).await?
         }
-        Commands::AwaitTree(AwaitTreeCommands::Dump { format }) => {
-            cmd_impl::await_tree::dump(context, format).await?
-        }
+        Commands::AwaitTree(AwaitTreeCommands::Dump {
+            actor_traces_format,
+        }) => cmd_impl::await_tree::dump(context, actor_traces_format).await?,
         Commands::AwaitTree(AwaitTreeCommands::Analyze { path }) => {
             cmd_impl::await_tree::bottleneck_detect(context, path).await?
         }

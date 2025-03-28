@@ -20,7 +20,7 @@ use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
 
 use crate::CtlContext;
 
-pub async fn dump(context: &CtlContext, format: Option<String>) -> anyhow::Result<()> {
+pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> anyhow::Result<()> {
     let mut all = StackTraceResponse::default();
 
     let meta_client = context.meta_client().await?;
@@ -31,7 +31,7 @@ pub async fn dump(context: &CtlContext, format: Option<String>) -> anyhow::Resul
     let clients = ComputeClientPool::adhoc();
 
     let req = StackTraceRequest {
-        actor_traces_format: format,
+        actor_traces_format,
     };
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.

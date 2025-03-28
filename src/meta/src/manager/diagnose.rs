@@ -626,7 +626,9 @@ impl DiagnoseCommand {
         let compute_clients = ComputeClientPool::adhoc();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
-                && let Ok(result) = client.stack_trace(StackTraceRequest::default()).await
+                && let Ok(result) = client.stack_trace(StackTraceRequest {
+                    actor_traces_format: Some("json".to_owned()),
+                }).await
             {
                 all.merge_other(result);
             }

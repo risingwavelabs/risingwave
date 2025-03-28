@@ -125,9 +125,7 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
         .await?;
     let clients = ComputeClientPool::adhoc();
 
-    let req = StackTraceRequest {
-        actor_traces_format: Some("json".to_owned()),
-    };
+    let req = StackTraceRequest::default();
 
     let mut bottleneck_actors_found = false;
     for cn in compute_nodes {

@@ -86,11 +86,11 @@ impl MonitorService for MonitorServiceImpl {
                     (
                         k.0,
                         if req.actor_traces_format.is_some()
-                            && req.actor_traces_format.as_ref().unwrap() == "json"
+                            && req.actor_traces_format.as_ref().unwrap() == "text"
                         {
-                            serde_json::to_string(&v).unwrap()
-                        } else {
                             v.to_string()
+                        } else {
+                            serde_json::to_string(&v).unwrap()
                         },
                     )
                 })
