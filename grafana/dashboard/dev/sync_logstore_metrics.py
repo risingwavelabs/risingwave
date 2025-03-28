@@ -103,8 +103,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target_hidden(
-                            f"sum(rate({metric('sync_kv_log_store_state')}[$__rate_interval])) by (type, fragment_id, relation)",
-                            "{{type}} {{fragment_id}} {{relation}}",
+                            f"sum(rate({metric('sync_kv_log_store_state')}[$__rate_interval])) by (state, fragment_id, relation)",
+                            "{{state}} {{fragment_id}} {{relation}}",
                         ),
                         panels.target(
                             f"sum({metric('sync_kv_log_store_state', filter=clean_state)}) by (fragment_id, relation) - sum({metric('sync_kv_log_store_state', filter=dirty_state)}) by (fragment_id, relation)",
