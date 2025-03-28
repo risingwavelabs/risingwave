@@ -365,6 +365,7 @@ enum WriteFuture<S: LocalStateStore> {
     /// - After the read future consumes a chunk.
     Paused {
         message: Message,
+        start_instant: Instant,
         sleep_future: Option<Pin<Box<Sleep>>>,
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>, // Just used to hold the state
@@ -430,6 +431,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         let instant = Instant::now() + duration;
         tracing::trace!(?instant, ?duration, "write_future_pause");
         Self::Paused {
+            start_instant: Instant::now(),
             sleep_future: Some(Box::pin(sleep_until(instant))),
             message,
             stream,
@@ -442,13 +444,16 @@ impl<S: LocalStateStore> WriteFuture<S> {
         metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
-            WriteFuture::Paused { sleep_future, .. } => {
+            WriteFuture::Paused {
+                start_instant,
+                sleep_future,
+                ..
+            } => {
                 if let Some(sleep_future) = sleep_future {
-                    let now = tokio::time::Instant::now();
                     sleep_future.await;
                     metrics
                         .pause_duration_ns
-                        .inc_by(now.elapsed().as_nanos() as _);
+                        .inc_by(start_instant.elapsed().as_nanos() as _);
                     tracing::trace!("resuming write future");
                 }
                 must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { stream, write_state, message, .. } => {
