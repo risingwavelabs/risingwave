@@ -14,6 +14,7 @@
 
 use std::fmt::Write;
 
+use itertools::Itertools;
 use serde::Deserialize;
 
 /// Please refer to https://github.com/risingwavelabs/await-tree/blob/main/src/context.rs for the original definition.
@@ -86,16 +87,14 @@ impl std::fmt::Display for TreeView {
             )?;
 
             // Current span marker
-            if node.id == current_id {
+            if depth > 0 && node.id == current_id {
                 f.write_str("  <== current")?;
             }
 
             f.write_char('\n')?;
 
             // Format children recursively
-            let mut children = node.children.clone();
-            children.sort_by_key(|n| n.elapsed_ns); // mimic sort by start_time
-            for child in &children {
+            for child in node.children.iter().sorted_by_key(|n| n.elapsed_ns) {
                 fmt_node(f, child, depth + 1, current_id)?;
             }
 

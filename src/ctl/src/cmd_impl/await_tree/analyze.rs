@@ -128,16 +128,23 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
     let req = StackTraceRequest {
         actor_traces_format: Some("json".to_owned()),
     };
+
+    let mut bottleneck_actors_found = false;
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
         let response = client.stack_trace(req.clone()).await?;
         for (actor_id, trace) in response.actor_traces {
             let tree: TreeView = serde_json::from_str(&trace).unwrap();
             if tree.is_bottleneck() {
+                bottleneck_actors_found = true;
                 println!(">> Actor {}", actor_id);
                 println!("{}", tree);
             }
         }
+    }
+
+    if !bottleneck_actors_found {
+        println!("No bottleneck actors detected.");
     }
 
     Ok(())
@@ -146,13 +153,19 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
 async fn bottleneck_detect_from_file(path: String) -> anyhow::Result<()> {
     let actor_traces = extract_actor_traces(&path)
         .map_err(|e| anyhow::anyhow!("Failed to extract actor traces from file: {}", e))?;
+    let mut bottleneck_actors_found = false;
     for (actor_id, trace) in actor_traces {
         let tree: TreeView = serde_json::from_str(&trace)
             .map_err(|e| anyhow::anyhow!("Failed to parse actor trace JSON: {}", e))?;
         if tree.is_bottleneck() {
+            bottleneck_actors_found = true;
+
             println!(">> Actor {}", actor_id);
             println!("{}", tree);
         }
+    }
+    if !bottleneck_actors_found {
+        println!("No bottleneck actors detected.");
     }
     Ok(())
 }
