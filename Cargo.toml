@@ -381,7 +381,7 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 # patch diffs: https://github.com/madsim-rs/sqlx/pull/4
 sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 # patch to remove preserve_order from serde_json
-bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
+bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-json-no-preserve_order" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
