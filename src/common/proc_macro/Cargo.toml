@@ -15,11 +15,11 @@ proc-macro = true
 
 
 [dependencies]
-proc-macro-error = "1.0"
-quote = "1"
-proc-macro2 = { version = "1", default-features = false }
+proc-macro-error = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
 syn = "1"
-bae = "0.1.7"
+bae = { workspace = true }
 itertools = { workspace = true }
 
 [lints]

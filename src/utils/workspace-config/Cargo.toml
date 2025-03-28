@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # Ideally we should just skip checking workspace-config for cargo-machete,
 # but it's not supported yet. So we just manually ignore all dependencies.
@@ -31,9 +30,16 @@ rw-dynamic-link = ["dynamic-zstd-sys"]
 fips = ["aws-lc-rs"]
 
 [dependencies]
+
+# FIPS
+aws-lc-rs = { workspace = true, features = ["fips"], optional = true }
+
+# Dynamic linking
+dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, default-features = false, features = [
+    "pkg-config",
+] }
 # Disable verbose logs for release builds
-log = { version = "0.4", features = ["release_max_level_debug"] }
-tracing = { version = "0.1", features = ["release_max_level_debug"] }
+log = { workspace = true, features = ["release_max_level_debug"] }
 
 # Static linking
 static-libz-sys = { package = "libz-sys", version = "1", optional = true, features = [
@@ -45,18 +51,9 @@ static-lzma-sys = { package = "lzma-sys", version = "0.1", optional = true, feat
 static-sasl2-sys = { package = "sasl2-sys", version = "0.1", optional = true, features = [
     "gssapi-vendored",
 ] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
 vendored-openssl-sys = { package = "openssl-sys", version = "0.9.96", optional = true, features = [
     "vendored",
-] }
-
-# Dynamic linking
-dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, default-features = false, features = [
-    "pkg-config",
-] }
-
-# FIPS
-aws-lc-rs ={ version = "1.6", optional = true, default-features = false, features = [
-    "fips",
 ] }
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!

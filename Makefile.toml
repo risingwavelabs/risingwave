@@ -1112,10 +1112,10 @@ test $? -eq 0 || exit 1
 private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
-install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
-    "sort",
-    "--help",
-], install_command = "binstall" }
+install_script = """
+#!/usr/bin/env bash
+cargo install --git https://github.com/risingwavelabs/cargo-sort --rev e473cff
+"""
 script = """
 #!/usr/bin/env bash
 

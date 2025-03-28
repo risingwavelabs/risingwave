@@ -8,10 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
+anyhow = { workspace = true, features = ["backtrace"] }
 clap = { workspace = true }
-path-absolutize = "3.1"
-similar = "2"
+path-absolutize = { workspace = true }
+similar = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -22,8 +22,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "process",
     "io-util",
 ] }
-tracing = "0.1"
-tracing-subscriber = "0.3.17"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

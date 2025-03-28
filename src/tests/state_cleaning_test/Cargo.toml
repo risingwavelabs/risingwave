@@ -8,18 +8,18 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 clap = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-regex = "1"
+futures = { workspace = true, features = ["alloc"] }
+regex = { workspace = true }
 risingwave_rt = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_with = "3"
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
-tokio-postgres = "0.7"
+tokio-postgres = { workspace = true }
 tokio-stream = { workspace = true }
-toml = "0.8"
-tracing = "0.1"
+toml = { workspace = true }
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

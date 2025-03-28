@@ -8,15 +8,15 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 bincode = "1"
-easy-ext = "1"
-serde = "1"
-serde-error = "0.1"
-thiserror = "1"
+easy-ext = { workspace = true }
+serde = { workspace = true }
+serde-error = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tonic = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [lints]
 workspace = true

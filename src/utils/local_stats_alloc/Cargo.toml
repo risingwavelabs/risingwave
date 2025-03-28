@@ -7,12 +7,11 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 description = "Local allocator with statistics"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dev-dependencies]
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
-
-[dev-dependencies]
 
 [lints]
 workspace = true

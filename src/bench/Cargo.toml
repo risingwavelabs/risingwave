@@ -11,22 +11,18 @@ repository = { workspace = true }
 ignored = ["bcc", "opentelemetry"]
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 clap = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 itertools = { workspace = true }
-plotters = { version = "0.3.5", default-features = false, features = [
-    "svg_backend",
-    "line_series",
-    "point_series"
-] }
+plotters = { workspace = true, features = ["svg_backend", "line_series", "point_series"] }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_stream = { workspace = true }
 sea-orm  = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",

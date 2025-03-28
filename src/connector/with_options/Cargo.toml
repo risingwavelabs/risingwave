@@ -6,16 +6,15 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-quote = "1"
+quote = { workspace = true }
 syn = "2"
+
+[dev-dependencies]
 
 [lib]
 proc-macro = true
-
-[dev-dependencies]
 
 [lints]
 workspace = true

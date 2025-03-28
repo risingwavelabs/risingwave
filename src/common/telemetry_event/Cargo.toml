@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 jsonbb = { workspace = true }
 prost = { workspace = true }
-reqwest = { version = "0.12.2", features = ["json"] }
+reqwest = { workspace = true, features = ["json"] }
 risingwave_pb = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -21,4 +21,4 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tracing = "0.1"
+tracing = { workspace = true }

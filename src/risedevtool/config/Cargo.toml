@@ -8,12 +8,12 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
+anyhow = { workspace = true, features = ["backtrace"] }
 clap = { workspace = true }
-console = "0.15"
-dialoguer = "0.11"
-enum-iterator = "2"
-fs-err = "3.1.0"
+console = { workspace = true }
+dialoguer = { workspace = true }
+enum-iterator = { workspace = true }
+fs-err = { workspace = true }
 itertools = { workspace = true }
 
 [lints]
