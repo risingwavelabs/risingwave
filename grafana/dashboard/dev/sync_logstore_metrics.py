@@ -102,7 +102,7 @@ def _(outer_panels: Panels):
                     "Kv Log Store Buffer State (0-clean, 1-dirty)",
                     "",
                     [
-                        panels.target(
+                        panels.target_hidden(
                             f"sum({metric('sync_kv_log_store_state')}) by (type, fragment_id, relation)",
                             "{{type}} {{fragment_id}} {{relation}}",
                         ),
@@ -161,28 +161,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                # pause duration
-                panels.timeseries_latency(
-                    "Log Store Pause Duration",
+                panels.timeseries_percentage(
+                    "Log Store Pause Ratio",
                     "",
                     [
                         panels.target(
-                            f"max({metric('sync_kv_log_store_write_pause_duration_ns')}) by (fragment_id, relation) / 1000000000",
+                            f"avg(rate({metric('sync_kv_log_store_write_pause_duration_ns')}[$__rate_interval])) by (fragment_id, relation) / 1000000000",
                             "{{fragment_id}} {{relation}}",
-                        ),
+                        )
                     ],
                 ),
-                # duration we have to wait before each poll
-                panels.timeseries_latency(
-                    "Log Store Wait Next Poll Duration",
-                    "",
-                    [
-                        panels.target(
-                            f"max({metric('sync_kv_log_store_wait_next_poll_ns')}) by (fragment_id, relation) / 1000000000",
-                            "{{fragment_id}} {{relation}}",
-                        ),
-                    ]
-                )
             ],
         )
     ]
