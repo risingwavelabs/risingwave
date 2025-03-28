@@ -155,7 +155,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             Err(e) => {
                                 tracing::error!(
                                     target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
+                                    error = %e.as_report(), "schema change error");
                                 finish_tx.send(()).unwrap();
                             }
                         }

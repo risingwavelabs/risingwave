@@ -474,7 +474,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             let e = msg.unwrap_err();
                             let core = &self.stream_source_core;
                             tracing::warn!(
-                                error = ?e.as_report(),
+                                error = %e.as_report(),
                                 source_id = %core.source_id,
                                 "stream source reader error",
                             );

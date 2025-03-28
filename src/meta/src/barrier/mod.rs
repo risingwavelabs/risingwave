@@ -411,11 +411,11 @@ impl CheckpointControl {
                 info!("waiting for completing command to finish in recovery");
                 match join_handle.await {
                     Err(e) => {
-                        warn!(err = ?e.as_report(), "failed to join completing task");
+                        warn!(err = %e.as_report(), "failed to join completing task");
                         true
                     }
                     Ok(Err(e)) => {
-                        warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                        warn!(err = %e.as_report(), "failed to complete barrier during clear");
                         true
                     }
                     Ok(Ok(_)) => false,
@@ -428,7 +428,7 @@ impl CheckpointControl {
             while let Some(task) = self.next_complete_barrier_task(None) {
                 if let Err(e) = self.context.clone().complete_barrier(task).await {
                     error!(
-                        err = ?e.as_report(),
+                        err = %e.as_report(),
                         "failed to complete barrier during recovery"
                     );
                     break;
@@ -735,7 +735,7 @@ impl GlobalBarrierManager {
                                 }
                             }
                             Err(e) => {
-                                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                                warn!(e = %e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
                             }
                         }
                     }
