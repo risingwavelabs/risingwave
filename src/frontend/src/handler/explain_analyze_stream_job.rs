@@ -141,7 +141,7 @@ mod net {
     use crate::error::Result;
     use crate::handler::HandlerArgs;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId, StreamNode};
-    use crate::handler::explain_analyze_stream_job::metrics::StreamNodeStats;
+    use crate::handler::explain_analyze_stream_job::metrics::ExecutorStats;
     use crate::meta_client::FrontendMetaClient;
     use crate::session::FrontendEnv;
 
@@ -177,8 +177,8 @@ mod net {
         executor_ids: &[ExecutorId],
         adjacency_list: &HashMap<OperatorId, StreamNode>,
         profiling_duration: Duration,
-    ) -> Result<StreamNodeStats> {
-        let mut aggregated_stats = StreamNodeStats::new();
+    ) -> Result<ExecutorStats> {
+        let mut aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
@@ -210,33 +210,36 @@ mod net {
 }
 
 /// Profiling metrics data structure and utilities
+/// We have 2 stages of metric collection:
+/// 1. Collect the stream node metrics at the **Executor** level.
+/// 2. Merge the stream node metrics into **Operator** level, avg, max, min, etc...
 mod metrics {
     use std::collections::HashMap;
 
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
-    use crate::handler::explain_analyze_stream_job::graph::ExecutorId;
+    use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
 
     #[derive(Default)]
-    pub(super) struct StreamNodeMetrics {
+    pub(super) struct ExecutorMetrics {
         pub executor_id: ExecutorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
         pub total_output_pending_ms: u64,
     }
 
-    pub(super) struct StreamNodeStats {
-        inner: HashMap<ExecutorId, StreamNodeMetrics>,
+    pub(super) struct ExecutorStats {
+        inner: HashMap<ExecutorId, ExecutorMetrics>,
     }
 
-    impl StreamNodeStats {
+    impl ExecutorStats {
         pub(super) fn new() -> Self {
-            StreamNodeStats {
+            ExecutorStats {
                 inner: HashMap::new(),
             }
         }
 
-        pub fn get(&self, operator_id: &ExecutorId) -> Option<&StreamNodeMetrics> {
+        pub fn get(&self, operator_id: &ExecutorId) -> Option<&ExecutorMetrics> {
             self.inner.get(operator_id)
         }
 
@@ -289,6 +292,53 @@ mod metrics {
             }
         }
     }
+
+    pub(super) struct OperatorMetrics {
+        pub executor_id: OperatorId,
+        pub epoch: u32,
+        pub total_output_throughput: u64,
+        pub total_output_pending_ms: u64,
+    }
+
+    pub(super) struct OperatorStats {
+        inner: HashMap<OperatorId, OperatorMetrics>,
+    }
+
+    impl OperatorStats {
+        /// Aggregates executor-level stats into operator-level stats
+        fn aggregate(
+            operator_map: HashMap<OperatorId, Vec<ExecutorId>>,
+            executor_stats: &ExecutorStats,
+        ) -> Self {
+            let mut operator_stats = HashMap::new();
+            for (operator_id, executor_ids) in operator_map {
+                let num_executors = executor_ids.len() as u64;
+                let mut total_output_throughput = 0;
+                let mut total_output_pending_ms = 0;
+                for executor_id in executor_ids {
+                    if let Some(stats) = executor_stats.get(&executor_id) {
+                        total_output_throughput += stats.total_output_throughput;
+                        total_output_pending_ms += stats.total_output_pending_ms;
+                    }
+                }
+                let total_output_throughput = total_output_throughput / num_executors;
+                let total_output_pending_ms = total_output_pending_ms / num_executors;
+
+                operator_stats.insert(
+                    operator_id,
+                    OperatorMetrics {
+                        executor_id: operator_id,
+                        epoch: 0,
+                        total_output_throughput,
+                        total_output_pending_ms,
+                    },
+                );
+            }
+            OperatorStats {
+                inner: operator_stats,
+            }
+        }
+    }
 }
 
 /// Utilities for the stream node graph:
@@ -305,7 +355,7 @@ mod graph {
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
-    use crate::handler::explain_analyze_stream_job::metrics::StreamNodeStats;
+    use crate::handler::explain_analyze_stream_job::metrics::ExecutorStats;
 
     pub(super) type OperatorId = u64;
     pub(super) type ExecutorId = u64;
@@ -466,7 +516,7 @@ mod graph {
     pub(super) fn render_graph_with_metrics(
         adjacency_list: &HashMap<u64, StreamNode>,
         root_node: u64,
-        stats: &StreamNodeStats,
+        stats: &ExecutorStats,
         profiling_duration: &Duration,
     ) -> Vec<ExplainAnalyzeStreamJobOutput> {
         let profiling_duration_secs = profiling_duration.as_secs_f64();
