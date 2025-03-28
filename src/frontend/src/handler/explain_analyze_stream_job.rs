@@ -19,7 +19,7 @@ use tokio::time::Duration;
 
 use crate::error::Result;
 use crate::handler::explain_analyze_stream_job::graph::{
-    extract_stream_node_infos, render_graph_with_metrics,
+    extract_executor_ids, extract_stream_node_infos, render_graph_with_metrics,
 };
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 
@@ -43,14 +43,14 @@ pub async fn handle_explain_analyze_stream_job(
     let fragments = net::get_fragments(meta_client, job_id).await?;
 
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
-    let operator_ids = adjacency_list.keys().copied().collect::<Vec<_>>();
+    let executor_ids = extract_executor_ids(&adjacency_list);
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
 
     let aggregated_stats = net::get_aggregated_stats(
         &handler_args,
         &worker_nodes,
-        &operator_ids,
+        &executor_ids,
         &adjacency_list,
         profiling_duration,
     )
@@ -140,7 +140,7 @@ mod net {
 
     use crate::error::Result;
     use crate::handler::HandlerArgs;
-    use crate::handler::explain_analyze_stream_job::graph::{OperatorId, StreamNode};
+    use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId, StreamNode};
     use crate::handler::explain_analyze_stream_job::metrics::StreamNodeStats;
     use crate::meta_client::FrontendMetaClient;
     use crate::session::FrontendEnv;
@@ -174,7 +174,7 @@ mod net {
     pub(super) async fn get_aggregated_stats(
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
-        operator_ids: &[OperatorId],
+        executor_ids: &[ExecutorId],
         adjacency_list: &HashMap<OperatorId, StreamNode>,
         profiling_duration: Duration,
     ) -> Result<StreamNodeStats> {
@@ -184,7 +184,7 @@ mod net {
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    executor_ids: operator_ids.into(),
+                    executor_ids: executor_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -198,7 +198,7 @@ mod net {
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    executor_ids: operator_ids.into(),
+                    executor_ids: executor_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -297,7 +297,9 @@ mod graph {
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
 
-    use risingwave_common::operator::unique_operator_id;
+    use risingwave_common::operator::{
+        unique_executor_id_from_unique_operator_id, unique_operator_id,
+    };
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
@@ -306,6 +308,7 @@ mod graph {
     use crate::handler::explain_analyze_stream_job::metrics::StreamNodeStats;
 
     pub(super) type OperatorId = u64;
+    pub(super) type ExecutorId = u64;
 
     /// This is an internal struct used ONLY for explain analyze stream job.
     #[derive(Debug)]
@@ -441,6 +444,19 @@ mod graph {
         }
 
         (root_node.unwrap(), operator_id_to_stream_node)
+    }
+
+    pub(super) fn extract_executor_ids(adjacency_list: &HashMap<u64, StreamNode>) -> Vec<u64> {
+        let mut executor_ids = HashSet::new();
+        for node in adjacency_list.values() {
+            let operator_id = node.operator_id;
+            for actor_id in &node.actor_ids {
+                let executor_id =
+                    unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
+                executor_ids.insert(executor_id);
+            }
+        }
+        executor_ids.into_iter().collect()
     }
 
     // Do a DFS based rendering. Each node will occupy its own row.

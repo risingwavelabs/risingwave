@@ -23,3 +23,9 @@ pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
     assert!(operator_id <= u32::MAX as u64);
     ((actor_id as u64) << 32) + operator_id
 }
+
+pub fn unique_executor_id_from_unique_operator_id(actor_id: u32, unique_operator_id: u64) -> u64 {
+    // keep only low-32 bits
+    let unique_operator_id = unique_operator_id & 0xFFFFFFFF;
+    ((actor_id as u64) << 32) + unique_operator_id
+}
