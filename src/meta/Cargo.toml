@@ -8,36 +8,34 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 arc-swap = { workspace = true }
-assert_matches = "1"
-async-trait = "0.1"
-base64-url = { version = "3.0.0" }
-bytes = { version = "1", features = ["serde"] }
-chrono = "0.4"
+assert_matches = { workspace = true }
+async-trait = { workspace = true }
+base64-url = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = "7"
-crepe = "0.1"
-easy-ext = "1"
-educe = "0.6"
-either = "1"
-enum-as-inner = "0.6"
-fail = "0.5"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hex = "0.4"
-http = "1"
+comfy-table = { workspace = true }
+crepe = { workspace = true }
+easy-ext = { workspace = true }
+educe = { workspace = true }
+either = { workspace = true }
+enum-as-inner = { workspace = true }
+fail = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
+hex = { workspace = true }
+http = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-maplit = "1.0.2"
-notify = { version = "8", default-features = false, features = [
-    "macos_fsevent",
-] }
-num-integer = "0.1"
-num-traits = "0.2"
+maplit = { workspace = true }
+notify = { workspace = true, features = ["macos_fsevent"] }
+num-integer = { workspace = true }
+num-traits = { workspace = true }
 otlp-embedded = { workspace = true }
 parking_lot = { workspace = true }
-prometheus = "0.13"
-prometheus-http-query = "0.8"
+prometheus = { workspace = true }
+prometheus-http-query = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
 risingwave_backup = { workspace = true }
@@ -54,13 +52,13 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 rw_futures_util = { workspace = true }
-scopeguard = "1.2.0"
+scopeguard = { workspace = true }
 sea-orm = { workspace = true }
-serde = { version = "1.0.196", features = ["derive"] }
-serde_json = "1.0.113"
-strum = { version = "0.27", features = ["derive"] }
-sync-point = { path = "../utils/sync-point" }
-thiserror = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+strum = { workspace = true, features = ["derive"] }
+sync-point = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -70,12 +68,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-retry = "0.3"
+tokio-retry = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = { version = "0.5", features = ["util", "load-shed"] }
-tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+tower = { workspace = true, features = ["util", "load-shed"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = { workspace = true }
@@ -88,13 +86,13 @@ tower-http = { version = "0.6", features = [
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-assert_matches = "1"
-expect-test = "1.5"
+assert_matches = { workspace = true }
+expect-test = { workspace = true }
 rand = { workspace = true }
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
-tempfile = "3"
-tracing-subscriber = "0.3"
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [features]
 test = []

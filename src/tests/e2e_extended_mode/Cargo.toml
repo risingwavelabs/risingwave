@@ -8,19 +8,19 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
-chrono = { version = "0.4", features = ['serde'] }
+anyhow = { workspace = true, features = ["backtrace"] }
+chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true }
-pg_interval = "0.4"
-rust_decimal = { version = "1.37", features = ["db-postgres"] }
+pg_interval = { workspace = true }
+rust_decimal = { workspace = true, features = ["db-postgres"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",
     "rt-multi-thread",
 ] }
-tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
-tracing = "0.1"
-tracing-subscriber = "0.3.17"
+tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[bin]]
 name = "risingwave_e2e_extended_mode_test"

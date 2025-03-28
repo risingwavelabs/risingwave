@@ -9,8 +9,8 @@ proc-macro = true
 
 [dependencies]
 itertools = { workspace = true }
-proc-macro2 = "1"
-quote = "1"
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 syn = { version = "2", features = ["full", "extra-traits"] }
 
 [lints]

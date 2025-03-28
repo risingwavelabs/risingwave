@@ -8,24 +8,24 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-assert_matches = "1"
-async-recursion = "1"
-async-trait = "0.1"
-either = "1"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+anyhow = { workspace = true }
+assert_matches = { workspace = true }
+async-recursion = { workspace = true }
+async-trait = { workspace = true }
+either = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-futures-util = "0.3"
+futures-util = { workspace = true }
 iceberg = { workspace = true }
 itertools = { workspace = true }
 linkme = { workspace = true }
-memcomparable = "0.2"
+memcomparable = { workspace = true }
 mysql_async = { workspace = true }
 opendal = { workspace = true }
-panic-message = "0.3"
+panic-message = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { workspace = true }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { workspace = true, features = ["process"] }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
@@ -35,9 +35,9 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
-scopeguard = "1"
-serde_json = "1"
-thiserror = "1"
+scopeguard = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -48,11 +48,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-postgres = "0.7"
+tokio-postgres = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tracing = "0.1"
-twox-hash = "2"
+tracing = { workspace = true }
+twox-hash = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -60,7 +60,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 rand = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-tempfile = "3"
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

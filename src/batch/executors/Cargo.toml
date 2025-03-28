@@ -8,21 +8,21 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-assert_matches = "1"
-async-trait = "0.1"
-bytes = "1"
-either = "1"
+anyhow = { workspace = true }
+assert_matches = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+either = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-futures-util = "0.3"
+futures-util = { workspace = true }
 hashbrown = { workspace = true }
 itertools = { workspace = true }
 linkme = { workspace = true }
 mysql_async = { workspace = true }
 opendal = { workspace = true }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { workspace = true, features = ["process"] }
 rand = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -45,9 +45,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-postgres = "0.7"
-tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+tokio-postgres = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
@@ -57,7 +57,7 @@ criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-tempfile = "3"
+tempfile = { workspace = true }
 tikv-jemallocator = { workspace = true }
 tokio-stream = { workspace = true }
 

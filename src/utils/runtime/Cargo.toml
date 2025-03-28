@@ -13,21 +13,21 @@ ignored = ["rw-tokio"]
 
 [dependencies]
 await-tree = { workspace = true }
-console = "0.15"
-console-subscriber = "0.4"
-either = "1"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hostname = "0.4"
+console = { workspace = true }
+console-subscriber = { workspace = true }
+either = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
+hostname = { workspace = true }
 parking_lot = { workspace = true }
-pprof = { version = "0.14", features = ["flamegraph"] }
+pprof = { workspace = true, features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
-rlimit = "0.10"
-rustls = "0.23.5"
+rlimit = { workspace = true }
+rustls = { workspace = true }
 # Explicitly specify the tokio version used in RisingWave runtime
 rw-tokio = { version = "=1.44.0", package = "tokio" }
 thiserror-ext = { workspace = true }
-time = { version = "0.3", features = ["formatting", "local-offset"] }
+time = { workspace = true, features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -37,16 +37,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-tracing-subscriber = { version = "0.3", features = [
-    "fmt",
-    "parking_lot",
-    "std",
-    "time",
-    "local-time",
-    "json",
-] }
+tracing-subscriber = { workspace = true, features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 opentelemetry = { workspace = true }

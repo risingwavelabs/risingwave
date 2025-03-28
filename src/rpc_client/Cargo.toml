@@ -8,23 +8,23 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1"
-easy-ext = "1"
-either = "1.15.0"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "1"
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+easy-ext = { workspace = true }
+either = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
+http = { workspace = true }
 lru = { workspace = true }
-moka = { version = "0.12.0", features = ["future"] }
-paste = "1"
+moka = { workspace = true, features = ["future"] }
+paste = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_error = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 rw_futures_util = { workspace = true }
-static_assertions = "1"
-thiserror = "1"
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -34,11 +34,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-retry = "0.3"
+tokio-retry = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = "0.5"
-tracing = "0.1"
+tower = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 risingwave_hummock_sdk = { workspace = true }

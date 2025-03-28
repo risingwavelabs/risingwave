@@ -9,10 +9,7 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
+chrono = { workspace = true, features = ["clock", "std"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

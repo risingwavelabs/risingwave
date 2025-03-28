@@ -8,30 +8,30 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 arc-swap = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
-bytes = { version = "1", features = ["serde"] }
-dyn-clone = "1.0.14"
-either = "1"
-enum-as-inner = "0.6"
-fail = "0.5"
+bytes = { workspace = true, features = ["serde"] }
+dyn-clone = { workspace = true }
+either = { workspace = true }
+enum-as-inner = { workspace = true }
+fail = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-hex = "0.4"
+hex = { workspace = true }
 itertools = { workspace = true }
-libc = "0.2"
-lz4 = "1.28.0"
-memcomparable = "0.2"
+libc = { workspace = true }
+lz4 = { workspace = true }
+memcomparable = { workspace = true }
 mixtrics = { workspace = true }
-moka = { version = "0.12.0", features = ["future", "sync"] }
-more-asserts = "0.3"
-num-integer = "0.1"
+moka = { workspace = true, features = ["future", "sync"] }
+more-asserts = { workspace = true }
+num-integer = { workspace = true }
 parking_lot = { workspace = true }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { workspace = true, features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
 risingwave_backup = { workspace = true }
@@ -44,14 +44,14 @@ risingwave_hummock_trace = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-scopeguard = "1"
-serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
-sled = "0.34.7"
-spin = "0.9"
-sync-point = { path = "../utils/sync-point" }
-tempfile = "3"
-thiserror = "1"
+scopeguard = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
+sled = { workspace = true }
+spin = { workspace = true }
+sync-point = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -63,12 +63,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-retry = "0.3"
+tokio-retry = { workspace = true }
 tonic = { workspace = true }
-tracing = "0.1"
-xorf = "0.11.0"
-xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
-zstd = { version = "0.13", default-features = false }
+tracing = { workspace = true }
+xorf = { workspace = true }
+xxhash-rust = { workspace = true, features = ["xxh32", "xxh64"] }
+zstd = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.17", default-features = false }
@@ -86,10 +86,10 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
-expect-test = "1"
+expect-test = { workspace = true }
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
-uuid = { version = "1", features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 fiemap = "0.1.1"

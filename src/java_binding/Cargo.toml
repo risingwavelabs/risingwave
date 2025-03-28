@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1"
-bytes = "1"
-cfg-or-panic = "0.2"
+anyhow = { workspace = true }
+bytes = { workspace = true }
+cfg-or-panic = { workspace = true }
 foyer ={ workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-jni = "0.21.1"
+futures = { workspace = true, features = ["alloc"] }
+jni = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -18,8 +18,8 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -29,7 +29,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 risingwave_expr = { workspace = true }

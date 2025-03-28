@@ -9,12 +9,12 @@ repository = { workspace = true }
 
 [dependencies]
 clap = { workspace = true }
-educe = "0.6"
-hex = "0.4"
+educe = { workspace = true }
+hex = { workspace = true }
 otlp-embedded = { workspace = true }
-prometheus-http-query = "0.8"
-redact = "0.1.5"
-regex = "1"
+prometheus-http-query = { workspace = true }
+redact = { workspace = true }
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
@@ -23,7 +23,7 @@ risingwave_meta_service = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 sea-orm = { workspace = true }
-serde_json = "1"
+serde_json = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -34,7 +34,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tonic = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

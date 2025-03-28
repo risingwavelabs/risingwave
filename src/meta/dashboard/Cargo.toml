@@ -9,26 +9,26 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 axum = { workspace = true }
-axum-embed = "0.1"
-bytes = "1"
-mime_guess = "2"
-reqwest = "0.12.2"
-rust-embed = { version = "8", features = ["interpolate-folder-path", "mime-guess"] }
+axum-embed = { workspace = true }
+bytes = { workspace = true }
+mime_guess = { workspace = true }
+reqwest = { workspace = true }
+rust-embed = { workspace = true, features = ["interpolate-folder-path", "mime-guess"] }
 thiserror-ext = { workspace = true }
-tracing = "0.1"
-url = "2"
+tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
-tracing-subscriber = "0.3"
+tracing-subscriber = { workspace = true }
 
 [build-dependencies]
-anyhow = "1"
-cargo-emit = "0.2"
-dircpy = "0.3"
-npm_rs = "1"
+anyhow = { workspace = true }
+cargo-emit = { workspace = true }
+dircpy = { workspace = true }
+npm_rs = { workspace = true }
 
 [lints]
 workspace = true

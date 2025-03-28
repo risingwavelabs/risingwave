@@ -9,8 +9,8 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fail = "0.5"
-sync-point = { path = "../utils/sync-point" }
+fail = { workspace = true }
+sync-point = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

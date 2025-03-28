@@ -9,13 +9,13 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-trait = "0.1"
-bytes = { version = "1" }
+async-trait = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true }
-fail = "0.5"
+fail = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2.9"
+futures = { workspace = true, features = ["alloc"] }
+futures-async-stream = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
@@ -28,7 +28,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true, features = ["test"] }
-serial_test = { version = "3.2", optional = true }
+serial_test = { workspace = true, optional = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -36,16 +36,13 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
-expect-test = "1"
-futures = { version = "0.3", default-features = false, features = [
-    "alloc",
-    "executor",
-] }
+expect-test = { workspace = true }
+futures = { workspace = true, features = ["alloc", "executor"] }
 
-futures-async-stream = "0.2.9"
+futures-async-stream = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
-sync-point = { path = "../../utils/sync-point" }
+sync-point = { workspace = true }
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]

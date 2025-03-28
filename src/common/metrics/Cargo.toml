@@ -9,32 +9,32 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-auto_impl = "1"
-bytes = "1"
-cfg-or-panic = "0.2"
+auto_impl = { workspace = true }
+bytes = { workspace = true }
+cfg-or-panic = { workspace = true }
 clap = { workspace = true }
-easy-ext = "1"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "1"
-http-02 = { package = "http", version = "0.2" }
+easy-ext = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
+http = { workspace = true }
+http-02 = { workspace = true }
 hyper = { version = "1" }
 hyper-014 = { package = "hyper", version = "0.14", features = ["client"] }
-hyper-util = { version = "0.1", features = ["client-legacy"] }
+hyper-util = { workspace = true, features = ["client-legacy"] }
 hytra = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
-prometheus = { version = "0.13" }
+prometheus = { workspace = true }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tonic = { workspace = true }
-tower-layer = "0.3.3"
-tower-service = "0.3.3"
-tracing = "0.1"
-tracing-subscriber = "0.3.17"
+tower-layer = { workspace = true }
+tower-service = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 http-body = "1"

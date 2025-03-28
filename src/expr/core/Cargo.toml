@@ -10,48 +10,45 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1"
-auto_impl = "1"
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+auto_impl = { workspace = true }
 await-tree = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-const-currying = "0.0.4"
-downcast-rs = "2.0"
-easy-ext = "1"
-educe = "0.6"
-either = "1"
-enum-as-inner = "0.6"
-futures = "0.3"
+chrono = { workspace = true, features = ["clock", "std"] }
+const-currying = { workspace = true }
+downcast-rs = { workspace = true }
+easy-ext = { workspace = true }
+educe = { workspace = true }
+either = { workspace = true }
+enum-as-inner = { workspace = true }
+futures = { workspace = true }
 futures-async-stream = { workspace = true }
-futures-util = "0.3"
+futures-util = { workspace = true }
 itertools = { workspace = true }
 linkme = { workspace = true }
-num-traits = "0.2"
-parse-display = "0.10"
-paste = "1"
-prometheus = "0.13"
+num-traits = { workspace = true }
+parse-display = { workspace = true }
+paste = { workspace = true }
+prometheus = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
-risingwave_expr_macro = { path = "../macro" }
+risingwave_expr_macro = { workspace = true }
 risingwave_pb = { workspace = true }
-smallvec = "1"
-static_assertions = "1"
-thiserror = "1"
+smallvec = { workspace = true }
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt-multi-thread",
     "macros",
 ] }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-expect-test = "1"
+expect-test = { workspace = true }
 
 [lints]
 workspace = true

@@ -8,10 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-async-std = { version = "1", features = ["attributes", "tokio1"] }
-easy-ext = "1"
+async-std = { workspace = true, features = ["attributes", "tokio1"] }
+easy-ext = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-uuid = { version = "1", features = ["v4"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }

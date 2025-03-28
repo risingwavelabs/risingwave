@@ -8,8 +8,8 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-ahash = "0.8"
-anyhow = "1"
+ahash = { workspace = true }
+anyhow = { workspace = true }
 arc-swap = { workspace = true }
 arrow-52-array = { package = "arrow-array", version = "52" }
 arrow-52-buffer = { package = "arrow-buffer", version = "52" }
@@ -19,89 +19,82 @@ arrow-54-array = { package = "arrow-array", version = "54" }
 arrow-54-buffer = { package = "arrow-buffer", version = "54" }
 arrow-54-cast = { package = "arrow-cast", version = "54" }
 arrow-54-schema = { package = "arrow-schema", version = "54" }
-async-trait = "0.1"
+async-trait = { workspace = true }
 auto_enums = { workspace = true }
-auto_impl = "1"
-bitfield-struct = "0.10"
-bitflags = "2"
-byteorder = "1"
-bytes = "1"
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+auto_impl = { workspace = true }
+bitfield-struct = { workspace = true }
+bitflags = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+chrono-tz = { workspace = true, features = ["case-insensitive"] }
 clap = { workspace = true }
-comfy-table = "7"
-crc32fast = "1"
-easy-ext = "1"
-educe = "0.6"
-either = "1"
-enum-as-inner = "0.6"
-enumflags2 = { version = "0.7.8" }
-ethnum = { version = "1", features = ["serde"] }
-fixedbitset = "0.5"
+comfy-table = { workspace = true }
+crc32fast = { workspace = true }
+easy-ext = { workspace = true }
+educe = { workspace = true }
+either = { workspace = true }
+enum-as-inner = { workspace = true }
+enumflags2 = { workspace = true }
+ethnum = { workspace = true, features = ["serde"] }
+fixedbitset = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { workspace = true, features = ["alloc"] }
 governor = { workspace = true }
-hashbrown = "0.15"
-hex = "0.4.3"
-http = "1"
-humantime = "2.2"
+hashbrown = { workspace = true }
+hex = { workspace = true }
+http = { workspace = true }
+humantime = { workspace = true }
 itertools = { workspace = true }
-itoa = "1.0"
-jiff = "0.1.15"
+itoa = { workspace = true }
+jiff = { workspace = true }
 jsonbb = { workspace = true }
 lru = { workspace = true }
-memcomparable = { version = "0.2", features = ["decimal"] }
-num-integer = "0.1"
-num-traits = "0.2"
-number_prefix = "0.4.0"
+memcomparable = { workspace = true, features = ["decimal"] }
+num-integer = { workspace = true }
+num-traits = { workspace = true }
+number_prefix = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 parking_lot = { workspace = true }
-parse-display = "0.10"
-paste = "1"
+parse-display = { workspace = true }
+paste = { workspace = true }
 pin-project-lite = { workspace = true }
-postgres-types = { version = "0.2.6", features = [
-    "derive",
-    "with-chrono-0_4",
-    "with-serde_json-1",
-] }
-prometheus = { version = "0.13" }
+postgres-types = { workspace = true, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
+prometheus = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
-regex = "1"
-reqwest = { version = "0.12.2", features = ["json"] }
-risingwave-fields-derive = { path = "./fields-derive" }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+risingwave-fields-derive = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
-risingwave_common_metrics = { path = "./metrics" }
+risingwave_common_metrics = { workspace = true }
 risingwave_common_proc_macro = { workspace = true }
-risingwave_common_secret = { path = "./secret" }
+risingwave_common_secret = { workspace = true }
 risingwave_error = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_telemetry_event = { workspace = true }
-rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rust_decimal = { workspace = true, features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
-ryu = "1.0"
-serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
-serde_default = "0.2"
-serde_json = "1"
-serde_with = "3"
-smallbitset = "0.7.1"
-smallvec = "1"
-speedate = "0.15.0"
-stacker = "0.1"
-static_assertions = "1"
-strum = "0.27"
-strum_macros = "0.27"
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
-thiserror = "1"
+ryu = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
+serde_default = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+smallbitset = { workspace = true }
+smallvec = { workspace = true }
+speedate = { workspace = true }
+stacker = { workspace = true }
+static_assertions = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+sysinfo = { workspace = true, features = ["system"] }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
+tinyvec = { workspace = true, features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -110,16 +103,16 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-retry = "0.3"
+tokio-retry = { workspace = true }
 tokio-util = { workspace = true }
-toml = "0.8"
-tracing = "0.1"
-tracing-futures = { version = "0.2", features = ["futures-03"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-futures = { workspace = true, features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
-tracing-subscriber = "0.3.17"
-twox-hash = "2"
-url = "2"
-uuid = { version = "1", features = ["v4"] }
+tracing-subscriber = { workspace = true }
+twox-hash = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -137,14 +130,14 @@ libc = "0.2"
 mach2 = "0.4"
 
 [dev-dependencies]
-coarsetime = "0.1"
+coarsetime = { workspace = true }
 criterion = { workspace = true }
-expect-test = "1"
-more-asserts = "0.3"
-pretty_assertions = "1"
+expect-test = { workspace = true }
+more-asserts = { workspace = true }
+pretty_assertions = { workspace = true }
 rand = { workspace = true }
-rusty-fork = "0.3"
-tempfile = "3"
+rusty-fork = { workspace = true }
+tempfile = { workspace = true }
 
 [[bench]]
 name = "bench_encoding"

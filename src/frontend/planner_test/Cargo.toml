@@ -8,16 +8,16 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-expect-test = "1"
+anyhow = { workspace = true }
+expect-test = { workspace = true }
 itertools = { workspace = true }
-paste = "1"
+paste = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_with = "3"
-serde_yaml = "0.9"
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -28,14 +28,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-walkdir = "2"
+walkdir = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-libtest-mimic = "0.8"
-tempfile = "3"
+libtest-mimic = { workspace = true }
+tempfile = { workspace = true }
 
 [lib]
 test = false

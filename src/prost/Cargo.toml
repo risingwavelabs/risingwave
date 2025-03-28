@@ -8,28 +8,28 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-enum-as-inner = "0.6"
-pbjson = "0.7"
+enum-as-inner = { workspace = true }
+pbjson = { workspace = true }
 prost = { workspace = true }
-prost-helpers = { path = "helpers" }
+prost-helpers = { workspace = true }
 risingwave_error = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-strum = { version = "0.27", features = ["derive"] }
-thiserror = "1"
+serde = { workspace = true, features = ["derive"] }
+strum = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 tonic = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-static_assertions = "1"
+static_assertions = { workspace = true }
 
 [build-dependencies]
-fs-err = "3.1"
-pbjson-build = "0.7"
+fs-err = { workspace = true }
+pbjson-build = { workspace = true }
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
-walkdir = "2"
+walkdir = { workspace = true }
 
 [lints]
 workspace = true

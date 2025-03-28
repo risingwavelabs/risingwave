@@ -8,29 +8,26 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
+anyhow = { workspace = true, features = ["backtrace"] }
+chrono = { workspace = true, features = ["clock", "std"] }
 clap = { workspace = true }
-console = "0.15"
-fs-err = "3.1.0"
-glob = "0.3"
-google-cloud-pubsub = "0.30"
-indicatif = "0.17"
+console = { workspace = true }
+fs-err = { workspace = true }
+glob = { workspace = true }
+google-cloud-pubsub = { workspace = true }
+indicatif = { workspace = true }
 itertools = { workspace = true }
-log = "0.4"
-panic-message = "0.3"
+log = { workspace = true }
+panic-message = { workspace = true }
 rdkafka = { workspace = true }
 redis = { workspace = true }
-regex = "1"
-reqwest = { version = "0.12.2", features = ["blocking"] }
-serde = { version = "1", features = ["derive"] }
-serde_with = "3"
-serde_yaml = "0.9"
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true }
+serde_yaml = { workspace = true }
 sqlx = { workspace = true, features = ["any"] }
-tempfile = "3"
+tempfile = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -41,11 +38,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = "2"
-workspace-hack = { path = "../workspace-hack" }
-yaml-rust = "0.4"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+url = { workspace = true }
+workspace-hack = { workspace = true }
+yaml-rust = { workspace = true }
 
 [lints]
 workspace = true

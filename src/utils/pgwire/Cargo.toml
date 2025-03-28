@@ -9,39 +9,39 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = { version = "1.0", default-features = false }
+anyhow = { workspace = true }
 auto_enums = { workspace = true }
-byteorder = "1.5"
-bytes = "1"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 itertools = { workspace = true }
-jsonwebtoken = "9"
-openssl = "0.10.70"
-panic-message = "0.3"
+jsonwebtoken = { workspace = true }
+openssl = { workspace = true }
+panic-message = { workspace = true }
 parking_lot = { workspace = true }
-peekable = { version = "0.3", features = ["tokio"] }
-postgres-types = { version = "0.2.6" }
-reqwest = "0.12.2"
+peekable = { workspace = true, features = ["tokio"] }
+postgres-types = { workspace = true }
+reqwest = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-socket2 = "0.5"
-thiserror = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+socket2 = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",
 ] }
-tokio-openssl = "0.6.3"
-tracing = "0.1"
+tokio-openssl = { workspace = true }
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-tempfile = "3"
-tokio-postgres = "0.7"
+tempfile = { workspace = true }
+tokio-postgres = { workspace = true }
 
 [lints]
 workspace = true

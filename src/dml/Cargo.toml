@@ -8,12 +8,12 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 risingwave_common = { workspace = true }
-thiserror = "1"
+thiserror = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -23,15 +23,15 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = { version = "0.1" }
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-assert_matches = "1"
-paste = "1"
-tempfile = "3"
+assert_matches = { workspace = true }
+paste = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

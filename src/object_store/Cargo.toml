@@ -15,7 +15,7 @@ workspace = true
 ignored = ["aws-credential-types"]
 
 [dependencies]
-async-trait = "0.1"
+async-trait = { workspace = true }
 await-tree = { workspace = true }
 aws-config = { workspace = true }
 # add the dependency explicitly to enable hardcoded-credentials feature
@@ -25,14 +25,14 @@ aws-smithy-http = { workspace = true }
 aws-smithy-runtime = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
-bytes = { version = "1", features = ["serde"] }
-crc32fast = "1"
-fail = "0.5"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+bytes = { workspace = true, features = ["serde"] }
+crc32fast = { workspace = true }
+fail = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 hyper = { version = "0.14", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
-hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
+hyper-rustls = { workspace = true, features = ["webpki-roots"] }
 itertools = { workspace = true }
-madsim = "0.2.31"
+madsim = { workspace = true }
 opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
@@ -45,16 +45,16 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
     "services-azfile",
 ] }
-prometheus = { version = "0.13", features = ["process"] }
-reqwest = "0.12.2" # required by opendal
+prometheus = { workspace = true, features = ["process"] }
+reqwest = { workspace = true } # required by opendal
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true, optional = true }
-spin = "0.9"
-thiserror = "1"
+spin = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
-tokio-retry = "0.3"
-tracing = "0.1"
+tokio-retry = { workspace = true }
+tracing = { workspace = true }
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...## [target.'cfg(not(madsim))'.dependencies]
 # workspace-hack = { path = "../workspace-hack" }
 #

@@ -27,9 +27,9 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemal
 
 [dependencies]
 clap = { workspace = true }
-console = "0.15"
-const-str = "0.6"
-home = "0.5"
+console = { workspace = true }
+const-str = { workspace = true }
+home = { workspace = true }
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
@@ -40,9 +40,9 @@ risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
-shell-words = "1.1.0"
-strum = "0.27"
-strum_macros = "0.27"
+shell-words = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }
@@ -55,20 +55,16 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = { version = "0.1" }
-workspace-config = { path = "../utils/workspace-config" }
-workspace-hack = { path = "../workspace-hack" }
+tracing = { workspace = true }
+workspace-config = { workspace = true }
+workspace-hack = { workspace = true }
 
 [dev-dependencies]
-expect-test = "1"
+expect-test = { workspace = true }
 
 [build-dependencies]
 thiserror-ext = { workspace = true }
-vergen = { version = "8", default-features = false, features = [
-    "build",
-    "git",
-    "gitcl",
-] }
+vergen = { workspace = true, features = ["build", "git", "gitcl"] }
 
 [[bin]]
 name = "risingwave"

@@ -7,8 +7,8 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = { version = "1", default-features = false }
-quote = "1"
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 syn = "2"
 
 [lints]

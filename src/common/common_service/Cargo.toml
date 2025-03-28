@@ -9,23 +9,23 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-trait = "0.1"
+async-trait = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["query"] }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "1"
-prometheus = { version = "0.13" }
+futures = { workspace = true, features = ["alloc"] }
+http = { workspace = true }
+prometheus = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-thiserror = "1"
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tonic = { workspace = true }
-tower = { version = "0.5", features = ["util", "load-shed"] }
-tower-http = { version = "0.6", features = ["add-extension", "compression-gzip"] }
-tracing = "0.1"
+tower = { workspace = true, features = ["util", "load-shed"] }
+tower-http = { workspace = true, features = ["add-extension", "compression-gzip"] }
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

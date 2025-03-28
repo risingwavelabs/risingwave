@@ -6,13 +6,13 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fs-err = "3"
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+fs-err = { workspace = true }
+sysinfo = { workspace = true, features = ["system"] }
 thiserror-ext = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

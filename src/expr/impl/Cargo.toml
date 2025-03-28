@@ -19,66 +19,63 @@ python-udf = ["arrow-udf-python"]
 wasm-udf = ["arrow-udf-wasm", "zstd"]
 
 [dependencies]
-aho-corasick = "1"
-anyhow = "1"
+aho-corasick = { workspace = true }
+anyhow = { workspace = true }
 arrow-udf-flight = { workspace = true, optional = true }
 arrow-udf-js = { workspace = true, optional = true }
 arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true, optional = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 auto_enums = { workspace = true }
-bytes = "1"
+bytes = { workspace = true }
 # The feature setting is also used in src/expr/impl/src/udf/wasm.rs
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-constant_time_eq = "0.4"
-educe = "0.6"
-fancy-regex = "0.14"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+chrono = { workspace = true, features = ["clock", "std"] }
+chrono-tz = { workspace = true, features = ["case-insensitive"] }
+constant_time_eq = { workspace = true }
+educe = { workspace = true }
+fancy-regex = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-futures-util = "0.3"
-ginepro = { version = "0.8", optional = true }
-hex = "0.4"
-hmac = "0.12"
+futures-util = { workspace = true }
+ginepro = { workspace = true, optional = true }
+hex = { workspace = true }
+hmac = { workspace = true }
 iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
-md5 = "0.7"
-moka = { version = "0.12.0", features = ["sync"] }
-num-traits = "0.2"
-openssl = "0.10"
-regex = "1"
+md5 = { workspace = true }
+moka = { workspace = true, features = ["sync"] }
+num-traits = { workspace = true }
+openssl = { workspace = true }
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
-self_cell = "1.1.0"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha1 = "0.10"
-sha2 = "0.10"
-smallvec = "1"
-sql-json-path = { version = "0.1", features = ["jsonbb"] }
-thiserror = "1"
+rust_decimal = { workspace = true, features = ["db-postgres", "maths"] }
+self_cell = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+smallvec = { workspace = true }
+sql-json-path = { workspace = true, features = ["jsonbb"] }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-flight
 tonic = { version = "0.12", optional = true }
-tracing = "0.1"
-zstd = { version = "0.13", default-features = false, optional = true }
+tracing = { workspace = true }
+zstd = { workspace = true, optional = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true }
-expect-test = "1"
+expect-test = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",

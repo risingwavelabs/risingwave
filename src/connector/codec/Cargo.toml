@@ -9,40 +9,37 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 apache-avro = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-easy-ext = "1"
+chrono = { workspace = true, features = ["clock", "std"] }
+easy-ext = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
-num-bigint = "0.4"
+num-bigint = { workspace = true }
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.14", features = ["serde"] }
-prost-types = "0.13"
-protox = "0.7"
-reqwest = { version = "0.12.2", features = ["json"] }
+prost-reflect = { workspace = true, features = ["serde"] }
+prost-types = { workspace = true }
+protox = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
-rust_decimal = "1"
-serde_json = "1.0"
-thiserror = "1"
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-time = "0.3.30"
-tracing = "0.1"
-url = "2"
+time = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
-expect-test = "1"
-fs-err = "3"
-hex = "0.4"
+expect-test = { workspace = true }
+fs-err = { workspace = true }
+hex = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [build-dependencies]
-prost-build = "0.13"
+prost-build = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

@@ -8,12 +8,12 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 itertools = { workspace = true }
 rand = { workspace = true }
-regex = "1"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -21,7 +21,7 @@ risingwave_meta = { workspace = true }
 risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 sea-orm = { workspace = true }
-serde_json = "1"
+serde_json = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -33,7 +33,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

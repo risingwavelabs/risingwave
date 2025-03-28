@@ -8,18 +8,18 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-bytes = "1"
-chrono = "0.4"
+anyhow = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = "7"
+comfy-table = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hex = "0.4"
-inquire = "0.7.0"
+futures = { workspace = true, features = ["alloc"] }
+hex = { workspace = true }
+inquire = { workspace = true }
 itertools = { workspace = true }
 prost = { workspace = true }
-regex = "1.10.0"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }
@@ -32,10 +32,10 @@ risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
 sea-orm = { workspace = true }
-serde = "1"
-serde_json = "1"
-serde_yaml = "0.9.25"
-size = "0.5"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+size = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -47,8 +47,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tonic = { workspace = true }
-tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

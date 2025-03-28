@@ -8,24 +8,24 @@ edition = "2021"
 ignored = ["tikv-jemallocator"]
 
 [dependencies]
-anyhow = "1.0"
-async-trait = "0.1"
-cfg-or-panic = "0.2"
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+cfg-or-panic = { workspace = true }
 clap = { workspace = true }
-console = "0.15"
-expect-test = "1"
-fail = { version = "0.5" }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-glob = "0.3"
+console = { workspace = true }
+expect-test = { workspace = true }
+fail = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
+glob = { workspace = true }
 itertools = { workspace = true }
 lru = { workspace = true }
-madsim = "0.2.31"
-maplit = "1"
-paste = "1"
-pin-project = "1.1"
-pretty_assertions = "1"
+madsim = { workspace = true }
+maplit = { workspace = true }
+paste = { workspace = true }
+pin-project = { workspace = true }
+pretty_assertions = { workspace = true }
 rand = { workspace = true }
-rand_chacha = { version = "0.9" }
+rand_chacha = { workspace = true }
 rdkafka = { workspace = true }
 risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }
@@ -33,7 +33,7 @@ risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
-risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
+risingwave_e2e_extended_mode_test = { workspace = true }
 risingwave_expr_impl = { workspace = true, features = ["js-udf"] }
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -42,17 +42,17 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
-serde = "1.0.188"
-serde_derive = "1.0.188"
-serde_json = "1.0.107"
-sqllogictest = "0.28.0"
-tempfile = "3"
+serde = { workspace = true }
+serde_derive = { workspace = true }
+serde_json = { workspace = true }
+sqllogictest = { workspace = true }
+tempfile = { workspace = true }
 tikv-jemallocator = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
-tokio-postgres = "0.7"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = "*"
+tokio-postgres = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

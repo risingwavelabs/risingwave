@@ -9,25 +9,25 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-trait = "0.1"
+async-trait = { workspace = true }
 bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
-byteorder = "1"
-bytes = { version = "1", features = ["serde"] }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2.9"
+byteorder = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
+futures = { workspace = true, features = ["alloc"] }
+futures-async-stream = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
-thiserror = "1.0"
+thiserror = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
-tracing = "0.1"
+tracing = { workspace = true }
 foyer = { workspace = true }
 
 [dev-dependencies]
 itertools = { workspace = true }
-mockall = "0.11.4"
+mockall = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 
 [lints]

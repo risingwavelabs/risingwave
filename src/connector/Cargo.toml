@@ -8,68 +8,61 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 apache-avro = { workspace = true }
-assert_matches = "1"
-async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.40"
-async-trait = "0.1"
+assert_matches = { workspace = true }
+async-compression = { workspace = true, features = ["gzip", "tokio"] }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
 auto_enums = { workspace = true }
-auto_impl = "1"
+auto_impl = { workspace = true }
 await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
-aws-msk-iam-sasl-signer = "1.0.0"
-aws-sdk-dynamodb = "1"
-aws-sdk-emrserverless = "1.53.0"
+aws-msk-iam-sasl-signer = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
+aws-sdk-emrserverless = { workspace = true }
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
-aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
+aws-smithy-types-convert = { workspace = true, features = ["convert-chrono"] }
 aws-types = { workspace = true }
-base64 = "0.22"
-byteorder = "1"
-bytes = { version = "1", features = ["serde"] }
-cfg-or-panic = "0.2"
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d38c8b6391af098b724c114e5a4746aedab6ab8e", features = [
-    "time",
-] }
-csv = "1.3"
+base64 = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true, features = ["serde"] }
+cfg-or-panic = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+clickhouse = { workspace = true, features = ["time"] }
+csv = { workspace = true }
 deltalake = { workspace = true }
-duration-str = "0.16.1"
-easy-ext = "1"
-either = "1"
-elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
-enum-as-inner = "0.6"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+duration-str = { workspace = true }
+easy-ext = { workspace = true }
+either = { workspace = true }
+elasticsearch = { workspace = true, features = ["rustls-tls"] }
+enum-as-inner = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = "0.18.0"
-glob = "0.3"
-google-cloud-bigquery = { version = "0.14.0", features = ["auth"] }
-google-cloud-gax = "0.19.2"
-google-cloud-googleapis = { version = "0.16", features = ["pubsub", "bigquery"] }
-google-cloud-pubsub = "0.30"
+gcp-bigquery-client = { workspace = true }
+glob = { workspace = true }
+google-cloud-bigquery = { workspace = true, features = ["auth"] }
+google-cloud-gax = { workspace = true }
+google-cloud-googleapis = { workspace = true, features = ["pubsub", "bigquery"] }
+google-cloud-pubsub = { workspace = true }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-indexmap = { version = "2.8.0", features = ["serde"] }
+indexmap = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
-jni = { version = "0.21.1", features = ["invocation"] }
-maplit = "1.0.2"
-moka = { version = "0.12.10", features = ["future"] }
-mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
+jni = { workspace = true, features = ["invocation"] }
+maplit = { workspace = true }
+moka = { workspace = true, features = ["future"] }
+mongodb = { workspace = true, features = ["tokio-runtime"] }
 mysql_async = { workspace = true }
-mysql_common = { version = "0.32", default-features = false, features = [
-    "chrono",
-] }
-nexmark = { version = "0.2", features = ["serde"] }
-num-bigint = "0.4"
+mysql_common = { workspace = true, features = ["chrono"] }
+nexmark = { workspace = true, features = ["serde"] }
+num-bigint = { workspace = true }
 opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
@@ -79,24 +72,18 @@ opendal = { workspace = true, features = [
     "services-s3",
     "services-webhdfs",
 ] }
-opensearch = { version = "2.3.0", features = ["rustls-tls"] }
-openssl = "0.10"
+opensearch = { workspace = true, features = ["rustls-tls"] }
+openssl = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { workspace = true }
-paste = "1"
-pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
-postgres-openssl = "0.5.0"
-prometheus = { version = "0.13", features = ["process"] }
+paste = { workspace = true }
+pg_bigdecimal = { workspace = true }
+postgres-openssl = { workspace = true }
+prometheus = { workspace = true, features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.14", features = ["serde"] }
-prost-types = "0.13"
-pulsar = { version = "6.3", default-features = false, features = [
-    "tokio-runtime",
-    "telemetry",
-    "auth-oauth2",
-    "lz4",
-    "zstd",
-] }
+prost-reflect = { workspace = true, features = ["serde"] }
+prost-types = { workspace = true }
+pulsar = { workspace = true, features = ["tokio-runtime", "telemetry", "auth-oauth2", "lz4", "zstd"] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",
@@ -104,8 +91,8 @@ rdkafka = { workspace = true, features = [
     "zstd",
 ] }
 redis = { workspace = true, features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
-regex = "1.4"
-reqwest = { version = "0.12.2", features = ["json", "stream"] }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
@@ -114,43 +101,31 @@ risingwave_jni_core = { workspace = true }
 risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-rumqttc = { version = "0.24.0", features = ["url"] }
-rust_decimal = "1"
-rustls-native-certs = "0.8"
-rustls-pemfile = "2"
-rustls-pki-types = "1"
+rumqttc = { workspace = true, features = ["url"] }
+rust_decimal = { workspace = true }
+rustls-native-certs = { workspace = true }
+rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true }
 rw_futures_util = { workspace = true }
-scopeguard = "1"
+scopeguard = { workspace = true }
 sea-orm = { workspace = true }
-sea-schema = { version = "0.16", default-features = false, features = [
-    "discovery",
-    "sqlx-postgres",
-    "sqlx-mysql",
-] }
-serde = { version = "1", features = ["derive", "rc"] }
-serde_derive = "1"
-serde_json = "1"
-serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.15.0", features = ["hints"] }
-smallvec = "1"
+sea-schema = { workspace = true, features = ["discovery", "sqlx-postgres", "sqlx-mysql"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_derive = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["json"] }
+simd-json = { workspace = true, features = ["hints"] }
+smallvec = { workspace = true }
 sqlx = { workspace = true }
-strum = "0.27"
-strum_macros = "0.27"
-tempfile = "3"
-thiserror = "1"
+strum = { workspace = true }
+strum_macros = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
-tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
-    "chrono",
-    "sql-browser-tokio",
-    "rustls",
-    "rust_decimal",
-    "bigdecimal",
-    "tds73",
-    "time",
-] }
-time = "0.3.30"
+tiberius = { workspace = true, features = ["chrono", "sql-browser-tokio", "rustls", "rust_decimal", "bigdecimal", "tds73", "time"] }
+time = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -160,40 +135,40 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
-tokio-retry = "0.3"
+tokio-postgres = { workspace = true, features = ["with-uuid-1"] }
+tokio-retry = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
-tracing = "0.1"
-typed-builder = "^0.21"
-url = "2"
-urlencoding = "2"
-uuid = { version = "1", features = ["v4", "fast-rng"] }
-with_options = { path = "./with_options" }
-yup-oauth2 = "8.3"
+tracing = { workspace = true }
+typed-builder = { workspace = true }
+url = { workspace = true }
+urlencoding = { workspace = true }
+uuid = { workspace = true, features = ["v4", "fast-rng"] }
+with_options = { workspace = true }
+yup-oauth2 = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-assert_matches = "1"
+assert_matches = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true }
-expect-test = "1"
-fs-err = "3"
-paste = "1"
-pretty_assertions = "1"
-proc-macro2 = "1.0"
-quote = "1"
+expect-test = { workspace = true }
+fs-err = { workspace = true }
+paste = { workspace = true }
+pretty_assertions = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 rand = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
 syn = { version = "2", features = ["full"] }
-tempfile = "3"
-tracing-subscriber = "0.3"
-tracing-test = "0.2"
-walkdir = "2"
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-test = { workspace = true }
+walkdir = { workspace = true }
 
 [[bench]]
 name = "debezium_json_parser"

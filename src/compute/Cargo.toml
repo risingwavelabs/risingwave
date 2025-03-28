@@ -8,20 +8,20 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1"
+anyhow = { workspace = true }
+async-trait = { workspace = true }
 await-tree = { workspace = true }
-chrono = { version = "0.4" }
+chrono = { workspace = true }
 clap = { workspace = true }
-either = "1"
+either = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { workspace = true, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-http = "1"
+http = { workspace = true }
 itertools = { workspace = true }
-maplit = "1.0.2"
-pprof = { version = "0.14", features = ["flamegraph"] }
-prometheus = { version = "0.13" }
+maplit = { workspace = true }
+pprof = { workspace = true, features = ["flamegraph"] }
+prometheus = { workspace = true }
 prost = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_batch_executors = { workspace = true }
@@ -36,8 +36,8 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -51,8 +51,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = { version = "0.5", features = ["util", "load-shed"] }
-tracing = "0.1"
+tower = { workspace = true, features = ["util", "load-shed"] }
+tracing = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -62,8 +62,8 @@ futures-async-stream = { workspace = true }
 rand = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-tempfile = "3"
-tokio-retry = "0.3"
+tempfile = { workspace = true }
+tokio-retry = { workspace = true }
 
 [lints]
 workspace = true

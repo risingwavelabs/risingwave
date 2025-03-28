@@ -10,16 +10,16 @@ repository = { workspace = true }
 
 [dependencies]
 jsonbb = { workspace = true }
-jsonwebtoken = "9"
+jsonwebtoken = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_telemetry_event = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-thiserror = "1"
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
-expect-test = "1"
+expect-test = { workspace = true }
 
 [lints]
 workspace = true

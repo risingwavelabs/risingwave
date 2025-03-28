@@ -11,11 +11,11 @@ repository = { workspace = true }
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1"
-quote = "1"
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 syn = { version = "2", features = ["full", "extra-traits"] }
 
 [dev-dependencies]
-expect-test = "1"
-indoc = "2"
-prettyplease = { version = "0.2", features = ["verbatim"] }
+expect-test = { workspace = true }
+indoc = { workspace = true }
+prettyplease = { workspace = true, features = ["verbatim"] }

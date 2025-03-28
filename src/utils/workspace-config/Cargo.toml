@@ -32,8 +32,8 @@ fips = ["aws-lc-rs"]
 
 [dependencies]
 # Disable verbose logs for release builds
-log = { version = "0.4", features = ["release_max_level_debug"] }
-tracing = { version = "0.1", features = ["release_max_level_debug"] }
+log = { workspace = true, features = ["release_max_level_debug"] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
 
 # Static linking
 static-libz-sys = { package = "libz-sys", version = "1", optional = true, features = [
@@ -55,9 +55,7 @@ dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, defau
 ] }
 
 # FIPS
-aws-lc-rs ={ version = "1.6", optional = true, default-features = false, features = [
-    "fips",
-] }
+aws-lc-rs ={ workspace = true, features = ["fips"], optional = true }
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
 

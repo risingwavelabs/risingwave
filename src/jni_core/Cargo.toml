@@ -4,18 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1"
-bytes = "1"
-cfg-or-panic = "0.2"
-chrono = { version = "0.4", default-features = false }
-fs-err = "3"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-jni = { version = "0.21.1", features = ["invocation"] }
-paste = "1"
+anyhow = { workspace = true }
+bytes = { workspace = true }
+cfg-or-panic = { workspace = true }
+chrono = { workspace = true }
+fs-err = { workspace = true }
+futures = { workspace = true, features = ["alloc"] }
+jni = { workspace = true, features = ["invocation"] }
+paste = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -26,10 +26,10 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
-expect-test = "1"
+expect-test = { workspace = true }
 
 [lints]
 workspace = true

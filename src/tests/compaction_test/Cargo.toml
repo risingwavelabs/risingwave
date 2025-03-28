@@ -9,8 +9,8 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1"
-bytes = "1"
+anyhow = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true }
 foyer = { workspace = true }
 risingwave_common = { workspace = true }
@@ -30,7 +30,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tracing = "0.1"
+tracing = { workspace = true }
 
 [dev-dependencies]
 risingwave_hummock_sdk = { workspace = true }
