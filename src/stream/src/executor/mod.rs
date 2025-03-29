@@ -41,8 +41,8 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
     PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
-    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -299,6 +299,9 @@ pub enum Mutation {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
     },
+    StartFragmentBackfill {
+        fragment_ids: Vec<FragmentId>,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -499,7 +502,8 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
-            | Mutation::DropSubscriptions { .. } => false,
+            | Mutation::DropSubscriptions { .. }
+            | Mutation::StartFragmentBackfill { .. } => false,
         }
     }
 
@@ -724,6 +728,11 @@ impl Mutation {
                     )
                     .collect(),
             }),
+            Mutation::StartFragmentBackfill { fragment_ids } => {
+                PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                    fragment_ids: fragment_ids.clone(),
+                })
+            }
         }
     }
 
@@ -842,6 +851,11 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
+            PbMutation::StartFragmentBackfill(start_fragment_backfill) => {
+                Mutation::StartFragmentBackfill {
+                    fragment_ids: start_fragment_backfill.fragment_ids.clone(),
+                }
+            }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

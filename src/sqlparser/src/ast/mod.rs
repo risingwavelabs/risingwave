@@ -1535,6 +1535,10 @@ pub enum Statement {
         local: bool,
         value: SetTimeZoneValue,
     },
+    /// `SET BACKFILL_ORDER_STRATEGY TO { DEFAULT | NONE | AUTO | FIXED <object_name> -> <object_name>, ... }
+    SetBackfillOrderStrategy {
+        strategy: BackfillOrderStrategy,
+    },
     /// `COMMENT ON ...`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -2170,6 +2174,9 @@ impl Statement {
                 }
                 write!(f, " TIME ZONE {}", value)?;
                 Ok(())
+            }
+            Statement::SetBackfillOrderStrategy { strategy } => {
+                write!(f, "SET BACKFILL_ORDER_STRATEGY TO {}", strategy)
             }
             Statement::Commit { chain } => {
                 write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" },)
@@ -2959,6 +2966,7 @@ pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
+    BackfillOrder(BackfillOrderStrategy),
 }
 
 impl fmt::Display for SqlOptionValue {
@@ -2968,6 +2976,9 @@ impl fmt::Display for SqlOptionValue {
             SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
             SqlOptionValue::ConnectionRef(connection_ref) => {
                 write!(f, "{}", connection_ref)
+            }
+            SqlOptionValue::BackfillOrder(order) => {
+                write!(f, "{}", order)
             }
         }
     }
@@ -3545,6 +3556,47 @@ impl fmt::Display for DiscardType {
         match self {
             All => write!(f, "ALL"),
         }
+    }
+}
+
+// We decouple "default" from none,
+// so we can choose strategies that make the most sense.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BackfillOrderStrategy {
+    #[default]
+    Default,
+    None,
+    Auto,
+    Fixed(Vec<(ObjectName, ObjectName)>),
+}
+
+impl fmt::Display for BackfillOrderStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use BackfillOrderStrategy::*;
+        match self {
+            Default => write!(f, "DEFAULT"),
+            None => write!(f, "NONE"),
+            Auto => write!(f, "AUTO"),
+            Fixed(map) => {
+                let mut parts = vec![];
+                for (start, end) in map {
+                    parts.push(format!("{} -> {}", start, end));
+                }
+                write!(f, "{}", display_comma_separated(&parts))
+            }
+        }
+    }
+}
+
+impl BackfillOrderStrategy {
+    /// Returns whether all backfill nodes should pause initially.
+    /// Meta will resume them in the order specified by the backfill order.
+    pub fn should_pause_initially(&self) -> bool {
+        matches!(
+            self,
+            BackfillOrderStrategy::Auto | BackfillOrderStrategy::Fixed(_)
+        )
     }
 }
 

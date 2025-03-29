@@ -289,7 +289,8 @@ impl InflightDatabaseInfo {
                 | Command::SourceChangeSplit(_)
                 | Command::Throttle(_)
                 | Command::CreateSubscription { .. }
-                | Command::DropSubscription { .. } => {
+                | Command::DropSubscription { .. }
+                | Command::StartFragmentBackfill { .. } => {
                     return None;
                 }
                 Command::CreateStreamingJob { info, job_type, .. } => {
