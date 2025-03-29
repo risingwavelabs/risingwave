@@ -5,7 +5,10 @@ package monitor_service;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message StackTraceRequest {}
+message StackTraceRequest {
+  // Allowed values: "json", "text". Default is "text".
+  optional string actor_traces_format = 1;
+}
 
 message StackTraceResponse {
   map<uint32, string> actor_traces = 1;
