@@ -51,7 +51,7 @@ use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{ColumnMapping, find_columns_by_ids};
 use crate::store::{
     NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions,
-    StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
+    StateStoreGet, StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
@@ -412,12 +412,16 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 },
             )
             .await?;
+        // TODO: may avoid the clone here when making the `on_key_value_fn` non-static
+        let row_serde = self.row_serde.clone();
         match read_snapshot
-            .get_keyed_row(serialized_pk, read_options)
+            .on_key_value(serialized_pk, read_options, move |key, value| {
+                let row = row_serde.deserialize(value)?;
+                Ok((key.epoch_with_gap.pure_epoch(), row))
+            })
             .await?
         {
-            Some((full_key, value)) => {
-                let row = self.row_serde.deserialize(&value)?;
+            Some((epoch, row)) => {
                 let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
                 match &self.key_output_indices {
@@ -429,7 +433,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                             if let Some(epoch_idx) = self.epoch_idx
                                 && *idx == epoch_idx
                             {
-                                let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                                let epoch = Epoch::from(epoch);
                                 result_row_vec
                                     .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
                             } else if self.value_output_indices.contains(idx) {
@@ -461,7 +465,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                             let mut result_row_vec = vec![];
                             for idx in &self.output_indices {
                                 if idx == epoch_idx {
-                                    let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                                    let epoch = Epoch::from(epoch);
                                     result_row_vec.push(risingwave_common::types::Datum::from(
                                         epoch.as_scalar(),
                                     ));
