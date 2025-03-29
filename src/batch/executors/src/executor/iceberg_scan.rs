@@ -39,7 +39,7 @@ pub struct IcebergScanExecutor {
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
     file_scan_tasks: Option<IcebergFileScanTask>,
-    batch_size: usize,
+    chunk_size: usize,
     schema: Schema,
     identity: String,
     metrics: Option<BatchMetrics>,
@@ -66,7 +66,7 @@ impl IcebergScanExecutor {
         iceberg_config: IcebergProperties,
         snapshot_id: Option<i64>,
         file_scan_tasks: IcebergFileScanTask,
-        batch_size: usize,
+        chunk_size: usize,
         schema: Schema,
         identity: String,
         metrics: Option<BatchMetrics>,
@@ -76,7 +76,7 @@ impl IcebergScanExecutor {
         Self {
             iceberg_config,
             snapshot_id,
-            batch_size,
+            chunk_size,
             schema,
             file_scan_tasks: Some(file_scan_tasks),
             identity,
@@ -113,7 +113,7 @@ impl IcebergScanExecutor {
                 table.clone(),
                 data_file_scan_task,
                 IcebergScanOpts {
-                    batch_size: self.batch_size,
+                    chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
                 },

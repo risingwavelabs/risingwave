@@ -1,0 +1,215 @@
+statement ok
+SET RW_IMPLICIT_FLUSH = true;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar, PRIMARY KEY(i1, i2));
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE SINK sink1 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 'test_streaming',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1,
+    primary_key = 'i1,i2',
+    partition_by = 'i1'
+);
+
+statement ok
+INSERT INTO s1 (i1, i2, i3) values(1,'1','1'),(2,'2','2'),(3,'3','3'),(4,'4','4'),(5,'5','5');
+
+statement ok
+CREATE SOURCE iceberg_t1_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'test_streaming',
+);
+
+statement ok
+create materialized view mv2 as select * from iceberg_t1_source;
+
+# select only some columns
+statement ok
+create materialized view mv3 as select i2, i1 * 3 as abc from iceberg_t1_source;
+
+sleep 5s
+
+query I retry 3 backoff 5s
+select * from mv2 order by i1;
+----
+1 1 1
+2 2 2
+3 3 3
+4 4 4
+5 5 5
+
+
+query I retry 3 backoff 5s
+select * from mv3 order by i2;
+----
+1 3
+2 6
+3 9
+4 12
+5 15
+
+
+# delete cannot be reflected
+statement ok
+DELETE FROM s1 WHERE i1 < 3;
+
+sleep 5s
+
+query I
+select count(*) from iceberg_t1_source;
+----
+3
+
+query I retry 3 backoff 5s
+select count(*) from mv2;
+----
+5
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+5
+
+
+# insert more data
+statement ok
+INSERT INTO s1 (i1, i2, i3) values(6,'6','6'),(7,'7','7'),(8,'8','8'),(9,'9','9'),(10,'10','10');
+
+sleep 5s
+
+query I
+select count(*) from iceberg_t1_source;
+----
+8
+
+query I retry 3 backoff 5s
+select count(*) from mv2;
+----
+10
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+10
+
+
+# insert more data  -- with upsert
+statement ok
+INSERT INTO s1 (i1, i2, i3) values(9,'9','99'),(10,'10','1010'), (11,'11','1111');
+
+sleep 5s
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+3 3 3
+4 4 4
+5 5 5
+6 6 6
+7 7 7
+8 8 8
+9 9 99
+10 10 1010
+11 11 1111
+
+query I retry 3 backoff 5s
+select * from mv2 order by i1, i3;
+----
+1 1 1
+2 2 2
+3 3 3
+4 4 4
+5 5 5
+6 6 6
+7 7 7
+8 8 8
+9 9 9
+9 9 99
+10 10 10
+10 10 1010
+11 11 1111
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+13
+
+# test recovery
+statement ok
+RECOVER;
+
+# insert more data
+statement ok
+INSERT INTO s1 (i1, i2, i3) values(12,'12','1212'),(13,'13','1313'),(14,'14','1414'),(15,'15','1515'),(16,'16','1616');
+
+sleep 5s
+
+query I
+select count(*) from iceberg_t1_source;
+----
+14
+
+query I retry 3 backoff 5s
+select count(*) from mv2;
+----
+18
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+18
+
+# insert large batch of data
+statement ok
+INSERT INTO s1 (i1, i2, i3) select 1, i::varchar, i::varchar from generate_series(10001, 20000) as i;
+
+sleep 5s
+
+query I
+select count(*) from iceberg_t1_source;
+----
+10014
+
+query I retry 3 backoff 5s
+select count(*) from mv2;
+----
+10018
+
+query I retry 3 backoff 5s
+select count(*) from mv3;
+----
+10018
+
+# TODO: also test compaction
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SOURCE iceberg_t1_source CASCADE;
+
+statement ok
+DROP TABLE s1 cascade;

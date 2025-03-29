@@ -382,7 +382,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 debug_assert_eq!(mapping.len(), 1);
                                 if let Some((split_id, _offset)) = mapping.into_iter().next() {
                                     reading_file = split_id.clone();
-                                    let row = state_store_handler.get(split_id.clone()).await?
+                                    let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
                                         split_id)
@@ -397,7 +397,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     };
 
                                     state_store_handler
-                                        .set(split_id, fs_split.encode_to_json())
+                                        .set(&split_id, fs_split.encode_to_json())
                                         .await?;
                                 }
                                 let chunk = prune_additional_cols(
@@ -410,7 +410,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             }
                             None => {
                                 splits_on_fetch -= 1;
-                                state_store_handler.delete(reading_file.clone()).await?;
+                                state_store_handler.delete(&reading_file).await?;
                             }
                         },
                     }

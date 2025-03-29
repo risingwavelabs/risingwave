@@ -99,9 +99,13 @@ impl SourceDescBuilder {
             .map(|c| SourceColumnDesc::from(&c.column_desc))
             .collect();
 
-        for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
-            if !existed {
-                columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(c));
+        // currently iceberg uses other columns. See `extract_iceberg_columns`
+        // TODO: unify logic.
+        if connector_name != "iceberg" {
+            for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
+                if !existed {
+                    columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(c));
+                }
             }
         }
 
@@ -172,6 +176,10 @@ impl SourceDescBuilder {
             columns,
             metrics: self.metrics.clone(),
         })
+    }
+
+    pub fn with_properties(&self) -> WithOptionsSecResolved {
+        self.with_properties.clone()
     }
 }
 
