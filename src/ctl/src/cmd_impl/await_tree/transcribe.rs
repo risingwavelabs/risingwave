@@ -15,7 +15,7 @@
 use crate::cmd_impl::await_tree::tree::TreeView;
 use crate::cmd_impl::await_tree::utils::extract_actor_traces;
 
-pub async fn transcribe(path: String) -> anyhow::Result<()> {
+pub fn transcribe(path: String) -> anyhow::Result<()> {
     let actor_traces = extract_actor_traces(&path)
         .map_err(|e| anyhow::anyhow!("Failed to extract actor traces from file: {}", e))?;
     for (actor_id, trace) in actor_traces {

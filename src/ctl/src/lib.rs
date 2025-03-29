@@ -879,7 +879,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::await_tree::bottleneck_detect(context, path).await?
         }
         Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
-            cmd_impl::await_tree::transcribe(path).await?
+            cmd_impl::await_tree::transcribe(path)?
         }
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?

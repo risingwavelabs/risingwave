@@ -17,12 +17,12 @@ use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
 
-use serde::Deserialize;
-
 use crate::cmd_impl::await_tree::tree::{SpanNodeView, SpanView, TreeView};
 
 /// Check `impl Display for StackTraceResponseOutput<'_>` for the format of the file.
-pub fn extract_actor_traces<P: AsRef<Path>>(path: P) -> anyhow::Result<HashMap<u32, String>> {
+pub(crate) fn extract_actor_traces<P: AsRef<Path>>(
+    path: P,
+) -> anyhow::Result<HashMap<u32, String>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
 
@@ -43,7 +43,7 @@ pub fn extract_actor_traces<P: AsRef<Path>>(path: P) -> anyhow::Result<HashMap<u
         // Stop parsing if a new section is encountered
         if line.starts_with("---") && in_actor_traces {
             if let Some(actor_id) = current_actor_id {
-                actor_traces.insert(actor_id, current_trace.trim().to_string());
+                actor_traces.insert(actor_id, current_trace.trim().to_owned());
             }
             break;
         }
@@ -52,7 +52,7 @@ pub fn extract_actor_traces<P: AsRef<Path>>(path: P) -> anyhow::Result<HashMap<u
         if in_actor_traces && line.starts_with(">> Actor ") {
             // Save the previous actor trace before processing the next one
             if let Some(actor_id) = current_actor_id {
-                actor_traces.insert(actor_id, current_trace.trim().to_string());
+                actor_traces.insert(actor_id, current_trace.trim().to_owned());
             }
             // Extract actor_id
             if let Some(id_str) = line.strip_prefix(">> Actor ") {
@@ -70,7 +70,7 @@ pub fn extract_actor_traces<P: AsRef<Path>>(path: P) -> anyhow::Result<HashMap<u
 
     // Store the last actor's trace if any
     if let Some(actor_id) = current_actor_id {
-        actor_traces.insert(actor_id, current_trace.trim().to_string());
+        actor_traces.insert(actor_id, current_trace.trim().to_owned());
     }
 
     Ok(actor_traces)
@@ -103,7 +103,7 @@ pub fn parse_tree_view_from_text(input: &str) -> anyhow::Result<TreeView> {
 
         // Check for span definition line
         if let Some((span_name, rest)) = line.split_once('[') {
-            let name = span_name.trim().to_string();
+            let name = span_name.trim().to_owned();
 
             // Extract elapsed time from the format `[elapsed_ns]`
             if let Some(elapsed_str) = rest.strip_suffix(']') {

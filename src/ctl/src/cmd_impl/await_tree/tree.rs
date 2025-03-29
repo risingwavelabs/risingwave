@@ -17,7 +17,7 @@ use std::fmt::Write;
 use itertools::Itertools;
 use serde::Deserialize;
 
-/// Please refer to https://github.com/risingwavelabs/await-tree/blob/main/src/context.rs for the original definition.
+/// See <https://github.com/risingwavelabs/await-tree/blob/main/src/context.rs> for the original definition.
 /// This is for loading await tree info from the JSON output of `Tree`.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct TreeView {
