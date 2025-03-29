@@ -247,7 +247,7 @@ struct Header {
 /// `RowEncoding` holds row-specific information for Column-Aware Encoding
 struct RowEncoding {
     header: Header,
-    offsets: SmallVec<[u8; COLUMN_ON_STACK * 2]>,
+    offsets: SmallVec<u8, { COLUMN_ON_STACK * 2 }>,
     data: Vec<u8>,
 }
 
@@ -308,11 +308,10 @@ impl RowEncoding {
         self.header.set_offset(offset_width);
 
         self.offsets
-            .resize(usize_offsets.len() * offset_width.width(), 0);
-
-        let mut offsets_buf = &mut self.offsets[..];
+            .reserve(usize_offsets.len() * offset_width.width());
         for &offset in usize_offsets {
-            offsets_buf.put_uint_le(offset as u64, offset_width.width());
+            self.offsets
+                .put_uint_le(offset as u64, offset_width.width());
         }
     }
 
@@ -327,7 +326,7 @@ impl RowEncoding {
         );
         let datums = datums.into_iter();
         let mut offset_usize =
-            SmallVec::<[usize; COLUMN_ON_STACK]>::with_capacity(datums.size_hint().0);
+            SmallVec::<usize, COLUMN_ON_STACK>::with_capacity(datums.size_hint().0);
         for (datum, data_type) in datums.zip_eq_debug(data_types) {
             offset_usize.push(self.data.len());
             datum.encode_to(data_type, &mut self.data);
@@ -378,16 +377,15 @@ pub struct Serializer<D: DataTypes = Vec<DataType>> {
     data_types: D,
 }
 
-type EncodedColumnIds = SmallVec<[u8; COLUMN_ON_STACK * 4]>;
+type EncodedColumnIds = SmallVec<u8, { COLUMN_ON_STACK * 4 }>;
 
 fn encode_column_ids(column_ids: impl ExactSizeIterator<Item = ColumnId>) -> EncodedColumnIds {
     // currently we hard-code ColumnId as i32
-    let mut encoded_column_ids = smallvec![0; column_ids.len() * 4];
-    let mut buf = &mut encoded_column_ids[..];
+    let mut buf = SmallVec::with_capacity(column_ids.len() * 4);
     for id in column_ids {
         buf.put_i32_le(id.get_id());
     }
-    encoded_column_ids
+    buf
 }
 
 impl Serializer {
@@ -525,7 +523,7 @@ pub struct Deserializer<D: DataTypes = Arc<[DataType]>> {
 #[derive(Clone)]
 enum ColumnMapping {
     /// For small number of columns, use linear search with `SmallVec`. This ensures no heap allocation.
-    Small(SmallVec<[i32; COLUMN_ON_STACK]>),
+    Small(SmallVec<i32, COLUMN_ON_STACK>),
     /// For larger number of columns, build a `HashMap` for faster lookup.
     Large(HashMap<i32, usize>),
 }
