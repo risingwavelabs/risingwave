@@ -288,7 +288,7 @@ impl StreamTableScan {
             .ctx
             .with_options()
             .backfill_order_strategy()
-            .is_some();
+            .should_pause_initially();
 
         let stream_key = self
             .stream_key()

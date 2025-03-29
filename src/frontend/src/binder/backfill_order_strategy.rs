@@ -36,10 +36,9 @@ use crate::session::SessionImpl;
 /// But backfill order strategy can have duplicate relations.
 pub fn bind_backfill_order_strategy(
     session: &SessionImpl,
-    backfill_order_strategy: Option<BackfillOrderStrategy>,
+    backfill_order_strategy: BackfillOrderStrategy,
 ) -> Result<PbBackfillOrderStrategy> {
-    let strategy = backfill_order_strategy.unwrap_or(BackfillOrderStrategy::None);
-    let pb_strategy = match strategy {
+    let pb_strategy = match backfill_order_strategy {
         BackfillOrderStrategy::Auto
         | BackfillOrderStrategy::Default
         | BackfillOrderStrategy::None => PbStrategy::Unspecified(BackfillOrderUnspecified {}),

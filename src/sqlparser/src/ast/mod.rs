@@ -3619,9 +3619,12 @@ impl fmt::Display for DiscardType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+// We decouple "default" from none,
+// so we can choose strategies that make the most sense.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BackfillOrderStrategy {
+    #[default]
     Default,
     None,
     Auto,
@@ -3643,6 +3646,17 @@ impl fmt::Display for BackfillOrderStrategy {
                 write!(f, "{}", display_comma_separated(&parts))
             }
         }
+    }
+}
+
+impl BackfillOrderStrategy {
+    /// Returns whether all backfill nodes should pause initially.
+    /// Meta will resume them in the order specified by the backfill order.
+    pub fn should_pause_initially(&self) -> bool {
+        matches!(
+            self,
+            BackfillOrderStrategy::Auto | BackfillOrderStrategy::Fixed(_)
+        )
     }
 }
 
