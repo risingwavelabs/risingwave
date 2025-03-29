@@ -213,6 +213,7 @@ impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
     ) -> LogStoreResult<()> {
+        tracing::trace!(epoch, start_seq_id, end_seq_id, "write_chunk");
         for (i, (op, row)) in chunk.rows().enumerate() {
             let seq_id = start_seq_id + (i as SeqIdType);
             assert!(seq_id <= end_seq_id);

@@ -40,9 +40,9 @@
         └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id, t3._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1, t3._row_id], pk_columns: [t1._row_id, t2._row_id, v1, t3._row_id], pk_conflict: NoCheck }
-    └─StreamSyncLogStore { buffer_size: 2048, pause_duration_ms: 256 }
+    └─StreamSyncLogStore { buffer_size: 2048, pause_duration_ms: 64 }
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = t3.v5, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t1._row_id, t2._row_id, t3._row_id] }
-        ├─StreamSyncLogStore { buffer_size: 2048, pause_duration_ms: 256 }
+        ├─StreamSyncLogStore { buffer_size: 2048, pause_duration_ms: 64 }
         │ └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
         │   ├─StreamExchange { dist: HashShard(t1.v1) }
         │   │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
