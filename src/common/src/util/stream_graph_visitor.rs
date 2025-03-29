@@ -282,6 +282,12 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::SyncLogStore(node) => {
                 always!(node.log_store_table, "StreamSyncLogStore");
             }
+
+            // MaterializedExprs
+            NodeBody::MaterializedExprs(node) => {
+                always!(node.state_table, "MaterializedExprs");
+            }
+
             _ => {}
         }
     };
