@@ -52,7 +52,7 @@ pub struct WithOptions {
     inner: BTreeMap<String, String>,
     secret_ref: BTreeMap<String, SecretRefValue>,
     connection_ref: BTreeMap<String, ConnectionRefValue>,
-    backfill_order_strategy: Option<BackfillOrderStrategy>,
+    backfill_order_strategy: BackfillOrderStrategy,
 }
 
 impl std::ops::Deref for WithOptions {
@@ -196,7 +196,7 @@ impl WithOptions {
             && self.inner.get(UPSTREAM_SOURCE_KEY).unwrap() != WEBHOOK_CONNECTOR
     }
 
-    pub fn backfill_order_strategy(&self) -> Option<BackfillOrderStrategy> {
+    pub fn backfill_order_strategy(&self) -> BackfillOrderStrategy {
         self.backfill_order_strategy.clone()
     }
 }
@@ -391,7 +391,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
         let mut secret_ref: BTreeMap<String, SecretRefValue> = BTreeMap::new();
         let mut connection_ref: BTreeMap<String, ConnectionRefValue> = BTreeMap::new();
-        let mut backfill_order_strategy = None;
+        let mut backfill_order_strategy = BackfillOrderStrategy::Default;
         for option in options {
             let key = option.name.real_value();
             match &option.value {
@@ -418,7 +418,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                     continue;
                 }
                 SqlOptionValue::BackfillOrder(b) => {
-                    backfill_order_strategy = Some(b.clone());
+                    backfill_order_strategy = b.clone();
                     continue;
                 }
                 _ => {}
