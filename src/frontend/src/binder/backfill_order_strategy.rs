@@ -30,6 +30,10 @@ use crate::error::Result;
 use crate::session::SessionImpl;
 
 // FIXME(kwannoel): we can flatten the strategy earlier
+/// We don't use query binder directly because its binding rules are different from a query.
+/// We only bind tables, materialized views and sources.
+/// Queries won't bind duplicate relations in the same query context.
+/// But backfill order strategy can have duplicate relations.
 pub fn bind_backfill_order_strategy(
     session: &SessionImpl,
     backfill_order_strategy: Option<BackfillOrderStrategy>,
