@@ -468,13 +468,15 @@ enum MetaCommands {
 pub enum AwaitTreeCommands {
     /// Dump Await Tree
     Dump {
-        /// Dump format
+        /// The format of actor traces in the diagnose file. `json` by default.
         #[clap(short, long = "actor-traces-format")]
         actor_traces_format: Option<String>,
     },
     /// Analyze Await Tree
     Analyze {
-        /// The path to the await tree file, if None, ctl will first pull one from the cluster
+        /// The path to the diagnose file, if None, ctl will first pull one from the cluster
+        /// The actor traces format can be either `json` or `text`. The analyze command will
+        /// automatically detect the format.
         #[clap(long = "path")]
         path: Option<String>,
     },

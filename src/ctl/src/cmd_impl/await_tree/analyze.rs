@@ -18,7 +18,7 @@ use risingwave_rpc_client::ComputeClientPool;
 
 use crate::CtlContext;
 use crate::cmd_impl::await_tree::tree::{SpanNodeView, TreeView};
-use crate::cmd_impl::await_tree::utils::extract_actor_traces;
+use crate::cmd_impl::await_tree::utils::{extract_actor_traces, parse_tree_view_from_text};
 
 impl TreeView {
     /// The target of this function is to analyze whether the current tree is the
@@ -132,7 +132,8 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
         let client = clients.get(&cn).await?;
         let response = client.stack_trace(req.clone()).await?;
         for (actor_id, trace) in response.actor_traces {
-            let tree: TreeView = serde_json::from_str(&trace).unwrap();
+            let tree: TreeView = serde_json::from_str(&trace)
+                .map_err(|e| anyhow::anyhow!("Failed to parse actor trace JSON: {}", e))?;
             if tree.is_bottleneck() {
                 bottleneck_actors_found = true;
                 println!(">> Actor {}", actor_id);
@@ -153,8 +154,15 @@ async fn bottleneck_detect_from_file(path: String) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to extract actor traces from file: {}", e))?;
     let mut bottleneck_actors_found = false;
     for (actor_id, trace) in actor_traces {
-        let tree: TreeView = serde_json::from_str(&trace)
-            .map_err(|e| anyhow::anyhow!("Failed to parse actor trace JSON: {}", e))?;
+        let tree: TreeView = if trace.trim().starts_with("{") {
+            // JSON usually starts with `{`
+            serde_json::from_str(&trace)
+                .map_err(|e| anyhow::anyhow!("Failed to parse actor trace JSON: {}", e))?
+        } else {
+            parse_tree_view_from_text(&trace)
+                .map_err(|e| anyhow::anyhow!("Failed to parse actor trace text: {}", e))?
+        };
+
         if tree.is_bottleneck() {
             bottleneck_actors_found = true;
 
