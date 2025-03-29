@@ -14,7 +14,7 @@ axum = { workspace = true }
 axum-extra = { workspace = true, features = ["query"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
