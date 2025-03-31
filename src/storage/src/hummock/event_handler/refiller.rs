@@ -208,7 +208,7 @@ impl CacheRefillConfig {
                 .copied()
                 .collect(),
             Err(e) => {
-                tracing::error!("ElasticDiskCache is not available: {}", e.as_report());
+                tracing::error!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 HashSet::new()
             }
         };
