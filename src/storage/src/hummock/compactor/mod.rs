@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
@@ -158,7 +158,7 @@ impl Compactor {
                     task_progress.clone(),
                     self.object_id_getter.clone(),
                 )
-                .verbose_instrument_await("compact")
+                .instrument_await("compact".verbose())
                 .await?
             } else {
                 self.compact_key_range_impl::<_, Xor16FilterBuilder>(
@@ -169,7 +169,7 @@ impl Compactor {
                     task_progress.clone(),
                     self.object_id_getter.clone(),
                 )
-                .verbose_instrument_await("compact")
+                .instrument_await("compact".verbose())
                 .await?
             }
         };
@@ -263,12 +263,12 @@ impl Compactor {
             iter,
             compaction_filter,
         )
-        .verbose_instrument_await("compact_and_build_sst")
+        .instrument_await("compact_and_build_sst".verbose())
         .await?;
 
         let ssts = sst_builder
             .finish()
-            .verbose_instrument_await("builder_finish")
+            .instrument_await("builder_finish".verbose())
             .await?;
 
         Ok((ssts, compaction_statistics))

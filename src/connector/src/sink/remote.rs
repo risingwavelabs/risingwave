@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
 use jni::JavaVM;
@@ -50,6 +50,7 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, unbounded_channel};
@@ -57,6 +58,7 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
+use super::SinkCommittedEpochSubscriber;
 use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
@@ -309,7 +311,7 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
@@ -403,7 +405,7 @@ impl LogSinker for RemoteLogSinker {
                                         epoch,
                                         chunk_id: batch_id as _,
                                     },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -422,7 +424,7 @@ impl LogSinker for RemoteLogSinker {
                                 truncate_matched_offset(
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -455,7 +457,7 @@ impl LogSinker for RemoteLogSinker {
                                         batch_id: chunk_id as u64,
                                         chunk,
                                     })
-                                    .instrument_await(format!(
+                                    .instrument_await(span!(
                                         "log_sinker_send_chunk (chunk {chunk_id})"
                                     ))
                                     .await?;
@@ -463,7 +465,7 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Chunk { epoch, chunk_id }, None));
                             }
-                            LogStoreReadItem::Barrier { is_checkpoint } => {
+                            LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                                 let offset = TruncateOffset::Barrier { epoch };
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;
@@ -472,7 +474,7 @@ impl LogSinker for RemoteLogSinker {
                                     let start_time = Instant::now();
                                     request_tx
                                         .barrier(epoch, true)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_commit_checkpoint (epoch {epoch})"
                                         ))
                                         .await?;
@@ -480,7 +482,7 @@ impl LogSinker for RemoteLogSinker {
                                 } else {
                                     request_tx
                                         .barrier(epoch, false)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_send_barrier (epoch {epoch})"
                                         ))
                                         .await?;
@@ -490,7 +492,6 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Barrier { epoch }, start_time));
                             }
-                            LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                         }
                     }
                 }
@@ -556,7 +557,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }
@@ -676,7 +677,7 @@ impl RemoteCoordinator {
 
 #[async_trait]
 impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         Ok(None)
     }
 

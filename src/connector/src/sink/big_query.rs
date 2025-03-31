@@ -159,7 +159,7 @@ impl BigQueryLogSinker {
 
 #[async_trait]
 impl LogSinker for BigQueryLogSinker {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         loop {
             tokio::select!(
@@ -178,7 +178,6 @@ impl LogSinker for BigQueryLogSinker {
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Barrier { epoch },0);
                         }
-                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }
                 }
             )

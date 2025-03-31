@@ -225,7 +225,7 @@ impl Build for UserDefinedFunction {
             arg_schema,
             runtime,
             arrow_convert,
-            span: format!("udf_call({})", name).into(),
+            span: await_tree::span!("udf_call({})", name),
             metrics,
         })
     }

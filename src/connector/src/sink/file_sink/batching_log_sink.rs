@@ -33,7 +33,7 @@ impl BatchingLogSinker {
 
 #[async_trait]
 impl LogSinker for BatchingLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         let mut sink_writer = self.writer;
         #[derive(Debug)]
@@ -57,26 +57,6 @@ impl LogSinker for BatchingLogSinker {
         let mut state = LogConsumerState::Uninitialized;
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
-            if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
-                match &state {
-                    LogConsumerState::BarrierReceived { prev_epoch } => {
-                        // we need to force to finish the batch here. Otherwise, there can be data loss because actor can be dropped and rebuilt during scaling.
-                        if sink_writer.try_commit().await? {
-                            // If epoch increased, we first need to truncate the previous epoch.
-                            if epoch > *prev_epoch {
-                                log_reader
-                                    .truncate(TruncateOffset::Barrier { epoch: *prev_epoch })?;
-                            }
-                        };
-                    }
-                    _ => unreachable!(
-                        "update vnode bitmap can be accepted only right after \
-                    barrier, but current state is {:?}",
-                        state
-                    ),
-                }
-                continue;
-            }
             // begin_epoch when not previously began
             state = match state {
                 LogConsumerState::Uninitialized => LogConsumerState::EpochBegun {
@@ -148,7 +128,7 @@ impl LogSinker for BatchingLogSinker {
                         Ok(false) => {}
                     }
                 }
-                LogStoreReadItem::Barrier { is_checkpoint: _ } => {
+                LogStoreReadItem::Barrier { .. } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun {
                             curr_epoch,
@@ -166,7 +146,6 @@ impl LogSinker for BatchingLogSinker {
 
                     state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_vnode_bitmap) => {}
             }
         }
     }

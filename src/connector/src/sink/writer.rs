@@ -132,7 +132,7 @@ impl<W> LogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         let mut sink_writer = self.writer;
         let metrics = self.sink_writer_metrics;
@@ -152,16 +152,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
-            if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
-                match &state {
-                    LogConsumerState::BarrierReceived { .. } => {}
-                    _ => unreachable!(
-                        "update vnode bitmap can be accepted only right after \
-                    barrier, but current state is {:?}",
-                        state
-                    ),
-                }
-            }
             // begin_epoch when not previously began
             state = match state {
                 LogConsumerState::Uninitialized => {
@@ -195,7 +185,10 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         return Err(e);
                     }
                 }
-                LogStoreReadItem::Barrier { is_checkpoint } => {
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    new_vnode_bitmap,
+                } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
                         _ => unreachable!("epoch must have begun before handling barrier"),
@@ -207,13 +200,14 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                             .sink_commit_duration
                             .observe(start_time.elapsed().as_millis() as f64);
                         log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                        if let Some(new_vnode_bitmap) = new_vnode_bitmap {
+                            sink_writer.update_vnode_bitmap(new_vnode_bitmap).await?;
+                        }
                     } else {
+                        assert!(new_vnode_bitmap.is_none());
                         sink_writer.barrier(false).await?;
                     }
                     state = LogConsumerState::BarrierReceived { prev_epoch }
-                }
-                LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) => {
-                    sink_writer.update_vnode_bitmap(vnode_bitmap).await?;
                 }
             }
         }
@@ -249,7 +243,7 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         loop {
             let select_result = drop_either_future(
@@ -267,11 +261,10 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                             let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
                             self.writer.write_chunk(chunk, add_future).await?;
                         }
-                        LogStoreReadItem::Barrier { is_checkpoint } => {
+                        LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                             self.writer.barrier(is_checkpoint).await?;
                             self.future_manager.add_barrier(epoch);
                         }
-                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }
                 }
                 Either::Right(offset_result) => {

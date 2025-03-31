@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt, TryFutureExt};
@@ -105,7 +105,7 @@ impl<S> MonitoredStateStore<S> {
             MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
 
         let value = get_future
-            .verbose_instrument_await("store_get")
+            .instrument_await("store_get".verbose())
             .instrument(tracing::trace_span!("store_get"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
@@ -129,7 +129,7 @@ impl<S> MonitoredStateStore<S> {
             MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
 
         let value = get_keyed_row_future
-            .verbose_instrument_await("store_get_keyed_row")
+            .instrument_await("store_get_keyed_row".verbose())
             .instrument(tracing::trace_span!("store_get_keyed_row"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
@@ -262,7 +262,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     }
 
     fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-        self.inner.flush().verbose_instrument_await("store_flush")
+        self.inner.flush().instrument_await("store_flush".verbose())
     }
 
     fn epoch(&self) -> u64 {
@@ -285,7 +285,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.inner
             .try_flush()
-            .verbose_instrument_await("store_try_flush")
+            .instrument_await("store_try_flush".verbose())
     }
 
     async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
@@ -315,7 +315,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.inner
             .try_wait_epoch(epoch, options)
-            .verbose_instrument_await("store_wait_epoch")
+            .instrument_await("store_wait_epoch".verbose())
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }
 
