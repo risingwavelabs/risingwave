@@ -237,7 +237,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aef82843a0ec9f8b19567445ad2421ceeb1d711514384bdd3d49fe37102ee13"
 dependencies = [
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "digest",
  "libflate",
  "log",
@@ -1992,9 +1992,9 @@ dependencies = [
 
 [[package]]
 name = "bigdecimal"
-version = "0.4.5"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d712318a27c7150326677b321a5fa91b55f6d9034ffd67f20319e147d40cee"
+checksum = "7f31f3af01c5c65a07985c804d3366560e6fa7883d640a122819b14ec327482c"
 dependencies = [
  "autocfg",
  "libm",
@@ -5610,7 +5610,7 @@ dependencies = [
  "async-trait",
  "backon 1.2.0",
  "base64 0.21.7",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "google-cloud-auth",
  "google-cloud-gax",
  "google-cloud-googleapis",
@@ -7792,7 +7792,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a60cb978c0a1d654edcc1460f8d6092dacf21346ed6017d81fb76a23ef5a8de"
 dependencies = [
  "base64 0.21.7",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "bindgen 0.71.1",
  "bitflags 2.9.0",
  "bitvec",
@@ -8932,7 +8932,7 @@ name = "pg_bigdecimal"
 version = "0.1.5"
 source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=0b7893d88894ca082b4525f94f812da034486f7c#0b7893d88894ca082b4525f94f812da034486f7c"
 dependencies = [
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "byteorder",
  "bytes",
  "num-bigint",
@@ -11146,6 +11146,7 @@ version = "2.4.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
+ "bigdecimal 0.4.7",
  "chrono",
  "easy-ext",
  "expect-test",
@@ -12827,7 +12828,7 @@ checksum = "d5680a8b686985116607ef5f5af2b1f9e1cc2c228330e93101816a0baa279afa"
 dependencies = [
  "async-stream",
  "async-trait",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "chrono",
  "futures",
  "log",
@@ -12901,7 +12902,7 @@ version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff504d13b5e4b52fffcf2fb203d0352a5722fa5151696db768933e41e1e591bb"
 dependencies = [
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "chrono",
  "inherent",
  "ordered-float 3.9.1",
@@ -12918,7 +12919,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
 dependencies = [
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "chrono",
  "rust_decimal",
  "sea-query",
@@ -13788,7 +13789,7 @@ version = "0.8.2"
 source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "byteorder",
  "bytes",
  "chrono",
@@ -13870,7 +13871,7 @@ source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30d
 dependencies = [
  "atoi",
  "base64 0.22.1",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "bitflags 2.9.0",
  "byteorder",
  "bytes",
@@ -13916,7 +13917,7 @@ source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30d
 dependencies = [
  "atoi",
  "base64 0.22.1",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "bitflags 2.9.0",
  "byteorder",
  "chrono",

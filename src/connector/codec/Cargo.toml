@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 apache-avro = { workspace = true }
+bigdecimal = "0.4.7"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
