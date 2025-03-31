@@ -72,7 +72,7 @@ use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
-    ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, get_delimiter,
+    ObjectName, SourceWatermark, TableConstraint, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -316,9 +316,6 @@ pub(crate) fn bind_all_columns(
         }
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
 
-        println!("format encode: {:?}", &format_encode);
-        println!("row options: {:?}", &format_encode.row_options);
-
         match (&format_encode.format, &format_encode.row_encode) {
             (Format::DebeziumMongo, Encode::Json) => {
                 let strong_schema = format_encode
@@ -326,11 +323,6 @@ pub(crate) fn bind_all_columns(
                     .iter()
                     .find(|&s| s.name.to_string() == CDC_MONGODB_STRONG_SCHEMA_KEY)
                     .is_some_and(|opt| opt.value.to_string() == "true");
-
-                println!(
-                    "strong schema: {:?}, CDC_MONGODB_STRONG_SCHEMA_KEY: {}",
-                    strong_schema, CDC_MONGODB_STRONG_SCHEMA_KEY
-                );
 
                 // strong schema requires a '_id' column at the first position with a specific type
                 if strong_schema {
