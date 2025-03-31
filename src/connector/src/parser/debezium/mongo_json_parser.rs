@@ -77,8 +77,12 @@ impl DebeziumMongoJsonParser {
                 .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
                 .map(|v| v == "true")
                 .unwrap_or(false),
+            ConnectorProperties::Kafka(props) => props
+                .unknown_fields
+                .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
 
-            ConnectorProperties::Kafka(..) | ConnectorProperties::Test(..) => false,
+            ConnectorProperties::Test(..) => false,
             _ => todo!(),
         };
         if !strong_schema {
