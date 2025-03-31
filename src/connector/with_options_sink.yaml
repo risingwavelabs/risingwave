@@ -595,6 +595,10 @@ KafkaConfig:
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+  - name: properties.socket.keepalive.enable
+    field_type: bool
+    required: false
+    default: 'true'
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
