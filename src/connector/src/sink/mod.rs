@@ -662,7 +662,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
-pub trait SinkLogReader: Send + Sized + 'static {
+pub trait SinkLogReader: Send {
     fn start_from(
         &mut self,
         start_offset: Option<u64>,
@@ -679,29 +679,29 @@ pub trait SinkLogReader: Send + Sized + 'static {
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
-impl<R: LogReader> SinkLogReader for R {
+impl<R: LogReader> SinkLogReader for &mut R {
     fn next_item(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
-        <Self as LogReader>::next_item(self)
+        <R as LogReader>::next_item(*self)
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        <Self as LogReader>::truncate(self, offset)
+        <R as LogReader>::truncate(*self, offset)
     }
 
     fn start_from(
         &mut self,
         start_offset: Option<u64>,
-    ) -> impl std::future::Future<Output = LogStoreResult<()>> + std::marker::Send {
-        <Self as LogReader>::start_from(self, start_offset)
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        <R as LogReader>::start_from(*self, start_offset)
     }
 }
 
 #[async_trait]
 pub trait LogSinker: 'static + Send {
     // Note: Please rebuild the log reader's read stream before consuming the log store,
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
+    async fn consume_log_and_sink(self, log_reader: impl SinkLogReader) -> Result<!>;
 }
 pub type SinkCommittedEpochSubscriber = Arc<
     dyn Fn(SinkId) -> BoxFuture<'static, Result<(u64, UnboundedReceiver<u64>)>>

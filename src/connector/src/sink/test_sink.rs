@@ -17,13 +17,13 @@ use std::sync::{Arc, OnceLock};
 use anyhow::anyhow;
 use parking_lot::Mutex;
 
-use crate::sink::boxed::{BoxCoordinator, BoxWriter};
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{Sink, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam};
+use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
+use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 
-pub trait BuildBoxWriterTrait = FnMut(SinkParam, SinkWriterParam) -> BoxWriter<()> + Send + 'static;
+pub trait BuildBoxLogSinkerTrait =
+    FnMut(SinkParam, SinkWriterParam) -> BoxLogSinker + Send + 'static;
 
-pub type BuildBoxWriter = Box<dyn BuildBoxWriterTrait>;
+pub type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
 pub const TEST_SINK_NAME: &str = "test";
 
 #[derive(Debug)]
@@ -45,7 +45,7 @@ impl TryFrom<SinkParam> for TestSink {
 
 impl Sink for TestSink {
     type Coordinator = BoxCoordinator;
-    type LogSinker = LogSinkerOf<BoxWriter<()>>;
+    type LogSinker = BoxLogSinker;
 
     const SINK_NAME: &'static str = "test";
 
@@ -57,19 +57,18 @@ impl Sink for TestSink {
         &self,
         writer_param: SinkWriterParam,
     ) -> crate::sink::Result<Self::LogSinker> {
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        Ok(build_box_writer(self.param.clone(), writer_param).into_log_sinker(metrics))
+        Ok(build_box_log_sinker(self.param.clone(), writer_param))
     }
 }
 
 struct TestSinkRegistry {
-    build_box_writer: Arc<Mutex<Option<BuildBoxWriter>>>,
+    build_box_log_sinker: Arc<Mutex<Option<BuildBoxLogSinker>>>,
 }
 
 impl TestSinkRegistry {
     fn new() -> Self {
         TestSinkRegistry {
-            build_box_writer: Arc::new(Mutex::new(None)),
+            build_box_log_sinker: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -83,24 +82,26 @@ pub struct TestSinkRegistryGuard;
 
 impl Drop for TestSinkRegistryGuard {
     fn drop(&mut self) {
-        assert!(get_registry().build_box_writer.lock().take().is_some());
+        assert!(get_registry().build_box_log_sinker.lock().take().is_some());
     }
 }
 
-pub fn registry_build_sink(build_box_writer: impl BuildBoxWriterTrait) -> TestSinkRegistryGuard {
+pub fn registry_build_sink(
+    build_box_log_sinker: impl BuildBoxLogSinkerTrait,
+) -> TestSinkRegistryGuard {
     assert!(
         get_registry()
-            .build_box_writer
+            .build_box_log_sinker
             .lock()
-            .replace(Box::new(build_box_writer))
+            .replace(Box::new(build_box_log_sinker))
             .is_none()
     );
     TestSinkRegistryGuard
 }
 
-pub fn build_box_writer(param: SinkParam, writer_param: SinkWriterParam) -> BoxWriter<()> {
+pub fn build_box_log_sinker(param: SinkParam, writer_param: SinkWriterParam) -> BoxLogSinker {
     (get_registry()
-        .build_box_writer
+        .build_box_log_sinker
         .lock()
         .as_mut()
         .expect("should not be empty"))(param, writer_param)

@@ -311,7 +311,7 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
@@ -405,7 +405,7 @@ impl LogSinker for RemoteLogSinker {
                                         epoch,
                                         chunk_id: batch_id as _,
                                     },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -424,7 +424,7 @@ impl LogSinker for RemoteLogSinker {
                                 truncate_matched_offset(
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -465,7 +465,7 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Chunk { epoch, chunk_id }, None));
                             }
-                            LogStoreReadItem::Barrier { is_checkpoint } => {
+                            LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                                 let offset = TruncateOffset::Barrier { epoch };
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;
@@ -492,7 +492,6 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Barrier { epoch }, start_time));
                             }
-                            LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                         }
                     }
                 }

@@ -581,7 +581,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -601,7 +601,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -1846,6 +1846,7 @@ mod tests {
                     epoch1,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
+                        new_vnode_bitmap: None,
                     },
                 ),
                 (
@@ -1859,6 +1860,7 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
+                        new_vnode_bitmap: None,
                     },
                 ),
             ],
@@ -1905,6 +1907,7 @@ mod tests {
                     epoch1,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
+                        new_vnode_bitmap: None,
                     },
                 ),
                 (
@@ -1918,6 +1921,7 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
+                        new_vnode_bitmap: None,
                     },
                 ),
             ],
@@ -1974,6 +1978,7 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
+                        new_vnode_bitmap: None,
                     },
                 ),
             ],
@@ -2072,7 +2077,7 @@ mod tests {
             _ => unreachable!(),
         };
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -2087,7 +2092,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -2125,14 +2130,14 @@ mod tests {
             .unwrap();
 
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
@@ -2191,7 +2196,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
@@ -2207,7 +2212,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
