@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::error::BoxError;
@@ -330,7 +330,7 @@ impl StreamingUploader for S3StreamingUploader {
 
         if self.not_uploaded_len >= self.part_size {
             self.upload_next_part()
-                .verbose_instrument_await("s3_upload_next_part")
+                .instrument_await("s3_upload_next_part".verbose())
                 .await?;
             self.not_uploaded_len = 0;
         }
@@ -360,7 +360,7 @@ impl StreamingUploader for S3StreamingUploader {
                         .content_length(self.not_uploaded_len as i64)
                         .key(&self.key)
                         .send()
-                        .verbose_instrument_await("s3_put_object")
+                        .instrument_await("s3_put_object".verbose())
                         .await
                         .map_err(|err| {
                             set_error_should_retry::<PutObjectError>(
@@ -385,7 +385,7 @@ impl StreamingUploader for S3StreamingUploader {
         } else {
             match self
                 .flush_multipart_and_complete()
-                .verbose_instrument_await("s3_flush_multipart_and_complete")
+                .instrument_await("s3_flush_multipart_and_complete".verbose())
                 .await
             {
                 Err(e) => {

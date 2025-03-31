@@ -120,12 +120,11 @@ pub enum LogStoreReadItem {
     },
     Barrier {
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
     },
-    UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
-pub trait LogWriterPostFlushCurrentEpochFn<'a> =
-    FnOnce(Option<Arc<Bitmap>>) -> BoxFuture<'a, LogStoreResult<()>>;
+pub trait LogWriterPostFlushCurrentEpochFn<'a> = FnOnce() -> BoxFuture<'a, LogStoreResult<()>>;
 
 #[must_use]
 pub struct LogWriterPostFlushCurrentEpoch<'a>(
@@ -137,8 +136,8 @@ impl<'a> LogWriterPostFlushCurrentEpoch<'a> {
         Self(Box::new(f))
     }
 
-    pub async fn post_yield_barrier(self, new_vnodes: Option<Arc<Bitmap>>) -> LogStoreResult<()> {
-        self.0(new_vnodes).await
+    pub async fn post_yield_barrier(self) -> LogStoreResult<()> {
+        self.0().await
     }
 }
 
@@ -161,6 +160,7 @@ pub trait LogWriter: Send {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
     ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
@@ -171,6 +171,12 @@ pub trait LogWriter: Send {
 pub trait LogReader: Send + Sized + 'static {
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    /// Consume log store from given `start_offset` or aligned start offset recorded previously.
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Emit the next item.
     ///
@@ -229,6 +235,13 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind()
     }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.start_from(start_offset)
+    }
 }
 
 pub struct BackpressureMonitoredLogReader<R: LogReader> {
@@ -275,6 +288,13 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         self.inner.rewind().inspect_ok(|_| {
             self.wait_new_future_start_time = None;
         })
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.start_from(start_offset)
     }
 }
 
@@ -334,6 +354,13 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().instrument_await("log_reader_rewind")
     }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.start_from(start_offset)
+    }
 }
 
 type UpstreamChunkOffset = TruncateOffset;
@@ -380,7 +407,6 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
                         self.next_chunk_id = 0;
                         Ok(Either::Right((epoch, item)))
                     }
-                    LogStoreReadItem::UpdateVnodeBitmap(_) => Ok(Either::Right((epoch, item))),
                 }
             }
         }
@@ -507,7 +533,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                             return self.apply_rate_limit(split_chunk).await;
                         },
                         Either::Right(item) => {
-                            assert!(matches!(item.1, LogStoreReadItem::Barrier{..} | LogStoreReadItem::UpdateVnodeBitmap(_)));
+                            assert!(matches!(item.1, LogStoreReadItem::Barrier{..}));
                             return Ok(item);
                         },
                     }
@@ -545,6 +571,13 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
         self.core.consumed_offset_queue.clear();
         self.core.next_chunk_id = 0;
         self.core.inner.rewind()
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.core.inner.start_from(start_offset)
     }
 }
 
@@ -612,10 +645,11 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
         let post_flush = self
             .inner
-            .flush_current_epoch(next_epoch, is_checkpoint)
+            .flush_current_epoch(next_epoch, is_checkpoint, new_vnode_bitmap)
             .await?;
         self.metrics
             .log_store_latest_write_epoch

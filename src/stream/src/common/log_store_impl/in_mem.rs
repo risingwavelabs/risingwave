@@ -36,8 +36,8 @@ enum InMemLogStoreItem {
     Barrier {
         next_epoch: u64,
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
     },
-    UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
 /// An in-memory log store that can buffer a bounded amount of stream chunk in memory via bounded
@@ -179,6 +179,7 @@ impl LogReader for BoundedInMemLogStoreReader {
                     InMemLogStoreItem::Barrier {
                         is_checkpoint,
                         next_epoch,
+                        new_vnode_bitmap,
                     } => {
                         if is_checkpoint {
                             self.epoch_progress = AwaitingTruncate {
@@ -191,12 +192,14 @@ impl LogReader for BoundedInMemLogStoreReader {
                         self.latest_offset = TruncateOffset::Barrier {
                             epoch: current_epoch,
                         };
-                        Ok((current_epoch, LogStoreReadItem::Barrier { is_checkpoint }))
+                        Ok((
+                            current_epoch,
+                            LogStoreReadItem::Barrier {
+                                is_checkpoint,
+                                new_vnode_bitmap,
+                            },
+                        ))
                     }
-                    InMemLogStoreItem::UpdateVnodeBitmap(vnode_bitmap) => Ok((
-                        current_epoch,
-                        LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap),
-                    )),
                 },
                 AwaitingTruncate { .. } => Err(anyhow!(
                     "should not call next_item on checkpoint barrier for in-mem log store"
@@ -247,6 +250,10 @@ impl LogReader for BoundedInMemLogStoreReader {
     async fn rewind(&mut self) -> LogStoreResult<()> {
         Err(anyhow!("should not call rewind on it"))
     }
+
+    async fn start_from(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
+        Ok(())
+    }
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {
@@ -276,11 +283,13 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
         self.item_tx
             .send(InMemLogStoreItem::Barrier {
                 next_epoch,
                 is_checkpoint,
+                new_vnode_bitmap,
             })
             .instrument_await("in_mem_send_item_barrier")
             .await
@@ -301,18 +310,8 @@ impl LogWriter for BoundedInMemLogStoreWriter {
             assert_eq!(truncated_epoch, prev_epoch);
         }
 
-        Ok(LogWriterPostFlushCurrentEpoch::new(move |new_vnodes| {
-            async move {
-                if let Some(new_vnodes) = new_vnodes {
-                    self.item_tx
-                        .send(InMemLogStoreItem::UpdateVnodeBitmap(new_vnodes))
-                        .instrument_await("in_mem_send_item_vnode_bitmap")
-                        .await
-                        .map_err(|_| anyhow!("unable to send vnode bitmap"))?;
-                }
-                Ok(())
-            }
-            .boxed()
+        Ok(LogWriterPostFlushCurrentEpoch::new(move || {
+            async move { Ok(()) }.boxed()
         }))
     }
 
@@ -415,7 +414,7 @@ mod tests {
         };
 
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert!(!is_checkpoint);
                 assert_eq!(epoch, init_epoch);
             }
@@ -432,7 +431,7 @@ mod tests {
         };
 
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert!(is_checkpoint);
                 assert_eq!(epoch, epoch1);
             }

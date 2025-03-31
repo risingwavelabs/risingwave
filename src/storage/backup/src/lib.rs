@@ -67,7 +67,7 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_object_ids(),
+            ssts: v.get_object_ids(false),
             format_version,
             remarks,
             state_table_info: v

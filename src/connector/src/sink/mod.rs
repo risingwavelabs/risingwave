@@ -47,7 +47,7 @@ pub mod writer;
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use ::clickhouse::error::Error as ClickHouseError;
 use ::deltalake::DeltaTableError;
@@ -60,6 +60,7 @@ use decouple_checkpoint_log_sink::{
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use deltalake::DELTALAKE_SINK;
+use futures::future::BoxFuture;
 use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
@@ -82,9 +83,11 @@ use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
+use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedReceiver;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
@@ -656,12 +659,16 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
 
-pub trait SinkLogReader: Send + Sized + 'static {
+pub trait SinkLogReader: Send {
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
     /// Emit the next item.
     ///
     /// The implementation should ensure that the future is cancellation safe.
@@ -674,27 +681,41 @@ pub trait SinkLogReader: Send + Sized + 'static {
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
-impl<R: LogReader> SinkLogReader for R {
+impl<R: LogReader> SinkLogReader for &mut R {
     fn next_item(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
-        <Self as LogReader>::next_item(self)
+        <R as LogReader>::next_item(*self)
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        <Self as LogReader>::truncate(self, offset)
+        <R as LogReader>::truncate(*self, offset)
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        <R as LogReader>::start_from(*self, start_offset)
     }
 }
 
 #[async_trait]
-pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
+pub trait LogSinker: 'static + Send {
+    // Note: Please rebuild the log reader's read stream before consuming the log store,
+    async fn consume_log_and_sink(self, log_reader: impl SinkLogReader) -> Result<!>;
 }
+pub type SinkCommittedEpochSubscriber = Arc<
+    dyn Fn(SinkId) -> BoxFuture<'static, Result<(u64, UnboundedReceiver<u64>)>>
+        + Send
+        + Sync
+        + 'static,
+>;
 
 #[async_trait]
 pub trait SinkCommitCoordinator {
-    /// Initialize the sink committer coordinator
-    async fn init(&mut self) -> Result<()>;
+    /// Initialize the sink committer coordinator, return the log store rewind start offset.
+    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
@@ -706,8 +727,8 @@ pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
 impl SinkCommitCoordinator for DummySinkCommitCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
@@ -922,6 +943,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+}
+
+impl From<sea_orm::DbErr> for SinkError {
+    fn from(err: sea_orm::DbErr) -> Self {
+        SinkError::Iceberg(anyhow!(err))
+    }
 }
 
 impl From<OpendalError> for SinkError {

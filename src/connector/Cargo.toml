@@ -12,7 +12,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.39"
+async-nats = "0.40"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -21,7 +21,7 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
-aws-sdk-emrserverless = "1.50.0"
+aws-sdk-emrserverless = "1.53.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -103,7 +103,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.28", features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
+redis = { workspace = true, features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
 regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
@@ -111,6 +111,7 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.24.0", features = ["url"] }
@@ -120,6 +121,7 @@ rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
 scopeguard = "1"
+sea-orm = { workspace = true }
 sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",

@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 use async_recursion::async_recursion;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::future::join_all;
 use futures::stream::BoxStream;
 use futures::{FutureExt, TryFutureExt};
@@ -273,7 +273,7 @@ impl LocalBarrierWorker {
         if let Some(hummock) = self.actor_manager.env.state_store().as_hummock() {
             hummock
                 .clear_shared_buffer()
-                .verbose_instrument_await("store_clear_shared_buffer")
+                .instrument_await("store_clear_shared_buffer".verbose())
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();

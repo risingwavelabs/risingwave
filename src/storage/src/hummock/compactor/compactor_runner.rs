@@ -15,7 +15,7 @@
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
@@ -715,10 +715,10 @@ where
     if !task_config.key_range.left.is_empty() {
         let full_key = FullKey::decode(&task_config.key_range.left);
         iter.seek(full_key)
-            .verbose_instrument_await("iter_seek")
+            .instrument_await("iter_seek".verbose())
             .await?;
     } else {
-        iter.rewind().verbose_instrument_await("rewind").await?;
+        iter.rewind().instrument_await("rewind".verbose()).await?;
     };
 
     let end_key = if task_config.key_range.right.is_empty() {
@@ -805,7 +805,7 @@ where
                 last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
             }
             iter.next()
-                .verbose_instrument_await("iter_next_in_drop")
+                .instrument_await("iter_next_in_drop".verbose())
                 .await?;
             continue;
         }
@@ -839,7 +839,7 @@ where
                     let new_put = HummockValue::put(new_value.as_slice());
                     sst_builder
                         .add_full_key(iter_key, new_put, is_new_user_key)
-                        .verbose_instrument_await("add_rewritten_full_key")
+                        .instrument_await("add_rewritten_full_key".verbose())
                         .await?;
                     let value_size_change = value_size as i64 - new_value.len() as i64;
                     assert!(value_size_change >= 0);
@@ -852,11 +852,11 @@ where
             // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(iter_key, value, is_new_user_key)
-                .verbose_instrument_await("add_full_key")
+                .instrument_await("add_full_key".verbose())
                 .await?;
         }
 
-        iter.next().verbose_instrument_await("iter_next").await?;
+        iter.next().instrument_await("iter_next".verbose()).await?;
     }
 
     if let Some(last_table_id) = last_table_id.take() {

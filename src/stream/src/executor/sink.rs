@@ -277,7 +277,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             rate_limit_rx,
                             rebuild_sink_rx,
                         )
-                        .instrument_await(format!("consume_log (sink_id {sink_id})"))
+                        .instrument_await(
+                            await_tree::span!("consume_log (sink_id {sink_id})").long_running(),
+                        )
                         .map_ok(|never| never); // unify return type to `Message`
 
                         consume_log_stream.boxed()
@@ -323,11 +325,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let post_flush = log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                        .flush_current_epoch(
+                            barrier.epoch.curr,
+                            barrier.kind.is_checkpoint(),
+                            update_vnode_bitmap.clone(),
+                        )
                         .await?;
 
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let mutation = barrier.mutation.clone();
                     yield Message::Barrier(barrier);
                     if F::REBUILD_SINK_ON_UPDATE_VNODE_BITMAP
@@ -340,7 +346,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         rx.await
                             .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
                     }
-                    post_flush.post_yield_barrier(update_vnode_bitmap).await?;
+                    post_flush.post_yield_barrier().await?;
 
                     if let Some(mutation) = mutation.as_deref() {
                         match mutation {
@@ -609,7 +615,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
                                     sink_id = sink_param.sink_id.sink_id,
-                                    "rewind successfully after sink error"
+                                    "reset log reader stream successfully after sink error"
                                 );
                                 Ok(())
                             }

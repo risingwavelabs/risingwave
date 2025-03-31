@@ -31,9 +31,7 @@ jobs:
       - name: Install dependencies for compiling RisingWave
         run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.7
-        with:
-          version: "v0.5.2"
+        uses: mozilla-actions/sccache-action@v0.0.8
       - name: build rustdocs
         run: |
           cargo doc --workspace --no-deps --document-private-items
@@ -46,18 +44,7 @@ jobs:
       - name: Install tools for building docs
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-docset,mdbook,mdbook-toc,mdbook-linkcheck
-      - name: build docsets
-        run: |
-          cargo docset --no-clean --docset-name RisingWave
-          tar -czf risingwave.docset.tgz target/docset/risingwave.docset
-
-          echo "<entry>
-          <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
-          <url>https://risingwavelabs.github.io/risingwave/risingwave.docset.tgz</url>
-          </entry>" > RisingWave.xml
-
-          cp -t artifact "risingwave.docset.tgz" "RisingWave.xml"
+          tool: mdbook,mdbook-toc,mdbook-linkcheck
       - name: build developer doc
         run: |
           cd docs/dev

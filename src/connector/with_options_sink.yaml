@@ -544,6 +544,11 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: is_exactly_once
+    field_type: bool
+    comments: Whether it is exactly_once, the default is not.
+    required: false
+    default: Default::default
   - name: commit_retry_num
     field_type: u32
     required: false
@@ -932,7 +937,7 @@ MqttConfig:
     field_type: u32
     comments: The max size of messages received by the MQTT client
     required: false
-  - name: tls.client_key
+  - name: tls.ca
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false

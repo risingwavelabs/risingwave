@@ -21,14 +21,39 @@ CREATE TABLE test_route (
   v3 varchar,
 );
 
+# Invalid field: foo, allowed fields: {"username", "url", "password"}
+statement error
+create connection es_conn_1 with (
+  type = 'elasticsearch',
+  foo = 'bar',
+  url = 'http://elasticsearch:9200',
+  username = 'elastic',
+  password = 'risingwave'
+);
+
+# please set the password when the username is set.
+statement error
+create connection es_conn_1 with (
+  type = 'elasticsearch',
+  url = 'http://elasticsearch:9200',
+  username = 'elastic'
+);
+
+
+statement ok
+create connection es_conn with (
+  type = 'elasticsearch',
+    url = 'http://elasticsearch:9200',
+    username = 'elastic',
+    password = 'risingwave',
+);
+
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
     type = 'upsert',
     connector = 'elasticsearch',
     index = 'test_route',
-    url = 'http://elasticsearch:9200',
-    username = 'elastic',
-    password = 'risingwave',
+    connection = es_conn,
     routing_column = 'v3'
 );
 
