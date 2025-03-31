@@ -281,7 +281,6 @@ impl InflightDatabaseInfo {
             }
             Some(command) => match command {
                 Command::Flush
-                | Command::ConnectorPropsChange(_)
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
@@ -290,7 +289,8 @@ impl InflightDatabaseInfo {
                 | Command::SourceChangeSplit(_)
                 | Command::Throttle(_)
                 | Command::CreateSubscription { .. }
-                | Command::DropSubscription { .. } => {
+                | Command::DropSubscription { .. }
+                | Command::ConnectorPropsChange(_) => {
                     return None;
                 }
                 Command::CreateStreamingJob { info, job_type, .. } => {
