@@ -398,7 +398,7 @@ WITH (
 	properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers'
 )
-FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = "true" )
+FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = true )
 
 statement ok
 CREATE TABLE mongo_customers_no_schema_field (
@@ -423,7 +423,7 @@ WITH (
 	properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers_no_schema_field'
 )
-FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = "true" )
+FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = true )
 
 statement ok
 CREATE TABLE upsert_students_default_key (
