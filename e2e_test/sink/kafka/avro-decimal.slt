@@ -1,11 +1,18 @@
+control substitution on
+
 statement ok
 set sink_decouple = false;
 
+# cleanup
 system ok
-rpk topic create test-rw-sink-decimal-encode
+rpk topic delete 'test_rw_sink_decimal_encode_scale_0' || true; \
+(rpk sr subject delete 'test_rw_sink_decimal_encode_scale_0-value' && rpk sr subject delete 'test_rw_sink_decimal_encode_scale_0-value' --permanent) || true;
 
 system ok
-sr_register test-rw-sink-decimal-encode-value AVRO << EOF
+rpk topic create test_rw_sink_decimal_encode_scale_0
+
+system ok
+sr_register test_rw_sink_decimal_encode_scale_0-value AVRO << EOF
 {
   "type": "record",
   "name": "Simple",
@@ -15,16 +22,62 @@ sr_register test-rw-sink-decimal-encode-value AVRO << EOF
       "type": {
         "type": "bytes",
         "logicalType": "decimal",
-        "scale": 0
+        "scale": 0,
+        "precision": 29
       }
     }
   ]
 }
 EOF
 
-create table t_sink_decimal(decimal_field decimal);
+statement ok
+create table t_sink_decimal_scale_0(decimal_field decimal);
+
+statement ok
+create sink sink_decimal_scale_0 from t_sink_decimal_scale_0 with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_rw_sink_decimal_encode_scale_0'
+) format plain encode avro (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+statement ok
+create table ingest_decimal_scale_0 with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_rw_sink_decimal_encode_scale_0'
+) format plain encode avro (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# '0.1234567890' will be 0 due to insuffcient scale
+statement ok
+insert into t_sink_decimal_scale_0 values ('0'::decimal), ('-0'::decimal), ('79228162514264337593543950335'::decimal), ('-79228162514264337593543950335'::decimal), ('0.1234567890'::decimal);
+
+sleep 1s
+
+query I
+select * from ingest_decimal_scale_0 order by decimal_field;
+----
+-79228162514264337593543950335
+0
+0
+0
+79228162514264337593543950335
 
 
+# cleanup
+system ok
+rpk topic delete 'test_rw_sink_decimal_encode_scale_0' || true; \
+(rpk sr subject delete 'test_rw_sink_decimal_encode_scale_0-value' && rpk sr subject delete 'test_rw_sink_decimal_encode_scale_0-value' --permanent) || true;
+
+statement ok
+drop sink sink_decimal_scale_0;
+
+statement ok
+drop table t_sink_decimal_scale_0;
+
+statement ok
+drop table ingest_decimal_scale_0;
 
 statement ok
 set sink_decouple to default;

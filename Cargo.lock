@@ -13871,7 +13871,7 @@ source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30d
 dependencies = [
  "atoi",
  "base64 0.22.1",
- "bigdecimal 0.4.5",
+ "bigdecimal 0.4.7",
  "bitflags 2.9.0",
  "byteorder",
  "bytes",
