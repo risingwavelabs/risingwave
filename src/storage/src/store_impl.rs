@@ -687,7 +687,7 @@ impl StateStoreImpl {
 
             if !opts.meta_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
-                    tracing::error!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 } else {
                     builder = builder
                         .with_device_options(
@@ -742,7 +742,7 @@ impl StateStoreImpl {
 
             if !opts.data_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
-                    tracing::error!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 } else {
                     builder = builder
                         .with_device_options(
