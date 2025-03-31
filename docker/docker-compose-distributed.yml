@@ -1,6 +1,6 @@
 ---
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.1.4}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.1.5}
 services:
   compactor-0:
     <<: *image
