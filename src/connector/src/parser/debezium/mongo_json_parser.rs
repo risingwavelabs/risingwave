@@ -71,16 +71,26 @@ impl DebeziumMongoJsonParser {
         // [cl](#20100):
         // it is not guaranteed that only MongodbCdc properties will be passed
         // so I'll tolerate MongodbCdc, Kafka, and Test for now
+        tracing::info!(
+            "source_ctx.connector_props: {:?}",
+            source_ctx.connector_props
+        );
         let strong_schema = match &source_ctx.connector_props {
-            ConnectorProperties::MongodbCdc(mongo_props) => mongo_props
-                .properties
-                .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
-                .map(|v| v == "true")
-                .unwrap_or(false),
-            ConnectorProperties::Kafka(props) => props
-                .unknown_fields
-                .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
-                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
+            ConnectorProperties::MongodbCdc(mongo_props) => {
+                tracing::info!("MongodbCdc properties: {:?}", mongo_props);
+                mongo_props
+                    .properties
+                    .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+                    .map(|v| v == "true")
+                    .unwrap_or(false)
+            }
+            ConnectorProperties::Kafka(props) => {
+                tracing::info!("Kafka properties: {:?}", props);
+                props
+                    .unknown_fields
+                    .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+                    .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+            }
 
             ConnectorProperties::Test(..) => false,
             _ => todo!(),
