@@ -72,7 +72,7 @@ use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
-    ObjectName, SourceWatermark, TableConstraint, get_delimiter,
+    ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -324,8 +324,9 @@ pub(crate) fn bind_all_columns(
                 let strong_schema = format_encode
                     .row_options
                     .iter()
-                    .find(|&s| s.to_string() == CDC_MONGODB_STRONG_SCHEMA_KEY)
-                    .is_some_and(|opt| opt.value.to_string().eq_ignore_ascii_case("true"));
+                    .find(|&s| s.name.to_string() == CDC_MONGODB_STRONG_SCHEMA_KEY)
+                    .is_some_and(|opt| opt.value.to_string() == "true");
+
                 println!(
                     "strong schema: {:?}, CDC_MONGODB_STRONG_SCHEMA_KEY: {}",
                     strong_schema, CDC_MONGODB_STRONG_SCHEMA_KEY
