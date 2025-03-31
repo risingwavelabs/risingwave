@@ -1728,10 +1728,7 @@ impl CatalogController {
             );
             stmt.with_properties.0 = new_sql_options.into_values().cloned().collect();
         } else {
-            return Err(SinkError::Config(anyhow!(
-                "sink definition is not a create sink statement"
-            ))
-            .into());
+            panic!("sink definition is not a create sink statement")
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props);

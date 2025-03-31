@@ -665,7 +665,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             } else {
                                 sink_param.properties = config.into_iter().collect();
                                 sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
-                                Err(anyhow!("alter sink config need to rebuild sink.").into())
+                                Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
                             }
                             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                         },
