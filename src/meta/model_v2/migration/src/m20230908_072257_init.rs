@@ -765,7 +765,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Language).string().not_null())
                     .col(ColumnDef::new(Function::Link).string())
                     .col(ColumnDef::new(Function::Identifier).string())
-                    .col(ColumnDef::new(Function::Body).string())
+                    .col(ColumnDef::new(Function::Body).text())
                     .col(ColumnDef::new(Function::CompressedBinary).string())
                     .col(ColumnDef::new(Function::Kind).string().not_null())
                     .col(
