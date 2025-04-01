@@ -840,7 +840,10 @@ impl IcebergSinkWriter {
             MonitoredPositionDeleteWriterBuilder::new(
                 SortPositionDeleteWriterBuilder::new(
                     parquet_writer_builder.clone(),
-                    1024,
+                    writer_param
+                        .streaming_config
+                        .developer
+                        .iceberg_sink_positional_delete_cache_size,
                     None,
                     None,
                 ),
