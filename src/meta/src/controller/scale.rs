@@ -289,12 +289,12 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
             .filter(fragment::Column::JobId.is_in(table_ids))
+            .into_tuple()
             .all(&txn)
-            .await?
-            .into_iter()
-            .map(|fragment| fragment.fragment_id)
-            .collect();
+            .await?;
 
         self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
             .await
