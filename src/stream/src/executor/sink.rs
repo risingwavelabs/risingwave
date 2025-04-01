@@ -322,11 +322,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let post_flush = log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                        .flush_current_epoch(
+                            barrier.epoch.curr,
+                            barrier.kind.is_checkpoint(),
+                            update_vnode_bitmap.clone(),
+                        )
                         .await?;
 
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let mutation = barrier.mutation.clone();
                     yield Message::Barrier(barrier);
                     if F::REBUILD_SINK_ON_UPDATE_VNODE_BITMAP
@@ -339,7 +343,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         rx.await
                             .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
                     }
-                    post_flush.post_yield_barrier(update_vnode_bitmap).await?;
+                    post_flush.post_yield_barrier().await?;
 
                     if let Some(mutation) = mutation.as_deref() {
                         match mutation {
