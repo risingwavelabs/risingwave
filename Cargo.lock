@@ -2385,7 +2385,7 @@ checksum = "7f78efdd7378980d79c0f36b519e51191742d2c9f91ffa5e228fba9f3806d2e1"
 dependencies = [
  "cap-primitives",
  "cap-std",
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "windows-sys 0.59.0",
 ]
 
@@ -2398,7 +2398,7 @@ dependencies = [
  "ambient-authority",
  "fs-set-times",
  "io-extras",
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "ipnet",
  "maybe-owned",
  "rustix 0.38.41",
@@ -2424,7 +2424,7 @@ checksum = "c3dbd3e8e8d093d6ccb4b512264869e1281cdb032f7940bd50b2894f96f25609"
 dependencies = [
  "cap-primitives",
  "io-extras",
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "rustix 0.38.41",
 ]
 
@@ -5170,7 +5170,7 @@ version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "033b337d725b97690d86893f9de22b67b80dcc4e9ad815f348254c38119db8fb"
 dependencies = [
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "rustix 0.38.41",
  "windows-sys 0.52.0",
 ]
@@ -6480,19 +6480,8 @@ version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
 dependencies = [
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "io-lifetimes"
-version = "1.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2"
-dependencies = [
- "hermit-abi 0.3.9",
- "libc",
- "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -7070,12 +7059,6 @@ dependencies = [
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f051f77a7c8e6957c0696eac88f26b0117e54f52d3fc682ab19397a8812846a4"
-
-[[package]]
-name = "linux-raw-sys"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
@@ -7608,7 +7591,7 @@ checksum = "285f6f175bfc4a068c0aa66d1fc48b6f4af0193d9577f8a86fa3a80014be9321"
 dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.1",
- "prometheus",
+ "prometheus 0.13.4",
 ]
 
 [[package]]
@@ -9510,19 +9493,6 @@ dependencies = [
 
 [[package]]
 name = "procfs"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1de8dacb0873f77e6aefc6d71e044761fcc68060290f5b1089fcdf84626bb69"
-dependencies = [
- "bitflags 1.3.2",
- "byteorder",
- "hex",
- "lazy_static",
- "rustix 0.36.16",
-]
-
-[[package]]
-name = "procfs"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f"
@@ -9545,9 +9515,24 @@ dependencies = [
 
 [[package]]
 name = "prometheus"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "449811d15fbdf5ceb5c1144416066429cf82316e2ec8ce0c1f6f8a02e7bbcf8c"
+checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot 0.12.1",
+ "protobuf 2.28.0",
+ "thiserror 1.0.63",
+]
+
+[[package]]
+name = "prometheus"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
 dependencies = [
  "cfg-if",
  "fnv",
@@ -9555,9 +9540,9 @@ dependencies = [
  "libc",
  "memchr",
  "parking_lot 0.12.1",
- "procfs 0.14.2",
- "protobuf",
- "thiserror 1.0.63",
+ "procfs",
+ "protobuf 3.7.2",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
@@ -9733,6 +9718,26 @@ name = "protobuf"
 version = "2.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
+
+[[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.63",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.63",
+]
 
 [[package]]
 name = "protox"
@@ -10557,7 +10562,7 @@ dependencies = [
  "panic-message",
  "parking_lot 0.12.1",
  "parquet 54.2.1",
- "prometheus",
+ "prometheus 0.14.0",
  "rand 0.9.0",
  "risingwave_common",
  "risingwave_connector",
@@ -10599,7 +10604,7 @@ dependencies = [
  "madsim-tokio",
  "mysql_async",
  "opendal 0.49.2",
- "prometheus",
+ "prometheus 0.14.0",
  "rand 0.9.0",
  "risingwave_batch",
  "risingwave_common",
@@ -10763,8 +10768,8 @@ dependencies = [
  "pin-project-lite",
  "postgres-types",
  "pretty_assertions",
- "procfs 0.17.0",
- "prometheus",
+ "procfs",
+ "prometheus 0.14.0",
  "prost 0.13.4",
  "rand 0.9.0",
  "regex",
@@ -10868,8 +10873,8 @@ dependencies = [
  "madsim-tonic",
  "parking_lot 0.12.1",
  "pin-project-lite",
- "procfs 0.17.0",
- "prometheus",
+ "procfs",
+ "prometheus 0.14.0",
  "rw_iter_util",
  "rw_resource_util",
  "serde",
@@ -10900,7 +10905,7 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "pin-project-lite",
- "prometheus",
+ "prometheus 0.13.4",
  "rand 0.9.0",
  "risingwave_common",
  "risingwave_common_metrics",
@@ -10934,7 +10939,7 @@ dependencies = [
  "http 1.3.1",
  "madsim-tokio",
  "madsim-tonic",
- "prometheus",
+ "prometheus 0.14.0",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -11011,7 +11016,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "pprof",
- "prometheus",
+ "prometheus 0.14.0",
  "prost 0.13.4",
  "rand 0.9.0",
  "risingwave_batch",
@@ -11115,7 +11120,7 @@ dependencies = [
  "postgres-openssl",
  "pretty_assertions",
  "proc-macro2",
- "prometheus",
+ "prometheus 0.14.0",
  "prost 0.13.4",
  "prost-reflect",
  "prost-types 0.13.4",
@@ -11323,7 +11328,7 @@ dependencies = [
  "num-traits",
  "parse-display",
  "paste",
- "prometheus",
+ "prometheus 0.14.0",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_expr_macro",
@@ -11452,7 +11457,7 @@ dependencies = [
  "postgres-types",
  "pretty-xmlish",
  "pretty_assertions",
- "prometheus",
+ "prometheus 0.14.0",
  "prost 0.13.4",
  "quick-xml 0.37.1",
  "rand 0.9.0",
@@ -11679,7 +11684,7 @@ dependencies = [
  "num-traits",
  "otlp-embedded",
  "parking_lot 0.12.1",
- "prometheus",
+ "prometheus 0.14.0",
  "prometheus-http-query",
  "prost 0.13.4",
  "rand 0.9.0",
@@ -11839,7 +11844,7 @@ dependencies = [
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal 0.49.2",
- "prometheus",
+ "prometheus 0.14.0",
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_jni_core",
@@ -12125,8 +12130,8 @@ dependencies = [
  "nix 0.29.0",
  "num-integer",
  "parking_lot 0.12.1",
- "procfs 0.17.0",
- "prometheus",
+ "procfs",
+ "prometheus 0.14.0",
  "prost 0.13.4",
  "rand 0.9.0",
  "risingwave_backup",
@@ -12197,7 +12202,7 @@ dependencies = [
  "pin-project",
  "prehash",
  "pretty_assertions",
- "prometheus",
+ "prometheus 0.14.0",
  "prost 0.13.4",
  "rand 0.9.0",
  "risingwave_common",
@@ -12508,20 +12513,6 @@ checksum = "2dd18cd2bae1820af0b6ad5e54f4a51d0f3fcc53b05f845675074efcc7af071d"
 dependencies = [
  "rustc_version",
  "semver",
-]
-
-[[package]]
-name = "rustix"
-version = "0.36.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6da3636faa25820d8648e0e31c5d519bbb01f72fdf57131f0f5f7da5fed36eab"
-dependencies = [
- "bitflags 1.3.2",
- "errno",
- "io-lifetimes 1.0.11",
- "libc",
- "linux-raw-sys 0.1.4",
- "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -14262,7 +14253,7 @@ dependencies = [
  "cap-fs-ext",
  "cap-std",
  "fd-lock",
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "rustix 0.38.41",
  "windows-sys 0.52.0",
  "winx",
@@ -15492,7 +15483,7 @@ dependencies = [
  "cap-time-ext",
  "fs-set-times",
  "io-extras",
- "io-lifetimes 2.0.3",
+ "io-lifetimes",
  "log",
  "rustix 0.38.41",
  "system-interface",
