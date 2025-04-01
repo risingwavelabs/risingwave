@@ -494,6 +494,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                 LogStoreReadItem::Barrier {
                                     is_checkpoint,
                                     new_vnode_bitmap: None,
+                                    is_stop: false,
                                 }
                             }
                         };
@@ -608,6 +609,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     LogStoreReadItem::Barrier {
                         is_checkpoint,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 )
             }

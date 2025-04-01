@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::pending;
 use std::num::NonZeroU64;
 use std::time::Instant;
 
@@ -19,7 +20,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::{
     LogSinker, SinkCoordinationRpcClientEnum, SinkError, SinkLogReader, SinkWriterMetrics,
@@ -72,7 +73,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         let (mut coordinator_stream_handle, log_store_rewind_start_epoch) = self
             .sink_coordinate_client
-            .new_stream_handle(self.param, self.vnode_bitmap)
+            .new_stream_handle(&self.param, self.vnode_bitmap)
             .await?;
         let mut sink_writer = self.writer;
         log_reader.start_from(log_store_rewind_start_epoch).await?;
@@ -133,6 +134,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                 LogStoreReadItem::Barrier {
                     is_checkpoint,
                     new_vnode_bitmap,
+                    is_stop,
                 } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
@@ -142,6 +144,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                         current_checkpoint += 1;
                         if current_checkpoint >= commit_checkpoint_interval.get()
                             || new_vnode_bitmap.is_some()
+                            || is_stop
                         {
                             let start_time = Instant::now();
                             let metadata = sink_writer.barrier(true).await?;
@@ -161,6 +164,14 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                 coordinator_stream_handle
                                     .update_vnode_bitmap(&new_vnode_bitmap)
                                     .await?;
+                            }
+                            if is_stop {
+                                coordinator_stream_handle.stop().await?;
+                                info!(
+                                    sink_id = self.param.sink_id.sink_id,
+                                    "coordinated log sinker stops"
+                                );
+                                return pending().await;
                             }
                         } else {
                             let metadata = sink_writer.barrier(false).await?;

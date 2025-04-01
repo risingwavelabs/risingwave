@@ -121,6 +121,7 @@ pub enum LogStoreReadItem {
     Barrier {
         is_checkpoint: bool,
         new_vnode_bitmap: Option<Arc<Bitmap>>,
+        is_stop: bool,
     },
 }
 
@@ -141,6 +142,12 @@ impl<'a> LogWriterPostFlushCurrentEpoch<'a> {
     }
 }
 
+pub struct FlushCurrentEpochOptions {
+    pub is_checkpoint: bool,
+    pub new_vnode_bitmap: Option<Arc<Bitmap>>,
+    pub is_stop: bool,
+}
+
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
     fn init(
@@ -159,8 +166,7 @@ pub trait LogWriter: Send {
     fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
-        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        options: FlushCurrentEpochOptions,
     ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
@@ -644,13 +650,9 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
     async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
-        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
-        let post_flush = self
-            .inner
-            .flush_current_epoch(next_epoch, is_checkpoint, new_vnode_bitmap)
-            .await?;
+        let post_flush = self.inner.flush_current_epoch(next_epoch, options).await?;
         self.metrics
             .log_store_latest_write_epoch
             .set(next_epoch as _);

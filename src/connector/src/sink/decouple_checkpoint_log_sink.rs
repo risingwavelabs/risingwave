@@ -116,6 +116,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                 LogStoreReadItem::Barrier {
                     is_checkpoint,
                     new_vnode_bitmap,
+                    ..
                 } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,

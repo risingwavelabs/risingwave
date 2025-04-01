@@ -15,7 +15,7 @@
 use std::future::Future;
 
 use anyhow::anyhow;
-use futures::{FutureExt, Stream, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
@@ -25,35 +25,14 @@ use risingwave_pb::connector_service::{
     CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
     coordinate_response,
 };
-use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
-use tracing::warn;
 
 use crate::error::RpcError;
 use crate::{BidiStreamHandle, SinkCoordinationRpcClient};
 
-pub struct CoordinatorStreamHandle(BidiStreamHandle<CoordinateRequest, CoordinateResponse>);
-impl Drop for CoordinatorStreamHandle {
-    fn drop(&mut self) {
-        match self
-            .0
-            .send_request(CoordinateRequest {
-                msg: Some(coordinate_request::Msg::Stop(true)),
-            })
-            .now_or_never()
-        {
-            None => {
-                warn!("unable to send stop due to channel full")
-            }
-            Some(Err(e)) => {
-                warn!(e = %e.as_report(), "failed to stop the coordinator");
-            }
-            Some(Ok(_)) => {}
-        }
-    }
-}
+pub type CoordinatorStreamHandle = BidiStreamHandle<CoordinateRequest, CoordinateResponse>;
 
 impl CoordinatorStreamHandle {
     pub async fn new(
@@ -108,21 +87,20 @@ impl CoordinatorStreamHandle {
                     Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse {
                         log_store_rewind_start_epoch,
                     })),
-            } => Ok((Self(stream_handle), log_store_rewind_start_epoch)),
+            } => Ok((stream_handle, log_store_rewind_start_epoch)),
             msg => Err(anyhow!("should get start response but get {:?}", msg).into()),
         }
     }
 
     pub async fn commit(&mut self, epoch: u64, metadata: SinkMetadata) -> anyhow::Result<()> {
-        self.0
-            .send_request(CoordinateRequest {
-                msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
-                    epoch,
-                    metadata: Some(metadata),
-                })),
-            })
-            .await?;
-        match self.0.next_response().await? {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
+                epoch,
+                metadata: Some(metadata),
+            })),
+        })
+        .await?;
+        match self.next_response().await? {
             CoordinateResponse {
                 msg: Some(coordinate_response::Msg::CommitResponse(_)),
             } => Ok(()),
@@ -131,15 +109,22 @@ impl CoordinatorStreamHandle {
     }
 
     pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<()> {
-        self.0
-            .send_request(CoordinateRequest {
-                msg: Some(coordinate_request::Msg::UpdateVnodeRequest(
-                    UpdateVnodeBitmapRequest {
-                        vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
-                    },
-                )),
-            })
-            .await?;
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::UpdateVnodeRequest(
+                UpdateVnodeBitmapRequest {
+                    vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
+                },
+            )),
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn stop(mut self) -> anyhow::Result<()> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::Stop(true)),
+        })
+        .await?;
         Ok(())
     }
 }
