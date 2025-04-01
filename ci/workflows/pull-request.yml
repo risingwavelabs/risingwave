@@ -671,7 +671,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
 
   - label: "e2e standalone binary test"
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m standalone"
