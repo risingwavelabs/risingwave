@@ -148,6 +148,6 @@ message ColumnOrder {
   OrderType order_type = 2;
 }
 
-message uint32_vector {
+message Uint32Vector {
   repeated uint32 data = 1;
 }
