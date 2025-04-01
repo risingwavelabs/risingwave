@@ -1746,7 +1746,7 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
-    
+
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
 
