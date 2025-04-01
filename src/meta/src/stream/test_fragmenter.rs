@@ -35,11 +35,8 @@ use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
-    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
-};
+use risingwave_pb::stream_plan::{AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state, BackfillOrderStrategy, BackfillOrderUnspecified};
+use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
 
 use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
@@ -422,6 +419,9 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         table_ids_cnt: 3,
         parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
+        backfill_order_strategy: Some(BackfillOrderStrategy {
+            strategy: Some(Strategy::Unspecified(BackfillOrderUnspecified {})),
+        }),
     }
 }
 
