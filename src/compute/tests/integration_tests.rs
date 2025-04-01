@@ -166,7 +166,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         ExecutorInfo::new(
             all_schema.clone(),
             pk_indices.clone(),
-            "SourceExecutor".to_string(),
+            "SourceExecutor".to_owned(),
             1,
         ),
         SourceExecutor::<PanicStateStore>::new(
@@ -186,7 +186,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         ExecutorInfo::new(
             all_schema.clone(),
             pk_indices.clone(),
-            "DmlExecutor".to_string(),
+            "DmlExecutor".to_owned(),
             2,
         ),
         DmlExecutor::new(
@@ -206,7 +206,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         ExecutorInfo::new(
             all_schema.clone(),
             pk_indices.clone(),
-            "RowIdGenExecutor".to_string(),
+            "RowIdGenExecutor".to_owned(),
             3,
         ),
         RowIdGenExecutor::new(actor_ctx, dml_executor, row_id_index, vnodes).boxed(),
