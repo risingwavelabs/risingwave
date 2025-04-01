@@ -55,8 +55,7 @@ labels:
   files:
   - ".*iceberg.*"
 - label: "ci/run-e2e-iceberg-tests"
-  title:
-  - ".*iceberg.*"
+  title: ".*iceberg.*"
 
 # S3 source tests
 - label: "ci/run-s3-source-tests"
