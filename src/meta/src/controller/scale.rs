@@ -261,7 +261,7 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<RescheduleWorkingSet> {
         let inner = self.inner.read().await;
-        self.resolve_working_set_for_reschedule_helper(&inner.db, fragment_ids)
+        self.resolve_working_set_for_reschedule_helper_normal_way(&inner.db, fragment_ids)
             .await
     }
 
@@ -280,11 +280,11 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
+        self.resolve_working_set_for_reschedule_helper_normal_way(&txn, fragment_ids)
             .await
     }
 
-    pub async fn resolve_working_set_for_reschedule_helper2<C>(
+    pub async fn resolve_working_set_for_reschedule_helper_normal_way<C>(
         &self,
         txn: &C,
         fragment_ids: Vec<FragmentId>,
@@ -405,16 +405,15 @@ impl CatalogController {
                 )
             })
             .collect();
-        let result = RescheduleWorkingSet {
+
+        Ok(RescheduleWorkingSet {
             fragments,
             actors,
             actor_dispatchers,
             fragment_downstreams,
             fragment_upstreams,
             related_jobs,
-        };
-
-        Ok(result)
+        })
     }
 
     pub async fn resolve_working_set_for_reschedule_helper<C>(
