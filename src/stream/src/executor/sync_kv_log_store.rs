@@ -113,7 +113,7 @@ pub mod metrics {
         // state of the log store
         pub unclean_state: LabelGuardedIntCounter<5>,
         pub clean_state: LabelGuardedIntCounter<5>,
-        pub wait_next_poll_ns: Option<LabelGuardedIntCounter<4>>, // Allow us to take it later.
+        pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
 
         // Write metrics
         pub storage_write_count: LabelGuardedIntCounter<4>,
@@ -167,11 +167,9 @@ pub mod metrics {
                 &id_str,
                 name,
             ]);
-            let wait_next_poll_ns = Some(
-                metrics
-                    .sync_kv_log_store_wait_next_poll_ns
-                    .with_guarded_label_values(labels),
-            );
+            let wait_next_poll_ns = metrics
+                .sync_kv_log_store_wait_next_poll_ns
+                .with_guarded_label_values(labels);
 
             let storage_write_size = metrics
                 .sync_kv_log_store_storage_write_size
@@ -285,7 +283,7 @@ pub mod metrics {
             SyncedKvLogStoreMetrics {
                 unclean_state: LabelGuardedIntCounter::test_int_counter(),
                 clean_state: LabelGuardedIntCounter::test_int_counter(),
-                wait_next_poll_ns: Some(LabelGuardedIntCounter::test_int_counter()),
+                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_count: LabelGuardedIntCounter::test_int_counter(),
                 storage_write_size: LabelGuardedIntCounter::test_int_counter(),
                 pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
@@ -430,10 +428,11 @@ impl<S: LocalStateStore> WriteFuture<S> {
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>,
     ) -> Self {
-        tracing::trace!(now = ?Instant::now(), ?duration, "write_future_pause");
+        let now = Instant::now();
+        tracing::trace!(?now, ?duration, "write_future_pause");
         Self::Paused {
-            start_instant: Instant::now(),
-            sleep_future: Some(Box::pin(sleep_until(Instant::now() + duration))),
+            start_instant: now,
+            sleep_future: Some(Box::pin(sleep_until(now + duration))),
             message,
             stream,
             write_state,
@@ -496,12 +495,8 @@ impl<S: LocalStateStore> WriteFuture<S> {
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[try_stream(ok= Message, error = StreamExecutorError)]
-    pub async fn execute_monitored(mut self) {
-        let wait_next_poll_ns = self
-            .metrics
-            .wait_next_poll_ns
-            .take()
-            .expect("always initialized");
+    pub async fn execute_monitored(self) {
+        let wait_next_poll_ns = self.metrics.wait_next_poll_ns.clone();
         #[for_await]
         for message in self.execute_inner() {
             let current_time = Instant::now();
