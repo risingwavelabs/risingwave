@@ -318,13 +318,13 @@ impl CatalogController {
                 .insert((src_fragment_id, actor_dispatcher.dispatcher_type));
         }
 
-        let mut all_fragment_ids = HashSet::with_capacity(fragment_ids.len());
+        let mut related_fragment_ids = HashSet::with_capacity(fragment_ids.len());
 
         // all no shuffle relations
         let mut queue = VecDeque::from(fragment_ids);
 
         while let Some(fragment_id) = queue.pop_front() {
-            if all_fragment_ids.insert(fragment_id) {
+            if related_fragment_ids.insert(fragment_id) {
                 let upstreams = fragment_upstreams.get(&fragment_id).into_iter().flatten();
                 let downstreams = fragment_downstreams.get(&fragment_id).into_iter().flatten();
                 for &(neighbor, dispatcher_type) in upstreams.chain(downstreams) {
@@ -336,16 +336,16 @@ impl CatalogController {
         }
 
         // all normal relations
-        for fragment_id in all_fragment_ids.clone() {
+        for fragment_id in related_fragment_ids.clone() {
             let upstreams = fragment_upstreams.get(&fragment_id).into_iter().flatten();
             let downstreams = fragment_downstreams.get(&fragment_id).into_iter().flatten();
             for &(neighbor, _) in upstreams.chain(downstreams) {
-                all_fragment_ids.insert(neighbor);
+                related_fragment_ids.insert(neighbor);
             }
         }
 
         let fragments = Fragment::find()
-            .filter(fragment::Column::FragmentId.is_in(all_fragment_ids.clone()))
+            .filter(fragment::Column::FragmentId.is_in(related_fragment_ids.clone()))
             .all(txn)
             .await?;
 
@@ -356,7 +356,7 @@ impl CatalogController {
 
         let actors: HashMap<ActorId, _> = actors
             .into_iter()
-            .filter(|actor| all_fragment_ids.contains(&actor.fragment_id))
+            .filter(|actor| related_fragment_ids.contains(&actor.fragment_id))
             .map(|actor| (actor.actor_id, actor))
             .collect();
 
@@ -368,13 +368,13 @@ impl CatalogController {
 
         let fragment_downstreams: HashMap<_, _> = fragment_downstreams
             .into_iter()
-            .filter(|(fragment_id, _)| all_fragment_ids.contains(fragment_id))
+            .filter(|(fragment_id, _)| related_fragment_ids.contains(fragment_id))
             .map(|(fragment_id, downstreams)| (fragment_id, downstreams.into_iter().collect_vec()))
             .collect();
 
         let fragment_upstreams: HashMap<_, _> = fragment_upstreams
             .into_iter()
-            .filter(|(fragment_id, _)| all_fragment_ids.contains(fragment_id))
+            .filter(|(fragment_id, _)| related_fragment_ids.contains(fragment_id))
             .map(|(fragment_id, upstreams)| (fragment_id, upstreams.into_iter().collect_vec()))
             .collect();
 
