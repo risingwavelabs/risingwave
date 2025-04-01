@@ -12183,6 +12183,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hytra",
+ "iceberg",
  "itertools 0.14.0",
  "jsonbb",
  "local_stats_alloc",
