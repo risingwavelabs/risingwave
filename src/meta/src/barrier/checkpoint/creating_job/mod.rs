@@ -25,6 +25,7 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
@@ -39,6 +40,7 @@ use crate::barrier::{Command, CreateStreamingJobCommandInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::StreamJobActorsToCreate;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::stream::build_actor_connector_splits;
 
 #[derive(Debug)]
 pub(crate) struct CreatingStreamingJobControl {
@@ -58,11 +60,10 @@ pub(crate) struct CreatingStreamingJobControl {
 
 impl CreatingStreamingJobControl {
     pub(super) fn new(
-        info: CreateStreamingJobCommandInfo,
+        info: &CreateStreamingJobCommandInfo,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
-        initial_mutation: Mutation,
         control_stream_manager: &mut ControlStreamManager,
         edges: &mut FragmentEdgeBuildResult,
     ) -> MetaResult<Self> {
@@ -106,6 +107,23 @@ impl CreatingStreamingJobControl {
             true,
         );
 
+        let added_actors = info.stream_job_fragments.actor_ids();
+        let actor_splits = info
+            .init_split_assignment
+            .values()
+            .flat_map(build_actor_connector_splits)
+            .collect();
+
+        let initial_mutation = Mutation::Add(AddMutation {
+            // for mutation of snapshot backfill job, we won't include changes to dispatchers of upstream actors.
+            actor_dispatchers: Default::default(),
+            added_actors,
+            actor_splits,
+            // we assume that when handling snapshot backfill, the cluster must not be paused
+            pause: false,
+            subscriptions_to_add: Default::default(),
+        });
+
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
         Self::inject_barrier(
             database_id,
@@ -123,7 +141,7 @@ impl CreatingStreamingJobControl {
 
         Ok(Self {
             database_id,
-            definition: info.definition,
+            definition: info.definition.clone(),
             job_id,
             snapshot_backfill_upstream_tables,
             barrier_control,
