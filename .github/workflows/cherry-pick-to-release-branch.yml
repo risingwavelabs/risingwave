@@ -1,50 +1,26 @@
-name: PR for release branch
+name: Deprecation Notice for old cherry-pick label
 on:
   pull_request:
     branches:
       - main
-    types: ["closed", "labeled"]
+    types: ["labeled"]
 
 jobs:
-  get-release-branches:
-    if: |
-      github.event.pull_request.merged &&
-      ((github.event.action == 'labeled' && startsWith(github.event.label.name, 'need-cherry-pick-release-')) ||
-      (github.event.action == 'closed' && contains(toJson(github.event.pull_request.labels), 'need-cherry-pick-release-')))
+  deprecation_notice:
+    if: startsWith(github.event.label.name, 'need-cherry-pick-release-')
     runs-on: ubuntu-latest
-    outputs:
-      branches: ${{ steps.get-release-branches.outputs.branches }}
     steps:
-      - name: Get release branches
-        id: get-release-branches
-        run: |
-          if [[ ${{ github.event.action }} == 'labeled' ]]; then
-            echo "branches=[\"$(echo ${{ github.event.label.name }} | cut -d '-' -f 4-)\"]" >> "$GITHUB_OUTPUT"
-          else
-            labels='${{ toJson(github.event.pull_request.labels) }}'
-            echo branches=$(echo "$labels" | jq -r '.[] | select(.name | contains("need-cherry-pick")).name' | cut -d '-' -f 4- | jq --raw-input . | jq --slurp . -c) >> "$GITHUB_OUTPUT"
-          fi
-
-  release_pull_request:
-    needs:
-      - get-release-branches
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        branch: ${{ fromJson(needs.get-release-branches.outputs.branches) }}
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-      - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
+      - name: Add deprecation notice comment
+        uses: actions/github-script@v6
         with:
-          pr_branch: ${{ matrix.branch }}
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', github.event.number, matrix.branch) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: '> [!WARNING]\n> The `need-cherry-pick-release-xx` label is deprecated. Please use `need-cherry-pick-since-release-xx` instead for future PRs.'
+            })
 
 permissions:
   issues: write
   pull-requests: write
-  contents: write
