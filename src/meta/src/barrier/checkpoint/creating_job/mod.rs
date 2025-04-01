@@ -106,8 +106,6 @@ impl CreatingStreamingJobControl {
             true,
         );
 
-        // TODO: should be removed
-
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
         Self::inject_barrier(
             database_id,
