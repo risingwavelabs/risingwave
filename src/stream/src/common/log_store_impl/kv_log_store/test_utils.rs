@@ -217,6 +217,18 @@ pub(crate) fn check_stream_chunk_eq(first: &StreamChunk, second: &StreamChunk) -
     check_rows_eq(first.rows(), second.rows())
 }
 
+#[macro_export]
+macro_rules! assert_stream_chunk_eq {
+    ($left:expr, $right:expr) => {
+        assert!(
+            check_stream_chunk_eq(&$left, &$right),
+            "stream chunk not equal: left: {:?}, right: {:?}",
+            $left,
+            $right
+        );
+    };
+}
+
 pub(crate) trait LogWriterTestExt: LogWriter {
     async fn flush_current_epoch_for_test(
         &mut self,

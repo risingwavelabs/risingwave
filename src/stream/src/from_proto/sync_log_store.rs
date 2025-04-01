@@ -61,6 +61,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
 
         let pause_duration_ms = node.pause_duration_ms as _;
         let buffer_max_size = node.buffer_size as usize;
+        let chunk_size = actor_context.streaming_config.developer.chunk_size as u32;
 
         let executor = SyncedKvLogStoreExecutor::new(
             actor_context,
@@ -69,6 +70,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             serde,
             store,
             buffer_max_size,
+            chunk_size,
             upstream,
             Duration::from_millis(pause_duration_ms),
         );
