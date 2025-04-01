@@ -37,12 +37,13 @@ create table into_kafka (
   timestamp_millis_field timestamptz,
   date_field date,
   time_micros_field time,
-  time_millis_field time);
+  time_millis_field time,
+  decimal_field decimal);
 
 statement ok
 insert into into_kafka values
-  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, null, array[array[null, 3], null, array[7, null, 2]], '2006-01-02 15:04:05-07:00', null, null, '12:34:56.123456', null),
-  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, row(null::int, 'foo'), null, null, '2006-01-02 15:04:05-07:00', '2021-04-01', null, '23:45:16.654321');
+  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, null, array[array[null, 3], null, array[7, null, 2]], '2006-01-02 15:04:05-07:00', null, null, '12:34:56.123456', null, 9901234567890123456789),
+  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, row(null::int, 'foo'), null, null, '2006-01-02 15:04:05-07:00', '2021-04-01', null, '23:45:16.654321', 0.9901234567890123456789);
 
 statement ok
 flush;
@@ -192,10 +193,11 @@ select
   timestamp_millis_field,
   date_field,
   time_micros_field,
-  time_millis_field from from_kafka order by string_field;
+  time_millis_field,
+  decimal_field from from_kafka order by string_field;
 ----
-t Rising \x6130   3.5 4.25 22 24 23 NULL   {{NULL,3},NULL,{7,NULL,2}} 2006-01-02 22:04:05+00:00 NULL                      NULL       12:34:56.123456 NULL
-f Wave   \x5a4446 1.5 NULL 11 13 12 (,foo) NULL                       NULL                      2006-01-02 22:04:05+00:00 2021-04-01 NULL            23:45:16.654
+t Rising \x6130   3.5 4.25 22 24 23 NULL   {{NULL,3},NULL,{7,NULL,2}} 2006-01-02 22:04:05+00:00 NULL                      NULL       12:34:56.123456 NULL         1
+f Wave   \x5a4446 1.5 NULL 11 13 12 (,foo) NULL                       NULL                      2006-01-02 22:04:05+00:00 2021-04-01 NULL            23:45:16.654 2
 
 statement error test-rw-sink-upsert-avro-err-key
 create sink sink_err from into_kafka with (

@@ -35,6 +35,12 @@
       "size": 12,
       "logicalType": "duration"
     }]},
+    {"name": "decimal_field", "type": ["null", {
+      "type": "bytes",
+      "logicalType": "decimal",
+      "precision": 38,
+      "scale": 10
+    }]},
     {"name": "unsupported", "type": ["null", {
       "type": "record",
       "name": "Unsupported",
