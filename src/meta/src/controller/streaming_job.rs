@@ -1605,7 +1605,9 @@ impl CatalogController {
                                 .into());
                             }
                         }
-                        SinkType::validate_alter_config(&props)
+                        let mut new_props = sink.properties.0.clone();
+                        new_props.extend(props.clone());
+                        SinkType::validate_alter_config(&new_props)
                     },
                     |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
                 )?

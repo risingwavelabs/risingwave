@@ -2958,41 +2958,13 @@ impl TryFrom<(&String, &String)> for SqlOption {
     type Error = ParserError;
 
     fn try_from((name, value): (&String, &String)) -> Result<Self, Self::Error> {
-        let mut tokenizer = Tokenizer::new(value);
+        let query = format!("{} = {}", name, value);
+        let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
-
-        let value = {
-            const CONNECTION_REF_KEY: &str = "connection";
-            if name.eq_ignore_ascii_case(CONNECTION_REF_KEY) {
-                let connection_name = parser.parse_object_name().map_err(|e| {
-                    ParserError::ParserError(format!(
-                        "Failed to parse connection name in connection option: {}",
-                        e
-                    ))
-                })?;
-                let connection_name = match connection_name.0.as_slice() {
-                    [ident] if ident.real_value() == CONNECTION_REF_KEY => {
-                        parser.parse_object_name().map_err(|e| {
-                            ParserError::ParserError(format!(
-                                "Failed to parse connection name in connection option: {}",
-                                e
-                            ))
-                        })?
-                    }
-                    _ => connection_name,
-                };
-                SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
-            } else {
-                parser.parse_value_and_obj_ref::<false>().map_err(|e| {
-                    ParserError::ParserError(format!("Failed to parse value in option {}", e))
-                })?
-            }
-        };
-        Ok(SqlOption {
-            name: Parser::parse_object_name_str(name)?,
-            value,
-        })
+        parser
+            .parse_sql_option()
+            .map_err(|e| ParserError::ParserError(e.to_string()))
     }
 }
 
