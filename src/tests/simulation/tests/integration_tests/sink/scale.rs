@@ -55,12 +55,12 @@ async fn scale_and_check(
     Ok(())
 }
 
-async fn scale_test_inner(is_decouple: bool) -> Result<()> {
+async fn scale_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(is_coordinated_sink);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -161,11 +161,17 @@ fn init_logger() {
 #[tokio::test]
 async fn test_sink_scale() -> Result<()> {
     init_logger();
-    scale_test_inner(false).await
+    scale_test_inner(false, false).await
 }
 
 #[tokio::test]
 async fn test_sink_decouple_scale() -> Result<()> {
     init_logger();
-    scale_test_inner(true).await
+    scale_test_inner(true, false).await
+}
+
+#[tokio::test]
+async fn test_coordinated_sink_decouple_scale() -> Result<()> {
+    init_logger();
+    scale_test_inner(true, true).await
 }

@@ -105,7 +105,7 @@ impl Drop for TestSourceRegistryGuard {
     }
 }
 
-pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
+pub fn register_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
     assert!(
         get_registry()
             .box_source

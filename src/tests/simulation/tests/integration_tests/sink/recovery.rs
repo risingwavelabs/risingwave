@@ -53,12 +53,12 @@ async fn kill_and_check(
     Ok(())
 }
 
-async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
+async fn recovery_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(is_coordinated_sink);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -95,10 +95,20 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
 
 #[tokio::test]
 async fn test_sink_recovery() -> Result<()> {
-    recovery_test_inner(false).await
+    recovery_test_inner(false, false).await
 }
 
 #[tokio::test]
 async fn test_sink_decouple_recovery() -> Result<()> {
-    recovery_test_inner(true).await
+    recovery_test_inner(true, false).await
+}
+
+#[tokio::test]
+async fn test_coordinated_sink_recovery() -> Result<()> {
+    recovery_test_inner(false, true).await
+}
+
+#[tokio::test]
+async fn test_coordinated_sink_decouple_recovery() -> Result<()> {
+    recovery_test_inner(true, true).await
 }
