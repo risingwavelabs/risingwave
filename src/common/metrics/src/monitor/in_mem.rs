@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains data structures for in-memory monitoring.
+//! It is intentionally decoupled from Prometheus.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use parking_lot::RwLock;
+
+use crate::MetricLevel;
 
 pub type Count = Arc<AtomicU64>;
 
@@ -24,10 +29,9 @@ pub type Count = Arc<AtomicU64>;
 pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
 
 impl CountMap {
-    pub(crate) fn new() -> Self {
+    pub fn new(metric_level: MetricLevel) -> Self {
         let inner = Arc::new(RwLock::new(HashMap::new()));
-        #[cfg(all(not(test), not(madsim)))]
-        {
+        if metric_level != MetricLevel::Disabled {
             let inner = inner.clone();
             tokio::spawn(async move {
                 loop {
@@ -41,7 +45,7 @@ impl CountMap {
         CountMap(inner)
     }
 
-    pub(crate) fn new_or_get_counter(&self, id: u64) -> Count {
+    pub fn new_or_get_counter(&self, id: u64) -> Count {
         {
             let map = self.0.read();
             if let Some(counter) = map.get(&id) {
@@ -49,11 +53,9 @@ impl CountMap {
             }
         }
         let mut map = self.0.write();
-        let counter = map
-            .entry(id)
+        map.entry(id)
             .or_insert_with(|| Arc::new(AtomicU64::new(0)))
-            .clone();
-        counter
+            .clone()
     }
 
     pub fn collect(&self, operator_ids: &[u64]) -> HashMap<u64, u64> {

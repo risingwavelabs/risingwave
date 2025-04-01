@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 
+use await_tree::SpanExt;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -324,7 +325,7 @@ where
             {
                 self.concurrent_upload_join_handle
                     .next()
-                    .verbose_instrument_await("upload")
+                    .instrument_await("upload".verbose())
                     .await
                     .unwrap()
                     .map_err(HummockError::sstable_upload_error)??;

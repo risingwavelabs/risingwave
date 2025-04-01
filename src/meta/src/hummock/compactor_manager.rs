@@ -175,7 +175,7 @@ impl CompactorManagerInner {
             return None;
         }
 
-        let rand_index = rand::thread_rng().gen_range(0..self.compactor_map.len());
+        let rand_index = rand::rng().random_range(0..self.compactor_map.len());
         let compactor = self.compactor_map.values().nth(rand_index).unwrap().clone();
 
         Some(compactor)

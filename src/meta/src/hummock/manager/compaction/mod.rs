@@ -37,8 +37,8 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use risingwave_common::config::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
@@ -396,8 +396,7 @@ impl HummockManager {
                 |context_id: u32,
                  stream: Streaming<SubscribeCompactionEventRequest>,
                  compactor_request_streams: &mut FuturesUnordered<_>| {
-                    let future = stream
-                        .into_future()
+                    let future = StreamExt::into_future(stream)
                         .map(move |stream_future| (context_id, stream_future));
 
                     compactor_request_streams.push(future);
@@ -481,7 +480,7 @@ impl HummockManager {
                                     }
                                 }
 
-                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                match compactor_manager.get_compactor(context_id) { Some(compactor) => {
                                     // Forcefully cancel the task so that it terminates
                                     // early on the compactor
                                     // node.
@@ -493,11 +492,11 @@ impl HummockManager {
                                             "CancelTask operation has been sent to compactor node",
                                         );
                                     }
-                                } else {
+                                } _ => {
                                     // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
                                     // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
                                     compactor_alive = false;
-                                }
+                                }}
                             },
 
                             RequestEvent::Register(_) => {
@@ -655,6 +654,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
         // Apply stats changes.
@@ -1178,6 +1178,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
 
@@ -1222,32 +1223,35 @@ impl HummockManager {
             }
 
             let is_success = if let TaskStatus::Success = compact_task.task_status {
-                if let Err(e) = self
+                match self
                     .report_compaction_sanity_check(&task.object_timestamps)
                     .await
                 {
-                    warn!(
-                        "failed to commit compaction task {} {}",
-                        compact_task.task_id,
-                        e.as_report()
-                    );
-                    compact_task.task_status = TaskStatus::RetentionTimeRejected;
-                    false
-                } else {
-                    let group = version
-                        .latest_version()
-                        .levels
-                        .get(&compact_task.compaction_group_id)
-                        .unwrap();
-                    let is_expired = compact_task.is_expired(group.compaction_group_version_id);
-                    if is_expired {
-                        compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                    Err(e) => {
                         warn!(
-                            "The task may be expired because of group split, task:\n {:?}",
-                            compact_task_to_string(&compact_task)
+                            "failed to commit compaction task {} {}",
+                            compact_task.task_id,
+                            e.as_report()
                         );
+                        compact_task.task_status = TaskStatus::RetentionTimeRejected;
+                        false
                     }
-                    !is_expired
+                    _ => {
+                        let group = version
+                            .latest_version()
+                            .levels
+                            .get(&compact_task.compaction_group_id)
+                            .unwrap();
+                        let is_expired = compact_task.is_expired(group.compaction_group_version_id);
+                        if is_expired {
+                            compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                            warn!(
+                                "The task may be expired because of group split, task:\n {:?}",
+                                compact_task_to_string(&compact_task)
+                            );
+                        }
+                        !is_expired
+                    }
                 }
             } else {
                 false
@@ -1575,76 +1579,6 @@ impl HummockManager {
     }
 }
 
-pub fn check_cg_write_limit(
-    levels: &Levels,
-    compaction_config: &CompactionConfig,
-) -> WriteLimitType {
-    let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
-    let l0_sub_level_number = levels.l0.sub_levels.len();
-
-    // level count
-    if threshold < l0_sub_level_number {
-        return WriteLimitType::WriteStop(format!(
-            "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
-            l0_sub_level_number, threshold
-        ));
-    }
-
-    let threshold = compaction_config
-        .level0_stop_write_threshold_max_sst_count
-        .unwrap_or(compaction_config::level0_stop_write_threshold_max_sst_count())
-        as usize;
-    let l0_sst_count = levels
-        .l0
-        .sub_levels
-        .iter()
-        .map(|l| l.table_infos.len())
-        .sum();
-    if threshold < l0_sst_count {
-        return WriteLimitType::WriteStop(format!(
-            "WriteStop(l0_sst_count: {}, threshold: {}) too many L0 sst files",
-            l0_sst_count, threshold
-        ));
-    }
-
-    let threshold = compaction_config
-        .level0_stop_write_threshold_max_size
-        .unwrap_or(compaction_config::level0_stop_write_threshold_max_size());
-    let l0_size = levels
-        .l0
-        .sub_levels
-        .iter()
-        .map(|l| l.table_infos.iter().map(|t| t.sst_size).sum::<u64>())
-        .sum::<u64>();
-    if threshold < l0_size {
-        return WriteLimitType::WriteStop(format!(
-            "WriteStop(l0_size: {}, threshold: {}) too large L0 size",
-            l0_size, threshold
-        ));
-    }
-
-    WriteLimitType::Unlimited
-}
-
-pub enum WriteLimitType {
-    Unlimited,
-
-    WriteStop(String), // reason
-}
-
-impl WriteLimitType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Unlimited => "Unlimited",
-            Self::WriteStop(reason) => reason,
-        }
-    }
-
-    pub fn is_write_stop(&self) -> bool {
-        matches!(self, Self::WriteStop(_))
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct CompactionState {
     scheduled: Mutex<HashSet<(CompactionGroupId, compact_task::TaskType)>>,
@@ -1762,54 +1696,194 @@ fn update_table_stats_for_vnode_watermark_trivial_reclaim(
     }
 }
 
-pub enum EmergencyState {
-    /// The compaction group is in emergency state.
-    Emergency,
+#[derive(Debug, Clone)]
+pub enum GroupState {
     /// The compaction group is not in emergency state.
     Normal,
+
+    /// The compaction group is in emergency state.
+    Emergency(String), // reason
+
+    /// The compaction group is in write stop state.
+    WriteStop(String), // reason
 }
 
-fn too_many_l0_file_count(levels: &Levels, compaction_config: &CompactionConfig) -> bool {
-    let l0_file_count = levels
-        .l0
-        .sub_levels
-        .iter()
-        .map(|l| l.table_infos.len())
-        .sum::<usize>();
-    l0_file_count
-        > compaction_config
-            .emergency_level0_sst_file_count
-            .unwrap_or(compaction_config::emergency_level0_sst_file_count()) as usize
+impl GroupState {
+    pub fn is_write_stop(&self) -> bool {
+        matches!(self, Self::WriteStop(_))
+    }
+
+    pub fn is_emergency(&self) -> bool {
+        matches!(self, Self::Emergency(_))
+    }
+
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Self::Emergency(reason) | Self::WriteStop(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
-fn too_many_l0_partition_count(levels: &Levels, compaction_config: &CompactionConfig) -> bool {
-    levels.l0.sub_levels.first().is_some_and(|l| {
-        l.table_infos.len()
+#[derive(Clone, Default)]
+pub struct GroupStateValidator;
+
+impl GroupStateValidator {
+    pub fn write_stop_sub_level_count(
+        level_count: usize,
+        compaction_config: &CompactionConfig,
+    ) -> bool {
+        let threshold = compaction_config.level0_stop_write_threshold_sub_level_number as usize;
+        level_count > threshold
+    }
+
+    pub fn write_stop_l0_size(l0_size: u64, compaction_config: &CompactionConfig) -> bool {
+        l0_size
+            > compaction_config
+                .level0_stop_write_threshold_max_size
+                .unwrap_or(compaction_config::level0_stop_write_threshold_max_size())
+    }
+
+    pub fn write_stop_l0_file_count(
+        l0_file_count: usize,
+        compaction_config: &CompactionConfig,
+    ) -> bool {
+        l0_file_count
+            > compaction_config
+                .level0_stop_write_threshold_max_sst_count
+                .unwrap_or(compaction_config::level0_stop_write_threshold_max_sst_count())
+                as usize
+    }
+
+    pub fn emergency_l0_file_count(
+        l0_file_count: usize,
+        compaction_config: &CompactionConfig,
+    ) -> bool {
+        l0_file_count
+            > compaction_config
+                .emergency_level0_sst_file_count
+                .unwrap_or(compaction_config::emergency_level0_sst_file_count())
+                as usize
+    }
+
+    pub fn emergency_l0_partition_count(
+        last_l0_sub_level_partition_count: usize,
+        compaction_config: &CompactionConfig,
+    ) -> bool {
+        last_l0_sub_level_partition_count
             > compaction_config
                 .emergency_level0_sub_level_partition
                 .unwrap_or(compaction_config::emergency_level0_sub_level_partition())
                 as usize
-    })
-}
-
-pub fn check_emergency_state(
-    levels: &Levels,
-    compaction_config: &CompactionConfig,
-) -> EmergencyState {
-    // check write_stop
-    if check_cg_write_limit(levels, compaction_config).is_write_stop() {
-        return EmergencyState::Emergency;
     }
 
-    // check l0 file count
-    if too_many_l0_file_count(levels, compaction_config) {
-        return EmergencyState::Emergency;
+    pub fn check_single_group_write_stop(
+        levels: &Levels,
+        compaction_config: &CompactionConfig,
+    ) -> GroupState {
+        if Self::write_stop_sub_level_count(levels.l0.sub_levels.len(), compaction_config) {
+            return GroupState::WriteStop(format!(
+                "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",
+                levels.l0.sub_levels.len(),
+                compaction_config.level0_stop_write_threshold_sub_level_number
+            ));
+        }
+
+        if Self::write_stop_l0_file_count(
+            levels
+                .l0
+                .sub_levels
+                .iter()
+                .map(|l| l.table_infos.len())
+                .sum(),
+            compaction_config,
+        ) {
+            return GroupState::WriteStop(format!(
+                "WriteStop(l0_sst_count: {}, threshold: {}) too many L0 sst files",
+                levels
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .map(|l| l.table_infos.len())
+                    .sum::<usize>(),
+                compaction_config
+                    .level0_stop_write_threshold_max_sst_count
+                    .unwrap_or(compaction_config::level0_stop_write_threshold_max_sst_count())
+            ));
+        }
+
+        if Self::write_stop_l0_size(levels.l0.total_file_size, compaction_config) {
+            return GroupState::WriteStop(format!(
+                "WriteStop(l0_size: {}, threshold: {}) too large L0 size",
+                levels.l0.total_file_size,
+                compaction_config
+                    .level0_stop_write_threshold_max_size
+                    .unwrap_or(compaction_config::level0_stop_write_threshold_max_size())
+            ));
+        }
+
+        GroupState::Normal
     }
 
-    // check l0 last sub
-    if too_many_l0_partition_count(levels, compaction_config) {
-        return EmergencyState::Emergency;
+    pub fn check_single_group_emergency(
+        levels: &Levels,
+        compaction_config: &CompactionConfig,
+    ) -> GroupState {
+        if Self::emergency_l0_file_count(
+            levels
+                .l0
+                .sub_levels
+                .iter()
+                .map(|l| l.table_infos.len())
+                .sum(),
+            compaction_config,
+        ) {
+            return GroupState::Emergency(format!(
+                "Emergency(l0_sst_count: {}, threshold: {}) too many L0 sst files",
+                levels
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .map(|l| l.table_infos.len())
+                    .sum::<usize>(),
+                compaction_config
+                    .emergency_level0_sst_file_count
+                    .unwrap_or(compaction_config::emergency_level0_sst_file_count())
+            ));
+        }
+
+        if Self::emergency_l0_partition_count(
+            levels
+                .l0
+                .sub_levels
+                .first()
+                .map(|l| l.table_infos.len())
+                .unwrap_or(0),
+            compaction_config,
+        ) {
+            return GroupState::Emergency(format!(
+                "Emergency(l0_partition_count: {}, threshold: {}) too many L0 partitions",
+                levels
+                    .l0
+                    .sub_levels
+                    .first()
+                    .map(|l| l.table_infos.len())
+                    .unwrap_or(0),
+                compaction_config
+                    .emergency_level0_sub_level_partition
+                    .unwrap_or(compaction_config::emergency_level0_sub_level_partition())
+            ));
+        }
+
+        GroupState::Normal
     }
 
-    EmergencyState::Normal
+    pub fn group_state(levels: &Levels, compaction_config: &CompactionConfig) -> GroupState {
+        let state = Self::check_single_group_write_stop(levels, compaction_config);
+        if state.is_write_stop() {
+            return state;
+        }
+
+        Self::check_single_group_emergency(levels, compaction_config)
+    }
 }

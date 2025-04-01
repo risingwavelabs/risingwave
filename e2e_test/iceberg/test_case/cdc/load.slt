@@ -2,6 +2,10 @@
 statement ok
 set sink_decouple = false;
 
+# import data to mysql
+system ok
+mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc.sql
+
 statement ok
 create source mysql_mydb with (
     connector = 'mysql-cdc',
@@ -44,3 +48,18 @@ query I
 select count(*) from products;
 ----
 8
+
+# insert new data to mysql
+system ok
+mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
+
+sleep 20s
+
+statement ok
+drop sink s1;
+
+statement ok
+drop table products;
+
+statement ok
+drop source mysql_mydb;

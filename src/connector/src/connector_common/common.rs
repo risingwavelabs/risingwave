@@ -280,6 +280,10 @@ const fn default_kafka_sync_call_timeout() -> Duration {
     Duration::from_secs(5)
 }
 
+const fn default_socket_keepalive_enable() -> bool {
+    true
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
@@ -311,6 +315,13 @@ pub struct RdKafkaPropertiesCommon {
     #[serde(rename = "properties.enable.ssl.certificate.verification")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub enable_ssl_certificate_verification: Option<bool>,
+
+    #[serde(
+        rename = "properties.socket.keepalive.enable",
+        default = "default_socket_keepalive_enable"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub socket_keepalive_enable: bool,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -330,6 +341,10 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.enable_ssl_certificate_verification {
             c.set("enable.ssl.certificate.verification", v.to_string());
         }
+        c.set(
+            "socket.keepalive.enable",
+            self.socket_keepalive_enable.to_string(),
+        );
     }
 }
 
@@ -725,18 +740,19 @@ impl NatsCommon {
             NatsOffset::None => DeliverPolicy::All,
         };
 
-        let consumer = if let Ok(consumer) = stream.get_consumer(&name).await {
-            consumer
-        } else {
-            stream
-                .get_or_create_consumer(&name, {
-                    config.deliver_policy = deliver_policy;
-                    config.durable_name = Some(durable_consumer_name);
-                    config.filter_subjects =
-                        self.subject.split(',').map(|s| s.to_owned()).collect();
-                    config
-                })
-                .await?
+        let consumer = match stream.get_consumer(&name).await {
+            Ok(consumer) => consumer,
+            _ => {
+                stream
+                    .get_or_create_consumer(&name, {
+                        config.deliver_policy = deliver_policy;
+                        config.durable_name = Some(durable_consumer_name);
+                        config.filter_subjects =
+                            self.subject.split(',').map(|s| s.to_owned()).collect();
+                        config
+                    })
+                    .await?
+            }
         };
         Ok(consumer)
     }

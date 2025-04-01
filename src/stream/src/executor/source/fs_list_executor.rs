@@ -70,7 +70,7 @@ impl<S: StateStore> FsListExecutor<S> {
     fn build_chunked_paginate_stream(
         &self,
         source_desc: &SourceDesc,
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>>> {
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>> + use<S>> {
         let stream = source_desc
             .source
             .get_source_list()

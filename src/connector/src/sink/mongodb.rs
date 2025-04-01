@@ -74,7 +74,7 @@ mod send_bulk_write_command_future {
     }
 
     async fn send_bulk_write_command(db: Database, command: Document) -> Result<()> {
-        let result = db.run_command(command, None).await.map_err(|err| {
+        let result = db.run_command(command).await.map_err(|err| {
             SinkError::Mongodb(anyhow!(err).context(format!(
                 "sending bulk write command failed, database: {}",
                 db.name()
@@ -297,7 +297,7 @@ impl Sink for MongodbSink {
         let client = ClientGuard::new(self.param.sink_name.clone(), client);
         client
             .database("admin")
-            .run_command(doc! {"hello":1}, None)
+            .run_command(doc! {"hello":1})
             .await
             .map_err(|err| {
                 SinkError::Mongodb(anyhow!(err).context("failed to send hello command to mongodb"))

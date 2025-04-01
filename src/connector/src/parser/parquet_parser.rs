@@ -55,6 +55,12 @@ impl ParquetParser {
                 4,
             >,
         >,
+        parquet_source_skip_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                4,
+            >,
+        >,
     ) {
         #[for_await]
         for record_batch in record_batch_stream {
@@ -63,7 +69,9 @@ impl ParquetParser {
             let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(
                 record_batch,
                 file_source_input_row_count_metrics.clone(),
+                parquet_source_skip_row_count_metrics.clone(),
             )?;
+
             yield chunk;
         }
     }
@@ -101,10 +109,17 @@ impl ParquetParser {
                 4,
             >,
         >,
+        parquet_source_skip_row_count_metrics: Option<
+            risingwave_common::metrics::LabelGuardedMetric<
+                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
+                4,
+            >,
+        >,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
         let column_size = self.rw_columns.len();
         let mut chunk_columns = Vec::with_capacity(self.rw_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
+
         for source_column in self.rw_columns.clone() {
             match source_column.column_type {
                 crate::source::SourceColumnType::Normal => {
@@ -148,9 +163,13 @@ impl ParquetParser {
                                 _ => unreachable!(),
                             }
                         } else {
+                            // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
                             let mut array_builder =
                                 ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
                             array_builder.append_n_null(record_batch.num_rows());
+                            if let Some(metrics) = parquet_source_skip_row_count_metrics.clone() {
+                                metrics.inc_by(record_batch.num_rows() as u64);
+                            }
                             Arc::new(array_builder.finish())
                         };
                         chunk_columns.push(column);

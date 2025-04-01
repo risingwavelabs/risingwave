@@ -23,6 +23,7 @@ use risingwave_common::hash::{
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
+use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::{SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbActorLocation;
@@ -39,7 +40,8 @@ use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext, StreamNode,
+    DispatchStrategy, Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext,
+    StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -119,10 +121,36 @@ pub type StreamActorWithDispatchers = (StreamActor, Vec<PbDispatcher>);
 pub type StreamActorWithUpDownstreams = (StreamActor, ActorUpstreams, Vec<PbDispatcher>);
 pub type FragmentActorDispatchers = HashMap<FragmentId, HashMap<ActorId, Vec<PbDispatcher>>>;
 
+pub type FragmentDownstreamRelation = HashMap<FragmentId, Vec<DownstreamFragmentRelation>>;
+/// downstream `fragment_id` -> original upstream `fragment_id` -> new upstream `fragment_id`
+pub type FragmentReplaceUpstream = HashMap<FragmentId, HashMap<FragmentId, FragmentId>>;
+/// The newly added no-shuffle actor dispatcher from upstream fragment to downstream fragment
+/// upstream `fragment_id` -> downstream `fragment_id` -> upstream `actor_id` -> downstream `actor_id`
+pub type FragmentNewNoShuffle = HashMap<FragmentId, HashMap<FragmentId, HashMap<ActorId, ActorId>>>;
+
+#[derive(Debug, Clone)]
+pub struct DownstreamFragmentRelation {
+    pub downstream_fragment_id: FragmentId,
+    pub dispatcher_type: DispatcherType,
+    pub dist_key_indices: Vec<u32>,
+    pub output_indices: Vec<u32>,
+}
+
+impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
+    fn from((fragment_id, dispatch): (FragmentId, DispatchStrategy)) -> Self {
+        Self {
+            downstream_fragment_id: fragment_id,
+            dispatcher_type: dispatch.get_type().unwrap().into(),
+            dist_key_indices: dispatch.dist_key_indices,
+            output_indices: dispatch.output_indices,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StreamJobFragmentsToCreate {
     pub inner: StreamJobFragments,
-    pub dispatchers: FragmentActorDispatchers,
+    pub downstreams: FragmentDownstreamRelation,
 }
 
 impl Deref for StreamJobFragmentsToCreate {
@@ -130,20 +158,6 @@ impl Deref for StreamJobFragmentsToCreate {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-impl StreamJobFragmentsToCreate {
-    pub fn actors_to_create(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            FragmentId,
-            &StreamNode,
-            impl Iterator<Item = (&StreamActor, &Vec<PbDispatcher>, WorkerId)> + '_,
-        ),
-    > + '_ {
-        self.inner.actors_to_create(&self.dispatchers)
     }
 }
 
@@ -607,12 +621,11 @@ impl StreamJobFragments {
 
         let union_fragment_id =
             union_fragment_id.expect("fragment of placeholder merger not found");
-        let union_fragment = self
+
+        (self
             .fragments
             .get_mut(&union_fragment_id)
-            .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id));
-
-        union_fragment
+            .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id))) as _
     }
 
     /// Resolve dependent table
@@ -677,18 +690,16 @@ impl StreamJobFragments {
         actors
     }
 
-    fn actors_to_create<'a>(
-        &'a self,
-        fragment_actor_dispatchers: &'a FragmentActorDispatchers,
+    pub fn actors_to_create(
+        &self,
     ) -> impl Iterator<
         Item = (
             FragmentId,
-            &'a StreamNode,
-            impl Iterator<Item = (&'a StreamActor, &'a Vec<PbDispatcher>, WorkerId)> + 'a,
+            &StreamNode,
+            impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
         ),
-    > + 'a {
+    > + '_ {
         self.fragments.values().map(move |fragment| {
-            let actor_dispatchers = fragment_actor_dispatchers.get(&fragment.fragment_id);
             (
                 fragment.fragment_id,
                 &fragment.nodes,
@@ -698,11 +709,7 @@ impl StreamJobFragments {
                         .get(&actor.actor_id)
                         .expect("should exist")
                         .worker_id() as WorkerId;
-                    static EMPTY_VEC: Vec<PbDispatcher> = Vec::new();
-                    let disptachers = actor_dispatchers
-                        .and_then(|dispatchers| dispatchers.get(&actor.actor_id))
-                        .unwrap_or(&EMPTY_VEC);
-                    (actor, disptachers, worker_id)
+                    (actor, worker_id)
                 }),
             )
         })

@@ -28,6 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
@@ -43,8 +44,8 @@ use super::doris_starrocks_connector::{
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator, SinkError,
-    SinkParam, SinkWriterMetrics,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics,
 };
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
@@ -331,7 +332,6 @@ impl Sink for StarrocksSink {
             inner,
         )
         .await?;
-
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
@@ -343,7 +343,7 @@ impl Sink for StarrocksSink {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(
@@ -897,9 +897,9 @@ pub struct StarrocksSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for StarrocksSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         tracing::info!("Starrocks commit coordinator inited.");
-        Ok(())
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

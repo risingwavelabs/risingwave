@@ -116,7 +116,7 @@ fn gen_sys_table(attr: Attr, item_fn: ItemFn) -> Result<TokenStream2> {
 
     Ok(quote! {
         #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
-        #[no_mangle]    // to prevent duplicate schema.table name
+        #[unsafe(no_mangle)]    // to prevent duplicate schema.table name
         fn #gen_fn_name() -> crate::catalog::system_catalog::BuiltinCatalog {
             const _: () = {
                 assert!(#struct_type::PRIMARY_KEY.is_some(), "primary key is required for system table");
@@ -164,7 +164,7 @@ fn gen_sys_view(attr: Attr, item_struct: ItemStruct) -> Result<TokenStream2> {
 
     Ok(quote! {
         #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
-        #[no_mangle]    // to prevent duplicate schema.table name
+        #[unsafe(no_mangle)]    // to prevent duplicate schema.table name
         fn #gen_fn_name() -> crate::catalog::system_catalog::BuiltinCatalog {
             let fields = #struct_type::fields();
             crate::catalog::system_catalog::BuiltinCatalog::View(crate::catalog::system_catalog::BuiltinView {

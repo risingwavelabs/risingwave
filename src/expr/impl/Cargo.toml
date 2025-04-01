@@ -34,7 +34,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-constant_time_eq = "0.3"
+constant_time_eq = "0.4"
 educe = "0.6"
 fancy-regex = "0.14"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

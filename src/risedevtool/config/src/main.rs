@@ -317,40 +317,43 @@ fn main() -> Result<()> {
     let file_path = opts.file;
 
     let chosen = {
-        if let Ok(file) = OpenOptions::new().read(true).open(&file_path) {
-            let reader = BufReader::new(file);
-            let mut enabled = vec![];
-            for line in reader.lines() {
-                let line = line?;
-                if line.trim().is_empty() || line.trim().starts_with('#') {
-                    continue;
-                }
-                let Some((component, val)) = line.split_once('=') else {
-                    println!("invalid config line {}, discarded", line);
-                    continue;
-                };
-                if component == "RISEDEV_CONFIGURED" {
-                    continue;
-                }
-                match Components::from_env(component) {
-                    Some(component) => {
-                        if val == "true" {
-                            enabled.push(component);
-                        }
-                    }
-                    None => {
-                        println!("unknown configure {}, discarded", component);
+        match OpenOptions::new().read(true).open(&file_path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                let mut enabled = vec![];
+                for line in reader.lines() {
+                    let line = line?;
+                    if line.trim().is_empty() || line.trim().starts_with('#') {
                         continue;
                     }
+                    let Some((component, val)) = line.split_once('=') else {
+                        println!("invalid config line {}, discarded", line);
+                        continue;
+                    };
+                    if component == "RISEDEV_CONFIGURED" {
+                        continue;
+                    }
+                    match Components::from_env(component) {
+                        Some(component) => {
+                            if val == "true" {
+                                enabled.push(component);
+                            }
+                        }
+                        None => {
+                            println!("unknown configure {}, discarded", component);
+                            continue;
+                        }
+                    }
                 }
+                enabled
             }
-            enabled
-        } else {
-            println!(
-                "RiseDev component config not found, generating {}",
-                file_path
-            );
-            Components::default_enabled().to_vec()
+            _ => {
+                println!(
+                    "RiseDev component config not found, generating {}",
+                    file_path
+                );
+                Components::default_enabled().to_vec()
+            }
         }
     };
 

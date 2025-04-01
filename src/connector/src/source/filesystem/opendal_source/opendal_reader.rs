@@ -92,6 +92,17 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
             let chunk_stream;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                let actor_id = source_ctx.actor_id.to_string();
+                let source_id = source_ctx.source_id.to_string();
+                let source_name = source_ctx.source_name.clone();
+                let parquet_source_skip_row_count_metrics: risingwave_common::metrics::LabelGuardedMetric<prometheus::core::GenericCounter<prometheus::core::AtomicU64>, 4> = self.source_ctx.metrics
+                .parquet_source_skip_row_count
+                .with_guarded_label_values(&[
+                    &actor_id,
+                    &source_id,
+                    split.id().as_ref(),
+                    &source_name,
+                ]);
                 chunk_stream = read_parquet_file(
                     self.connector.op.clone(),
                     object_name.clone(),
@@ -100,6 +111,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
                     Some(file_source_input_row_count.clone()),
+                    Some(parquet_source_skip_row_count_metrics),
                 )
                 .await?;
             } else {

@@ -120,7 +120,7 @@ impl ActiveStreamingWorkerNodes {
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
-        let ret = loop {
+        loop {
             let notification = self
                 .rx
                 .recv()
@@ -201,9 +201,7 @@ impl ActiveStreamingWorkerNodes {
                     continue;
                 }
             }
-        };
-
-        ret
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -483,6 +481,16 @@ impl MetadataManager {
         self.catalog_controller
             .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
             .await
+    }
+
+    pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
+        Ok(self
+            .catalog_controller
+            .get_sink_state_table_ids(sink_id)
+            .await?
+            .into_iter()
+            .map(|id| (id as u32).into())
+            .collect())
     }
 
     pub async fn get_table_catalog_by_cdc_table_id(
