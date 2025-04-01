@@ -128,7 +128,7 @@ impl Sender {
             Message::Chunk(c) => {
                 let card = c.cardinality().clamp(1, self.max_chunk_permits);
                 if card == self.max_chunk_permits {
-                    tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
+                    tracing::debug!(cardinality = c.cardinality(), "large chunk in exchange")
                 }
                 Some(permits::Value::Record(card as _))
             }

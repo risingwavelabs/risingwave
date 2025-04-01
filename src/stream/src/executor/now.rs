@@ -118,7 +118,7 @@ impl<S: StateStore> NowExecutor<S> {
         {
             let mut curr_timestamp = None;
             if barriers.len() > 1 {
-                warn!(
+                debug!(
                     "handle multiple barriers at once in now executor: {}",
                     barriers.len()
                 );
