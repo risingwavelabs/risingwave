@@ -40,8 +40,8 @@ INSERT INTO car_sales
     region_id_gen.id as region_id,
     sales_id_gen.id as price
   FROM generate_series(1, 100000) as sales_id_gen(id)
-    CROSS JOIN generate_series(1, 7) as car_id_gen(id)
-    CROSS JOIN generate_series(1, 7) as region_id_gen(id);
+    CROSS JOIN generate_series(1, 5) as car_id_gen(id)
+    CROSS JOIN generate_series(1, 5) as region_id_gen(id);
 
 # Create an MV that groups sales by a range of prices
 statement ok
