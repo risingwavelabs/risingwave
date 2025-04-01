@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{BitAnd, BitOrAssign};
 
 use itertools::Itertools;
@@ -261,7 +261,7 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<RescheduleWorkingSet> {
         let inner = self.inner.read().await;
-        self.resolve_working_set_for_reschedule_helper(&inner.db, fragment_ids)
+        self.resolve_working_set_for_reschedule_helper_normal_way(&inner.db, fragment_ids)
             .await
     }
 
@@ -280,8 +280,140 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
+        self.resolve_working_set_for_reschedule_helper_normal_way(&txn, fragment_ids)
             .await
+    }
+
+    pub async fn resolve_working_set_for_reschedule_helper_normal_way<C>(
+        &self,
+        txn: &C,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<RescheduleWorkingSet>
+    where
+        C: ConnectionTrait,
+    {
+        let actor_dispatchers: Vec<_> = ActorDispatcher::find().all(txn).await?;
+        let actors: Vec<_> = Actor::find().all(txn).await?;
+
+        let actor_to_fragment: HashMap<ActorId, FragmentId> = actors
+            .iter()
+            .map(|actor| (actor.actor_id, actor.fragment_id))
+            .collect();
+
+        let mut fragment_downstreams = HashMap::new();
+        let mut fragment_upstreams = HashMap::new();
+
+        for actor_dispatcher in &actor_dispatchers {
+            let src_fragment_id = actor_to_fragment[&actor_dispatcher.actor_id];
+            let dst_fragment_id = actor_dispatcher.dispatcher_id;
+
+            fragment_downstreams
+                .entry(src_fragment_id)
+                .or_insert(HashSet::new())
+                .insert((dst_fragment_id, actor_dispatcher.dispatcher_type));
+
+            fragment_upstreams
+                .entry(dst_fragment_id)
+                .or_insert(HashSet::new())
+                .insert((src_fragment_id, actor_dispatcher.dispatcher_type));
+        }
+
+        let mut related_fragment_ids = HashSet::with_capacity(fragment_ids.len());
+
+        // all no shuffle relations
+        let mut queue = VecDeque::from(fragment_ids);
+
+        while let Some(fragment_id) = queue.pop_front() {
+            if related_fragment_ids.insert(fragment_id) {
+                let upstreams = fragment_upstreams.get(&fragment_id).into_iter().flatten();
+                let downstreams = fragment_downstreams.get(&fragment_id).into_iter().flatten();
+                for &(neighbor, dispatcher_type) in upstreams.chain(downstreams) {
+                    if dispatcher_type == DispatcherType::NoShuffle {
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+
+        // all normal relations
+        for fragment_id in related_fragment_ids.clone() {
+            let upstreams = fragment_upstreams.get(&fragment_id).into_iter().flatten();
+            let downstreams = fragment_downstreams.get(&fragment_id).into_iter().flatten();
+            for &(neighbor, _) in upstreams.chain(downstreams) {
+                related_fragment_ids.insert(neighbor);
+            }
+        }
+
+        let fragments = Fragment::find()
+            .filter(fragment::Column::FragmentId.is_in(related_fragment_ids.clone()))
+            .all(txn)
+            .await?;
+
+        let fragments: HashMap<FragmentId, _> = fragments
+            .into_iter()
+            .map(|fragment| (fragment.fragment_id, fragment))
+            .collect();
+
+        let actors: HashMap<ActorId, _> = actors
+            .into_iter()
+            .filter(|actor| related_fragment_ids.contains(&actor.fragment_id))
+            .map(|actor| (actor.actor_id, actor))
+            .collect();
+
+        let actor_dispatchers: HashMap<ActorId, Vec<_>> = actor_dispatchers
+            .into_iter()
+            .filter(|actor_dispatcher| actors.contains_key(&actor_dispatcher.actor_id))
+            .map(|actor_dispatcher| (actor_dispatcher.actor_id, actor_dispatcher))
+            .into_group_map();
+
+        let fragment_downstreams: HashMap<_, _> = fragment_downstreams
+            .into_iter()
+            .filter(|(fragment_id, _)| related_fragment_ids.contains(fragment_id))
+            .map(|(fragment_id, downstreams)| (fragment_id, downstreams.into_iter().collect_vec()))
+            .collect();
+
+        let fragment_upstreams: HashMap<_, _> = fragment_upstreams
+            .into_iter()
+            .filter(|(fragment_id, _)| related_fragment_ids.contains(fragment_id))
+            .map(|(fragment_id, upstreams)| (fragment_id, upstreams.into_iter().collect_vec()))
+            .collect();
+
+        let related_job_ids: HashSet<_> =
+            fragments.values().map(|fragment| fragment.job_id).collect();
+
+        let related_job_definitions =
+            resolve_streaming_job_definition(txn, &related_job_ids).await?;
+
+        let related_jobs = StreamingJob::find()
+            .filter(streaming_job::Column::JobId.is_in(related_job_ids))
+            .all(txn)
+            .await?;
+
+        let related_jobs = related_jobs
+            .into_iter()
+            .map(|job| {
+                let job_id = job.job_id;
+                (
+                    job_id,
+                    (
+                        job,
+                        related_job_definitions
+                            .get(&job_id)
+                            .cloned()
+                            .unwrap_or("".to_owned()),
+                    ),
+                )
+            })
+            .collect();
+
+        Ok(RescheduleWorkingSet {
+            fragments,
+            actors,
+            actor_dispatchers,
+            fragment_downstreams,
+            fragment_upstreams,
+            related_jobs,
+        })
     }
 
     pub async fn resolve_working_set_for_reschedule_helper<C>(
