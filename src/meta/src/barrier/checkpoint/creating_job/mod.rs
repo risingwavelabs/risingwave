@@ -31,7 +31,6 @@ use status::CreatingStreamingJobStatus;
 use tracing::info;
 
 use crate::MetaResult;
-use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -64,7 +63,6 @@ impl CreatingStreamingJobControl {
         version_stat: &HummockVersionStats,
         initial_mutation: Mutation,
         control_stream_manager: &mut ControlStreamManager,
-        edges: &mut FragmentEdgeBuildResult,
     ) -> MetaResult<Self> {
         let job_id = info.stream_job_fragments.stream_job_id();
         let database_id = DatabaseId::new(info.streaming_job.database_id());
@@ -86,8 +84,41 @@ impl CreatingStreamingJobControl {
         let table_id = info.stream_job_fragments.stream_job_id();
         let table_id_str = format!("{}", table_id.table_id);
 
-        let actors_to_create =
-            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create());
+        let mut actor_upstreams = Command::collect_actor_upstreams(
+            info.stream_job_fragments
+                .actors_to_create()
+                .flat_map(|(fragment_id, _, actors)| {
+                    actors.map(move |(actor, dispatchers, _)| {
+                        (actor.actor_id, fragment_id, dispatchers.as_slice())
+                    })
+                })
+                .chain(
+                    info.dispatchers
+                        .iter()
+                        .flat_map(|(fragment_id, dispatchers)| {
+                            dispatchers.iter().map(|(actor_id, dispatchers)| {
+                                (*actor_id, *fragment_id, dispatchers.as_slice())
+                            })
+                        }),
+                ),
+            None,
+        );
+        let mut actors_to_create = StreamJobActorsToCreate::default();
+        for (fragment_id, node, actors) in info.stream_job_fragments.actors_to_create() {
+            for (actor, dispatchers, worker_id) in actors {
+                actors_to_create
+                    .entry(worker_id)
+                    .or_default()
+                    .entry(fragment_id)
+                    .or_insert_with(|| (node.clone(), vec![]))
+                    .1
+                    .push((
+                        actor.clone(),
+                        actor_upstreams.remove(&actor.actor_id).unwrap_or_default(),
+                        dispatchers.clone(),
+                    ))
+            }
+        }
 
         let graph_info = InflightStreamingJobInfo {
             job_id: table_id,

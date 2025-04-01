@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, oneshot};
@@ -44,8 +45,8 @@ use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    ActorId, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle, FragmentReplaceUpstream,
-    StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    ActorId, FragmentActorDispatchers, FragmentId, StreamJobFragments, StreamJobFragmentsToCreate,
+    TableParallelism,
 };
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -61,10 +62,8 @@ pub struct CreateStreamingJobOption {
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct CreateStreamingJobContext {
-    /// New fragment relation to add from upstream fragments to downstream fragments.
-    pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    pub new_no_shuffle: FragmentNewNoShuffle,
-    pub upstream_actors: HashMap<FragmentId, HashSet<ActorId>>,
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: FragmentActorDispatchers,
 
     /// Internal tables in the streaming job.
     pub internal_tables: BTreeMap<u32, Table>,
@@ -185,11 +184,10 @@ pub struct ReplaceStreamJobContext {
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
-    pub replace_upstream: FragmentReplaceUpstream,
-    pub new_no_shuffle: FragmentNewNoShuffle,
+    pub merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 
-    /// New fragment relation to add from existing upstream fragment to downstream fragment.
-    pub upstream_fragment_downstreams: FragmentDownstreamRelation,
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: FragmentActorDispatchers,
 
     /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
@@ -377,9 +375,7 @@ impl GlobalStreamManager {
         stream_job_fragments: StreamJobFragmentsToCreate,
         CreateStreamingJobContext {
             streaming_job,
-            upstream_fragment_downstreams,
-            new_no_shuffle,
-            upstream_actors,
+            dispatchers,
             definition,
             create_type,
             job_type,
@@ -412,8 +408,8 @@ impl GlobalStreamManager {
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
                 new_fragments: stream_job_fragments,
-                replace_upstream: context.replace_upstream,
-                upstream_fragment_downstreams: context.upstream_fragment_downstreams,
+                merge_updates: context.merge_updates,
+                dispatchers: context.dispatchers,
                 init_split_assignment,
                 streaming_job,
                 tmp_id: tmp_table_id.table_id,
@@ -431,11 +427,7 @@ impl GlobalStreamManager {
             .await?;
         init_split_assignment.extend(
             self.source_manager
-                .allocate_splits_for_backfill(
-                    &stream_job_fragments,
-                    &new_no_shuffle,
-                    &upstream_actors,
-                )
+                .allocate_splits_for_backfill(&stream_job_fragments, &dispatchers)
                 .await?,
         );
 
@@ -445,7 +437,7 @@ impl GlobalStreamManager {
 
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
-            upstream_fragment_downstreams,
+            dispatchers,
             init_split_assignment,
             definition: definition.clone(),
             streaming_job: streaming_job.clone(),
@@ -490,9 +482,8 @@ impl GlobalStreamManager {
         new_fragments: StreamJobFragmentsToCreate,
         ReplaceStreamJobContext {
             old_fragments,
-            replace_upstream,
-            new_no_shuffle,
-            upstream_fragment_downstreams,
+            merge_updates,
+            dispatchers,
             tmp_id,
             streaming_job,
             drop_table_connector_ctx,
@@ -501,11 +492,7 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let init_split_assignment = if streaming_job.is_source() {
             self.source_manager
-                .allocate_splits_for_replace_source(
-                    &new_fragments,
-                    &replace_upstream,
-                    &new_no_shuffle,
-                )
+                .allocate_splits_for_replace_source(&new_fragments, &merge_updates)
                 .await?
         } else {
             self.source_manager.allocate_splits(&new_fragments).await?
@@ -521,8 +508,8 @@ impl GlobalStreamManager {
                 Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                     old_fragments,
                     new_fragments,
-                    replace_upstream,
-                    upstream_fragment_downstreams,
+                    merge_updates,
+                    dispatchers,
                     init_split_assignment,
                     streaming_job,
                     tmp_id,

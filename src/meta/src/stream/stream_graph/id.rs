@@ -80,3 +80,11 @@ pub(super) type GlobalTableIdGen = GlobalIdGen<{ IdCategory::Table }>;
 
 pub(super) type GlobalActorId = GlobalId<{ IdCategory::Actor }>;
 pub(super) type GlobalActorIdGen = GlobalIdGen<{ IdCategory::Actor }>;
+
+/// Extension for converting a slice of [`GlobalActorId`] to a vector of global IDs.
+#[easy_ext::ext(GlobalFragmentIdsExt)]
+pub(super) impl<A: AsRef<[GlobalActorId]>> A {
+    fn as_global_ids(&self) -> Vec<u32> {
+        self.as_ref().iter().map(|x| x.as_global_id()).collect()
+    }
+}

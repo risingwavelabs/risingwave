@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -23,8 +22,7 @@ use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
-use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{BarrierKind, Command, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::model::{ActorId, FragmentId, SubscriptionId};
 
@@ -272,97 +270,6 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-    }
-
-    pub(super) fn build_edge(&self, command: Option<&Command>) -> Option<FragmentEdgeBuildResult> {
-        let (info, replace_job) = match command {
-            None => {
-                return None;
-            }
-            Some(command) => match command {
-                Command::Flush
-                | Command::Pause
-                | Command::Resume
-                | Command::DropStreamingJobs { .. }
-                | Command::MergeSnapshotBackfillStreamingJobs(_)
-                | Command::RescheduleFragment { .. }
-                | Command::SourceChangeSplit(_)
-                | Command::Throttle(_)
-                | Command::CreateSubscription { .. }
-                | Command::DropSubscription { .. } => {
-                    return None;
-                }
-                Command::CreateStreamingJob { info, job_type, .. } => {
-                    let replace_job = match job_type {
-                        CreateStreamingJobType::Normal
-                        | CreateStreamingJobType::SnapshotBackfill(_) => None,
-                        CreateStreamingJobType::SinkIntoTable(replace_job) => Some(replace_job),
-                    };
-                    (Some(info), replace_job)
-                }
-                Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job)),
-            },
-        };
-        // `existing_fragment_ids` consists of
-        //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
-        //  - keys of `replace_job.upstream_fragment_downstreams`, which are the `fragment_id` of upstream fragment of replace_job,
-        // if the upstream fragment previously exists
-        //  - keys of `replace_upstream`, which are the `fragment_id` of downstream fragments that will update their upstream fragments.
-        let existing_fragment_ids = info
-            .into_iter()
-            .flat_map(|info| info.upstream_fragment_downstreams.keys())
-            .chain(replace_job.into_iter().flat_map(|replace_job| {
-                replace_job
-                    .upstream_fragment_downstreams
-                    .keys()
-                    .filter(|fragment_id| {
-                        info.map(|info| {
-                            !info
-                                .stream_job_fragments
-                                .fragments
-                                .contains_key(fragment_id)
-                        })
-                        .unwrap_or(true)
-                    })
-                    .chain(replace_job.replace_upstream.keys())
-            }))
-            .cloned();
-        let new_fragment_infos = info
-            .into_iter()
-            .flat_map(|info| info.stream_job_fragments.new_fragment_info())
-            .chain(
-                replace_job
-                    .into_iter()
-                    .flat_map(|replace_job| replace_job.new_fragments.new_fragment_info()),
-            )
-            .collect_vec();
-        let mut builder = FragmentEdgeBuilder::new(
-            existing_fragment_ids
-                .map(|fragment_id| self.fragment(fragment_id))
-                .chain(new_fragment_infos.iter().map(|(_, info)| info)),
-        );
-        if let Some(info) = info {
-            builder.add_relations(&info.upstream_fragment_downstreams);
-            builder.add_relations(&info.stream_job_fragments.downstreams);
-        }
-        if let Some(replace_job) = replace_job {
-            builder.add_relations(&replace_job.upstream_fragment_downstreams);
-            builder.add_relations(&replace_job.new_fragments.downstreams);
-        }
-        if let Some(replace_job) = replace_job {
-            for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {
-                for (original_upstream_fragment_id, new_upstream_fragment_id) in
-                    fragment_replacement
-                {
-                    builder.replace_upstream(
-                        *fragment_id,
-                        *original_upstream_fragment_id,
-                        *new_upstream_fragment_id,
-                    );
-                }
-            }
-        }
-        Some(builder.build())
     }
 }
 

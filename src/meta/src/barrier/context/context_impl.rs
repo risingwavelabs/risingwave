@@ -156,7 +156,7 @@ impl CommandContext {
                         replace_plan @ ReplaceStreamJobPlan {
                             old_fragments,
                             new_fragments,
-                            upstream_fragment_downstreams,
+                            dispatchers,
                             init_split_assignment,
                             ..
                         },
@@ -168,7 +168,7 @@ impl CommandContext {
                             .post_collect_job_fragments(
                                 new_fragments.stream_job_id.table_id as _,
                                 new_fragments.actor_ids(),
-                                upstream_fragment_downstreams,
+                                dispatchers,
                                 init_split_assignment,
                             )
                             .await?;
@@ -232,7 +232,7 @@ impl CommandContext {
                 // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
-                    upstream_fragment_downstreams,
+                    dispatchers,
                     init_split_assignment,
                     streaming_job,
                     ..
@@ -243,7 +243,7 @@ impl CommandContext {
                     .post_collect_job_fragments_inner(
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
-                        upstream_fragment_downstreams,
+                        dispatchers,
                         init_split_assignment,
                         streaming_job.is_materialized_view(),
                     )
@@ -276,7 +276,7 @@ impl CommandContext {
                 replace_plan @ ReplaceStreamJobPlan {
                     old_fragments,
                     new_fragments,
-                    upstream_fragment_downstreams,
+                    dispatchers,
                     init_split_assignment,
                     to_drop_state_table_ids,
                     ..
@@ -289,7 +289,7 @@ impl CommandContext {
                     .post_collect_job_fragments(
                         new_fragments.stream_job_id.table_id as _,
                         new_fragments.actor_ids(),
-                        upstream_fragment_downstreams,
+                        dispatchers,
                         init_split_assignment,
                     )
                     .await?;
