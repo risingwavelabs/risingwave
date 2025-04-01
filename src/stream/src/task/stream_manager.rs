@@ -332,6 +332,7 @@ impl StreamActorManager {
             schema,
             pk_indices,
             identity,
+            id: executor_id,
         }
     }
 

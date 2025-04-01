@@ -132,11 +132,12 @@ pub async fn setup_bench_stream_hash_join(
         .into_iter()
         .collect();
     let schema_len = schema.len();
-    let info = ExecutorInfo {
-        schema: Schema { fields: schema },
-        pk_indices: vec![0, 1, 3, 4],
-        identity: "HashJoinExecutor".to_owned(),
-    };
+    let info = ExecutorInfo::new(
+        Schema { fields: schema },
+        vec![0, 1, 3, 4],
+        "HashJoinExecutor".to_owned(),
+        0,
+    );
 
     // join-key is [0], primary-key is [1].
     let params_l = JoinParams::new(vec![0], vec![1]);

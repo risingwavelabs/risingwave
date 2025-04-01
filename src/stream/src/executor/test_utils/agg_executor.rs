@@ -217,11 +217,12 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     .await;
 
     let schema = generate_agg_schema(&input, &agg_calls, Some(&group_key_indices));
-    let info = ExecutorInfo {
+    let info = ExecutorInfo::new(
         schema,
         pk_indices,
-        identity: format!("HashAggExecutor {:X}", executor_id),
-    };
+        "HashAggExecutor".to_owned(),
+        executor_id,
+    );
 
     let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
         version: PbAggNodeVersion::LATEST,
@@ -285,11 +286,12 @@ pub async fn new_boxed_simple_agg_executor<S: StateStore>(
     .await;
 
     let schema = generate_agg_schema(&input, &agg_calls, None);
-    let info = ExecutorInfo {
+    let info = ExecutorInfo::new(
         schema,
         pk_indices,
-        identity: format!("SimpleAggExecutor {:X}", executor_id),
-    };
+        "SimpleAggExecutor".to_owned(),
+        executor_id,
+    );
 
     let exec = SimpleAggExecutor::new(AggExecutorArgs {
         version: PbAggNodeVersion::LATEST,
