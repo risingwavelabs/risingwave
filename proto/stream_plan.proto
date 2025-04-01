@@ -1054,7 +1054,7 @@ message StreamContext {
 message BackfillOrderUnspecified {}
 
 message BackfillOrderFixed {
-  map<uint32, common.uint32_vector> order = 1;
+  map<uint32, common.Uint32Vector> order = 1;
 }
 
 message BackfillOrderStrategy {
