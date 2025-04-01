@@ -354,6 +354,9 @@ impl StreamSink {
             CreateType::Foreground
         };
         let (properties, secret_refs) = properties.into_parts();
+        let is_exactly_once = properties
+            .get("is_exactly_once")
+            .is_some_and(|v| v.to_lowercase() == "true");
         let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -371,6 +374,7 @@ impl StreamSink {
             target_table: target_table.as_ref().map(|catalog| catalog.id()),
             extra_partition_col_idx,
             create_type,
+            is_exactly_once,
         };
 
         let unsupported_sink =
@@ -410,6 +414,11 @@ impl StreamSink {
         if !sink_decouple && sink_desc.is_file_sink() {
             return Err(
                 SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
+            );
+        }
+        if !sink_decouple && sink_desc.is_exactly_once {
+            return Err(
+                SinkError::Config(anyhow!("Exactly once sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
             );
         }
         let log_store_type = if sink_decouple {
