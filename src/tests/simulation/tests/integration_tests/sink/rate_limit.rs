@@ -31,7 +31,7 @@ async fn test_sink_decouple_rate_limit() -> Result<()> {
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(false);
     // There will be 1000 * 0.2 = 200 rows generated
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..1000, 0.2, 20);
 
