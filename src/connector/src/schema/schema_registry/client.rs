@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::future::select_all;
 use itertools::Itertools;
@@ -22,6 +23,8 @@ use reqwest::{Method, Url};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use thiserror_ext::AsReport as _;
+use tokio_retry::Retry;
+use tokio_retry::strategy::ExponentialBackoff;
 
 use super::util::*;
 use crate::connector_common::ConfluentSchemaRegistryConnection;
@@ -135,12 +138,25 @@ impl Client {
             client: self.inner.clone(),
             path: path.iter().map(|p| p.to_string()).collect_vec(),
         });
+
+        let retry_strategy = ExponentialBackoff::from_millis(100)
+            .factor(2)
+            .max_delay(Duration::from_secs(1))
+            .take(3);
+
         for url in &self.url {
-            fut_req.push(tokio::spawn(req_inner(
-                ctx.clone(),
-                url.clone(),
-                method.clone(),
-            )));
+            let url_clone = url.clone();
+            let ctx_clone = ctx.clone();
+            let method_clone = method.clone();
+
+            let retry_future = Retry::spawn(retry_strategy.clone(), move || {
+                let ctx = ctx_clone.clone();
+                let url = url_clone.clone();
+                let method = method_clone.clone();
+                async move { req_inner(ctx, url, method).await }
+            });
+
+            fut_req.push(tokio::spawn(retry_future));
         }
 
         while !fut_req.is_empty() {
