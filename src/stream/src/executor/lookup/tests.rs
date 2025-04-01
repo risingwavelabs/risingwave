@@ -109,10 +109,11 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
     .into_executor(schema, vec![0]);
 
     Executor::new(
-        ExecutorInfo::new_for_test(
+        ExecutorInfo::new(
             source.schema().clone(),
             source.pk_indices().to_vec(),
             "MaterializeExecutor".to_owned(),
+            0,
         ),
         MaterializeExecutor::for_test(
             source,
@@ -189,7 +190,7 @@ async fn test_lookup_this_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo::new_for_test(
+    let info = ExecutorInfo::new(
         Schema::new(vec![
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
@@ -198,6 +199,7 @@ async fn test_lookup_this_epoch() {
         ]),
         vec![1, 2],
         "LookupExecutor".to_owned(),
+        0,
     );
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         ctx: ActorContext::for_test(0),
@@ -263,7 +265,7 @@ async fn test_lookup_last_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo::new_for_test(
+    let info = ExecutorInfo::new(
         Schema::new(vec![
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
@@ -272,6 +274,7 @@ async fn test_lookup_last_epoch() {
         ]),
         vec![1, 2],
         "LookupExecutor".to_owned(),
+        0,
     );
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         ctx: ActorContext::for_test(0),

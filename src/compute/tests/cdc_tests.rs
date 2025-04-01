@@ -147,13 +147,14 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor = StreamExecutor::new(
-        ExecutorInfo::new_for_test(
+        ExecutorInfo::new(
             Schema::new(vec![
                 Field::unnamed(DataType::Jsonb),   // payload
                 Field::unnamed(DataType::Varchar), // _rw_offset
             ]),
             vec![0],
             "MockOffsetGenExecutor".to_owned(),
+            0,
         ),
         MockOffsetGenExecutor::new(source).boxed(),
     );
@@ -219,10 +220,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ];
 
     let cdc_backfill = StreamExecutor::new(
-        ExecutorInfo::new_for_test(
+        ExecutorInfo::new(
             table_schema.clone(),
             table_pk_indices,
             "CdcBackfillExecutor".to_owned(),
+            0,
         ),
         CdcBackfillExecutor::new(
             ActorContext::for_test(actor_id),

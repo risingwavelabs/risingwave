@@ -163,10 +163,11 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = Executor::new(
-        ExecutorInfo::new_for_test(
+        ExecutorInfo::new(
             all_schema.clone(),
             pk_indices.clone(),
             format!("SourceExecutor {:X}", 1),
+            0,
         ),
         SourceExecutor::<PanicStateStore>::new(
             actor_ctx.clone(),
@@ -182,10 +183,11 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = Executor::new(
-        ExecutorInfo::new_for_test(
+        ExecutorInfo::new(
             all_schema.clone(),
             pk_indices.clone(),
             format!("DmlExecutor {:X}", 2),
+            0,
         ),
         DmlExecutor::new(
             ActorContext::for_test(0),
@@ -201,10 +203,11 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     let row_id_gen_executor = Executor::new(
-        ExecutorInfo::new_for_test(
+        ExecutorInfo::new(
             all_schema.clone(),
             pk_indices.clone(),
             format!("RowIdGenExecutor {:X}", 3),
+            0,
         ),
         RowIdGenExecutor::new(actor_ctx, dml_executor, row_id_index, vnodes).boxed(),
     );

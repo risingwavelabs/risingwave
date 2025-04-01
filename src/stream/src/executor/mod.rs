@@ -196,10 +196,6 @@ impl ExecutorInfo {
             id,
         }
     }
-
-    pub fn new_for_test(schema: Schema, pk_indices: PkIndices, identity: String) -> Self {
-        Self::new(schema, pk_indices, identity, 0)
-    }
 }
 
 /// [`Execute`] describes the methods an executor should implement to handle control messages.
