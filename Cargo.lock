@@ -1771,7 +1771,7 @@ dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "rustc_version 0.4.0",
+ "rustc_version",
  "tracing",
 ]
 
@@ -3088,7 +3088,7 @@ version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
 dependencies = [
- "rustc_version 0.4.0",
+ "rustc_version",
 ]
 
 [[package]]
@@ -3328,7 +3328,7 @@ dependencies = [
  "curve25519-dalek-derive",
  "digest",
  "fiat-crypto",
- "rustc_version 0.4.0",
+ "rustc_version",
  "subtle",
  "zeroize",
 ]
@@ -3342,16 +3342,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.87",
-]
-
-[[package]]
-name = "darling"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a01d95850c592940db9b8194bc39f4bc0e89dee5c4265e4b1807c34a9aba453c"
-dependencies = [
- "darling_core 0.13.4",
- "darling_macro 0.13.4",
 ]
 
 [[package]]
@@ -3372,20 +3362,6 @@ checksum = "83b2eb4d90d12bdda5ed17de686c2acb4c57914f8f921b8da7e112b5a36f3fe1"
 dependencies = [
  "darling_core 0.20.9",
  "darling_macro 0.20.9",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "859d65a907b6852c9361e3185c862aae7fafd2887876799fa55f5f99dc40d610"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim 0.10.0",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -3414,17 +3390,6 @@ dependencies = [
  "quote",
  "strsim 0.11.1",
  "syn 2.0.87",
-]
-
-[[package]]
-name = "darling_macro"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c972679f83bdf9c42bd905396b6c3588a843a17f0f16dfcfa3e2c5d57441835"
-dependencies = [
- "darling_core 0.13.4",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -3892,7 +3857,7 @@ name = "delta_btree_map"
 version = "2.4.0-alpha"
 dependencies = [
  "educe",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
 ]
 
 [[package]]
@@ -3918,7 +3883,7 @@ dependencies = [
  "lazy_static",
  "parquet 52.2.0",
  "roaring",
- "rustc_version 0.4.0",
+ "rustc_version",
  "serde",
  "serde_json",
  "strum 0.26.3",
@@ -4097,14 +4062,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "derivative"
-version = "2.2.0"
+name = "derive-syn-parse"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+checksum = "d65d7ce8132b7c0e54497a4d9a55a1c2a0912a0d786cf894472ba818fba45762"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "derive-where"
+version = "1.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d671cc41a825ebabc75757b62d3d168c577f9149b2d49ece1dad1f72119d25"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -4147,7 +4123,7 @@ dependencies = [
  "convert_case 0.4.0",
  "proc-macro2",
  "quote",
- "rustc_version 0.4.0",
+ "rustc_version",
  "syn 1.0.109",
 ]
 
@@ -4441,10 +4417,10 @@ dependencies = [
  "lazy_static",
  "percent-encoding",
  "reqwest 0.12.4",
- "rustc_version 0.4.0",
+ "rustc_version",
  "serde",
  "serde_json",
- "serde_with 3.12.0",
+ "serde_with",
  "tokio",
  "url",
  "void",
@@ -4516,18 +4492,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7268b386296a025e474d5140678f75d6de9493ae55a5d709eeb9dd08149945e1"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "enum-as-inner"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21cdad81446a7f7dc43f6a77409efeb9733d2fa65553efef6018ef257c959b73"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -4929,7 +4893,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f1baf0dbf96932ec9a3038d57900329c015b0bfb7b63d904f3bc27e2b02a096"
 dependencies = [
  "bitflags 1.3.2",
- "rustc_version 0.4.0",
+ "rustc_version",
 ]
 
 [[package]]
@@ -5909,11 +5873,11 @@ dependencies = [
  "async-trait",
  "cfg-if",
  "data-encoding",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "futures-channel",
  "futures-io",
  "futures-util",
- "idna 1.0.3",
+ "idna",
  "ipnet",
  "once_cell",
  "rand 0.8.5",
@@ -6294,7 +6258,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_repr",
- "serde_with 3.12.0",
+ "serde_with",
  "thrift",
  "tokio",
  "typed-builder 0.20.1",
@@ -6351,17 +6315,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "idna"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "418a0a6fab821475f634efe3ccc45c013f742efe03d853e8d3355d5cb850ecf8"
-dependencies = [
- "matches",
- "unicode-bidi",
- "unicode-normalization",
-]
 
 [[package]]
 name = "idna"
@@ -7280,6 +7233,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "macro_magic"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc33f9f0351468d26fbc53d9ce00a096c8522ecb42f19b50f34f2c422f76d21d"
+dependencies = [
+ "macro_magic_core",
+ "macro_magic_macros",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "macro_magic_core"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1687dc887e42f352865a393acae7cf79d98fab6351cde1f58e9e057da89bf150"
+dependencies = [
+ "const-random",
+ "derive-syn-parse",
+ "macro_magic_core_macros",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "macro_magic_core_macros"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b02abfe41815b5bd98dbd4260173db2c116dda171dc0fe7838cb206333b83308"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "macro_magic_macros"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ea28ee64b88876bf45277ed9a5817c1817df061a74f2b988971a12570e5869"
+dependencies = [
+ "macro_magic_core",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
 name = "madsim"
 version = "0.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7652,7 +7653,7 @@ dependencies = [
  "loom",
  "parking_lot 0.12.1",
  "portable-atomic",
- "rustc_version 0.4.0",
+ "rustc_version",
  "smallvec",
  "tagptr",
  "thiserror 1.0.63",
@@ -7661,25 +7662,29 @@ dependencies = [
 
 [[package]]
 name = "mongodb"
-version = "2.8.2"
+version = "3.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef206acb1b72389b49bc9985efe7eb1f8a9bb18e5680d262fac26c07f44025f1"
+checksum = "fdf4261933e5113914caec01c4bb16a7502bdaa9cf80fd87191765e7d9ff16b2"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
  "bitflags 1.3.2",
  "bson",
  "chrono",
- "derivative",
+ "derive-where",
  "derive_more",
  "futures-core",
  "futures-executor",
  "futures-io",
  "futures-util",
  "hex",
+ "hickory-proto",
+ "hickory-resolver",
  "hmac",
- "lazy_static",
+ "macro_magic",
  "md-5",
+ "mongodb-internal-macros",
+ "once_cell",
  "pbkdf2 0.11.0",
  "percent-encoding",
  "rand 0.8.5",
@@ -7688,22 +7693,32 @@ dependencies = [
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_bytes",
- "serde_with 1.14.0",
+ "serde_with",
  "sha-1",
  "sha2",
- "socket2 0.4.9",
+ "socket2 0.5.6",
  "stringprep",
- "strsim 0.10.0",
+ "strsim 0.11.1",
  "take_mut",
  "thiserror 1.0.63",
  "tokio",
  "tokio-rustls 0.24.1",
  "tokio-util",
- "trust-dns-proto",
- "trust-dns-resolver",
  "typed-builder 0.10.0",
  "uuid",
  "webpki-roots 0.25.2",
+]
+
+[[package]]
+name = "mongodb-internal-macros"
+version = "3.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "619176c99deef0d50be51ce3193e9efd6a56ab0f4e6a38d5fd614880d148c7ae"
+dependencies = [
+ "macro_magic",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8340,7 +8355,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_plain",
- "serde_with 3.12.0",
+ "serde_with",
  "sha2",
  "subtle",
  "thiserror 1.0.63",
@@ -8359,10 +8374,10 @@ dependencies = [
  "lazy_static",
  "percent-encoding",
  "reqwest 0.12.4",
- "rustc_version 0.4.0",
+ "rustc_version",
  "serde",
  "serde_json",
- "serde_with 3.12.0",
+ "serde_with",
  "url",
  "void",
 ]
@@ -9531,7 +9546,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7849dd7319357e220886589ea0a0760ff138cde2eedfbbfd2708caee0b15dfc"
 dependencies = [
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "mime",
  "reqwest 0.11.20",
  "serde",
@@ -10441,7 +10456,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.4",
  "serde",
- "serde_with 3.12.0",
+ "serde_with",
  "serde_yaml",
  "sqlx",
  "tempfile",
@@ -10694,7 +10709,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "enumflags2",
  "ethnum",
  "expect-test",
@@ -10752,7 +10767,7 @@ dependencies = [
  "serde_bytes",
  "serde_default",
  "serde_json",
- "serde_with 3.12.0",
+ "serde_with",
  "smallbitset",
  "smallvec",
  "speedate",
@@ -11043,7 +11058,7 @@ dependencies = [
  "easy-ext",
  "either",
  "elasticsearch",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "expect-test",
  "fs-err",
  "futures",
@@ -11110,7 +11125,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with 3.12.0",
+ "serde_with",
  "serde_yaml",
  "simd-json",
  "smallvec",
@@ -11277,7 +11292,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "expect-test",
  "futures",
  "futures-async-stream",
@@ -11390,7 +11405,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "expect-test",
  "fancy-regex",
  "fixedbitset 0.5.0",
@@ -11628,7 +11643,7 @@ dependencies = [
  "easy-ext",
  "educe",
  "either",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "expect-test",
  "fail",
  "futures",
@@ -11819,7 +11834,7 @@ dependencies = [
 name = "risingwave_pb"
 version = "2.4.0-alpha"
 dependencies = [
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
@@ -11851,7 +11866,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
- "serde_with 3.12.0",
+ "serde_with",
  "serde_yaml",
  "tempfile",
  "thiserror-ext",
@@ -11998,7 +12013,7 @@ dependencies = [
  "madsim-tokio",
  "matches",
  "serde",
- "serde_with 3.12.0",
+ "serde_with",
  "serde_yaml",
  "thiserror 1.0.63",
  "tracing",
@@ -12046,7 +12061,7 @@ dependencies = [
  "regex",
  "risingwave_rt",
  "serde",
- "serde_with 3.12.0",
+ "serde_with",
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "toml",
@@ -12069,7 +12084,7 @@ dependencies = [
  "darwin-libproc",
  "dyn-clone",
  "either",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "expect-test",
  "fail",
  "fiemap",
@@ -12141,7 +12156,7 @@ dependencies = [
  "dhat",
  "educe",
  "either",
- "enum-as-inner 0.6.0",
+ "enum-as-inner",
  "expect-test",
  "fail",
  "foyer",
@@ -12457,30 +12472,21 @@ checksum = "c7fb8039b3032c191086b10f11f319a6e99e1e82889c5cc6046f515c9db1d497"
 
 [[package]]
 name = "rustc_version"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
-dependencies = [
- "semver 0.9.0",
-]
-
-[[package]]
-name = "rustc_version"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.18",
+ "semver",
 ]
 
 [[package]]
 name = "rustc_version_runtime"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d31b7153270ebf48bf91c65ae5b0c00e749c4cfad505f66530ac74950249582f"
+checksum = "2dd18cd2bae1820af0b6ad5e54f4a51d0f3fcc53b05f845675074efcc7af071d"
 dependencies = [
- "rustc_version 0.2.3",
- "semver 0.9.0",
+ "rustc_version",
+ "semver",
 ]
 
 [[package]]
@@ -13045,27 +13051,12 @@ checksum = "c2fdfc24bc566f839a2da4c4295b82db7d25a24253867d5c64355abb5799bdbe"
 
 [[package]]
 name = "semver"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
-dependencies = [
- "semver-parser",
-]
-
-[[package]]
-name = "semver"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0293b4b29daaf487284529cc2f5675b8e57c61f70167ba415a463651fd6a918"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "semver-parser"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "seq-macro"
@@ -13231,16 +13222,6 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "1.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "678b5a069e50bf00ecd22d0cd8ddf7c236f68581b03db652061ed5eb13a312ff"
-dependencies = [
- "serde",
- "serde_with_macros 1.5.2",
-]
-
-[[package]]
-name = "serde_with"
 version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6b6f7f2fcb69f747921f79f3926bd1e203fce4fef62c268dd3abfb6d86029aa"
@@ -13253,20 +13234,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with_macros 3.12.0",
+ "serde_with_macros",
  "time",
-]
-
-[[package]]
-name = "serde_with_macros"
-version = "1.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e182d6ec6f05393cc0e5ed1bf81ad6db3a8feedf8ee515ecdd369809bcce8082"
-dependencies = [
- "darling 0.13.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -15105,51 +15074,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "622b09ce2fe2df4618636fb92176d205662f59803f39e70d1c333393082de96c"
 
 [[package]]
-name = "trust-dns-proto"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c31f240f59877c3d4bb3b3ea0ec5a6a0cff07323580ff8c7a605cd7d08b255d"
-dependencies = [
- "async-trait",
- "cfg-if",
- "data-encoding",
- "enum-as-inner 0.4.0",
- "futures-channel",
- "futures-io",
- "futures-util",
- "idna 0.2.3",
- "ipnet",
- "lazy_static",
- "log",
- "rand 0.8.5",
- "smallvec",
- "thiserror 1.0.63",
- "tinyvec",
- "tokio",
- "url",
-]
-
-[[package]]
-name = "trust-dns-resolver"
-version = "0.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4ba72c2ea84515690c9fcef4c6c660bb9df3036ed1051686de84605b74fd558"
-dependencies = [
- "cfg-if",
- "futures-util",
- "ipconfig",
- "lazy_static",
- "log",
- "lru-cache",
- "parking_lot 0.12.1",
- "resolv-conf",
- "smallvec",
- "thiserror 1.0.63",
- "tokio",
- "trust-dns-proto",
-]
-
-[[package]]
 name = "try-lock"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15377,7 +15301,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32f8b686cadd1473f4bd0117a5d28d36b1ade384ea9b5069a1c40aefed7fda60"
 dependencies = [
  "form_urlencoded",
- "idna 1.0.3",
+ "idna",
  "percent-encoding",
  "serde",
 ]
@@ -15677,7 +15601,7 @@ dependencies = [
  "bitflags 2.9.0",
  "hashbrown 0.14.5",
  "indexmap 2.8.0",
- "semver 1.0.18",
+ "semver",
  "serde",
 ]
 
@@ -15689,7 +15613,7 @@ checksum = "36e5456165f81e64cb9908a0fe9b9d852c2c74582aa3fe2be3c2da57f937d3ae"
 dependencies = [
  "bitflags 2.9.0",
  "indexmap 2.8.0",
- "semver 1.0.18",
+ "semver",
 ]
 
 [[package]]
@@ -15735,7 +15659,7 @@ dependencies = [
  "pulley-interpreter",
  "rayon",
  "rustix 0.38.41",
- "semver 1.0.18",
+ "semver",
  "serde",
  "serde_derive",
  "serde_json",
@@ -15851,7 +15775,7 @@ dependencies = [
  "object 0.36.4",
  "postcard",
  "rustc-demangle",
- "semver 1.0.18",
+ "semver",
  "serde",
  "serde_derive",
  "smallvec",
@@ -16572,7 +16496,7 @@ dependencies = [
  "id-arena",
  "indexmap 2.8.0",
  "log",
- "semver 1.0.18",
+ "semver",
  "serde",
  "serde_derive",
  "serde_json",
