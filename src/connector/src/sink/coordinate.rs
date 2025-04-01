@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
 use tracing::{info, warn};
@@ -77,6 +78,20 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
             .await?;
         let mut sink_writer = self.writer;
         log_reader.start_from(log_store_rewind_start_epoch).await?;
+        let first_item = log_reader.next_item().await?;
+        if let (Some(log_store_rewind_start_epoch), (first_epoch, _)) =
+            (log_store_rewind_start_epoch, &first_item)
+            && log_store_rewind_start_epoch != *first_epoch
+        {
+            bail!(
+                "log_store_rewind_start_epoch {} not matched with first_epoch {}",
+                log_store_rewind_start_epoch,
+                first_epoch
+            );
+        }
+
+        let mut first_item = Some(first_item);
+
         #[derive(Debug)]
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -96,7 +111,12 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
         let sink_writer_metrics = self.sink_writer_metrics;
 
         loop {
-            let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
+            let (epoch, item) = if let Some(item) = first_item.take() {
+                item
+            } else {
+                log_reader.next_item().await?
+            };
+
             // begin_epoch when not previously began
             state = match state {
                 LogConsumerState::Uninitialized => {
@@ -157,13 +177,19 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                             sink_writer_metrics
                                 .sink_commit_duration
                                 .observe(start_time.elapsed().as_millis() as f64);
-                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
 
                             current_checkpoint = 0;
                             if let Some(new_vnode_bitmap) = new_vnode_bitmap {
-                                coordinator_stream_handle
+                                let epoch = coordinator_stream_handle
                                     .update_vnode_bitmap(&new_vnode_bitmap)
                                     .await?;
+                                if epoch != prev_epoch {
+                                    bail!(
+                                        "newly start epoch {} after update vnode bitmap not matched with prev_epoch {}",
+                                        epoch,
+                                        prev_epoch
+                                    );
+                                }
                             }
                             if is_stop {
                                 coordinator_stream_handle.stop().await?;
@@ -171,8 +197,10 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                     sink_id = self.param.sink_id.sink_id,
                                     "coordinated log sinker stops"
                                 );
+                                log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                                 return pending().await;
                             }
+                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                         } else {
                             let metadata = sink_writer.barrier(false).await?;
                             if let Some(metadata) = metadata {
