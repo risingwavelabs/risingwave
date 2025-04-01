@@ -551,7 +551,6 @@ impl StreamActorManager {
 
         // Wrap the executor for debug purpose.
         let wrapped = WrapperExecutor::new(
-            operator_id,
             executor,
             actor_context.clone(),
             env.config().developer.enable_executor_row_count,

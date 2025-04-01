@@ -94,7 +94,7 @@ message TieredCacheTracingRequest {
 message TieredCacheTracingResponse {}
 
 message GetProfileStatsRequest {
-  repeated uint64 operator_ids = 1;
+  repeated uint64 executor_ids = 1;
 }
 
 message GetProfileStatsResponse {
