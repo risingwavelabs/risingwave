@@ -246,7 +246,7 @@ mod tests {
 
         let mut parser = DebeziumMongoJsonParser::new(
             columns.clone(),
-            generate_source_context_ref().into(),
+            generate_source_context_ref(),
             MongoProperties::default(),
         )
         .unwrap();
@@ -287,7 +287,7 @@ mod tests {
         for data in input {
             let mut parser = DebeziumMongoJsonParser::new(
                 columns.clone(),
-                generate_source_context_ref().into(),
+                generate_source_context_ref(),
                 MongoProperties::default(),
             )
             .unwrap();
@@ -333,7 +333,7 @@ mod tests {
         for data in input {
             let mut parser = DebeziumMongoJsonParser::new(
                 columns.clone(),
-                generate_source_context_ref().into(),
+                generate_source_context_ref(),
                 MongoProperties::default(),
             )
             .unwrap();
