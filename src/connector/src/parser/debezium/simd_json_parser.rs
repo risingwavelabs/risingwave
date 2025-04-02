@@ -19,10 +19,10 @@ use simd_json::BorrowedValue;
 use simd_json::prelude::MutableObject;
 
 use crate::error::ConnectorResult;
-use crate::parser::AccessBuilder;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions, TimestamptzHandling};
+use crate::parser::{AccessBuilder, MongoProperties};
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
@@ -79,13 +79,13 @@ pub struct DebeziumMongoJsonAccessBuilder {
 }
 
 impl DebeziumMongoJsonAccessBuilder {
-    pub fn new(strong_schema: bool) -> anyhow::Result<Self> {
+    pub fn new(props: MongoProperties) -> anyhow::Result<Self> {
         Ok(Self {
             value: None,
             json_parse_options: JsonParseOptions::new_for_debezium(
                 TimestamptzHandling::GuessNumberUnit,
             ),
-            strong_schema,
+            strong_schema: props.strong_schema,
         })
     }
 }

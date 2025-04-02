@@ -23,11 +23,10 @@ use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, ParserFormat,
-    SourceStreamChunkRowWriter,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties,
+    MongoProperties as MongoEncodingProperties, ParserFormat, SourceStreamChunkRowWriter,
 };
-use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
-use crate::source::{ConnectorProperties, SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct DebeziumMongoJsonParser {
@@ -37,13 +36,10 @@ pub struct DebeziumMongoJsonParser {
     payload_builder: AccessBuilderImpl,
 }
 
-fn build_accessor_builder(
-    config: EncodingProperties,
-    strong_schema: bool,
-) -> anyhow::Result<AccessBuilderImpl> {
+fn build_accessor_builder(config: EncodingProperties) -> anyhow::Result<AccessBuilderImpl> {
     match config {
-        EncodingProperties::MongoJson => Ok(AccessBuilderImpl::DebeziumMongoJson(
-            DebeziumMongoJsonAccessBuilder::new(strong_schema)?,
+        EncodingProperties::MongoJson(mongo_props) => Ok(AccessBuilderImpl::DebeziumMongoJson(
+            DebeziumMongoJsonAccessBuilder::new(mongo_props)?,
         )),
         _ => bail!("unsupported encoding for DEBEZIUM_MONGO format"),
     }
@@ -53,6 +49,7 @@ impl DebeziumMongoJsonParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
+        props: MongoEncodingProperties,
     ) -> ConnectorResult<Self> {
         let _id_column = rw_columns
             .iter()
@@ -68,34 +65,7 @@ impl DebeziumMongoJsonParser {
             })
             .context("Debezium Mongo needs a `_id` column with supported types (Varchar Jsonb int32 int64) in table")?.clone();
 
-        // [cl](#20100):
-        // it is not guaranteed that only MongodbCdc properties will be passed
-        // so I'll tolerate MongodbCdc, Kafka, and Test for now
-        tracing::info!(
-            "source_ctx.connector_props: {:?}",
-            source_ctx.connector_props
-        );
-        let strong_schema = match &source_ctx.connector_props {
-            ConnectorProperties::MongodbCdc(mongo_props) => {
-                tracing::info!("MongodbCdc properties: {:?}", mongo_props);
-                mongo_props
-                    .properties
-                    .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
-                    .map(|v| v == "true")
-                    .unwrap_or(false)
-            }
-            ConnectorProperties::Kafka(props) => {
-                tracing::info!("Kafka properties: {:?}", props);
-                props
-                    .unknown_fields
-                    .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
-                    .is_some_and(|v| v.eq_ignore_ascii_case("true"))
-            }
-
-            ConnectorProperties::Test(..) => false,
-            _ => todo!(),
-        };
-        if !strong_schema {
+        if !props.strong_schema {
             let _payload_column = rw_columns
                 .iter()
                 .find(|desc| desc.name == "payload" && matches!(desc.data_type, DataType::Jsonb))
@@ -116,11 +86,11 @@ impl DebeziumMongoJsonParser {
         }
 
         // encodings are fixed to MongoJson
-
+        let encoding = EncodingProperties::MongoJson(props.clone());
         // for key, it doesn't matter if strong schema is enabled or not
-        let key_builder = build_accessor_builder(EncodingProperties::MongoJson, false)?;
+        let key_builder = build_accessor_builder(encoding.clone())?;
 
-        let payload_builder = build_accessor_builder(EncodingProperties::MongoJson, strong_schema)?;
+        let payload_builder = build_accessor_builder(encoding)?;
 
         Ok(Self {
             rw_columns,
@@ -184,15 +154,14 @@ mod tests {
     use risingwave_common::types::{ScalarImpl, StructType, ToOwnedDatum};
 
     use super::*;
-    use crate::parser::SourceStreamChunkBuilder;
     use crate::parser::unified::debezium::{extract_bson_field, extract_bson_id};
-    use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
+    use crate::parser::{MongoProperties, SourceStreamChunkBuilder};
     use crate::source::{ConnectorProperties, SourceCtrlOpts};
-    fn generate_source_context() -> SourceContext {
-        SourceContext {
+    fn generate_source_context_ref() -> Arc<SourceContext> {
+        Arc::new(SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(Box::default()),
             ..SourceContext::dummy()
-        }
+        })
     }
 
     #[test]
@@ -275,9 +244,12 @@ mod tests {
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
 
-        let mut parser =
-            DebeziumMongoJsonParser::new(columns.clone(), generate_source_context().into())
-                .unwrap();
+        let mut parser = DebeziumMongoJsonParser::new(
+            columns.clone(),
+            generate_source_context_ref().into(),
+            MongoProperties::default(),
+        )
+        .unwrap();
         let mut builder =
             SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
         parser
@@ -313,9 +285,12 @@ mod tests {
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
         for data in input {
-            let mut parser =
-                DebeziumMongoJsonParser::new(columns.clone(), generate_source_context().into())
-                    .unwrap();
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                generate_source_context_ref().into(),
+                MongoProperties::default(),
+            )
+            .unwrap();
 
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
@@ -356,9 +331,12 @@ mod tests {
         ];
 
         for data in input {
-            let mut parser =
-                DebeziumMongoJsonParser::new(columns.clone(), generate_source_context().into())
-                    .unwrap();
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                generate_source_context_ref().into(),
+                MongoProperties::default(),
+            )
+            .unwrap();
 
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
@@ -406,24 +384,15 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
-        let ConnectorProperties::MongodbCdc(mut cdc_props) =
-            ConnectorProperties::MongodbCdc(Box::default())
-        else {
-            unreachable!()
-        };
-
-        cdc_props
-            .properties
-            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
-        let source_ctx: Arc<_> = SourceContext {
-            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
-            ..SourceContext::dummy()
-        }
-        .into();
+        let source_ctx = generate_source_context_ref();
 
         for data in input {
-            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
-                .expect("build parser");
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                source_ctx.clone(),
+                MongoProperties::new(true),
+            )
+            .expect("build parser");
 
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
@@ -544,21 +513,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 "#.to_vec()
         ];
 
-        let ConnectorProperties::MongodbCdc(mut cdc_props) =
-            ConnectorProperties::MongodbCdc(Box::default())
-        else {
-            unreachable!()
-        };
-
-        cdc_props
-            .properties
-            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
-        let source_ctx: Arc<_> = SourceContext {
-            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
-            ..SourceContext::dummy()
-        }
-        .into();
-
+        let source_ctx: Arc<_> = generate_source_context_ref();
         let expected_datetime =
             chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
         let expected_date = chrono::DateTime::parse_from_rfc3339("2024-12-01T00:00:00Z")
@@ -566,8 +521,12 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             .date_naive();
 
         for datum in data {
-            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
-                .expect("build parser");
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                source_ctx.clone(),
+                MongoProperties::new(true),
+            )
+            .expect("build parser");
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
             parser
@@ -641,27 +600,18 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
         }
         "#.to_vec();
 
-        let ConnectorProperties::MongodbCdc(mut cdc_props) =
-            ConnectorProperties::MongodbCdc(Box::default())
-        else {
-            unreachable!()
-        };
-
-        cdc_props
-            .properties
-            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
-        let source_ctx: Arc<_> = SourceContext {
-            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
-            ..SourceContext::dummy()
-        }
-        .into();
+        let source_ctx: Arc<_> = generate_source_context_ref();
 
         let expected_birth_date = chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap();
         let expected_created_at =
             chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
 
-        let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
-            .expect("build parser");
+        let mut parser = DebeziumMongoJsonParser::new(
+            columns.clone(),
+            source_ctx.clone(),
+            MongoProperties::new(true),
+        )
+        .expect("build parser");
         let mut builder =
             SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
         parser
@@ -747,24 +697,14 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
         "#.to_vec(),
     ];
 
-        let ConnectorProperties::MongodbCdc(mut cdc_props) =
-            ConnectorProperties::MongodbCdc(Box::default())
-        else {
-            unreachable!()
-        };
-
-        cdc_props
-            .properties
-            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
-        let source_ctx: Arc<_> = SourceContext {
-            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
-            ..SourceContext::dummy()
-        }
-        .into();
-
+        let source_ctx = generate_source_context_ref();
         for datum in data {
-            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
-                .expect("build parser");
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                source_ctx.clone(),
+                MongoProperties::new(true),
+            )
+            .expect("build parser");
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
             parser
@@ -852,24 +792,15 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
         "#.to_vec(),
     ];
 
-        let ConnectorProperties::MongodbCdc(mut cdc_props) =
-            ConnectorProperties::MongodbCdc(Box::default())
-        else {
-            unreachable!()
-        };
-
-        cdc_props
-            .properties
-            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
-        let source_ctx: Arc<_> = SourceContext {
-            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
-            ..SourceContext::dummy()
-        }
-        .into();
+        let source_ctx = generate_source_context_ref();
 
         for datum in data {
-            let mut parser = DebeziumMongoJsonParser::new(columns.clone(), source_ctx.clone())
-                .expect("build parser");
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                source_ctx.clone(),
+                MongoProperties::new(true),
+            )
+            .expect("build parser");
             let mut builder =
                 SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
             parser
@@ -934,22 +865,14 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             br#"{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1004\"}, \"name\": null, \"age\": null, \"birth_date\": null, \"created_at\": null}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"last","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}"#.to_vec(),
         ];
 
-        let ConnectorProperties::MongodbCdc(mut cdc_props) =
-            ConnectorProperties::MongodbCdc(Box::default())
-        else {
-            unreachable!()
-        };
-        cdc_props
-            .properties
-            .insert(CDC_MONGODB_STRONG_SCHEMA_KEY.to_owned(), "true".to_owned());
-        let source_ctx: Arc<_> = SourceContext {
-            connector_props: ConnectorProperties::MongodbCdc(cdc_props),
-            ..SourceContext::dummy()
-        }
-        .into();
+        let source_ctx = generate_source_context_ref();
 
-        let mut parser =
-            DebeziumMongoJsonParser::new(columns.clone(), source_ctx).expect("build parser");
+        let mut parser = DebeziumMongoJsonParser::new(
+            columns.clone(),
+            source_ctx.clone(),
+            MongoProperties::new(true),
+        )
+        .expect("build parser");
         let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         // all null
