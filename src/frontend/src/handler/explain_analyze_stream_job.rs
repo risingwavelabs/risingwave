@@ -247,7 +247,7 @@ mod metrics {
         pub executor_id: ExecutorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
-        pub total_output_pending_ms: u64,
+        pub total_output_pending_ns: u64,
     }
 
     #[derive(Default, Debug)]
@@ -292,8 +292,8 @@ mod metrics {
                     .get(executor_id)
                     .cloned()
                     .unwrap_or(0);
-                stats.total_output_pending_ms += metrics
-                    .stream_node_output_blocking_duration_ms
+                stats.total_output_pending_ns += metrics
+                    .stream_node_output_blocking_duration_ns
                     .get(executor_id)
                     .cloned()
                     .unwrap_or(0);
@@ -331,12 +331,12 @@ mod metrics {
                         .cloned()
                         .unwrap_or(0)
                         - stats.total_output_throughput;
-                    stats.total_output_pending_ms = metrics
-                        .stream_node_output_blocking_duration_ms
+                    stats.total_output_pending_ns = metrics
+                        .stream_node_output_blocking_duration_ns
                         .get(executor_id)
                         .cloned()
                         .unwrap_or(0)
-                        - stats.total_output_pending_ms;
+                        - stats.total_output_pending_ns;
                 } else {
                     // TODO: warn missing metrics!
                 }
@@ -369,7 +369,7 @@ mod metrics {
         pub operator_id: OperatorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
-        pub total_output_pending_ms: u64,
+        pub total_output_pending_ns: u64,
     }
 
     #[derive(Debug)]
@@ -388,15 +388,15 @@ mod metrics {
             for (operator_id, executor_ids) in operator_map {
                 let num_executors = executor_ids.len() as u64;
                 let mut total_output_throughput = 0;
-                let mut total_output_pending_ms = 0;
+                let mut total_output_pending_ns = 0;
                 for executor_id in executor_ids {
                     if let Some(stats) = executor_stats.get(&executor_id) {
                         total_output_throughput += stats.total_output_throughput;
-                        total_output_pending_ms += stats.total_output_pending_ms;
+                        total_output_pending_ns += stats.total_output_pending_ns;
                     }
                 }
                 let total_output_throughput = total_output_throughput;
-                let total_output_pending_ms = total_output_pending_ms / num_executors;
+                let total_output_pending_ns = total_output_pending_ns / num_executors;
 
                 operator_stats.insert(
                     operator_id,
@@ -404,7 +404,7 @@ mod metrics {
                         operator_id,
                         epoch: 0,
                         total_output_throughput,
-                        total_output_pending_ms,
+                        total_output_pending_ns,
                     },
                 );
             }
@@ -416,10 +416,8 @@ mod metrics {
                     .get(fragment_id)
                     .copied()
                     .expect("should have fragment parallelism");
-                // FIXME(kwannoel): just use ns instead of ms.
-                let total_output_pending_ms = dispatch_metrics.total_output_pending_ns
-                    / 1_000_000
-                    / fragment_parallelism as u64;
+                let total_output_pending_ns =
+                    dispatch_metrics.total_output_pending_ns / fragment_parallelism as u64;
 
                 operator_stats.insert(
                     operator_id,
@@ -427,7 +425,7 @@ mod metrics {
                         operator_id,
                         epoch: 0,
                         total_output_throughput,
-                        total_output_pending_ms,
+                        total_output_pending_ns,
                     },
                 );
             }
@@ -655,7 +653,7 @@ mod graph {
 
             let stats = stats.get(&node_id);
             let (output_throughput, output_latency) = stats
-                .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ms))
+                .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ns))
                 .unwrap_or((0, 0));
             let row = ExplainAnalyzeStreamJobOutput {
                 identity: identity_rendered,
@@ -667,8 +665,7 @@ mod graph {
                     .join(","),
                 output_rows_per_second: (output_throughput as f64 / profiling_duration_secs)
                     .to_string(),
-                downstream_backpressure_ratio: (Duration::from_millis(output_latency)
-                    .as_secs_f64()
+                downstream_backpressure_ratio: (Duration::from_nanos(output_latency).as_secs_f64()
                     / usize::max(node.actor_ids.len(), 1) as f64
                     / profiling_duration_secs)
                     .to_string(),
