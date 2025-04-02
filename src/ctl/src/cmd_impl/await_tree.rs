@@ -58,7 +58,7 @@ pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> 
         && all.compaction_task_traces.is_empty()
         && all.inflight_barrier_traces.is_empty()
     {
-        println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
+        eprintln!("No traces found. No actors are running, or `--async-stack-trace` not set?");
     }
     println!("{}", all.output());
 
