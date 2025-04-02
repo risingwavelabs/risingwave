@@ -51,7 +51,6 @@ pub async fn handle_explain_analyze_stream_job(
         &handler_args,
         &worker_nodes,
         &executor_ids,
-        &adjacency_list,
         profiling_duration,
     )
     .await?;
@@ -176,7 +175,6 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &[ExecutorId],
-        adjacency_list: &HashMap<OperatorId, StreamNode>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
         let mut aggregated_stats = ExecutorStats::new();
@@ -189,7 +187,7 @@ mod net {
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.start_record(adjacency_list.keys(), &stats.into_inner());
+            aggregated_stats.start_record(executor_ids, &stats.into_inner());
         }
 
         sleep(profiling_duration).await;
@@ -203,7 +201,7 @@ mod net {
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.finish_record(adjacency_list.keys(), &stats.into_inner());
+            aggregated_stats.finish_record(executor_ids, &stats.into_inner());
         }
 
         Ok(aggregated_stats)
@@ -221,7 +219,7 @@ mod metrics {
 
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
 
-    #[derive(Default)]
+    #[derive(Default, Debug)]
     pub(super) struct ExecutorMetrics {
         pub executor_id: ExecutorId,
         pub epoch: u32,
@@ -229,6 +227,7 @@ mod metrics {
         pub total_output_pending_ms: u64,
     }
 
+    #[derive(Debug)]
     pub(super) struct ExecutorStats {
         inner: HashMap<ExecutorId, ExecutorMetrics>,
     }
@@ -247,7 +246,7 @@ mod metrics {
         /// Establish metrics baseline for profiling
         pub(super) fn start_record<'a>(
             &mut self,
-            executor_ids: impl Iterator<Item = &'a ExecutorId>,
+            executor_ids: &'a [ExecutorId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
@@ -270,7 +269,7 @@ mod metrics {
         /// Compute the deltas for reporting
         pub(super) fn finish_record<'a>(
             &mut self,
-            executor_ids: impl Iterator<Item = &'a ExecutorId>,
+            executor_ids: &'a [ExecutorId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
