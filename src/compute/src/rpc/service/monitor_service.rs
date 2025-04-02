@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
@@ -300,6 +300,34 @@ impl MonitorService for MonitorServiceImpl {
         let stream_node_output_blocking_duration_ms = metrics
             .mem_stream_node_output_blocking_duration_ms
             .collect(executor_ids);
+
+        let fragment_ids: HashSet<u32> = HashSet::new();
+
+        // Collect count metrics by fragment_ids
+        fn collect_by_fragment_ids<T: Collector>(m: &T, fragment_ids: &HashSet<u32>) -> Vec<u64> {
+            m.collect()
+                .into_iter()
+                .flat_map(|mut m| {
+                    let metrics = m.take_metric();
+                    metrics.into_iter().filter_map(|metric| {
+                        let label = get_label_infallible(&metric, "fragment_id");
+                        if fragment_ids.contains(&label) {
+                            let count = metric.get_counter().get_value() as u64;
+                            Some(count)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        }
+
+        let output_row_count =
+            collect_by_fragment_ids(&metrics.actor_out_record_cnt, &fragment_ids);
+        let output_blocking_duration = collect_by_fragment_ids(
+            &metrics.actor_output_buffer_blocking_duration_ns,
+            &fragment_ids,
+        );
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
             stream_node_output_blocking_duration_ms,
@@ -322,19 +350,6 @@ impl MonitorService for MonitorServiceImpl {
                 .into_vec()
         }
 
-        // Must ensure the label exists and can be parsed into `T`
-        fn get_label<T: std::str::FromStr>(metric: &Metric, label: &str) -> T {
-            metric
-                .get_label()
-                .iter()
-                .find(|lp| lp.get_name() == label)
-                .unwrap()
-                .get_value()
-                .parse::<T>()
-                .ok()
-                .unwrap()
-        }
-
         let actor_output_buffer_blocking_duration_ns =
             collect(&metrics.actor_output_buffer_blocking_duration_ns);
         let actor_count = collect(&metrics.actor_count);
@@ -342,7 +357,7 @@ impl MonitorService for MonitorServiceImpl {
         let actor_count: HashMap<_, _> = actor_count
             .iter()
             .map(|m| {
-                let fragment_id: u32 = get_label(m, "fragment_id");
+                let fragment_id: u32 = get_label_infallible(m, "fragment_id");
                 let count = m.get_gauge().get_value() as u32;
                 (fragment_id, count)
             })
@@ -361,7 +376,7 @@ impl MonitorService for MonitorServiceImpl {
 
         let actor_current_epoch = collect(&metrics.actor_current_epoch);
         for m in &actor_current_epoch {
-            let fragment_id: u32 = get_label(m, "fragment_id");
+            let fragment_id: u32 = get_label_infallible(m, "fragment_id");
             let epoch = m.get_gauge().get_value() as u64;
             if let Some(s) = fragment_stats.get_mut(&fragment_id) {
                 s.current_epoch = if s.current_epoch == 0 {
@@ -380,7 +395,7 @@ impl MonitorService for MonitorServiceImpl {
         let mut relation_stats: HashMap<u32, RelationStats> = HashMap::new();
         let mview_current_epoch = collect(&metrics.materialize_current_epoch);
         for m in &mview_current_epoch {
-            let table_id: u32 = get_label(m, "table_id");
+            let table_id: u32 = get_label_infallible(m, "table_id");
             let epoch = m.get_gauge().get_value() as u64;
             if let Some(s) = relation_stats.get_mut(&table_id) {
                 s.current_epoch = if s.current_epoch == 0 {
@@ -403,8 +418,9 @@ impl MonitorService for MonitorServiceImpl {
         let mut channel_stats: BTreeMap<String, ChannelStats> = BTreeMap::new();
 
         for metric in actor_output_buffer_blocking_duration_ns {
-            let fragment_id: u32 = get_label(&metric, "fragment_id");
-            let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id");
+            let fragment_id: u32 = get_label_infallible(&metric, "fragment_id");
+            let downstream_fragment_id: u32 =
+                get_label_infallible(&metric, "downstream_fragment_id");
 
             let key = format!("{}_{}", fragment_id, downstream_fragment_id);
             let channel_stat = channel_stats.entry(key).or_insert_with(|| ChannelStats {
@@ -416,17 +432,18 @@ impl MonitorService for MonitorServiceImpl {
 
             // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
             // See `src/common/metrics/src/relabeled_metric.rs`
-            channel_stat.actor_count += if get_label::<String>(&metric, "actor_id").is_empty() {
-                actor_count[&fragment_id]
-            } else {
-                1
-            };
+            channel_stat.actor_count +=
+                if get_label_infallible::<String>(&metric, "actor_id").is_empty() {
+                    actor_count[&fragment_id]
+                } else {
+                    1
+                };
             channel_stat.output_blocking_duration += metric.get_counter().get_value();
         }
 
         let actor_output_row_count = collect(&metrics.actor_out_record_cnt);
         for metric in actor_output_row_count {
-            let fragment_id: u32 = get_label(&metric, "fragment_id");
+            let fragment_id: u32 = get_label_infallible(&metric, "fragment_id");
 
             // Find out and write to all downstream channels
             let key_prefix = format!("{}_", fragment_id);
@@ -438,8 +455,8 @@ impl MonitorService for MonitorServiceImpl {
 
         let actor_input_row_count = collect(&metrics.actor_in_record_cnt);
         for metric in actor_input_row_count {
-            let upstream_fragment_id: u32 = get_label(&metric, "upstream_fragment_id");
-            let fragment_id: u32 = get_label(&metric, "fragment_id");
+            let upstream_fragment_id: u32 = get_label_infallible(&metric, "upstream_fragment_id");
+            let fragment_id: u32 = get_label_infallible(&metric, "fragment_id");
 
             let key = format!("{}_{}", upstream_fragment_id, fragment_id);
             if let Some(s) = channel_stats.get_mut(&key) {
@@ -529,6 +546,7 @@ impl MonitorService for MonitorServiceImpl {
 }
 
 pub use grpc_middleware::*;
+use risingwave_common::metrics::get_label_infallible;
 
 pub mod grpc_middleware {
     use std::sync::Arc;
