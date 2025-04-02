@@ -1,6 +1,8 @@
 I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Agreement](https://raw.githubusercontent.com/risingwavelabs/risingwave/17af8a747593ebdbfa826691daf75bdab7d14fa0/.github/contributor-license-agreement.txt).
 
-Highest Release Version: 2.3
+[Release Timeline](https://github.com/risingwavelabs/rw-commits-history/blob/main/release_timeline.md)
+[Currently Supported Versions](https://docs.risingwave.com/changelog/release-support-policy#support-end-dates-for-recent-releases)
+
 
 ## What's changed and what's your intention?
 
