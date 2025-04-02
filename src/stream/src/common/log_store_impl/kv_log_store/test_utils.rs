@@ -21,7 +21,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
+use risingwave_connector::sink::log_store::{FlushCurrentEpochOptions, LogStoreResult, LogWriter};
 use risingwave_pb::catalog::PbTable;
 
 use crate::common::log_store_impl::kv_log_store::KvLogStorePkInfo;
@@ -217,6 +217,18 @@ pub(crate) fn check_stream_chunk_eq(first: &StreamChunk, second: &StreamChunk) -
     check_rows_eq(first.rows(), second.rows())
 }
 
+#[macro_export]
+macro_rules! assert_stream_chunk_eq {
+    ($left:expr, $right:expr) => {
+        assert!(
+            check_stream_chunk_eq(&$left, &$right),
+            "stream chunk not equal: left: {:?}, right: {:?}",
+            $left,
+            $right
+        );
+    };
+}
+
 pub(crate) trait LogWriterTestExt: LogWriter {
     async fn flush_current_epoch_for_test(
         &mut self,
@@ -224,7 +236,14 @@ pub(crate) trait LogWriterTestExt: LogWriter {
         is_checkpoint: bool,
     ) -> LogStoreResult<()> {
         let post_flush = self
-            .flush_current_epoch(next_epoch, is_checkpoint, None)
+            .flush_current_epoch(
+                next_epoch,
+                FlushCurrentEpochOptions {
+                    is_checkpoint,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                },
+            )
             .await?;
         (post_flush).post_yield_barrier().await?;
         Ok(())

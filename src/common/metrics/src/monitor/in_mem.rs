@@ -16,74 +16,111 @@
 //! It is intentionally decoupled from Prometheus.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Weak};
 
-use parking_lot::RwLock;
-
-use crate::MetricLevel;
+use parking_lot::Mutex;
 
 pub type Count = Arc<AtomicU64>;
 
+pub struct GuardedCount {
+    id: u64,
+    pub count: Count,
+    parent: Weak<Mutex<InnerCountMap>>,
+}
+
+impl GuardedCount {
+    pub fn new(id: u64, parent: &Arc<Mutex<InnerCountMap>>) -> (Count, Self) {
+        let guard = GuardedCount {
+            id,
+            count: Arc::new(AtomicU64::new(0)),
+            parent: Arc::downgrade(parent),
+        };
+        (guard.count.clone(), guard)
+    }
+}
+
+impl Drop for GuardedCount {
+    fn drop(&mut self) {
+        if let Some(parent) = self.parent.upgrade() {
+            let mut map = parent.lock();
+            map.inner.remove(&self.id);
+        }
+    }
+}
+
+pub struct InnerCountMap {
+    inner: HashMap<u64, Count>,
+}
+
 #[derive(Clone)]
-pub struct CountMap(Arc<RwLock<HashMap<u64, Count>>>);
+pub struct CountMap(Arc<Mutex<InnerCountMap>>);
 
 impl CountMap {
-    pub fn new(metric_level: MetricLevel) -> Self {
-        let inner = Arc::new(RwLock::new(HashMap::new()));
-        if metric_level != MetricLevel::Disabled {
-            let inner = inner.clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                    if Self::should_gc(&inner.read()) {
-                        Self::gc(&mut inner.write());
-                    }
-                }
-            });
-        }
+    pub fn new() -> Self {
+        let inner = Arc::new(Mutex::new(InnerCountMap {
+            inner: HashMap::new(),
+        }));
         CountMap(inner)
     }
 
-    pub fn new_or_get_counter(&self, id: u64) -> Count {
-        {
-            let map = self.0.read();
-            if let Some(counter) = map.get(&id) {
-                return counter.clone();
-            }
-        }
-        let mut map = self.0.write();
-        map.entry(id)
-            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
-            .clone()
+    pub fn new_count(&self, id: u64) -> GuardedCount {
+        let inner = &self.0;
+        let (count, guarded_count) = GuardedCount::new(id, inner);
+        let mut map = inner.lock();
+        map.inner.insert(id, count);
+        guarded_count
     }
 
-    pub fn collect(&self, operator_ids: &[u64]) -> HashMap<u64, u64> {
-        let map = self.0.read();
-        operator_ids
-            .iter()
+    pub fn collect(&self, ids: &[u64]) -> HashMap<u64, u64> {
+        let map = self.0.lock();
+        ids.iter()
             .filter_map(|id| {
-                map.get(id)
+                map.inner
+                    .get(id)
                     .map(|v| (*id, v.load(std::sync::atomic::Ordering::Relaxed)))
             })
             .collect()
     }
+}
 
-    /// GC policy: if more than half of the counters are dropped, then do GC.
-    pub fn should_gc(map: &HashMap<u64, Count>) -> bool {
-        let total = map.len();
-        let dropped = map
-            .iter()
-            .filter(|(_, v)| Arc::strong_count(v) <= 1)
-            .count();
-        if dropped * 2 > total {
-            return true;
-        }
-        false
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_count_map() {
+        let count_map = CountMap::new();
+        let count1 = count_map.new_count(1);
+        let count2 = count_map.new_count(2);
+        count1
+            .count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        count2
+            .count
+            .fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+        let counts = count_map.collect(&[1, 2]);
+        assert_eq!(counts[&1], 1);
+        assert_eq!(counts[&2], 2);
     }
 
-    pub fn gc(map: &mut HashMap<u64, Count>) {
-        map.retain(|_, v| Arc::strong_count(v) > 1);
-        tracing::info!("Size of CountMap after GC: {}", map.len());
+    #[test]
+    fn test_count_map_drop() {
+        let count_map = CountMap::new();
+        let count1 = count_map.new_count(1);
+        let count2 = count_map.new_count(2);
+        count1
+            .count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        count2
+            .count
+            .fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+        let counts = count_map.collect(&[1, 2]);
+        assert_eq!(counts[&1], 1);
+        assert_eq!(counts[&2], 2);
+        drop(count1);
+        let counts = count_map.collect(&[1, 2]);
+        assert_eq!(counts.get(&1), None);
+        assert_eq!(counts.get(&2), Some(2).as_ref());
     }
 }

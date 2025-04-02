@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Decimal};
@@ -486,14 +484,6 @@ impl SinkWriter for SqlServerSinkWriter {
         if is_checkpoint {
             self.flush().await?;
         }
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }

@@ -21,7 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{
-    LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
+    FlushCurrentEpochOptions, LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
 };
 use risingwave_storage::store::LocalStateStore;
 use tokio::sync::mpsc::UnboundedSender;
@@ -142,8 +142,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
-        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
@@ -151,7 +150,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
         // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
         if !self.is_paused {
-            writer.write_barrier(epoch, is_checkpoint)?;
+            writer.write_barrier(epoch, options.is_checkpoint)?;
         }
         self.tx
             .flush_all_unflushed(|chunk, epoch, start_seq_id, end_seq_id| {
@@ -172,7 +171,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
 
         let truncate_offset = self.tx.pop_truncation(epoch);
         let post_seal_epoch = self.state.seal_current_epoch(next_epoch, truncate_offset);
-        self.tx.barrier(epoch, is_checkpoint, next_epoch);
+        self.tx.barrier(epoch, options.is_checkpoint, next_epoch);
         let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;
         let align_epoch_on_init = self.align_epoch_on_init;
@@ -180,7 +179,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         Ok(LogWriterPostFlushCurrentEpoch::new(move || {
             async move {
                 {
-                    let new_vnodes = new_vnode_bitmap;
+                    let new_vnodes = options.new_vnode_bitmap;
 
                     let state = post_seal_epoch
                         .post_yield_barrier(new_vnodes.clone())

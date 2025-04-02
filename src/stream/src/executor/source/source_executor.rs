@@ -1155,7 +1155,7 @@ mod tests {
             .await
             .unwrap();
         source_state_handler
-            .get(new_assignment[1].id())
+            .get(&new_assignment[1].id())
             .await
             .unwrap()
             .unwrap();

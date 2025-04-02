@@ -1127,18 +1127,12 @@ impl DatabaseCheckpointControl {
                             return Ok(());
                         };
                     }
-                    let info = info.clone();
                     let job_id = info.stream_job_fragments.stream_job_id();
                     let snapshot_backfill_upstream_tables = snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
                         .keys()
                         .cloned()
                         .collect();
-                    let mutation = command
-                        .as_ref()
-                        .expect("checked Some")
-                        .to_mutation(false, &mut edges)
-                        .expect("should have some mutation in `CreateStreamingJob` command");
 
                     self.creating_streaming_job_controls.insert(
                         job_id,
@@ -1147,7 +1141,6 @@ impl DatabaseCheckpointControl {
                             snapshot_backfill_upstream_tables,
                             barrier_info.prev_epoch(),
                             hummock_version_stats,
-                            mutation,
                             control_stream_manager,
                             edges.as_mut().expect("should exist"),
                         )?,

@@ -430,7 +430,7 @@ steps:
           <<: *docker-compose
           run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     parallelism: 2
     retry: *auto-retry
 

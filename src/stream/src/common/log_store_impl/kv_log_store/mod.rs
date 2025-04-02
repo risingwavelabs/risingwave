@@ -1847,6 +1847,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
                 (
@@ -1861,6 +1862,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
@@ -1908,6 +1910,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
                 (
@@ -1922,6 +1925,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
@@ -1979,6 +1983,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
