@@ -41,13 +41,13 @@ impl MergeExecutorBuilder {
             .map(|actors| actors.actors.iter())
             .into_iter()
             .flatten()
-            .map(|&upstream_actor_id| {
+            .map(|upstream_actor| {
                 new_input(
                     &local_barrier_manager,
                     executor_stats.clone(),
                     actor_context.id,
                     actor_context.fragment_id,
-                    upstream_actor_id,
+                    upstream_actor,
                     upstream_fragment_id,
                 )
             })

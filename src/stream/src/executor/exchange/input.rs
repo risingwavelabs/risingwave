@@ -173,6 +173,7 @@ pub struct RemoteInput {
 
 use remote_input::RemoteInputStreamInner;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_pb::common::ActorInfo;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -359,14 +360,12 @@ pub(crate) fn new_input(
     metrics: Arc<StreamingMetrics>,
     actor_id: ActorId,
     fragment_id: FragmentId,
-    upstream_actor_id: ActorId,
+    upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
 ) -> StreamResult<BoxedInput> {
     let context = &local_barrier_manager.shared_context;
-    let upstream_addr = context
-        .get_actor_info(&upstream_actor_id)?
-        .get_host()?
-        .into();
+    let upstream_actor_id = upstream_actor_info.actor_id;
+    let upstream_addr = upstream_actor_info.get_host()?.into();
 
     let input = if is_local_address(&context.addr, &upstream_addr) {
         LocalInput::new(
