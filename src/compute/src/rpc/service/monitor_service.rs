@@ -293,7 +293,9 @@ impl MonitorService for MonitorServiceImpl {
         request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
-        let executor_ids = &request.into_inner().executor_ids;
+        let inner = request.into_inner();
+        let executor_ids = &inner.executor_ids;
+        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids.into_iter());
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
             .collect(executor_ids);
@@ -301,28 +303,22 @@ impl MonitorService for MonitorServiceImpl {
             .mem_stream_node_output_blocking_duration_ms
             .collect(executor_ids);
 
-        let fragment_ids: HashSet<u32> = HashSet::new();
-
         // Collect count metrics by fragment_ids
         fn collect_by_fragment_ids<T: Collector>(
             m: &T,
             fragment_ids: &HashSet<u32>,
         ) -> HashMap<u32, u64> {
-            m.collect()
-                .into_iter()
-                .flat_map(|mut m| {
-                    let metrics = m.take_metric();
-                    metrics.into_iter().filter_map(|metric| {
-                        let fragment_id = get_label_infallible(&metric, "fragment_id");
-                        if fragment_ids.contains(&fragment_id) {
-                            let count = metric.get_counter().get_value() as u64;
-                            Some((fragment_id, count))
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .collect()
+            let mut metrics = HashMap::new();
+            for mut metric_family in m.collect() {
+                for metric in metric_family.take_metric() {
+                    let fragment_id = get_label_infallible(&metric, "fragment_id");
+                    if fragment_ids.contains(&fragment_id) {
+                        let entry = metrics.entry(fragment_id).or_insert(0);
+                        *entry += metric.get_counter().get_value() as u64;
+                    }
+                }
+            }
+            metrics
         }
 
         let dispatch_fragment_output_row_count =

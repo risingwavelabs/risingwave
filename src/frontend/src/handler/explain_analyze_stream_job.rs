@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use pgwire::pg_response::StatementType;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::AnalyzeTarget;
@@ -41,8 +43,11 @@ pub async fn handle_explain_analyze_stream_job(
 
     let meta_client = handler_args.session.env().meta_client();
     let fragments = net::get_fragments(meta_client, job_id).await?;
-
     let dispatcher_fragment_ids = fragments.iter().map(|f| f.id).collect::<Vec<_>>();
+    let fragment_parallelisms = fragments
+        .iter()
+        .map(|f| (f.id, f.actors.len()))
+        .collect::<HashMap<_, _>>();
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
 
@@ -56,7 +61,13 @@ pub async fn handle_explain_analyze_stream_job(
         profiling_duration,
     )
     .await?;
-    let aggregated_stats = metrics::OperatorStats::aggregate(operator_to_executor, &executor_stats);
+    tracing::debug!(?executor_stats, "collected executor stats");
+    let aggregated_stats = metrics::OperatorStats::aggregate(
+        operator_to_executor,
+        &executor_stats,
+        &fragment_parallelisms,
+    );
+    tracing::debug!(?aggregated_stats, "collected aggregated stats");
 
     // Render graph with metrics
     let rows = render_graph_with_metrics(
@@ -353,6 +364,7 @@ mod metrics {
     }
 
     #[expect(dead_code)]
+    #[derive(Debug)]
     pub(super) struct OperatorMetrics {
         pub operator_id: OperatorId,
         pub epoch: u32,
@@ -360,6 +372,7 @@ mod metrics {
         pub total_output_pending_ms: u64,
     }
 
+    #[derive(Debug)]
     pub(super) struct OperatorStats {
         inner: HashMap<OperatorId, OperatorMetrics>,
     }
@@ -369,6 +382,7 @@ mod metrics {
         pub(super) fn aggregate(
             operator_map: HashMap<OperatorId, Vec<ExecutorId>>,
             executor_stats: &ExecutorStats,
+            fragment_parallelisms: &HashMap<FragmentId, usize>,
         ) -> Self {
             let mut operator_stats = HashMap::new();
             for (operator_id, executor_ids) in operator_map {
@@ -381,7 +395,7 @@ mod metrics {
                         total_output_pending_ms += stats.total_output_pending_ms;
                     }
                 }
-                let total_output_throughput = total_output_throughput / num_executors;
+                let total_output_throughput = total_output_throughput;
                 let total_output_pending_ms = total_output_pending_ms / num_executors;
 
                 operator_stats.insert(
@@ -398,8 +412,14 @@ mod metrics {
             for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
                 let operator_id = *fragment_id as OperatorId;
                 let total_output_throughput = dispatch_metrics.total_output_throughput;
+                let fragment_parallelism = fragment_parallelisms
+                    .get(fragment_id)
+                    .copied()
+                    .expect("should have fragment parallelism");
                 // FIXME(kwannoel): just use ns instead of ms.
-                let total_output_pending_ms = dispatch_metrics.total_output_pending_ns / 1_000_000;
+                let total_output_pending_ms = dispatch_metrics.total_output_pending_ns
+                    / 1_000_000
+                    / fragment_parallelism as u64;
 
                 operator_stats.insert(
                     operator_id,
@@ -455,7 +475,7 @@ mod graph {
     impl StreamNode {
         fn new_for_dispatcher(fragment_id: u32) -> Self {
             StreamNode {
-                operator_id: 0,
+                operator_id: fragment_id as u64,
                 fragment_id,
                 identity: "Dispatcher".to_owned(),
                 actor_ids: vec![],
@@ -649,7 +669,7 @@ mod graph {
                     .to_string(),
                 downstream_backpressure_ratio: (Duration::from_millis(output_latency)
                     .as_secs_f64()
-                    / node.actor_ids.len() as f64
+                    / usize::max(node.actor_ids.len(), 1) as f64
                     / profiling_duration_secs)
                     .to_string(),
             };
