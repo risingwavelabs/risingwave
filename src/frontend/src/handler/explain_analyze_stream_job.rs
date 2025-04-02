@@ -189,7 +189,11 @@ mod net {
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.start_record(executor_ids, &stats.into_inner());
+            aggregated_stats.start_record(
+                executor_ids,
+                dispatcher_fragment_ids,
+                &stats.into_inner(),
+            );
         }
 
         sleep(profiling_duration).await;
@@ -204,7 +208,11 @@ mod net {
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.finish_record(executor_ids, &stats.into_inner());
+            aggregated_stats.finish_record(
+                executor_ids,
+                dispatcher_fragment_ids,
+                &stats.into_inner(),
+            );
         }
 
         Ok(aggregated_stats)
@@ -220,6 +228,7 @@ mod metrics {
 
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
 
     #[derive(Default, Debug)]
@@ -230,30 +239,41 @@ mod metrics {
         pub total_output_pending_ms: u64,
     }
 
+    #[derive(Default, Debug)]
+    pub(super) struct DispatchMetrics {
+        pub fragment_id: FragmentId,
+        pub epoch: u32,
+        pub total_output_throughput: u64,
+        pub total_output_pending_ns: u64,
+    }
+
     #[derive(Debug)]
     pub(super) struct ExecutorStats {
-        inner: HashMap<ExecutorId, ExecutorMetrics>,
+        executor_stats: HashMap<ExecutorId, ExecutorMetrics>,
+        dispatch_stats: HashMap<FragmentId, DispatchMetrics>,
     }
 
     impl ExecutorStats {
         pub(super) fn new() -> Self {
             ExecutorStats {
-                inner: HashMap::new(),
+                executor_stats: HashMap::new(),
+                dispatch_stats: HashMap::new(),
             }
         }
 
         pub fn get(&self, executor_id: &ExecutorId) -> Option<&ExecutorMetrics> {
-            self.inner.get(executor_id)
+            self.executor_stats.get(executor_id)
         }
 
         /// Establish metrics baseline for profiling
         pub(super) fn start_record<'a>(
             &mut self,
             executor_ids: &'a [ExecutorId],
+            dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                let stats = self.inner.entry(*executor_id).or_default();
+                let stats = self.executor_stats.entry(*executor_id).or_default();
                 stats.executor_id = *executor_id;
                 stats.epoch = 0;
                 stats.total_output_throughput += metrics
@@ -267,16 +287,33 @@ mod metrics {
                     .cloned()
                     .unwrap_or(0);
             }
+
+            for fragment_id in dispatch_fragment_ids {
+                let stats = self.dispatch_stats.entry(*fragment_id).or_default();
+                stats.fragment_id = *fragment_id;
+                stats.epoch = 0;
+                stats.total_output_throughput += metrics
+                    .dispatch_fragment_output_row_count
+                    .get(fragment_id)
+                    .cloned()
+                    .unwrap_or(0);
+                stats.total_output_pending_ns += metrics
+                    .dispatch_fragment_output_blocking_duration_ns
+                    .get(fragment_id)
+                    .cloned()
+                    .unwrap_or(0);
+            }
         }
 
         /// Compute the deltas for reporting
         pub(super) fn finish_record<'a>(
             &mut self,
             executor_ids: &'a [ExecutorId],
+            dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                if let Some(stats) = self.inner.get_mut(executor_id) {
+                if let Some(stats) = self.executor_stats.get_mut(executor_id) {
                     stats.total_output_throughput = metrics
                         .stream_node_output_row_count
                         .get(executor_id)
@@ -289,6 +326,25 @@ mod metrics {
                         .cloned()
                         .unwrap_or(0)
                         - stats.total_output_pending_ms;
+                } else {
+                    // TODO: warn missing metrics!
+                }
+            }
+
+            for fragment_id in dispatch_fragment_ids {
+                if let Some(stats) = self.dispatch_stats.get_mut(fragment_id) {
+                    stats.total_output_throughput = metrics
+                        .dispatch_fragment_output_row_count
+                        .get(fragment_id)
+                        .cloned()
+                        .unwrap_or(0)
+                        - stats.total_output_throughput;
+                    stats.total_output_pending_ns = metrics
+                        .dispatch_fragment_output_blocking_duration_ns
+                        .get(fragment_id)
+                        .cloned()
+                        .unwrap_or(0)
+                        - stats.total_output_pending_ns;
                 } else {
                     // TODO: warn missing metrics!
                 }
@@ -338,6 +394,24 @@ mod metrics {
                     },
                 );
             }
+
+            for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
+                let operator_id = *fragment_id as OperatorId;
+                let total_output_throughput = dispatch_metrics.total_output_throughput;
+                // FIXME(kwannoel): just use ns instead of ms.
+                let total_output_pending_ms = dispatch_metrics.total_output_pending_ns / 1_000_000;
+
+                operator_stats.insert(
+                    operator_id,
+                    OperatorMetrics {
+                        operator_id,
+                        epoch: 0,
+                        total_output_throughput,
+                        total_output_pending_ms,
+                    },
+                );
+            }
+
             OperatorStats {
                 inner: operator_stats,
             }
