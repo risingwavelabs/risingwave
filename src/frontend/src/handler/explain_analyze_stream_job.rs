@@ -131,8 +131,6 @@ mod bind {
 
 /// Utilities for fetching stats from CN
 mod net {
-    use std::collections::HashMap;
-
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
@@ -140,7 +138,7 @@ mod net {
 
     use crate::error::Result;
     use crate::handler::HandlerArgs;
-    use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId, StreamNode};
+    use crate::handler::explain_analyze_stream_job::graph::ExecutorId;
     use crate::handler::explain_analyze_stream_job::metrics::ExecutorStats;
     use crate::meta_client::FrontendMetaClient;
     use crate::session::FrontendEnv;
