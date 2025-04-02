@@ -42,6 +42,7 @@ pub async fn handle_explain_analyze_stream_job(
     let meta_client = handler_args.session.env().meta_client();
     let fragments = net::get_fragments(meta_client, job_id).await?;
 
+    let dispatcher_fragment_ids = fragments.iter().map(|f| f.id).collect::<Vec<_>>();
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
 
@@ -51,6 +52,7 @@ pub async fn handle_explain_analyze_stream_job(
         &handler_args,
         &worker_nodes,
         &executor_ids,
+        &dispatcher_fragment_ids,
         profiling_duration,
     )
     .await?;
@@ -173,6 +175,7 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &[ExecutorId],
+        dispatcher_fragment_ids: &[u32],
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
         let mut aggregated_stats = ExecutorStats::new();
@@ -182,7 +185,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.into(),
-                    dispatcher_fragment_ids: vec![].into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -197,7 +200,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.into(),
-                    dispatcher_fragment_ids: vec![].into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
