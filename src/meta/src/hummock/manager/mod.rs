@@ -70,7 +70,7 @@ mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
-pub use compaction::{EmergencyState, WriteLimitType, check_cg_write_limit, check_emergency_state};
+pub use compaction::{GroupState, GroupStateValidator};
 pub(crate) use utils::*;
 
 // Update to states are performed as follow:
