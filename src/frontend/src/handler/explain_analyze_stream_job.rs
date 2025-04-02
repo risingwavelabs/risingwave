@@ -182,6 +182,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.into(),
+                    dispatcher_fragment_ids: vec![].into(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -196,6 +197,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.into(),
+                    dispatcher_fragment_ids: vec![].into(),
                 })
                 .await
                 .expect("get profiling stats failed");

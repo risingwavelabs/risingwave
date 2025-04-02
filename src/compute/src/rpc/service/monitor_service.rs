@@ -304,16 +304,19 @@ impl MonitorService for MonitorServiceImpl {
         let fragment_ids: HashSet<u32> = HashSet::new();
 
         // Collect count metrics by fragment_ids
-        fn collect_by_fragment_ids<T: Collector>(m: &T, fragment_ids: &HashSet<u32>) -> Vec<u64> {
+        fn collect_by_fragment_ids<T: Collector>(
+            m: &T,
+            fragment_ids: &HashSet<u32>,
+        ) -> HashMap<u32, u64> {
             m.collect()
                 .into_iter()
                 .flat_map(|mut m| {
                     let metrics = m.take_metric();
                     metrics.into_iter().filter_map(|metric| {
-                        let label = get_label_infallible(&metric, "fragment_id");
-                        if fragment_ids.contains(&label) {
+                        let fragment_id = get_label_infallible(&metric, "fragment_id");
+                        if fragment_ids.contains(&fragment_id) {
                             let count = metric.get_counter().get_value() as u64;
-                            Some(count)
+                            Some((fragment_id, count))
                         } else {
                             None
                         }
@@ -322,15 +325,17 @@ impl MonitorService for MonitorServiceImpl {
                 .collect()
         }
 
-        let output_row_count =
+        let dispatch_fragment_output_row_count =
             collect_by_fragment_ids(&metrics.actor_out_record_cnt, &fragment_ids);
-        let output_blocking_duration = collect_by_fragment_ids(
+        let dispatch_fragment_output_blocking_duration_ns = collect_by_fragment_ids(
             &metrics.actor_output_buffer_blocking_duration_ns,
             &fragment_ids,
         );
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
             stream_node_output_blocking_duration_ms,
+            dispatch_fragment_output_row_count,
+            dispatch_fragment_output_blocking_duration_ns,
         }))
     }
 
