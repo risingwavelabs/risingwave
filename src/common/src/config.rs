@@ -1232,6 +1232,18 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    /// `IcebergListExecutor`: The interval in seconds for Iceberg source to list new files.
+    #[serde(default = "default::developer::iceberg_list_interval_sec")]
+    pub iceberg_list_interval_sec: u64,
+
+    /// `IcebergFetchExecutor`: The number of files the executor will fetch concurrently in a batch.
+    #[serde(default = "default::developer::iceberg_fetch_batch_size")]
+    pub iceberg_fetch_batch_size: u64,
+
+    /// `IcebergSink`: The size of the cache for positional delete in the sink.
+    #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
+    pub iceberg_sink_positional_delete_cache_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2243,6 +2255,18 @@ pub mod default {
 
         pub fn rpc_client_connect_timeout_secs() -> u64 {
             5
+        }
+
+        pub fn iceberg_list_interval_sec() -> u64 {
+            1
+        }
+
+        pub fn iceberg_fetch_batch_size() -> u64 {
+            1024
+        }
+
+        pub fn iceberg_sink_positional_delete_cache_size() -> usize {
+            1024
         }
     }
 

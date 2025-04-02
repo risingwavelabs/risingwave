@@ -27,7 +27,7 @@ fi
 '''
 
 [tasks.clean-kafka]
-category = "RiseDev - Test - Source Test - Kafka"
+category = "RiseDev - External Systems"
 description = "Delete all kafka topics."
 dependencies = ["check-and-load-risedev-env-file"]
 script = '''
@@ -55,7 +55,7 @@ fi
 
 # rpk tools
 [tasks.rpk]
-category = "RiseDev - Test - Source Test - Kafka"
+category = "RiseDev - External Systems"
 dependencies = ["check-kafka"]
 # check https://docs.redpanda.com/current/reference/rpk/rpk-x-options/ or rpk -X help/list for options
 script = """
@@ -71,7 +71,7 @@ rpk "$@"
 """
 
 [tasks.redpanda-console]
-category = "RiseDev - Test - Source Test - Kafka"
+category = "RiseDev - External Systems"
 description = "Start Redpanda console (Kafka GUI) at localhost:8080."
 dependencies = ["check-kafka"]
 script = '''

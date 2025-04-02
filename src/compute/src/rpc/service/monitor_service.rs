@@ -293,13 +293,13 @@ impl MonitorService for MonitorServiceImpl {
         request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
-        let operator_ids = &request.into_inner().operator_ids;
+        let executor_ids = &request.into_inner().executor_ids;
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
-            .collect(operator_ids);
+            .collect(executor_ids);
         let stream_node_output_blocking_duration_ms = metrics
             .mem_stream_node_output_blocking_duration_ms
-            .collect(operator_ids);
+            .collect(executor_ids);
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
             stream_node_output_blocking_duration_ms,

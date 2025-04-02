@@ -15,19 +15,21 @@
 use futures_async_stream::try_stream;
 use tokio::time::Instant;
 
-use crate::executor::monitor::ProfileMetricsExt;
+use crate::executor::monitor::profiling_stats::{ProfileMetricsExt, ProfileMetricsImpl};
 use crate::executor::prelude::*;
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn stream_node_metrics(
+    info: Arc<ExecutorInfo>,
     enable_explain_analyze_stats: bool,
-    operator_id: u64,
     input: impl MessageStream,
     actor_ctx: ActorContextRef,
 ) {
-    let stats = actor_ctx
-        .streaming_metrics
-        .new_profile_metrics(operator_id, enable_explain_analyze_stats);
+    let stats = ProfileMetricsImpl::new(
+        info.id,
+        &actor_ctx.streaming_metrics,
+        enable_explain_analyze_stats,
+    );
 
     #[for_await]
     for message in input {

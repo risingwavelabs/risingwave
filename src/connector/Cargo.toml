@@ -42,7 +42,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d
 ] }
 csv = "1.3"
 deltalake = { workspace = true }
-duration-str = "0.16.1"
+duration-str = "0.17.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
@@ -63,7 +63,7 @@ itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
-mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
+mongodb = "3.2.3"
 mysql_async = { workspace = true }
 mysql_common = { version = "0.32", default-features = false, features = [
     "chrono",
@@ -111,6 +111,7 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.24.0", features = ["url"] }
@@ -120,6 +121,7 @@ rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
 scopeguard = "1"
+sea-orm = { workspace = true }
 sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",

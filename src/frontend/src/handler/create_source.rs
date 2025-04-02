@@ -937,18 +937,8 @@ pub async fn bind_create_source_or_table_with_connector(
     }
     debug_assert_column_ids_distinct(&columns);
 
-    let must_need_pk = if is_create_source {
-        with_properties.connector_need_pk()
-    } else {
-        // For those connectors that do not need generate a `row_id`` column in the source schema such as iceberg.
-        // But in such case, we can not create mv or table on the source because there is not a pk.
-        assert!(with_properties.connector_need_pk());
-
-        true
-    };
-
     let (mut columns, pk_col_ids, row_id_index) =
-        bind_pk_and_row_id_on_relation(columns, pk_names, must_need_pk)?;
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;

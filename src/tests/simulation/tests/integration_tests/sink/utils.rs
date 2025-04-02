@@ -224,13 +224,15 @@ impl SimulationTestSink {
             let parallelism_counter = parallelism_counter.clone();
             let err_rate = err_rate.clone();
             let store = store.clone();
-            move |_, _| {
+            use risingwave_connector::sink::SinkWriterMetrics;
+            use risingwave_connector::sink::writer::SinkWriterExt;
+            move |_, writer_param| {
                 parallelism_counter.fetch_add(1, Relaxed);
-                Box::new(TestWriter::new(
-                    store.clone(),
-                    parallelism_counter.clone(),
-                    err_rate.clone(),
-                ))
+                let metrics = SinkWriterMetrics::new(&writer_param);
+                risingwave_connector::sink::boxed::boxed_log_sinker(
+                    TestWriter::new(store.clone(), parallelism_counter.clone(), err_rate.clone())
+                        .into_log_sinker(metrics),
+                )
             }
         });
 
