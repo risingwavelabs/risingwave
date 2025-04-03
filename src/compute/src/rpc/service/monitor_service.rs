@@ -299,8 +299,8 @@ impl MonitorService for MonitorServiceImpl {
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
             .collect(executor_ids);
-        let stream_node_output_blocking_duration_ms = metrics
-            .mem_stream_node_output_blocking_duration_ms
+        let stream_node_output_blocking_duration_ns = metrics
+            .mem_stream_node_output_blocking_duration_ns
             .collect(executor_ids);
 
         // Collect count metrics by fragment_ids
@@ -329,7 +329,7 @@ impl MonitorService for MonitorServiceImpl {
         );
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
-            stream_node_output_blocking_duration_ms,
+            stream_node_output_blocking_duration_ns,
             dispatch_fragment_output_row_count,
             dispatch_fragment_output_blocking_duration_ns,
         }))

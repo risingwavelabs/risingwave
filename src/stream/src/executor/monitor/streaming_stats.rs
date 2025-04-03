@@ -51,7 +51,7 @@ pub struct StreamingMetrics {
     // Aggregated per operator rather than per actor.
     // These are purely in-memory, never collected by prometheus.
     pub mem_stream_node_output_row_count: CountMap,
-    pub mem_stream_node_output_blocking_duration_ms: CountMap,
+    pub mem_stream_node_output_blocking_duration_ns: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_execution_time: LabelGuardedGaugeVec<1>,
@@ -234,7 +234,7 @@ impl StreamingMetrics {
         .relabel_debug_1(level);
 
         let stream_node_output_row_count = CountMap::new();
-        let stream_node_output_blocking_duration_ms = CountMap::new();
+        let stream_node_output_blocking_duration_ns = CountMap::new();
 
         let source_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
@@ -1180,7 +1180,7 @@ impl StreamingMetrics {
             level,
             executor_row_count,
             mem_stream_node_output_row_count: stream_node_output_row_count,
-            mem_stream_node_output_blocking_duration_ms: stream_node_output_blocking_duration_ms,
+            mem_stream_node_output_blocking_duration_ns: stream_node_output_blocking_duration_ns,
             actor_execution_time,
             actor_scheduled_duration,
             actor_scheduled_cnt,
