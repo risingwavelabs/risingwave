@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use risingwave_common::bail;
 use risingwave_common::catalog::ObjectId;
 use risingwave_pb::common::Uint32Vector;
 use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
@@ -53,12 +54,49 @@ pub fn bind_backfill_order_strategy(
                     .data
                     .push(end_relation_id);
             }
+            if has_cycle(&order) {
+                bail!("Backfill order strategy has a cycle");
+            }
             Some(PbStrategy::Fixed(BackfillOrderFixed { order }))
         }
     };
     Ok(PbBackfillOrderStrategy {
         strategy: pb_strategy,
     })
+}
+
+/// Check if the backfill order has a cycle.
+fn has_cycle(order: &HashMap<ObjectId, Uint32Vector>) -> bool {
+    fn dfs(
+        node: ObjectId,
+        order: &HashMap<ObjectId, Uint32Vector>,
+        visited: &mut HashSet<ObjectId>,
+        stack: &mut HashSet<ObjectId>,
+    ) -> bool {
+        if stack.contains(&node) {
+            return true; // Cycle detected
+        }
+        if visited.insert(node) {
+            stack.insert(node);
+            for &neighbor in &order.get(&node).unwrap_or(&Uint32Vector::default()).data {
+                if dfs(neighbor, order, visited, stack) {
+                    return true;
+                }
+            }
+            stack.remove(&node);
+        }
+        false
+    }
+
+    let mut visited = HashSet::new();
+    let mut stack = HashSet::new();
+    for &start in order.keys() {
+        if !visited.contains(&start) && dfs(start, order, &mut visited, &mut stack) {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn bind_backfill_relation_id_by_name(session: &SessionImpl, name: ObjectName) -> Result<ObjectId> {
