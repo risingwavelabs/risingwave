@@ -468,7 +468,7 @@ enum MetaCommands {
 pub enum AwaitTreeCommands {
     /// Dump Await Tree
     Dump {
-        /// The format of actor traces in the diagnose file. `json` by default.
+        /// The format of actor traces in the diagnose file. Allowed values: `json`, `text`. `json` by default.
         #[clap(short, long = "actor-traces-format")]
         actor_traces_format: Option<String>,
     },

@@ -1,1 +1,0 @@
-{"error":"Query Error: error returned from database: (code: 1) no such table: worker"}

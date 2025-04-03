@@ -27,6 +27,7 @@ use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUA
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
@@ -85,9 +86,7 @@ impl MonitorService for MonitorServiceImpl {
                 .map(|(k, v)| {
                     (
                         k.0,
-                        if req.actor_traces_format.is_some()
-                            && req.actor_traces_format.as_ref().unwrap() == "text"
-                        {
+                        if req.actor_traces_format == ActorTracesFormat::Text as i32 {
                             v.to_string()
                         } else {
                             serde_json::to_string(&v).unwrap()

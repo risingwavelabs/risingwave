@@ -15,6 +15,7 @@
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
 use rw_diagnose_tools::await_tree::TreeView;
@@ -32,13 +33,18 @@ pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> 
     let clients = ComputeClientPool::adhoc();
 
     let req = StackTraceRequest {
-        actor_traces_format,
+        actor_traces_format: match actor_traces_format.as_deref() {
+            Some("text") => ActorTracesFormat::Text as i32,
+            Some("json") | None => ActorTracesFormat::Json as i32,
+            _ => return Err(anyhow::anyhow!("Invalid actor traces format")),
+        },
     };
+
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let response = client.stack_trace(req.clone()).await?;
+        let response = client.stack_trace(req).await?;
         all.merge_other(response);
     }
 
@@ -49,7 +55,7 @@ pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> 
     for compactor in compactor_nodes {
         let addr: HostAddr = compactor.get_host().unwrap().into();
         let client = CompactorClient::new(addr).await?;
-        let response = client.stack_trace(req.clone()).await?;
+        let response = client.stack_trace(req).await?;
         all.merge_other(response);
     }
 
@@ -87,7 +93,7 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
     let mut bottleneck_actors_found = false;
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let response = client.stack_trace(req.clone()).await?;
+        let response = client.stack_trace(req).await?;
         for (actor_id, trace) in response.actor_traces {
             let tree: TreeView = serde_json::from_str(&trace)
                 .map_err(|e| anyhow::anyhow!("Failed to parse actor trace JSON: {}", e))?;

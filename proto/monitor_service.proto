@@ -6,8 +6,11 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message StackTraceRequest {
-  // Allowed values: "json", "text". Default is "text".
-  optional string actor_traces_format = 1;
+  enum ActorTracesFormat {
+    JSON = 0;
+    TEXT = 1;
+  }
+  ActorTracesFormat actor_traces_format = 1;
 }
 
 message StackTraceResponse {
