@@ -1508,6 +1508,12 @@ pub async fn create_iceberg_engine_table(
     let iceberg_table_name = table_name.0.last().unwrap().real_value();
 
     let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
+    let sink_decouple = session.config().sink_decouple();
+    if matches!(sink_decouple, SinkDecouple::Disable) {
+        bail!(
+            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = false` to resolve it"
+        );
+    }
 
     let mut connection_ref = BTreeMap::new();
     let with_common = if iceberg_engine_connection.is_empty() {
