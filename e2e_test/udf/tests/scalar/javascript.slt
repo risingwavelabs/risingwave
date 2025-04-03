@@ -1,0 +1,104 @@
+statement ok
+create function int_42() returns int language javascript as $$
+export function int_42() {
+    return 42;
+}
+$$;
+
+statement ok
+create function gcd(a int, b int) returns int language javascript as $$
+export function gcd(a, b) {
+    // required before we support `RETURNS NULL ON NULL INPUT`
+    if(a == null || b == null) {
+        return null;
+    }
+    while (b != 0) {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+$$;
+
+statement ok
+create function decimal_add(a decimal, b decimal) returns decimal language javascript as $$
+export function decimal_add(a, b) {
+    return a + b;
+}
+$$;
+
+# TODO(rc): Support `time` for JS UDF
+include ./fallback/datetime.slt.part
+
+statement ok
+create function jsonb_access(json jsonb, index int) returns jsonb language javascript as $$
+export function jsonb_access(json, index) {
+    if (json === null) {
+        return null;
+    }
+    try {
+        return json[index];
+    } catch (error) {
+        return null;
+    }
+}
+$$;
+
+statement ok
+create function sum_array(arr int[]) returns int language javascript as $$
+export function sum_array(arr) {
+    if (arr === null) {
+        return null;
+    }
+    return arr.reduce((sum, num) => sum + num, 0);
+}
+$$;
+
+statement ok
+create function key_value(kv varchar) returns struct<key varchar, value varchar> language javascript as $$
+export function key_value(kv) {
+    if (!kv || !kv.includes('=')) {
+        return null;
+    }
+    const [key, value] = kv.split('=', 2);
+    return { key, value };
+}
+$$;
+
+statement ok
+create function return_all(a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>)
+returns struct<a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
+language javascript as $$
+export function return_all(a, b, c, d, e, f, g, h, i, j, s) {
+    return {a,b,c,d,e,f,g,h,i,j,s};
+}
+$$;
+
+statement ok
+create function series(n int) returns table (x int) language javascript as $$
+export function* series(n) {
+    for(let i = 0; i < n; i++) {
+        yield i;
+    }
+}
+$$;
+
+statement ok
+create function key_values(kv varchar) returns table (key varchar, value varchar) language javascript as $$
+export function* key_values(kv) {
+    if (!kv) {
+        return;
+    }
+    const pairs = kv.split(',');
+    for (const pair of pairs) {
+        if (pair.includes('=')) {
+            const [key, value] = pair.split('=', 2);
+            yield {key, value};
+        }
+    }
+}
+$$;
+
+include ./test.slt.part
+include ./drop.slt.part
