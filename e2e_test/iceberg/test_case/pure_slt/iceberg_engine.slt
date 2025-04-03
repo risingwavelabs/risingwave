@@ -165,6 +165,12 @@ statement ok
 DROP TABLE price;
 
 statement ok
+set sink_decouple = false;
+
+statement error
+create table t2(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
 DROP CONNECTION my_conn;
 
 statement ok
