@@ -1051,7 +1051,7 @@ message StreamContext {
   string timezone = 1;
 }
 
-message BackfillOrderUnspecified {}
+message BackfillOrderAuto {}
 
 message BackfillOrderFixed {
   map<uint32, common.Uint32Vector> order = 1;
@@ -1059,7 +1059,7 @@ message BackfillOrderFixed {
 
 message BackfillOrderStrategy {
   oneof strategy {
-    BackfillOrderUnspecified unspecified = 1;
+    BackfillOrderAuto auto = 1;
     BackfillOrderFixed fixed = 2;
   }
 }
