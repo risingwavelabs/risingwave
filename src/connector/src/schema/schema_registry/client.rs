@@ -184,6 +184,7 @@ impl Client {
             client: self.inner.clone(),
             path: path.iter().map(|p| p.to_string()).collect_vec(),
         });
+        tracing::debug!("retry config: {:?}", self.retry_config);
 
         let retry_strategy = ExponentialBackoff::from_millis(self.retry_config.backoff_duration_ms)
             .factor(self.retry_config.backoff_factor)
@@ -318,6 +319,7 @@ mod tests {
             &SchemaRegistryConfig {
                 username: None,
                 password: None,
+                retry_config: SchemaRegistryRetryConfig::default(),
             },
         )
         .unwrap();
