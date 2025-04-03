@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::ObjectId;
-use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_pb::common::Uint32Vector;
 use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
 use risingwave_pb::stream_plan::{
@@ -25,6 +24,7 @@ use risingwave_sqlparser::ast::{BackfillOrderStrategy, ObjectName};
 
 use crate::Binder;
 use crate::catalog::CatalogError;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::Result;
 use crate::session::SessionImpl;
@@ -74,17 +74,19 @@ fn bind_backfill_relation_id_by_name(session: &SessionImpl, name: ObjectName) ->
         }
         None => {
             let search_path = session.config().search_path();
-            for path in search_path.path() {
-                let schema_name = if path == USER_NAME_WILD_CARD {
-                    &session.user_name()
-                } else {
-                    path
-                };
+            let user_name = session.user_name();
+            let schema_path = SchemaPath::Path(&search_path, &user_name);
+            let result: Result<Option<(ObjectId, &str)>> = schema_path.try_find(|schema_name| {
                 if let Ok(schema_catalog) = reader.get_schema_by_name(&db_name, schema_name)
                     && let Ok(relation_id) = bind_source_or_table(schema_catalog, &rel_name)
                 {
-                    return Ok(relation_id);
+                    Ok(Some(relation_id))
+                } else {
+                    Ok(None)
                 }
+            });
+            if let Some((relation_id, _schema_name)) = result? {
+                return Ok(relation_id);
             }
             Err(CatalogError::NotFound("table or source", rel_name.to_owned()).into())
         }
