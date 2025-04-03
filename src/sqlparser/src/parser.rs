@@ -25,7 +25,9 @@ use core::fmt;
 use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
-use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
+use winnow::combinator::{
+    alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated, separated_pair,
+};
 use winnow::{ModalResult, Parser as _};
 
 use crate::ast::*;
@@ -3983,17 +3985,18 @@ impl Parser<'_> {
 
     fn parse_fixed_backfill_order(&mut self) -> ModalResult<Vec<(ObjectName, ObjectName)>> {
         self.expect_word("FIXED")?;
-        let mut edges = vec![];
-        // parse <object_name> -> <object_name>, ...
-        loop {
-            let start_table_name = self.parse_object_name()?;
-            self.expect_token(&Token::Arrow)?;
-            let end_table_name = self.parse_object_name()?;
-            edges.push((start_table_name, end_table_name));
-            if !self.consume_token(&Token::Comma) {
-                break;
-            }
-        }
+        self.expect_token(&Token::LParen)?;
+        let edges = separated(
+            0..,
+            separated_pair(
+                Self::parse_object_name,
+                Token::Arrow,
+                Self::parse_object_name,
+            ),
+            Token::Comma,
+        )
+        .parse_next(self)?;
+        self.expect_token(&Token::RParen)?;
         Ok(edges)
     }
 

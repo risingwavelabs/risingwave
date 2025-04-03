@@ -33,7 +33,6 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
-use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
