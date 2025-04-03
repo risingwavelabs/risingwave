@@ -567,6 +567,8 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     async fn into_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
         let mut ops = Vec::with_capacity(chunk_size);
+        // vnode -> epoch, seq_id
+        let mut progress_map = HashMap::new();
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
 
