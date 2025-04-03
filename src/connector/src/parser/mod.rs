@@ -458,8 +458,9 @@ impl ByteStreamSourceParserImpl {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
-            (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
-                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
+            (ProtocolProperties::DebeziumMongo, EncodingProperties::MongoJson(props)) => {
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx, props.clone())
+                    .map(Self::DebeziumMongoJson)
             }
             (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
                 CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)

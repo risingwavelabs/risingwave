@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
@@ -27,6 +27,7 @@ use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use crate::schema::schema_registry::SchemaRegistryConfig;
+use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
 use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
 
 /// Note: this is created in `SourceReader::build_stream`
@@ -60,7 +61,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    MongoJson,
+    MongoJson(MongoProperties),
     Bytes(BytesProperties),
     Parquet,
     Native,
@@ -268,10 +269,8 @@ impl SpecificParserConfig {
                 )?,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
-                EncodingProperties::Json(JsonProperties {
-                    use_schema_registry: false,
-                    timestamptz_handling: None,
-                })
+                let props = MongoProperties::from(&format_encode_options_with_secret);
+                EncodingProperties::MongoJson(props)
             }
             (SourceFormat::Plain, SourceEncode::Bytes) => {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
@@ -355,4 +354,23 @@ pub struct JsonProperties {
 #[derive(Debug, Default, Clone)]
 pub struct BytesProperties {
     pub column_name: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct MongoProperties {
+    pub strong_schema: bool,
+}
+
+impl MongoProperties {
+    pub fn new(strong_schema: bool) -> Self {
+        Self { strong_schema }
+    }
+}
+impl From<&BTreeMap<String, String>> for MongoProperties {
+    fn from(config: &BTreeMap<String, String>) -> Self {
+        let strong_schema = config
+            .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+            .is_some_and(|k| k.eq_ignore_ascii_case("true"));
+        Self { strong_schema }
+    }
 }
