@@ -238,6 +238,7 @@ message CoordinateRequest {
     CommitRequest commit_request = 2;
     UpdateVnodeBitmapRequest update_vnode_request = 3;
     bool stop = 4;
+    uint64 align_initial_epoch_request = 5;
   }
 }
 
@@ -254,6 +255,7 @@ message CoordinateResponse {
     StartCoordinationResponse start_response = 1;
     CommitResponse commit_response = 2;
     bool stopped = 3;
+    uint64 align_initial_epoch_response = 4;
   }
 }
 
