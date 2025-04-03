@@ -1543,10 +1543,6 @@ pub enum Statement {
         local: bool,
         value: SetTimeZoneValue,
     },
-    /// `SET BACKFILL_ORDER_STRATEGY TO { DEFAULT | NONE | AUTO | FIXED <object_name> -> <object_name>, ... }
-    SetBackfillOrderStrategy {
-        strategy: BackfillOrderStrategy,
-    },
     /// `COMMENT ON ...`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -2182,9 +2178,6 @@ impl Statement {
                 }
                 write!(f, " TIME ZONE {}", value)?;
                 Ok(())
-            }
-            Statement::SetBackfillOrderStrategy { strategy } => {
-                write!(f, "SET BACKFILL_ORDER_STRATEGY TO {}", strategy)
             }
             Statement::Commit { chain } => {
                 write!(f, "COMMIT{}", if *chain { " AND CHAIN" } else { "" },)
