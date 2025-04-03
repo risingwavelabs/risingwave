@@ -1,0 +1,60 @@
+statement ok
+create function int_42() returns int
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function gcd(int, int) returns int
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function gcd(int, int, int) returns int
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+query I
+select gcd(25, 15);
+----
+5
+
+# to test function overload
+query I
+select gcd(25, 15, 3);
+----
+1
+
+statement ok
+create function decimal_add(decimal, decimal) returns decimal
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function datetime(date, time) returns timestamp
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function jsonb_access(jsonb, int) returns jsonb
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function sum_array(integer[]) returns integer
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function key_value(varchar) returns struct<key varchar, value varchar>
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+# TODO(rc): WASM version of `return_all`
+include ./fallback/return_all.slt.part
+
+statement ok
+create function series(int) returns table (x int)
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+statement ok
+create function key_values(varchar) returns table (key varchar, value varchar)
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+include ./test.slt.part
+
+statement ok
+drop function gcd(int,int,int);
+
+include ./drop.slt.part
