@@ -737,9 +737,9 @@ impl StreamFragmentGraph {
     pub fn create_fragment_backfill_ordering(
         &self,
     ) -> Option<HashMap<FragmentId, Vec<FragmentId>>> {
-        match self.backfill_order_strategy.strategy.as_ref().unwrap() {
-            backfill_order_strategy::Strategy::Auto(_) => None,
-            backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order }) => {
+        match self.backfill_order_strategy.strategy.as_ref() {
+            None | Some(backfill_order_strategy::Strategy::Auto(_)) => None,
+            Some(backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order })) => {
                 let mapping = self.collect_backfill_mapping();
                 let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
                 for (rel_id, downstream_rel_ids) in order {
