@@ -59,127 +59,127 @@ pub enum Token {
     HexStringLiteral(String),
     /// Parameter symbols: i.e:  $1, $2
     Parameter(String),
-    /// Comma
-    Comma,
     /// Whitespace (space, tab, etc)
     Whitespace(Whitespace),
-    /// Double equals sign `==`
-    DoubleEq,
-    /// Equality operator `=`
-    Eq,
-    /// Not Equals operator `<>` (or `!=` in some dialects)
-    Neq,
-    /// Less Than operator `<`
-    Lt,
-    /// Greater Than operator `>`
-    Gt,
-    /// Less Than Or Equals operator `<=`
-    LtEq,
-    /// Greater Than Or Equals operator `>=`
-    GtEq,
-    /// Spaceship operator <=>
-    Spaceship,
-    /// Plus operator `+`
-    Plus,
-    /// Minus operator `-`
-    Minus,
-    /// Multiplication operator `*`
-    Mul,
-    /// Division operator `/`
-    Div,
-    /// Modulo Operator `%`
-    Mod,
-    /// String concatenation `||`
-    Concat,
+    /// Period (used for compound identifiers or projections into nested types)
+    Period,
     /// Left parenthesis `(`
     LParen,
     /// Right parenthesis `)`
     RParen,
-    /// Period (used for compound identifiers or projections into nested types)
-    Period,
+    /// Comma
+    Comma,
+    /// SemiColon `;` used as separator for COPY and payload
+    SemiColon,
     /// Colon `:`
     Colon,
     /// DoubleColon `::` (used for casting in postgresql)
     DoubleColon,
-    /// SemiColon `;` used as separator for COPY and payload
-    SemiColon,
     /// Backslash `\` used in terminating the COPY payload with `\.`
     Backslash,
     /// Left bracket `[`
     LBracket,
     /// Right bracket `]`
     RBracket,
-    /// Ampersand `&`
-    Ampersand,
-    /// Pipe `|`
-    Pipe,
-    /// Caret `^`
-    Caret,
-    /// Prefix `^@`
-    Prefix,
     /// Left brace `{`
     LBrace,
     /// Right brace `}`
     RBrace,
+    /// Plus operator `+`
+    Plus,
+    /// Minus operator `-`
+    Minus,
+    /// `->`, access JSON object field or array element in PostgreSQL
+    Arrow,
+    /// `->>`, access JSON object field or array element as text in PostgreSQL
+    LongArrow,
+    /// Multiplication operator `*`
+    Mul,
+    /// Division operator `/`
+    Div,
+    /// Modulo Operator `%`
+    Mod,
+    /// Pipe `|`
+    Pipe,
+    /// String concatenation `||`
+    Concat,
+    /// `|/`, a square root math operator in PostgreSQL
+    PGSquareRoot,
+    /// `||/` , a cube root math operator in PostgreSQL
+    PGCubeRoot,
+    /// Double equals sign `==`
+    DoubleEq,
+    /// Equality operator `=`
+    Eq,
     /// Right Arrow `=>`
     RArrow,
-    /// Sharp `#` used for PostgreSQL Bitwise XOR operator
-    Sharp,
+    /// `!~` , a case sensitive not match regular expression operator in PostgreSQL
+    ExclamationMarkTilde,
+    /// `!~*` , a case insensitive not match regular expression operator in PostgreSQL
+    ExclamationMarkTildeAsterisk,
+    /// Exclamation Mark `!` used for PostgreSQL factorial operator
+    ExclamationMark,
+    /// Double Exclamation Mark `!!` used for PostgreSQL prefix factorial operator
+    DoubleExclamationMark,
+    /// `!~~` , a case sensitive NOT LIKE regular expression operator in PostgreSQL
+    ExclamationMarkDoubleTilde,
+    /// `!~~*` , a case insensitive NOT ILIKE regular expression operator in PostgreSQL
+    ExclamationMarkDoubleTildeAsterisk,
+    /// Not Equals operator `<>` (or `!=` in some dialects)
+    Neq,
+    /// Less Than operator `<`
+    Lt,
+    /// Less Than Or Equals operator `<=`
+    LtEq,
+    /// Spaceship operator <=>
+    Spaceship,
+    /// `<<`, a bitwise shift left operator in PostgreSQL
+    ShiftLeft,
+    /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
+    ArrowAt,
+    /// `>>`, a bitwise shift right operator in PostgreSQL
+    ShiftRight,
+    /// Greater Than operator `>`
+    Gt,
+    /// Greater Than Or Equals operator `>=`
+    GtEq,
+    /// Ampersand `&`
+    Ampersand,
+    /// Caret `^`
+    Caret,
+    /// Prefix `^@`
+    Prefix,
     /// Tilde `~` used for PostgreSQL Bitwise NOT operator or case sensitive match regular
     /// expression operator
     Tilde,
     /// `~*` , a case insensitive match regular expression operator in PostgreSQL
     TildeAsterisk,
-    /// `!~` , a case sensitive not match regular expression operator in PostgreSQL
-    ExclamationMarkTilde,
-    /// `!~*` , a case insensitive not match regular expression operator in PostgreSQL
-    ExclamationMarkTildeAsterisk,
     /// `~~`, a case sensitive LIKE expression operator in PostgreSQL
     DoubleTilde,
     /// `~~*` , a case insensitive ILIKE regular expression operator in PostgreSQL
     DoubleTildeAsterisk,
-    /// `!~~` , a case sensitive NOT LIKE regular expression operator in PostgreSQL
-    ExclamationMarkDoubleTilde,
-    /// `!~~*` , a case insensitive NOT ILIKE regular expression operator in PostgreSQL
-    ExclamationMarkDoubleTildeAsterisk,
-    /// `<<`, a bitwise shift left operator in PostgreSQL
-    ShiftLeft,
-    /// `>>`, a bitwise shift right operator in PostgreSQL
-    ShiftRight,
-    /// Exclamation Mark `!` used for PostgreSQL factorial operator
-    ExclamationMark,
-    /// Double Exclamation Mark `!!` used for PostgreSQL prefix factorial operator
-    DoubleExclamationMark,
-    /// AtSign `@` used for PostgreSQL abs operator
-    AtSign,
-    /// `|/`, a square root math operator in PostgreSQL
-    PGSquareRoot,
-    /// `||/` , a cube root math operator in PostgreSQL
-    PGCubeRoot,
-    /// `->`, access JSON object field or array element in PostgreSQL
-    Arrow,
-    /// `->>`, access JSON object field or array element as text in PostgreSQL
-    LongArrow,
+    /// Sharp `#` used for PostgreSQL Bitwise XOR operator
+    Sharp,
     /// `#>`, extract JSON sub-object at the specified path in PostgreSQL
     HashArrow,
     /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
     HashLongArrow,
     /// `#-`, delete a key from a JSON object in PostgreSQL
     HashMinus,
+    /// AtSign `@` used for PostgreSQL abs operator
+    AtSign,
     /// `@>`, does the left JSON value contain the right JSON path/value entries at the top level
     AtArrow,
-    /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
-    ArrowAt,
+    /// `@?`, does JSON path return any item for the specified JSON value?
+    AtQuestionMark,
+    /// `@@`, returns the result of a JSON path predicate check for the specified JSON value.
+    AtAt,
     /// `?`, does the string exist as a top-level key within the JSON value
     QuestionMark,
     /// `?|`, do any of the strings exist as top-level keys or array elements?
     QuestionMarkPipe,
     /// `?&`, do all of the strings exist as top-level keys or array elements?
     QuestionMarkAmpersand,
-    /// `@?`, does JSON path return any item for the specified JSON value?
-    AtQuestionMark,
-    /// `@@`, returns the result of a JSON path predicate check for the specified JSON value.
-    AtAt,
 }
 
 impl fmt::Display for Token {
@@ -517,80 +517,6 @@ impl<'a> Tokenizer<'a> {
                     }
                     Ok(Some(Token::Whitespace(Whitespace::Newline)))
                 }
-                'N' => {
-                    self.next(); // consume, to check the next char
-                    match self.peek() {
-                        Some('\'') => {
-                            // N'...' - a <national character string literal>
-                            let s = self.tokenize_single_quoted_string()?;
-                            Ok(Some(Token::NationalStringLiteral(s)))
-                        }
-                        _ => {
-                            // regular identifier starting with an "N"
-                            let s = self.tokenize_word('N');
-                            Ok(Some(Token::make_word(&s, None)))
-                        }
-                    }
-                }
-                x @ 'e' | x @ 'E' => {
-                    self.next(); // consume, to check the next char
-                    match self.peek() {
-                        Some('\'') => {
-                            // E'...' - a <character string literal>
-                            let s = self.tokenize_single_quoted_string_with_escape()?;
-                            Ok(Some(Token::CstyleEscapesString(s)))
-                        }
-                        _ => {
-                            // regular identifier starting with an "E"
-                            let s = self.tokenize_word(x);
-                            Ok(Some(Token::make_word(&s, None)))
-                        }
-                    }
-                }
-                // The spec only allows an uppercase 'X' to introduce a hex
-                // string, but PostgreSQL, at least, allows a lowercase 'x' too.
-                x @ 'x' | x @ 'X' => {
-                    self.next(); // consume, to check the next char
-                    match self.peek() {
-                        Some('\'') => {
-                            // X'...' - a <binary string literal>
-                            let s = self.tokenize_single_quoted_string()?;
-                            Ok(Some(Token::HexStringLiteral(s)))
-                        }
-                        _ => {
-                            // regular identifier starting with an "X"
-                            let s = self.tokenize_word(x);
-                            Ok(Some(Token::make_word(&s, None)))
-                        }
-                    }
-                }
-                // identifier or keyword
-                ch if is_identifier_start(ch) => {
-                    self.next(); // consume the first char
-                    let s = self.tokenize_word(ch);
-
-                    Ok(Some(Token::make_word(&s, None)))
-                }
-                // string
-                '\'' => {
-                    let s = self.tokenize_single_quoted_string()?;
-
-                    Ok(Some(Token::SingleQuotedString(s)))
-                }
-                // delimited (quoted) identifier
-                quote_start if is_delimited_identifier_start(quote_start) => {
-                    self.next(); // consume the opening quote
-                    let quote_end = Word::matching_end_quote(quote_start);
-                    let s = self.peeking_take_while(|ch| ch != quote_end);
-                    if self.next() == Some(quote_end) {
-                        Ok(Some(Token::make_word(&s, Some(quote_start))))
-                    } else {
-                        self.error(format!(
-                            "Expected close delimiter '{}' before EOF.",
-                            quote_end
-                        ))
-                    }
-                }
                 // numbers and period
                 '0'..='9' | '.' => {
                     let mut s = self.peeking_take_while(|ch| ch.is_ascii_digit());
@@ -648,10 +574,98 @@ impl<'a> Tokenizer<'a> {
                     self.reject_number_junk()?;
                     Ok(Some(Token::Number(s)))
                 }
+                'N' => {
+                    self.next(); // consume, to check the next char
+                    match self.peek() {
+                        Some('\'') => {
+                            // N'...' - a <national character string literal>
+                            let s = self.tokenize_single_quoted_string()?;
+                            Ok(Some(Token::NationalStringLiteral(s)))
+                        }
+                        _ => {
+                            // regular identifier starting with an "N"
+                            let s = self.tokenize_word('N');
+                            Ok(Some(Token::make_word(&s, None)))
+                        }
+                    }
+                }
+                x @ 'e' | x @ 'E' => {
+                    self.next(); // consume, to check the next char
+                    match self.peek() {
+                        Some('\'') => {
+                            // E'...' - a <character string literal>
+                            let s = self.tokenize_single_quoted_string_with_escape()?;
+                            Ok(Some(Token::CstyleEscapesString(s)))
+                        }
+                        _ => {
+                            // regular identifier starting with an "E"
+                            let s = self.tokenize_word(x);
+                            Ok(Some(Token::make_word(&s, None)))
+                        }
+                    }
+                }
+                // The spec only allows an uppercase 'X' to introduce a hex
+                // string, but PostgreSQL, at least, allows a lowercase 'x' too.
+                x @ 'x' | x @ 'X' => {
+                    self.next(); // consume, to check the next char
+                    match self.peek() {
+                        Some('\'') => {
+                            // X'...' - a <binary string literal>
+                            let s = self.tokenize_single_quoted_string()?;
+                            Ok(Some(Token::HexStringLiteral(s)))
+                        }
+                        _ => {
+                            // regular identifier starting with an "X"
+                            let s = self.tokenize_word(x);
+                            Ok(Some(Token::make_word(&s, None)))
+                        }
+                    }
+                }
+                // string
+                '\'' => {
+                    let s = self.tokenize_single_quoted_string()?;
+
+                    Ok(Some(Token::SingleQuotedString(s)))
+                }
+                '$' => Ok(Some(self.tokenize_dollar_preceded_value()?)),
+                // delimited (quoted) identifier
+                quote_start @ '"' => {
+                    self.next(); // consume the opening quote
+                    let quote_end = Word::matching_end_quote(quote_start);
+                    let s = self.peeking_take_while(|ch| ch != quote_end);
+                    if self.next() == Some(quote_end) {
+                        Ok(Some(Token::make_word(&s, Some(quote_start))))
+                    } else {
+                        self.error(format!(
+                            "Expected close delimiter '{}' before EOF.",
+                            quote_end
+                        ))
+                    }
+                }
+                // identifier or keyword
+                ch if is_identifier_start(ch) => {
+                    self.next(); // consume the first char
+                    let s = self.tokenize_word(ch);
+
+                    Ok(Some(Token::make_word(&s, None)))
+                }
                 // punctuation
                 '(' => self.consume_and_return(Token::LParen),
                 ')' => self.consume_and_return(Token::RParen),
                 ',' => self.consume_and_return(Token::Comma),
+                ';' => self.consume_and_return(Token::SemiColon),
+                ':' => {
+                    self.next();
+                    match self.peek() {
+                        Some(':') => self.consume_and_return(Token::DoubleColon),
+                        _ => Ok(Some(Token::Colon)),
+                    }
+                }
+                '\\' => self.consume_and_return(Token::Backslash),
+                '[' => self.consume_and_return(Token::LBracket),
+                ']' => self.consume_and_return(Token::RBracket),
+                '{' => self.consume_and_return(Token::LBrace),
+                '}' => self.consume_and_return(Token::RBrace),
                 // operators
                 '-' => {
                     self.next(); // consume the '-'
@@ -692,6 +706,7 @@ impl<'a> Tokenizer<'a> {
                 '+' => self.consume_and_return(Token::Plus),
                 '*' => self.consume_and_return(Token::Mul),
                 '%' => self.consume_and_return(Token::Mod),
+                '`' => todo!(),
                 '|' => {
                     self.next(); // consume the '|'
                     match self.peek() {
@@ -764,18 +779,6 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Gt)),
                     }
                 }
-                ':' => {
-                    self.next();
-                    match self.peek() {
-                        Some(':') => self.consume_and_return(Token::DoubleColon),
-                        _ => Ok(Some(Token::Colon)),
-                    }
-                }
-                '$' => Ok(Some(self.tokenize_dollar_preceded_value()?)),
-                ';' => self.consume_and_return(Token::SemiColon),
-                '\\' => self.consume_and_return(Token::Backslash),
-                '[' => self.consume_and_return(Token::LBracket),
-                ']' => self.consume_and_return(Token::RBracket),
                 '&' => self.consume_and_return(Token::Ampersand),
                 '^' => {
                     self.next();
@@ -784,8 +787,6 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Caret)),
                     }
                 }
-                '{' => self.consume_and_return(Token::LBrace),
-                '}' => self.consume_and_return(Token::RBrace),
                 '~' => {
                     self.next(); // consume
                     match self.peek() {
@@ -1205,15 +1206,6 @@ impl<'a> Tokenizer<'a> {
         }
         s
     }
-}
-
-/// Determine if a character starts a quoted identifier. The default
-/// implementation, accepting "double quoted" ids is both ANSI-compliant
-/// and appropriate for most dialects (with the notable exception of
-/// MySQL, MS SQL, and sqlite). You can accept one of characters listed
-/// in `Word::matching_end_quote` here
-fn is_delimited_identifier_start(ch: char) -> bool {
-    ch == '"'
 }
 
 /// Determine if a character is a valid start character for an unquoted identifier
