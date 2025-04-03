@@ -463,15 +463,13 @@ impl CreateMviewProgressTracker {
         barrier_info: &BarrierInfo,
         resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
         version_stats: &HummockVersionStats,
-    ) -> (Vec<TrackingJob>, Vec<FragmentId>) {
-        let mut pending_backfill_nodes = vec![];
-
+    ) -> Vec<TrackingJob> {
         let new_tracking_job_info =
             if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
                 match job_type {
                     CreateStreamingJobType::Normal => {
                         if let Some(order) = &info.backfill_order_state {
-                            pending_backfill_nodes.extend(order.get_initial_nodes());
+                            self.queue_backfill(order.get_initial_nodes());
                         }
                         Some((info, None))
                     }
@@ -498,11 +496,10 @@ impl CreateMviewProgressTracker {
             // for checkpoint, we should also clear it.
             self.cancel_command(table_id);
         }
-        pending_backfill_nodes.extend(self.take_pending_backfill_nodes());
         if barrier_info.kind.is_checkpoint() {
-            (self.take_finished_jobs(), pending_backfill_nodes)
+            self.take_finished_jobs()
         } else {
-            (vec![], pending_backfill_nodes)
+            vec![]
         }
     }
 
