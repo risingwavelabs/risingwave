@@ -43,6 +43,24 @@ INSERT INTO car_sales
     CROSS JOIN generate_series(1, 5) as car_id_gen(id)
     CROSS JOIN generate_series(1, 5) as region_id_gen(id);
 
+# should fail with cycle
+statement error Backfill order strategy has a cycle
+create materialized view m1
+  with (backfill_order = FIXED(car_sales -> car_sales))
+as select count(*) from car_sales join car_info
+  on car_sales.car_id = car_info.id
+  join car_regions
+    on car_sales.region_id = car_regions.id;
+
+# should fail with cycle
+statement error Backfill order strategy has a cycle
+create materialized view m1
+  with (backfill_order = FIXED(car_sales -> car_regions, car_info -> car_sales, car_regions -> car_sales))
+as select count(*) from car_sales join car_info
+  on car_sales.car_id = car_info.id
+  join car_regions
+    on car_sales.region_id = car_regions.id;
+
 # Create an MV that groups sales by a range of prices
 statement ok
 create materialized view m1
