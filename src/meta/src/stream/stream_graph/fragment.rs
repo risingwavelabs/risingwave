@@ -33,16 +33,14 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::backfill_order_strategy::Strategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    BackfillOrderFixed, BackfillOrderStrategy, BackfillOrderUnspecified, DispatchStrategy,
-    DispatcherType, FragmentTypeFlag, PbStreamNode,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
-    backfill_order_strategy,
+    BackfillOrderFixed, BackfillOrderStrategy, DispatchStrategy, DispatcherType, FragmentTypeFlag,
+    PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
+    StreamScanType, backfill_order_strategy,
 };
 
 use crate::MetaResult;
@@ -451,12 +449,9 @@ impl StreamFragmentGraph {
         };
 
         let max_parallelism = proto.max_parallelism as usize;
-        let backfill_order_strategy =
-            proto
-                .backfill_order_strategy
-                .unwrap_or(BackfillOrderStrategy {
-                    strategy: Some(Strategy::Unspecified(BackfillOrderUnspecified {})),
-                });
+        let backfill_order_strategy = proto
+            .backfill_order_strategy
+            .unwrap_or(BackfillOrderStrategy { strategy: None });
 
         Ok(Self {
             fragments,
@@ -743,7 +738,7 @@ impl StreamFragmentGraph {
         &self,
     ) -> Option<HashMap<FragmentId, Vec<FragmentId>>> {
         match self.backfill_order_strategy.strategy.as_ref().unwrap() {
-            backfill_order_strategy::Strategy::Unspecified(_) => None,
+            backfill_order_strategy::Strategy::Auto(_) => None,
             backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order }) => {
                 let mapping = self.collect_backfill_mapping();
                 let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();

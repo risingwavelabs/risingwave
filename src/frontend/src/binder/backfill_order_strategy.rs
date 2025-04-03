@@ -19,7 +19,7 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_pb::common::Uint32Vector;
 use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
 use risingwave_pb::stream_plan::{
-    BackfillOrderFixed, BackfillOrderStrategy as PbBackfillOrderStrategy, BackfillOrderUnspecified,
+    BackfillOrderFixed, BackfillOrderStrategy as PbBackfillOrderStrategy,
 };
 use risingwave_sqlparser::ast::{BackfillOrderStrategy, ObjectName};
 
@@ -41,7 +41,7 @@ pub fn bind_backfill_order_strategy(
     let pb_strategy = match backfill_order_strategy {
         BackfillOrderStrategy::Auto
         | BackfillOrderStrategy::Default
-        | BackfillOrderStrategy::None => PbStrategy::Unspecified(BackfillOrderUnspecified {}),
+        | BackfillOrderStrategy::None => None,
         BackfillOrderStrategy::Fixed(orders) => {
             let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
             for (start_name, end_name) in orders {
@@ -53,11 +53,11 @@ pub fn bind_backfill_order_strategy(
                     .data
                     .push(end_relation_id);
             }
-            PbStrategy::Fixed(BackfillOrderFixed { order })
+            Some(PbStrategy::Fixed(BackfillOrderFixed { order }))
         }
     };
     Ok(PbBackfillOrderStrategy {
-        strategy: Some(pb_strategy),
+        strategy: pb_strategy,
     })
 }
 
