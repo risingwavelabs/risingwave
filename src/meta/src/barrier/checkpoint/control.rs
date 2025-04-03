@@ -51,7 +51,6 @@ use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo, TracedEpoch,
 };
 use crate::manager::MetaSrvEnv;
-use crate::model::FragmentId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
@@ -609,9 +608,6 @@ pub(crate) struct DatabaseCheckpointControl {
     create_mview_tracker: CreateMviewProgressTracker,
 
     metrics: DatabaseCheckpointControlMetrics,
-
-    /// Next nodes to backfill, identified by fragment id.
-    pending_backfill_nodes: Vec<FragmentId>,
 }
 
 impl DatabaseCheckpointControl {
@@ -625,7 +621,6 @@ impl DatabaseCheckpointControl {
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker: Default::default(),
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
-            pending_backfill_nodes: Default::default(),
         }
     }
 
@@ -645,7 +640,6 @@ impl DatabaseCheckpointControl {
             creating_streaming_job_controls,
             create_mview_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
-            pending_backfill_nodes: Default::default(),
         }
     }
 
@@ -892,14 +886,12 @@ impl DatabaseCheckpointControl {
                 let (_, mut node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
-                let (mut finished_jobs, pending_backfill_nodes) =
-                    self.create_mview_tracker.apply_collected_command(
-                        node.command_ctx.command.as_ref(),
-                        &node.command_ctx.barrier_info,
-                        &node.state.resps,
-                        hummock_version_stats,
-                    );
-                self.pending_backfill_nodes.extend(pending_backfill_nodes);
+                let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
+                    node.command_ctx.command.as_ref(),
+                    &node.command_ctx.barrier_info,
+                    &node.state.resps,
+                    hummock_version_stats,
+                );
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
                     assert!(finished_jobs.is_empty());
                     node.notifiers.into_iter().for_each(|notifier| {
@@ -1164,10 +1156,14 @@ impl DatabaseCheckpointControl {
         if let (BarrierKind::Checkpoint(_), None) = (&barrier_info.kind, &command) {
             if let Some(jobs_to_merge) = self.jobs_to_merge() {
                 command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
-            } else if !self.pending_backfill_nodes.is_empty() {
-                command = Some(Command::StartFragmentBackfill {
-                    fragment_ids: take(&mut self.pending_backfill_nodes),
-                });
+            } else {
+                let pending_backfill_nodes =
+                    self.create_mview_tracker.take_pending_backfill_nodes();
+                if !pending_backfill_nodes.is_empty() {
+                    command = Some(Command::StartFragmentBackfill {
+                        fragment_ids: pending_backfill_nodes,
+                    });
+                }
             }
         }
 
