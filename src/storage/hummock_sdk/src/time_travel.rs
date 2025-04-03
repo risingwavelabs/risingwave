@@ -44,10 +44,10 @@ pub fn refill_version(
             .rev()
             .chain(level.levels.iter_mut())
     }) {
+        refill_level(level, sst_id_to_info);
         level
             .table_infos
             .retain(|t| t.table_ids.contains(&table_id));
-        refill_level(level, sst_id_to_info);
     }
 }
 
