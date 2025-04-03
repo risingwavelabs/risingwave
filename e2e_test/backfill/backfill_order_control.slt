@@ -46,7 +46,7 @@ INSERT INTO car_sales
 # Create an MV that groups sales by a range of prices
 statement ok
 create materialized view m1
-    with (backfill_order = FIXED car_regions -> car_sales, car_info -> car_sales)
+    with (backfill_order = FIXED(car_regions -> car_sales, car_info -> car_sales))
     as
       with price_ranges as (
         select
