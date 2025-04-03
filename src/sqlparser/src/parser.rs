@@ -4794,11 +4794,6 @@ impl Parser<'_> {
                 snapshot: None,
                 session: false,
             })
-        } else if self.parse_word("BACKFILL_ORDER_STRATEGY")
-            && (self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO))
-        {
-            let strategy = self.parse_backfill_order_strategy()?;
-            Ok(Statement::SetBackfillOrderStrategy { strategy })
         } else {
             let variable = self.parse_identifier()?;
 
