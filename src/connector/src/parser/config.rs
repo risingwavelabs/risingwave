@@ -26,7 +26,7 @@ use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
 
 /// Note: this is created in `SourceReader::build_stream`
@@ -169,7 +169,9 @@ impl SpecificParserConfig {
                 } else if info.use_schema_registry {
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
+                        client_config: SchemaRegistryConfig::from(
+                            &format_encode_options_with_secret,
+                        ),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
                         topic: get_kafka_topic(&options_with_secret)?.clone(),
@@ -211,7 +213,9 @@ impl SpecificParserConfig {
                 config.schema_location = if info.use_schema_registry {
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
+                        client_config: SchemaRegistryConfig::from(
+                            &format_encode_options_with_secret,
+                        ),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
                         topic: get_kafka_topic(&options_with_secret)?.clone(),
@@ -240,7 +244,9 @@ impl SpecificParserConfig {
                     key_record_name: info.key_message_name.clone(),
                     schema_location: SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
+                        client_config: SchemaRegistryConfig::from(
+                            &format_encode_options_with_secret,
+                        ),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
                         topic: get_kafka_topic(&options_with_secret).unwrap().clone(),
@@ -302,7 +308,7 @@ pub enum SchemaLocation {
     /// <https://docs.confluent.io/platform/current/schema-registry/index.html>
     Confluent {
         urls: String,
-        client_config: SchemaRegistryAuth,
+        client_config: SchemaRegistryConfig,
         name_strategy: PbSchemaRegistryNameStrategy,
         topic: String,
     },

@@ -46,7 +46,9 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::schema_registry::{
-    SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME, SchemaRegistryAuth, name_strategy_from_str,
+    SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+    SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
@@ -125,6 +127,23 @@ fn try_consume_string_from_options(
     key: &str,
 ) -> Option<AstString> {
     format_encode_options.remove(key).map(AstString)
+}
+
+fn try_consume_schema_registry_config_from_options(
+    format_encode_options: &mut BTreeMap<String, String>,
+) {
+    [
+        SCHEMA_REGISTRY_USERNAME,
+        SCHEMA_REGISTRY_PASSWORD,
+        SCHEMA_REGISTRY_MAX_DELAY_KEY,
+        SCHEMA_REGISTRY_BACKOFF_DURATION_KEY,
+        SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+        SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    ]
+    .iter()
+    .for_each(|key| {
+        try_consume_string_from_options(format_encode_options, key);
+    });
 }
 
 fn consume_string_from_options(
