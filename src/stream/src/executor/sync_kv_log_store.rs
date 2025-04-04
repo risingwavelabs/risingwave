@@ -86,7 +86,7 @@ use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::{
-    KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
+    KvLogStoreItem, LogStoreRowSerde, LogStoreVnodeItemMergeStream,
 };
 use crate::common::log_store_impl::kv_log_store::state::{
     LogStorePostSealCurrentEpoch, LogStoreReadState, LogStoreStateWriteChunkFuture,
@@ -563,7 +563,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             };
 
             let log_store_stream = read_state
-                .read_persisted_log_store(
+                .read_persisted_log_store_with_progress(
                     self.metrics.persistent_log_read_metrics.clone(),
                     initial_write_epoch.prev,
                     LogStoreReadStateStreamRangeStart::Unbounded,
@@ -764,8 +764,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
+type PersistedStream<S> =
+    Peekable<Pin<Box<LogStoreVnodeItemMergeStream<TimeoutAutoRebuildIter<S>>>>>;
+
 enum ReadFuture<S: StateStoreRead> {
-    ReadingPersistedStream(Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>),
+    ReadingPersistedStream(PersistedStream<S>),
     ReadingFlushedChunk {
         future: ReadFlushedChunkFuture,
         truncate_offset: ReaderTruncationOffsetType,
