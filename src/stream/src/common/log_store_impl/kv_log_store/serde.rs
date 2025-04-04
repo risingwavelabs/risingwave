@@ -414,7 +414,7 @@ impl LogStoreRowSerde {
 
     pub(crate) async fn deserialize_stream_chunk<I: StateStoreReadIter>(
         &self,
-        iters: impl IntoIterator<Item = I>,
+        iters: impl IntoIterator<Item = (VirtualNode, I)>,
         start_seq_id: SeqId,
         end_seq_id: SeqId,
         expected_epoch: u64,
@@ -428,7 +428,7 @@ impl LogStoreRowSerde {
         let stream = select_all(
             iters
                 .into_iter()
-                .map(|iter| deserialize_stream(iter, self.clone())),
+                .map(|(vnode, iter)| deserialize_stream(vnode, iter, self.clone())),
         );
         pin_mut!(stream);
         while let Some(row) = stream.try_next().await? {
@@ -546,7 +546,7 @@ struct LogStoreRowOpStream<S: StateStoreReadIter> {
 
 impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     pub(crate) fn new(
-        iters: Vec<S>,
+        iters: Vec<(VirtualNode, S)>,
         serde: LogStoreRowSerde,
         metrics: KvLogStoreReadMetrics,
     ) -> Self {
@@ -555,7 +555,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             serde: serde.clone(),
             barrier_streams: iters
                 .into_iter()
-                .map(|s| deserialize_stream(s, serde.clone()).peekable())
+                .map(|(vnode, s)| deserialize_stream(vnode, s, serde.clone()).peekable())
                 .collect(),
             row_streams: FuturesUnordered::new(),
             not_started_streams: Vec::new(),
@@ -659,7 +659,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 pub(crate) type LogStoreItemMergeStream<S: StateStoreReadIter> =
     impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
-    iters: Vec<S>,
+    iters: Vec<(VirtualNode, S)>,
     serde: LogStoreRowSerde,
     chunk_size: usize,
     metrics: KvLogStoreReadMetrics,
@@ -672,6 +672,7 @@ mod stream_de {
 
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
+        pub vnode: VirtualNode,
         pub epoch: u64,
         pub op: LogStoreOp,
         pub size: usize,
@@ -679,6 +680,7 @@ mod stream_de {
 
     #[derive(Debug)]
     pub(super) struct RawLogStoreRow {
+        pub vnode: VirtualNode,
         pub epoch: u64,
         pub op: LogStoreRowOp,
         pub size: usize,
@@ -688,6 +690,7 @@ mod stream_de {
         impl Stream<Item = LogStoreResult<LogStoreRow>> + Send + Unpin;
 
     pub(super) fn deserialize_stream<S: StateStoreReadIter>(
+        vnode: VirtualNode,
         iter: S,
         serde: LogStoreRowSerde,
     ) -> LogStoreItemStream<S> {
@@ -695,7 +698,12 @@ mod stream_de {
             iter.into_stream(move |(key, value)| -> StorageResult<RawLogStoreRow> {
                 let size = key.user_key.table_key.len() + value.len();
                 let (epoch, op) = serde.deserialize(value)?;
-                Ok(RawLogStoreRow { epoch, op, size })
+                Ok(RawLogStoreRow {
+                    vnode,
+                    epoch,
+                    op,
+                    size,
+                })
             })
             .map_err(Into::into),
         )
@@ -708,6 +716,7 @@ mod stream_de {
     async fn may_merge_update(stream: impl Stream<Item = LogStoreResult<RawLogStoreRow>> + Send) {
         pin_mut!(stream);
         while let Some(RawLogStoreRow {
+            vnode,
             epoch,
             op,
             size: row_size,
@@ -738,6 +747,7 @@ mod stream_de {
                             ));
                         }
                         yield LogStoreRow {
+                            vnode,
                             epoch,
                             op: LogStoreOp::Update {
                                 seq_id: next_seq_id,
@@ -757,6 +767,7 @@ mod stream_de {
                             warn!("do not get UpdateInsert after UpdateDelete");
                         }
                         yield LogStoreRow {
+                            vnode,
                             epoch,
                             op: LogStoreOp::Row {
                                 seq_id,
@@ -766,6 +777,7 @@ mod stream_de {
                             size: row_size,
                         };
                         yield LogStoreRow {
+                            vnode,
                             epoch,
                             op: LogStoreOp::from(next_op),
                             size: row_size,
@@ -779,6 +791,7 @@ mod stream_de {
                         warn!("reach end of stream after UpdateDelete");
                     }
                     yield LogStoreRow {
+                        vnode,
                         epoch,
                         op: LogStoreOp::Row {
                             seq_id,
@@ -790,6 +803,7 @@ mod stream_de {
                 }
             } else {
                 yield LogStoreRow {
+                    vnode,
                     epoch,
                     op: LogStoreOp::from(op),
                     size: row_size,
