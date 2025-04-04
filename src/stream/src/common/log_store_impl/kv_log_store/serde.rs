@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::mem::replace;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -27,7 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::value_encoding;
@@ -46,7 +45,8 @@ use risingwave_storage::table::{SINGLETON_VNODE, compute_vnode};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
+    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType,
+    SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -266,7 +266,7 @@ impl LogStoreRowSerde {
     pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
-        seq_id: SeqIdType,
+        seq_id: SeqId,
         op: Op,
         row: impl Row,
     ) -> (VirtualNode, TableKey<Bytes>, Bytes) {
@@ -320,7 +320,7 @@ impl LogStoreRowSerde {
         &self,
         vnode: VirtualNode,
         epoch: u64,
-        seq_id: Option<SeqIdType>,
+        seq_id: Option<SeqId>,
     ) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
             (self.pk_info.compute_pk)(vnode, Self::encode_epoch(epoch), seq_id),
@@ -346,7 +346,10 @@ impl LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
-    fn deserialize(&self, value_bytes: &[u8]) -> value_encoding::Result<(u64, LogStoreRowOp)> {
+    fn deserialize(
+        &self,
+        value_bytes: &[u8],
+    ) -> value_encoding::Result<(Epoch, VirtualNode, SeqId, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(value_bytes)?;
 
         let payload_row = OwnedRow::new(row_data[self.pk_info.predefined_column_len()..].to_vec());
@@ -356,6 +359,16 @@ impl LogStoreRowSerde {
                 .unwrap()
                 .as_int64(),
         );
+        let vnode = VirtualNode::from_datum_ref(
+            row_data[risingwave_common::constants::log_store::v2::VNODE_COLUMN_INDEX]
+                .to_datum_ref(),
+        );
+
+        let seq_id = *row_data[self.pk_info.seq_id_column_index]
+            .as_ref()
+            .unwrap()
+            .as_int32();
+
         let row_op_code = *row_data[self.pk_info.row_op_column_index]
             .as_ref()
             .unwrap()
@@ -392,14 +405,14 @@ impl LogStoreRowSerde {
             }
             _ => unreachable!("invalid row op code: {}", row_op_code),
         };
-        Ok((epoch, op))
+        Ok((epoch, vnode, seq_id, op))
     }
 
     pub(crate) async fn deserialize_stream_chunk<I: StateStoreReadIter>(
         &self,
         iters: impl IntoIterator<Item = I>,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         expected_epoch: u64,
         metrics: &KvLogStoreReadMetrics,
     ) -> LogStoreResult<StreamChunk> {
@@ -414,7 +427,10 @@ impl LogStoreRowSerde {
                 .map(|iter| deserialize_stream(iter, self.clone())),
         );
         pin_mut!(stream);
-        while let Some((epoch, op, row_size)) = stream.try_next().await? {
+        while let Some(row) = stream.try_next().await? {
+            let epoch = row.epoch;
+            let op = row.op;
+            let row_size = row.size;
             match (epoch, op) {
                 (epoch, LogStoreOp::Row { op, row }) => {
                     if epoch != expected_epoch {
@@ -567,8 +583,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     async fn into_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
         let mut ops = Vec::with_capacity(chunk_size);
-        // vnode -> epoch, seq_id
-        let mut progress_map = HashMap::new();
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
 
@@ -649,21 +663,45 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 
 mod stream_de {
     use super::*;
+
+    #[expect(dead_code)]
+    #[derive(Debug)]
+    pub(super) struct LogStoreRow {
+        pub epoch: u64,
+        pub seq_id: SeqId,
+        pub vnode: VirtualNode,
+        pub op: LogStoreOp,
+        pub size: usize,
+    }
+
+    #[derive(Debug)]
+    pub(super) struct RawLogStoreRow {
+        pub epoch: u64,
+        pub seq_id: SeqId,
+        pub vnode: VirtualNode,
+        pub op: LogStoreRowOp,
+        pub size: usize,
+    }
+
     pub(super) type LogStoreItemStream<S: StateStoreReadIter> =
-        impl Stream<Item = LogStoreResult<(u64, LogStoreOp, usize)>> + Send + Unpin;
+        impl Stream<Item = LogStoreResult<LogStoreRow>> + Send + Unpin;
 
     pub(super) fn deserialize_stream<S: StateStoreReadIter>(
         iter: S,
         serde: LogStoreRowSerde,
     ) -> LogStoreItemStream<S> {
         may_merge_update(
-            iter.into_stream(
-                move |(key, value)| -> StorageResult<(u64, LogStoreRowOp, usize)> {
-                    let read_size = key.user_key.table_key.len() + value.len();
-                    let (epoch, op) = serde.deserialize(value)?;
-                    Ok((epoch, op, read_size))
-                },
-            )
+            iter.into_stream(move |(key, value)| -> StorageResult<RawLogStoreRow> {
+                let size = key.user_key.table_key.len() + value.len();
+                let (epoch, vnode, seq_id, op) = serde.deserialize(value)?;
+                Ok(RawLogStoreRow {
+                    epoch,
+                    seq_id,
+                    vnode,
+                    op,
+                    size,
+                })
+            })
             .map_err(Into::into),
         )
         .boxed()
@@ -671,19 +709,27 @@ mod stream_de {
         // rustc will panic in auto_trait.rs. May remove it when using future version of tool chain.
     }
 
-    #[try_stream(ok = (u64, LogStoreOp, usize), error = anyhow::Error)]
-    async fn may_merge_update(
-        stream: impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp, usize)>> + Send,
-    ) {
+    #[try_stream(ok = LogStoreRow, error = anyhow::Error)]
+    async fn may_merge_update(stream: impl Stream<Item = LogStoreResult<RawLogStoreRow>> + Send) {
         pin_mut!(stream);
-        while let Some((epoch, op, row_size)) = stream.try_next().await? {
+        while let Some(RawLogStoreRow {
+            epoch,
+            vnode,
+            seq_id,
+            op,
+            size: row_size,
+        }) = stream.try_next().await?
+        {
             if let LogStoreRowOp::Row {
                 op: Op::UpdateDelete,
                 row: old_value,
             } = op
             {
                 let next_item = stream.try_next().await?;
-                if let Some((next_item_epoch, next_op, next_row_size)) = next_item {
+                if let Some(row) = next_item {
+                    let next_item_epoch = row.epoch;
+                    let next_op = row.op;
+                    let next_row_size = row.size;
                     if let LogStoreRowOp::Row {
                         op: Op::UpdateInsert,
                         row: new_value,
@@ -696,14 +742,16 @@ mod stream_de {
                                 next_item_epoch
                             ));
                         }
-                        yield (
+                        yield LogStoreRow {
                             epoch,
-                            LogStoreOp::Update {
+                            vnode,
+                            seq_id,
+                            op: LogStoreOp::Update {
                                 new_value,
                                 old_value,
                             },
-                            (row_size + next_row_size),
-                        );
+                            size: (row_size + next_row_size),
+                        };
                     } else {
                         if cfg!(debug_assertions) {
                             unreachable!(
@@ -714,15 +762,23 @@ mod stream_de {
                             // in release mode just warn
                             warn!("do not get UpdateInsert after UpdateDelete");
                         }
-                        yield (
+                        yield LogStoreRow {
                             epoch,
-                            LogStoreOp::Row {
+                            vnode,
+                            seq_id,
+                            op: LogStoreOp::Row {
                                 op: Op::UpdateDelete,
                                 row: old_value,
                             },
-                            row_size,
-                        );
-                        yield (epoch, LogStoreOp::from(next_op), row_size);
+                            size: row_size,
+                        };
+                        yield LogStoreRow {
+                            epoch,
+                            vnode,
+                            seq_id,
+                            op: LogStoreOp::from(next_op),
+                            size: row_size,
+                        };
                     }
                 } else {
                     if cfg!(debug_assertions) {
@@ -731,17 +787,25 @@ mod stream_de {
                         // in release mode just warn
                         warn!("reach end of stream after UpdateDelete");
                     }
-                    yield (
+                    yield LogStoreRow {
                         epoch,
-                        LogStoreOp::Row {
+                        vnode,
+                        seq_id,
+                        op: LogStoreOp::Row {
                             op: Op::UpdateDelete,
                             row: old_value,
                         },
-                        row_size,
-                    );
+                        size: row_size,
+                    };
                 }
             } else {
-                yield (epoch, LogStoreOp::from(op), row_size);
+                yield LogStoreRow {
+                    epoch,
+                    vnode,
+                    seq_id,
+                    op: LogStoreOp::from(op),
+                    size: row_size,
+                };
             }
         }
     }
@@ -767,8 +831,8 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 
         for mut stream in self.barrier_streams.drain(..) {
             match Pin::new(&mut stream).peek().await {
-                Some(Ok((epoch, _, _))) => {
-                    self.not_started_streams.push((*epoch, stream));
+                Some(Ok(row)) => {
+                    self.not_started_streams.push((row.epoch, stream));
                 }
                 Some(Err(_)) => match Pin::new(&mut stream).next().await {
                     Some(Err(e)) => {
@@ -860,7 +924,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             .await
             .expect("row stream should not be empty when polled")
         {
-            let (decoded_epoch, op, read_size) = result?;
+            let row = result?;
+            let decoded_epoch = row.epoch;
+            let op = row.op;
+            let read_size = row.size;
             self.may_init_epoch(decoded_epoch)?;
             match op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
@@ -964,7 +1031,7 @@ mod tests {
         TEST_TABLE_ID, check_rows_eq, gen_test_data, gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{
-        KV_LOG_STORE_V2_INFO, KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType,
+        KV_LOG_STORE_V2_INFO, KvLogStorePkInfo, KvLogStoreReadMetrics, SeqId,
     };
 
     const EPOCH0: u64 = test_epoch(1);
@@ -1015,7 +1082,7 @@ mod tests {
             let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
-            let (decoded_epoch, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, _, _, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
             match row_op {
                 LogStoreRowOp::Row {
@@ -1033,7 +1100,7 @@ mod tests {
         let (key, encoded_barrier) = serde.serialize_barrier(epoch, SINGLETON_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_barrier).unwrap() {
-            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (decoded_epoch, _, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
                 assert_eq!(decoded_epoch, epoch);
             }
@@ -1053,7 +1120,7 @@ mod tests {
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
-            let (decoded_epoch, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, _, _, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
             match row_op {
                 LogStoreRowOp::Row {
@@ -1072,7 +1139,7 @@ mod tests {
             serde.serialize_barrier(epoch, SINGLETON_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_checkpoint_barrier).unwrap() {
-            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (decoded_epoch, _, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert_eq!(decoded_epoch, epoch);
                 assert!(is_checkpoint);
             }
@@ -1169,7 +1236,7 @@ mod tests {
         ops: Vec<Op>,
         rows: Vec<OwnedRow>,
         epoch: u64,
-        seq_id: &mut SeqIdType,
+        seq_id: &mut SeqId,
     ) -> (
         impl Stream<Item = StorageResult<StateStoreKeyedRow>> + use<>,
         Sender<()>,
@@ -1197,7 +1264,7 @@ mod tests {
     #[expect(clippy::type_complexity)]
     fn gen_single_test_stream(
         serde: LogStoreRowSerde,
-        seq_id: &mut SeqIdType,
+        seq_id: &mut SeqId,
         base: i64,
     ) -> (
         impl Stream<Item = StorageResult<StateStoreKeyedRow>> + use<>,
