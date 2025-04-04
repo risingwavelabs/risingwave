@@ -693,20 +693,18 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 // Use MAX EPOCH here because the epoch to consume may be below the safe
                 // epoch
                 async move {
-                    Ok::<_, anyhow::Error>(
-                        state_store
-                            .iter(
-                                (Included(range_start), Included(range_end)),
-                                ReadOptions {
-                                    prefetch_options:
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
-                                    cache_policy: CachePolicy::Fill(CacheHint::Low),
-                                    table_id,
-                                    ..Default::default()
-                                },
-                            )
-                            .await?,
-                    )
+                    let iter = state_store
+                        .iter(
+                            (Included(range_start), Included(range_end)),
+                            ReadOptions {
+                                prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                                cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                table_id,
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
+                    Ok::<_, anyhow::Error>((vnode, iter))
                 }
             }))
             .instrument_await("Wait Create Iter Stream")
@@ -782,6 +780,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     Duration::from_secs(10 * 60),
                 )
                 .await
+                .map(|iter| (vnode, iter))
             }
         }));
 
