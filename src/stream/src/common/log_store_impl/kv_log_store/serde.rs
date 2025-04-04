@@ -721,6 +721,7 @@ mod stream_de {
                     let next_item_epoch = row.epoch;
                     let next_op = row.op;
                     let next_row_size = row.size;
+                    let next_seq_id = row.seq_id;
                     if let LogStoreRowOp::Row {
                         op: Op::UpdateInsert,
                         row: new_value,
@@ -735,7 +736,7 @@ mod stream_de {
                         }
                         yield LogStoreRow {
                             epoch,
-                            seq_id,
+                            seq_id: next_seq_id,
                             op: LogStoreOp::Update {
                                 new_value,
                                 old_value,
