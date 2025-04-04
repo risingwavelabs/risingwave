@@ -600,7 +600,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         pin_mut!(this);
 
         let mut read_info = ReadInfo::new();
-        while let Some((epoch, row_op, row_read_size)) = this.next_op().await? {
+        while let Some(row) = this.next_op().await? {
+            let epoch = row.epoch;
+            let row_op = row.op;
+            let row_read_size = row.size;
             match row_op {
                 LogStoreOp::Row { op, row, .. } => {
                     read_info.read_one_row(row_read_size);
@@ -920,7 +923,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         Ok(())
     }
 
-    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreOp, usize)>> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<LogStoreRow>> {
         while let (Some(result), stream) = self
             .row_streams
             .next()
@@ -929,16 +932,14 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         {
             let row = result?;
             let decoded_epoch = row.epoch;
-            let op = row.op;
-            let read_size = row.size;
             self.may_init_epoch(decoded_epoch)?;
-            match op {
+            match &row.op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
                     self.row_streams.push(stream.into_future());
-                    return Ok(Some((decoded_epoch, op, read_size)));
+                    return Ok(Some(row));
                 }
                 LogStoreOp::Barrier { is_checkpoint } => {
-                    self.check_is_checkpoint(is_checkpoint)?;
+                    self.check_is_checkpoint(*is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
 
@@ -949,15 +950,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
-                        return Ok(Some((
-                            decoded_epoch,
-                            LogStoreOp::Barrier { is_checkpoint },
-                            read_size,
-                        )));
+                        return Ok(Some(row));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
                             curr_epoch: decoded_epoch,
-                            is_checkpoint,
+                            is_checkpoint: *is_checkpoint,
                         };
                         continue;
                     }
@@ -1424,7 +1421,9 @@ mod tests {
 
         pin_mut!(stream);
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
 
         assert_eq!(
             (
@@ -1443,7 +1442,9 @@ mod tests {
             tx1[i].take().unwrap().send(()).unwrap();
             let mut j = 0;
             while j < ops[i].len() {
-                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                let row = stream.next_op().await.unwrap().unwrap();
+                let epoch = row.epoch;
+                let op = row.op;
                 assert_eq!(EPOCH1, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
@@ -1467,7 +1468,9 @@ mod tests {
             assert_eq!(j, ops[i].len());
         }
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
 
         assert_eq!(
             (
@@ -1486,7 +1489,9 @@ mod tests {
             tx2[i].take().unwrap().send(()).unwrap();
             let mut j = 0;
             while j < ops[i].len() {
-                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                let row = stream.next_op().await.unwrap().unwrap();
+                let epoch = row.epoch;
+                let op = row.op;
                 assert_eq!(EPOCH2, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
@@ -1510,7 +1515,9 @@ mod tests {
             assert_eq!(j, ops[i].len());
         }
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
         assert_eq!(
             (
                 EPOCH2,
