@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
@@ -95,8 +96,8 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
         let client = clients.get(&cn).await?;
         let response = client.stack_trace(req).await?;
         for (actor_id, trace) in response.actor_traces {
-            let tree: TreeView = serde_json::from_str(&trace)
-                .map_err(|e| anyhow::anyhow!("Failed to parse actor trace JSON: {}", e))?;
+            let tree: TreeView =
+                serde_json::from_str(&trace).context("Failed to parse JSON actor trace")?;
             if tree.is_bottleneck() {
                 bottleneck_actors_found = true;
                 println!(">> Actor {}", actor_id);
