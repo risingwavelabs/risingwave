@@ -736,7 +736,7 @@ pub(crate) enum LogStoreReadStateStreamRangeStart {
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
-    pub(crate) fn read_persisted_log_store_futures(
+    fn read_persisted_log_store_futures(
         &self,
         first_write_epoch: u64,
         range_start: LogStoreReadStateStreamRangeStart,

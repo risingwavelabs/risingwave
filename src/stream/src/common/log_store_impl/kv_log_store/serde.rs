@@ -658,7 +658,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         }
     }
 
-    #[expect(dead_code)]
     #[try_stream(ok = (LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
     async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
