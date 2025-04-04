@@ -7,8 +7,9 @@ option optimize_for = SPEED;
 
 message StackTraceRequest {
   enum ActorTracesFormat {
-    JSON = 0;
-    TEXT = 1;
+    UNSPECIFIED = 0;
+    JSON = 1;
+    TEXT = 2;
   }
   ActorTracesFormat actor_traces_format = 1;
 }
