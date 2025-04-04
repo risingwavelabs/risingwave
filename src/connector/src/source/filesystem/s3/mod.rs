@@ -13,8 +13,12 @@
 // limitations under the License.
 pub mod enumerator;
 
+use std::collections::HashSet;
+
+use once_cell::sync::Lazy;
 use serde::Deserialize;
 
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::source::SourceProperties;
 use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::util::dummy::{
@@ -41,6 +45,11 @@ pub struct S3PropertiesCommon {
     pub endpoint_url: Option<String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecretOnCloud for S3PropertiesCommon {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Lazy<HashSet<&'static str>> =
+        Lazy::new(|| HashSet::from(["s3.credentials.access", "s3.credentials.secret"]));
 }
 
 #[derive(Debug, Clone, PartialEq)]

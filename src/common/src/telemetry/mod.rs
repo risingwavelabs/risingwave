@@ -42,6 +42,10 @@ const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test";
 
 pub use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
 
+pub fn is_cloud_hosted() -> bool {
+    get_telemetry_risingwave_cloud_uuid().is_some()
+}
+
 pub fn telemetry_cluster_type_from_env_var() -> TelemetryResult<PbTelemetryClusterType> {
     let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
         Ok(cluster_type) => cluster_type,

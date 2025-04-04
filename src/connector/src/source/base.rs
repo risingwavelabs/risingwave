@@ -46,6 +46,7 @@ use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
@@ -74,7 +75,9 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug {
+pub trait SourceProperties:
+    TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecretOnCloud
+{
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>

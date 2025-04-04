@@ -33,6 +33,10 @@ use time::OffsetDateTime;
 use url::Url;
 use with_options::WithOptions;
 
+use once_cell::sync::Lazy;
+use std::collections::HashSet;
+
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
 use crate::error::ConnectorResult;
@@ -483,6 +487,10 @@ pub struct PulsarCommon {
 
     #[serde(rename = "auth.token")]
     pub auth_token: Option<String>,
+}
+
+impl EnforceSecretOnCloud for PulsarCommon {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Lazy<HashSet<&'static str>> = Lazy::new(|| HashSet::from(["pulsar.auth.token"]));
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
