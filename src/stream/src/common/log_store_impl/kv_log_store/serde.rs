@@ -26,7 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::value_encoding;
@@ -349,7 +349,7 @@ impl LogStoreRowSerde {
     fn deserialize(
         &self,
         value_bytes: &[u8],
-    ) -> value_encoding::Result<(Epoch, VirtualNode, SeqId, LogStoreRowOp)> {
+    ) -> value_encoding::Result<(Epoch, Option<SeqId>, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(value_bytes)?;
 
         let payload_row = OwnedRow::new(row_data[self.pk_info.predefined_column_len()..].to_vec());
@@ -359,15 +359,10 @@ impl LogStoreRowSerde {
                 .unwrap()
                 .as_int64(),
         );
-        let vnode = VirtualNode::from_datum_ref(
-            row_data[risingwave_common::constants::log_store::v2::VNODE_COLUMN_INDEX]
-                .to_datum_ref(),
-        );
 
-        let seq_id = *row_data[self.pk_info.seq_id_column_index]
+        let seq_id = row_data[self.pk_info.seq_id_column_index]
             .as_ref()
-            .unwrap()
-            .as_int32();
+            .map(|i| *i.as_int32());
 
         let row_op_code = *row_data[self.pk_info.row_op_column_index]
             .as_ref()
@@ -405,7 +400,7 @@ impl LogStoreRowSerde {
             }
             _ => unreachable!("invalid row op code: {}", row_op_code),
         };
-        Ok((epoch, vnode, seq_id, op))
+        Ok((epoch, seq_id, op))
     }
 
     pub(crate) async fn deserialize_stream_chunk<I: StateStoreReadIter>(
@@ -668,8 +663,7 @@ mod stream_de {
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
         pub epoch: u64,
-        pub seq_id: SeqId,
-        pub vnode: VirtualNode,
+        pub seq_id: Option<SeqId>,
         pub op: LogStoreOp,
         pub size: usize,
     }
@@ -677,8 +671,7 @@ mod stream_de {
     #[derive(Debug)]
     pub(super) struct RawLogStoreRow {
         pub epoch: u64,
-        pub seq_id: SeqId,
-        pub vnode: VirtualNode,
+        pub seq_id: Option<SeqId>,
         pub op: LogStoreRowOp,
         pub size: usize,
     }
@@ -693,11 +686,10 @@ mod stream_de {
         may_merge_update(
             iter.into_stream(move |(key, value)| -> StorageResult<RawLogStoreRow> {
                 let size = key.user_key.table_key.len() + value.len();
-                let (epoch, vnode, seq_id, op) = serde.deserialize(value)?;
+                let (epoch, seq_id, op) = serde.deserialize(value)?;
                 Ok(RawLogStoreRow {
                     epoch,
                     seq_id,
-                    vnode,
                     op,
                     size,
                 })
@@ -714,7 +706,6 @@ mod stream_de {
         pin_mut!(stream);
         while let Some(RawLogStoreRow {
             epoch,
-            vnode,
             seq_id,
             op,
             size: row_size,
@@ -744,7 +735,6 @@ mod stream_de {
                         }
                         yield LogStoreRow {
                             epoch,
-                            vnode,
                             seq_id,
                             op: LogStoreOp::Update {
                                 new_value,
@@ -764,7 +754,6 @@ mod stream_de {
                         }
                         yield LogStoreRow {
                             epoch,
-                            vnode,
                             seq_id,
                             op: LogStoreOp::Row {
                                 op: Op::UpdateDelete,
@@ -774,7 +763,6 @@ mod stream_de {
                         };
                         yield LogStoreRow {
                             epoch,
-                            vnode,
                             seq_id,
                             op: LogStoreOp::from(next_op),
                             size: row_size,
@@ -789,7 +777,6 @@ mod stream_de {
                     }
                     yield LogStoreRow {
                         epoch,
-                        vnode,
                         seq_id,
                         op: LogStoreOp::Row {
                             op: Op::UpdateDelete,
@@ -801,7 +788,6 @@ mod stream_de {
             } else {
                 yield LogStoreRow {
                     epoch,
-                    vnode,
                     seq_id,
                     op: LogStoreOp::from(op),
                     size: row_size,
@@ -1082,7 +1068,7 @@ mod tests {
             let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
-            let (decoded_epoch, _, _, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, _, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
             match row_op {
                 LogStoreRowOp::Row {
@@ -1100,7 +1086,7 @@ mod tests {
         let (key, encoded_barrier) = serde.serialize_barrier(epoch, SINGLETON_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_barrier).unwrap() {
-            (decoded_epoch, _, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (decoded_epoch, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
                 assert_eq!(decoded_epoch, epoch);
             }
@@ -1120,7 +1106,7 @@ mod tests {
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
-            let (decoded_epoch, _, _, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, _, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
             match row_op {
                 LogStoreRowOp::Row {
@@ -1139,7 +1125,7 @@ mod tests {
             serde.serialize_barrier(epoch, SINGLETON_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_checkpoint_barrier).unwrap() {
-            (decoded_epoch, _, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (decoded_epoch, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert_eq!(decoded_epoch, epoch);
                 assert!(is_checkpoint);
             }
