@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -45,8 +45,8 @@ use risingwave_storage::table::{SINGLETON_VNODE, compute_vnode};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
-    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType,
-    SeqId,
+    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, LogStoreVnodeProgress,
+    ReaderTruncationOffsetType, RowOpCodeType, SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -590,7 +590,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         pin_mut!(this);
 
         let mut read_info = ReadInfo::new();
-        while let Some((epoch, row_op, row_read_size)) = this.next_op().await? {
+        while let Some(row) = this.next_op().await? {
+            let epoch = row.epoch;
+            let row_op = row.op;
+            let row_read_size = row.size;
             match row_op {
                 LogStoreOp::Row { op, row } => {
                     read_info.read_one_row(row_read_size);
@@ -643,6 +646,94 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             }
         }
     }
+
+    #[expect(dead_code)]
+    #[try_stream(ok = (LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
+    async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
+        assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
+        let mut ops = Vec::with_capacity(chunk_size);
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
+
+        let mut progress = LogStoreVnodeProgress::new();
+
+        if !self.init().await? {
+            // no data in all stream
+            return Ok(());
+        }
+
+        let this = self;
+        pin_mut!(this);
+
+        let mut read_info = ReadInfo::new();
+        while let Some(row) = this.next_op().await? {
+            let epoch = row.epoch;
+            let seq_id = row.seq_id;
+            let vnode = row.vnode;
+            let row_op = row.op;
+            let row_read_size = row.size;
+            match row_op {
+                LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
+                    progress.insert(epoch, (vnode, seq_id.expect("all rows should have seq_id")));
+                }
+                _ => {}
+            }
+
+            match row_op {
+                LogStoreOp::Row { op, row } => {
+                    read_info.read_one_row(row_read_size);
+                    ops.push(op);
+                    if let Some(chunk) = data_chunk_builder.append_one_row(row) {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        read_info.report(&this.metrics);
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                }
+                LogStoreOp::Update {
+                    new_value,
+                    old_value,
+                } => {
+                    read_info.read_update(row_read_size);
+                    if !data_chunk_builder.can_append_update() {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        let chunk = data_chunk_builder.consume_all().expect("must not be empty");
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                    ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
+                    assert!(data_chunk_builder.append_one_row(old_value).is_none());
+                    if let Some(chunk) = data_chunk_builder.append_one_row(new_value) {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        read_info.report(&this.metrics);
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                }
+                LogStoreOp::Barrier { is_checkpoint } => {
+                    read_info.read_one_row(row_read_size);
+                    read_info.report(&this.metrics);
+                    if let Some(chunk) = data_chunk_builder.consume_all() {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                    yield (
+                        take(&mut progress),
+                        KvLogStoreItem::Barrier { is_checkpoint },
+                    )
+                }
+            }
+        }
+    }
 }
 
 pub(crate) type LogStoreItemMergeStream<S: StateStoreReadIter> =
@@ -659,7 +750,6 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
 
-    #[expect(dead_code)]
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
         pub vnode: VirtualNode,
@@ -914,7 +1004,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         Ok(())
     }
 
-    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreOp, usize)>> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<LogStoreRow>> {
         while let (Some(result), stream) = self
             .row_streams
             .next()
@@ -923,16 +1013,14 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         {
             let row = result?;
             let decoded_epoch = row.epoch;
-            let op = row.op;
-            let read_size = row.size;
             self.may_init_epoch(decoded_epoch)?;
-            match op {
+            match &row.op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
                     self.row_streams.push(stream.into_future());
-                    return Ok(Some((decoded_epoch, op, read_size)));
+                    return Ok(Some(row));
                 }
                 LogStoreOp::Barrier { is_checkpoint } => {
-                    self.check_is_checkpoint(is_checkpoint)?;
+                    self.check_is_checkpoint(*is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
 
@@ -943,15 +1031,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
-                        return Ok(Some((
-                            decoded_epoch,
-                            LogStoreOp::Barrier { is_checkpoint },
-                            read_size,
-                        )));
+                        return Ok(Some(row));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
                             curr_epoch: decoded_epoch,
-                            is_checkpoint,
+                            is_checkpoint: *is_checkpoint,
                         };
                         continue;
                     }
@@ -1367,7 +1451,9 @@ mod tests {
 
         pin_mut!(stream);
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
 
         assert_eq!(
             (
@@ -1386,7 +1472,9 @@ mod tests {
             tx1[i].take().unwrap().send(()).unwrap();
             let mut j = 0;
             while j < ops[i].len() {
-                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                let row = stream.next_op().await.unwrap().unwrap();
+                let epoch = row.epoch;
+                let op = row.op;
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
                     assert_eq!(
@@ -1417,7 +1505,9 @@ mod tests {
             assert_eq!(j, ops[i].len());
         }
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
 
         assert_eq!(
             (
@@ -1436,7 +1526,9 @@ mod tests {
             tx2[i].take().unwrap().send(()).unwrap();
             let mut j = 0;
             while j < ops[i].len() {
-                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                let row = stream.next_op().await.unwrap().unwrap();
+                let epoch = row.epoch;
+                let op = row.op;
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
                     assert_eq!(
@@ -1467,7 +1559,9 @@ mod tests {
             assert_eq!(j, ops[i].len());
         }
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
         assert_eq!(
             (
                 EPOCH2,
