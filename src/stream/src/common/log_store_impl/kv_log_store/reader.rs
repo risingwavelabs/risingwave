@@ -49,7 +49,8 @@ use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
 use crate::common::log_store_impl::kv_log_store::serde::{
-    KvLogStoreItem, LogStoreItemMergeStream, merge_log_store_item_stream,
+    KvLogStoreItem, LogStoreItemMergeStream, LogStoreVnodeItemMergeStream,
+    merge_log_store_item_stream, merge_log_store_vnode_item_stream,
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
@@ -778,6 +779,28 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         streams_future.map_err(Into::into).map_ok(move |streams| {
             // TODO: set chunk size by config
             Box::pin(merge_log_store_item_stream(
+                streams,
+                serde,
+                1024,
+                read_metrics,
+            ))
+        })
+    }
+
+    pub(crate) fn read_persisted_log_store_with_progress(
+        &self,
+        read_metrics: KvLogStoreReadMetrics,
+        first_write_epoch: u64,
+        range_start: LogStoreReadStateStreamRangeStart,
+    ) -> impl Future<
+        Output = LogStoreResult<Pin<Box<LogStoreVnodeItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
+    > + Send
+    + 'static {
+        let serde = self.serde.clone();
+        let streams_future = self.read_persisted_log_store_futures(first_write_epoch, range_start);
+        streams_future.map_err(Into::into).map_ok(move |streams| {
+            // TODO: set chunk size by config
+            Box::pin(merge_log_store_vnode_item_stream(
                 streams,
                 serde,
                 1024,
