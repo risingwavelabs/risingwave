@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -45,8 +45,8 @@ use risingwave_storage::table::{SINGLETON_VNODE, compute_vnode};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
-    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType,
-    SeqId,
+    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, LogStoreVnodeProgress,
+    ReaderTruncationOffsetType, RowOpCodeType, SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -653,6 +653,94 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         );
                     }
                     yield (epoch, KvLogStoreItem::Barrier { is_checkpoint })
+                }
+            }
+        }
+    }
+
+    #[expect(dead_code)]
+    #[try_stream(ok = (LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
+    async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
+        assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
+        let mut ops = Vec::with_capacity(chunk_size);
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
+
+        let mut progress = LogStoreVnodeProgress::new();
+
+        if !self.init().await? {
+            // no data in all stream
+            return Ok(());
+        }
+
+        let this = self;
+        pin_mut!(this);
+
+        let mut read_info = ReadInfo::new();
+        while let Some(row) = this.next_op().await? {
+            let epoch = row.epoch;
+            let seq_id = row.seq_id;
+            let vnode = row.vnode;
+            let row_op = row.op;
+            let row_read_size = row.size;
+            match row_op {
+                LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
+                    progress.insert(epoch, (vnode, seq_id.expect("all rows should have seq_id")));
+                }
+                _ => {}
+            }
+
+            match row_op {
+                LogStoreOp::Row { op, row } => {
+                    read_info.read_one_row(row_read_size);
+                    ops.push(op);
+                    if let Some(chunk) = data_chunk_builder.append_one_row(row) {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        read_info.report(&this.metrics);
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                }
+                LogStoreOp::Update {
+                    new_value,
+                    old_value,
+                } => {
+                    read_info.read_update(row_read_size);
+                    if !data_chunk_builder.can_append_update() {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        let chunk = data_chunk_builder.consume_all().expect("must not be empty");
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                    ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
+                    assert!(data_chunk_builder.append_one_row(old_value).is_none());
+                    if let Some(chunk) = data_chunk_builder.append_one_row(new_value) {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        read_info.report(&this.metrics);
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                }
+                LogStoreOp::Barrier { is_checkpoint } => {
+                    read_info.read_one_row(row_read_size);
+                    read_info.report(&this.metrics);
+                    if let Some(chunk) = data_chunk_builder.consume_all() {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        yield (
+                            take(&mut progress),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                    yield (
+                        take(&mut progress),
+                        KvLogStoreItem::Barrier { is_checkpoint },
+                    )
                 }
             }
         }
