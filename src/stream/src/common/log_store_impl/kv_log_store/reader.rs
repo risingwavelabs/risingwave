@@ -28,7 +28,7 @@ use futures::future::{BoxFuture, try_join_all};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::{EpochExt, EpochPair};
 use risingwave_connector::sink::log_store::{
@@ -719,14 +719,12 @@ pub(crate) enum LogStoreReadStateStreamRangeStart {
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
-    pub(crate) fn read_persisted_log_store(
+    pub(crate) fn read_persisted_log_store_futures(
         &self,
-        read_metrics: KvLogStoreReadMetrics,
         first_write_epoch: u64,
         range_start: LogStoreReadStateStreamRangeStart,
-    ) -> impl Future<
-        Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
-    > + Send
+    ) -> impl Future<Output = StorageResult<Vec<(VirtualNode, TimeoutAutoRebuildIter<S>)>>>
+    + Send
     + 'static {
         let serde = self.serde.clone();
         let range_start = match range_start {
@@ -740,7 +738,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
 
         let state_store = self.state_store.clone();
         let table_id = self.table_id;
-        let streams_future = try_join_all(self.serde.vnodes().iter_vnodes().map(move |vnode| {
+        try_join_all(self.serde.vnodes().iter_vnodes().map(move |vnode| {
             let key_range = prefixed_range_with_vnode(
                 (range_start.clone(), Excluded(range_end.clone())),
                 vnode,
@@ -763,8 +761,20 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .await
                 .map(|iter| (vnode, iter))
             }
-        }));
+        }))
+    }
 
+    pub(crate) fn read_persisted_log_store(
+        &self,
+        read_metrics: KvLogStoreReadMetrics,
+        first_write_epoch: u64,
+        range_start: LogStoreReadStateStreamRangeStart,
+    ) -> impl Future<
+        Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
+    > + Send
+    + 'static {
+        let serde = self.serde.clone();
+        let streams_future = self.read_persisted_log_store_futures(first_write_epoch, range_start);
         streams_future.map_err(Into::into).map_ok(move |streams| {
             // TODO: set chunk size by config
             Box::pin(merge_log_store_item_stream(
