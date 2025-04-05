@@ -253,6 +253,7 @@ message CoordinateResponse {
   oneof msg {
     StartCoordinationResponse start_response = 1;
     CommitResponse commit_response = 2;
+    bool stopped = 3;
   }
 }
 

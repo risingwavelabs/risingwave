@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
-use futures::{Future, TryStreamExt};
+use futures::{TryStreamExt, ready};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    CoordinateResponse, SinkMetadata, coordinate_request, coordinate_response,
+    CoordinateResponse, coordinate_request, coordinate_response,
 };
 use tonic::Status;
 
@@ -90,55 +89,51 @@ impl SinkWriterCoordinationHandle {
             .map_err(|_| anyhow!("fail to send commit response of epoch {}", epoch))
     }
 
-    pub(super) fn poll_next_commit_request(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<anyhow::Result<Option<(u64, SinkMetadata)>>> {
-        let future = self.next_commit_request();
-        let future = pin!(future);
-        future.poll(cx)
+    pub(super) fn stop(&mut self) -> anyhow::Result<()> {
+        self.response_tx
+            .send(Ok(CoordinateResponse {
+                msg: Some(coordinate_response::Msg::Stopped(true)),
+            }))
+            .map_err(|_| anyhow!("fail to send stopped response"))
     }
 
-    async fn next_commit_request(&mut self) -> anyhow::Result<Option<(u64, SinkMetadata)>> {
-        loop {
-            let request = self
-                .request_stream
-                .try_next()
-                .await?
-                .ok_or_else(|| anyhow!("end of request stream"))?;
-            match request.msg.ok_or_else(|| anyhow!("None msg in request"))? {
-                coordinate_request::Msg::StartRequest(_) => {
-                    return Err(anyhow!("should have started"));
-                }
+    pub(super) fn poll_next_request(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<anyhow::Result<coordinate_request::Msg>> {
+        let result = try {
+            let request = ready!(self.request_stream.try_poll_next_unpin(cx))
+                .ok_or_else(|| anyhow!("end of request stream"))??;
+            let request = request.msg.ok_or_else(|| anyhow!("None msg in request"))?;
+            match &request {
+                coordinate_request::Msg::StartRequest(_) | coordinate_request::Msg::Stop(_) => {}
                 coordinate_request::Msg::CommitRequest(request) => {
                     if let Some(prev_epoch) = self.prev_epoch {
                         if request.epoch < prev_epoch {
-                            return Err(anyhow!(
+                            return Poll::Ready(Err(anyhow!(
                                 "invalid commit epoch {}, prev_epoch {}",
                                 request.epoch,
                                 prev_epoch
-                            ));
+                            )));
                         }
                     }
-                    let Some(metadata) = request.metadata else {
-                        return Err(anyhow!("empty commit metadata"));
+                    if request.metadata.is_none() {
+                        return Poll::Ready(Err(anyhow!("empty commit metadata")));
                     };
                     self.prev_epoch = Some(request.epoch);
-                    return Ok(Some((request.epoch, metadata)));
                 }
                 coordinate_request::Msg::UpdateVnodeRequest(request) => {
                     let bitmap = Bitmap::from(
-                        &request
+                        request
                             .vnode_bitmap
+                            .as_ref()
                             .ok_or_else(|| anyhow!("empty vnode bitmap"))?,
                     );
                     self.vnode_bitmap = bitmap;
-                    continue;
                 }
-                coordinate_request::Msg::Stop(_) => {
-                    return Ok(None);
-                }
-            }
-        }
+            };
+            request
+        };
+        Poll::Ready(result)
     }
 }
