@@ -33,7 +33,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
 use tracing::{Instrument, event};
 
-use super::exchange::output::{BoxedOutput, new_output};
+use super::exchange::output::{Output, new_output};
 use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
@@ -593,7 +593,7 @@ macro_rules! impl_dispatcher {
                 }
             }
 
-            pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+            pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
                 }
@@ -650,7 +650,7 @@ pub trait Dispatcher: Debug + 'static {
     fn dispatch_watermark(&mut self, watermark: Watermark) -> impl DispatchFuture<'_>;
 
     /// Add new outputs to the dispatcher.
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>);
     /// Remove outputs to `actor_ids` from the dispatcher.
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
@@ -674,7 +674,7 @@ pub trait Dispatcher: Debug + 'static {
 /// Note that this does not follow `concurrent_dispatchers` in the config and the concurrency is
 /// always unlimited.
 async fn broadcast_concurrent(
-    outputs: impl IntoIterator<Item = &'_ mut BoxedOutput>,
+    outputs: impl IntoIterator<Item = &'_ mut Output>,
     message: DispatcherMessageBatch,
 ) -> StreamResult<()> {
     futures::future::try_join_all(
@@ -688,7 +688,7 @@ async fn broadcast_concurrent(
 
 #[derive(Debug)]
 pub struct RoundRobinDataDispatcher {
-    outputs: Vec<BoxedOutput>,
+    outputs: Vec<Output>,
     output_indices: Vec<usize>,
     cur: usize,
     dispatcher_id: DispatcherId,
@@ -697,7 +697,7 @@ pub struct RoundRobinDataDispatcher {
 
 impl RoundRobinDataDispatcher {
     pub fn new(
-        outputs: Vec<BoxedOutput>,
+        outputs: Vec<Output>,
         output_indices: Vec<usize>,
         dispatcher_id: DispatcherId,
     ) -> Self {
@@ -750,7 +750,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
         Ok(())
     }
 
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.outputs.extend(outputs);
     }
 
@@ -775,7 +775,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 }
 
 pub struct HashDataDispatcher {
-    outputs: Vec<BoxedOutput>,
+    outputs: Vec<Output>,
     keys: Vec<usize>,
     output_indices: Vec<usize>,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
@@ -797,7 +797,7 @@ impl Debug for HashDataDispatcher {
 
 impl HashDataDispatcher {
     pub fn new(
-        outputs: Vec<BoxedOutput>,
+        outputs: Vec<Output>,
         keys: Vec<usize>,
         output_indices: Vec<usize>,
         hash_mapping: ExpandedActorMapping,
@@ -815,7 +815,7 @@ impl HashDataDispatcher {
 }
 
 impl Dispatcher for HashDataDispatcher {
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.outputs.extend(outputs);
     }
 
@@ -967,7 +967,7 @@ impl Dispatcher for HashDataDispatcher {
 /// `BroadcastDispatcher` dispatches message to all outputs.
 #[derive(Debug)]
 pub struct BroadcastDispatcher {
-    outputs: HashMap<ActorId, BoxedOutput>,
+    outputs: HashMap<ActorId, Output>,
     output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
@@ -975,7 +975,7 @@ pub struct BroadcastDispatcher {
 
 impl BroadcastDispatcher {
     pub fn new(
-        outputs: impl IntoIterator<Item = BoxedOutput>,
+        outputs: impl IntoIterator<Item = Output>,
         output_indices: Vec<usize>,
         dispatcher_id: DispatcherId,
     ) -> Self {
@@ -988,8 +988,8 @@ impl BroadcastDispatcher {
     }
 
     fn into_pairs(
-        outputs: impl IntoIterator<Item = BoxedOutput>,
-    ) -> impl Iterator<Item = (ActorId, BoxedOutput)> {
+        outputs: impl IntoIterator<Item = Output>,
+    ) -> impl Iterator<Item = (ActorId, Output)> {
         outputs
             .into_iter()
             .map(|output| (output.actor_id(), output))
@@ -1033,7 +1033,7 @@ impl Dispatcher for BroadcastDispatcher {
         Ok(())
     }
 
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
 
@@ -1072,18 +1072,14 @@ pub struct SimpleDispatcher {
     ///
     /// Therefore, when dispatching data, we assert that there's exactly one output by
     /// `Self::output`.
-    output: SmallVec<[BoxedOutput; 2]>,
+    output: SmallVec<[Output; 2]>,
     output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
 }
 
 impl SimpleDispatcher {
-    pub fn new(
-        output: BoxedOutput,
-        output_indices: Vec<usize>,
-        dispatcher_id: DispatcherId,
-    ) -> Self {
+    pub fn new(output: Output, output_indices: Vec<usize>, dispatcher_id: DispatcherId) -> Self {
         Self {
             output: smallvec![output],
             output_indices,
@@ -1094,7 +1090,7 @@ impl SimpleDispatcher {
 }
 
 impl Dispatcher for SimpleDispatcher {
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.output.extend(outputs);
         assert!(self.output.len() <= 2);
     }
@@ -1162,9 +1158,7 @@ impl Dispatcher for SimpleDispatcher {
 #[cfg(test)]
 mod tests {
     use std::hash::{BuildHasher, Hasher};
-    use std::sync::Mutex;
 
-    use async_trait::async_trait;
     use futures::pin_mut;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
@@ -1181,30 +1175,6 @@ mod tests {
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
-    #[derive(Debug)]
-    pub struct MockOutput {
-        actor_id: ActorId,
-        data: Arc<Mutex<Vec<DispatcherMessageBatch>>>,
-    }
-
-    impl MockOutput {
-        pub fn new(actor_id: ActorId, data: Arc<Mutex<Vec<DispatcherMessageBatch>>>) -> Self {
-            Self { actor_id, data }
-        }
-    }
-
-    #[async_trait]
-    impl Output for MockOutput {
-        async fn send(&mut self, message: DispatcherMessageBatch) -> StreamResult<()> {
-            self.data.lock().unwrap().push(message);
-            Ok(())
-        }
-
-        fn actor_id(&self) -> ActorId {
-            self.actor_id
-        }
-    }
-
     // TODO: this test contains update being shuffled to different partitions, which is not
     // supported for now.
     #[tokio::test]
@@ -1218,15 +1188,12 @@ mod tests {
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
-        let output_data_vecs = (0..num_outputs)
-            .map(|_| Arc::new(Mutex::new(Vec::new())))
-            .collect::<Vec<_>>();
-        let outputs = output_data_vecs
-            .iter()
+        let (output_tx_vecs, mut output_rx_vecs): (Vec<_>, Vec<_>) =
+            (0..num_outputs).map(|_| channel_for_test()).collect();
+        let outputs = output_tx_vecs
+            .into_iter()
             .enumerate()
-            .map(|(actor_id, data)| {
-                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
-            })
+            .map(|(actor_id, tx)| Output::new(1 + actor_id as u32, tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1254,7 +1221,7 @@ mod tests {
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
         assert_eq!(
-            *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
+            *output_rx_vecs[0].recv().await.unwrap().as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
                 +  4 6 8
@@ -1268,7 +1235,7 @@ mod tests {
             )
         );
         assert_eq!(
-            *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
+            *output_rx_vecs[1].recv().await.unwrap().as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
                 +  4 6 8 D
@@ -1482,15 +1449,12 @@ mod tests {
         let cardinality = 10;
         let dimension = 4;
         let key_indices = &[0, 2];
-        let output_data_vecs = (0..num_outputs)
-            .map(|_| Arc::new(Mutex::new(Vec::new())))
-            .collect::<Vec<_>>();
-        let outputs = output_data_vecs
-            .iter()
+        let (output_tx_vecs, output_rx_vecs): (Vec<_>, Vec<_>) =
+            (0..num_outputs).map(|_| channel_for_test()).collect();
+        let outputs = output_tx_vecs
+            .into_iter()
             .enumerate()
-            .map(|(actor_id, data)| {
-                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
-            })
+            .map(|(actor_id, tx)| Output::new(1 + actor_id as u32, tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1551,14 +1515,17 @@ mod tests {
         let chunk = StreamChunk::new(ops, columns);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
-        for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
-            let guard = output.lock().unwrap();
+        for (output_idx, mut rx) in output_rx_vecs.into_iter().enumerate() {
+            let mut output = vec![];
+            while let Some(Some(msg)) = rx.recv().now_or_never() {
+                output.push(msg);
+            }
             // It is possible that there is no chunks, as a key doesn't belong to any hash bucket.
-            assert!(guard.len() <= 1);
-            if guard.is_empty() {
+            assert!(output.len() <= 1);
+            if output.is_empty() {
                 assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
-                let message = guard.first().unwrap();
+                let message = output.first().unwrap();
                 let real_chunk = match message {
                     DispatcherMessageBatch::Chunk(chunk) => chunk,
                     _ => panic!(),
