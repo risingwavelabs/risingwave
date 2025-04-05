@@ -54,11 +54,11 @@ impl CompactorClient {
         })
     }
 
-    pub async fn stack_trace(&self) -> Result<StackTraceResponse> {
+    pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .stack_trace(StackTraceRequest::default())
+            .stack_trace(req)
             .await
             .map_err(RpcError::from_compactor_status)?
             .into_inner())

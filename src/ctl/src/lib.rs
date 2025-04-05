@@ -69,9 +69,10 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
-    /// Dump the await-tree of compute nodes and compactors
+    /// Commands for await-tree, such as dumping, analyzing and transcribing
+    #[clap(subcommand)]
     #[clap(visible_alias("trace"))]
-    AwaitTree,
+    AwaitTree(AwaitTreeCommands),
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
@@ -464,6 +465,30 @@ enum MetaCommands {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+pub enum AwaitTreeCommands {
+    /// Dump Await Tree
+    Dump {
+        /// The format of actor traces in the diagnose file. Allowed values: `json`, `text`. `json` by default.
+        #[clap(short, long = "actor-traces-format")]
+        actor_traces_format: Option<String>,
+    },
+    /// Analyze Await Tree
+    Analyze {
+        /// The path to the diagnose file, if None, ctl will first pull one from the cluster
+        /// The actor traces format can be either `json` or `text`. The analyze command will
+        /// automatically detect the format.
+        #[clap(long = "path")]
+        path: Option<String>,
+    },
+    /// Transcribe Await Tree From JSON to Text format
+    Transcribe {
+        /// The path to the await tree file to be transcribed
+        #[clap(long = "path")]
+        path: String,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
 enum ThrottleCommands {
     Source(ThrottleCommandArgs),
     Mv(ThrottleCommandArgs),
@@ -847,7 +872,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
             cmd_impl::meta::graph_check(endpoint).await?
         }
-        Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
+        Commands::AwaitTree(AwaitTreeCommands::Dump {
+            actor_traces_format,
+        }) => cmd_impl::await_tree::dump(context, actor_traces_format).await?,
+        Commands::AwaitTree(AwaitTreeCommands::Analyze { path }) => {
+            cmd_impl::await_tree::bottleneck_detect(context, path).await?
+        }
+        Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
+            rw_diagnose_tools::await_tree::transcribe(path)?
+        }
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }
