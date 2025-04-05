@@ -32,7 +32,7 @@ linkme = { workspace = true }
 num-traits = "0.2"
 parse-display = "0.10"
 paste = "1"
-prometheus = "0.13"
+prometheus = "0.14"
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr_macro = { path = "../macro" }
