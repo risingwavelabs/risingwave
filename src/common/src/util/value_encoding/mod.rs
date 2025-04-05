@@ -22,7 +22,7 @@ use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 
 use crate::array::ArrayImpl;
-use crate::row::{Row, RowDeserializer as BasicDeserializer};
+use crate::row::Row;
 use crate::types::*;
 
 pub mod error;
@@ -30,6 +30,8 @@ use error::ValueEncodingError;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
+
+pub use crate::row::RowDeserializer as BasicDeserializer;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
