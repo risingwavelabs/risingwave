@@ -54,8 +54,9 @@ use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlS
 use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
-    WithOptionsSecResolved, dispatch_source_prop, dispatch_split_impl, for_all_connections,
-    for_all_sources, impl_connection, impl_connector_properties, impl_split, match_source_name_str,
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_source_prop, dispatch_split_impl,
+    for_all_connections, for_all_sources, impl_connection, impl_connector_properties, impl_split,
+    match_source_name_str,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -569,6 +570,22 @@ impl ConnectorProperties {
         )
     }
 
+    pub fn enforce_secret_on_cloud(
+        with_properties: &WithOptionsSecResolved,
+    ) -> crate::error::ConnectorResult<()> {
+        let connector = with_properties
+            .get_connector()
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
+        let key_iter = with_properties.keys().map(|s| s.as_str());
+        match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            PropType::enforce_secret_on_cloud(key_iter),
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
+
     pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
         matches!(
@@ -845,6 +862,8 @@ mod tests {
     use crate::source::cdc::{DebeziumCdcSplit, Mysql};
     use crate::source::kafka::KafkaSplit;
 
+    use risingwave_common::telemetry::TELEMETRY_RISINGWAVE_CLOUD_UUID;
+
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
         let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_owned());
@@ -928,6 +947,29 @@ mod tests {
         } else {
             panic!("extract kafka config failed");
         }
+    }
+
+    #[test]
+    fn test_enforce_secret_on_cloud() {
+        use std::env::{set_var, remove_var};
+
+        let props = convert_args!(btreemap!(
+            "connector" => "kafka",
+            "properties.bootstrap.server" => "b1,b2",
+            "topic" => "test",
+            "scan.startup.mode" => "earliest",
+            "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
+            "properties.security.protocol" => "SASL_PLAINTEXT",
+            "properties.sasl.mechanism" => "PLAIN",
+            "properties.sasl.username" => "user",
+            "properties.sasl.password" => "pass",
+        ));
+
+        let props_with_secret = WithOptionsSecResolved::without_secrets(props.clone());
+        assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_ok());
+        unsafe {set_var(TELEMETRY_RISINGWAVE_CLOUD_UUID, "demo_cloud_uuid");}
+        assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_err());
+        unsafe {remove_var(TELEMETRY_RISINGWAVE_CLOUD_UUID);}
     }
 
     #[test]
