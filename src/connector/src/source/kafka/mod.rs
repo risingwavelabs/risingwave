@@ -102,6 +102,13 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde(rename = "properties.enable.auto.commit")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub enable_auto_commit: Option<bool>,
+
+    /// How long to cache the broker address resolving results (milliseconds).
+    /// default: 1000
+    /// range: 0...86400000
+    #[serde(rename = "properties.broker.address.ttl")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub broker_address_ttl: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -229,6 +236,9 @@ impl RdKafkaPropertiesConsumer {
         if let Some(v) = &self.enable_auto_commit {
             c.set("enable.auto.commit", v.to_string());
         }
+        if let Some(v) = &self.broker_address_ttl {
+            c.set("broker.address.ttl", v.to_string());
+        }
     }
 }
 
@@ -258,6 +268,7 @@ mod test {
             "properties.fetch.max.bytes".to_owned() => "114514".to_owned(),
             "properties.enable.auto.commit".to_owned() => "true".to_owned(),
             "properties.fetch.queue.backoff.ms".to_owned() => "114514".to_owned(),
+            "properties.broker.address.ttl".to_owned() => "86400000".to_owned(),
             // PrivateLink
             "broker.rewrite.endpoints".to_owned() => "{\"broker1\": \"10.0.0.1:8001\"}".to_owned(),
         };
