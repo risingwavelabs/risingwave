@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -127,6 +127,7 @@ impl KinesisSplitReader {
     #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
+        let mut provisioned_throughput_exceeded_start_time: Option<Instant> = None;
         loop {
             if self.shard_iter.is_none() {
                 tracing::warn!(
@@ -182,6 +183,9 @@ impl KinesisSplitReader {
                         self.shard_id,
                         self.latest_offset
                     );
+
+                    // reset the provisioned throughput exceeded time
+                    provisioned_throughput_exceeded_start_time = None;
                     yield chunk;
                 }
                 Err(SdkError::ServiceError(e)) if e.err().is_resource_not_found_exception() => {
@@ -201,11 +205,19 @@ impl KinesisSplitReader {
                 Err(SdkError::ServiceError(e))
                     if e.err().is_provisioned_throughput_exceeded_exception() =>
                 {
-                    tracing::warn!(
-                        "stream {:?} shard {:?} throughput exceeded, retry",
-                        self.stream_name,
-                        self.shard_id
-                    );
+                    if let Some(start_time) = provisioned_throughput_exceeded_start_time
+                        && start_time.elapsed() > Duration::from_secs(5)
+                    {
+                        tracing::warn!(
+                            "stream {:?} shard {:?} has been throttled for {} seconds, retry",
+                            self.stream_name,
+                            self.shard_id,
+                            start_time.elapsed().as_secs()
+                        );
+                    } else if provisioned_throughput_exceeded_start_time.is_none() {
+                        provisioned_throughput_exceeded_start_time = Some(Instant::now());
+                    }
+
                     self.new_shard_iter().await?;
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
