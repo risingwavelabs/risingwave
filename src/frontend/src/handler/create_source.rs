@@ -810,6 +810,7 @@ pub async fn bind_create_source_or_table_with_connector(
         )
         .into());
     }
+
     if is_create_source {
         match format_encode.format {
             Format::Upsert

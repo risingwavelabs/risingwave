@@ -571,13 +571,13 @@ impl ConnectorProperties {
     }
 
     pub fn enforce_secret_on_cloud(
-        with_properties: &WithOptionsSecResolved,
+        with_properties: &impl WithPropertiesExt,
     ) -> crate::error::ConnectorResult<()> {
         let connector = with_properties
             .get_connector()
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
             .to_lowercase();
-        let key_iter = with_properties.keys().map(|s| s.as_str());
+        let key_iter = with_properties.key_iter();
         match_source_name_str!(
             connector.as_str(),
             PropType,
@@ -857,12 +857,11 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 mod tests {
     use maplit::*;
     use nexmark::event::EventType;
+    use risingwave_common::telemetry::TELEMETRY_RISINGWAVE_CLOUD_UUID;
 
     use super::*;
     use crate::source::cdc::{DebeziumCdcSplit, Mysql};
     use crate::source::kafka::KafkaSplit;
-
-    use risingwave_common::telemetry::TELEMETRY_RISINGWAVE_CLOUD_UUID;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
@@ -951,7 +950,7 @@ mod tests {
 
     #[test]
     fn test_enforce_secret_on_cloud() {
-        use std::env::{set_var, remove_var};
+        use std::env::{remove_var, set_var};
 
         let props = convert_args!(btreemap!(
             "connector" => "kafka",
@@ -967,9 +966,13 @@ mod tests {
 
         let props_with_secret = WithOptionsSecResolved::without_secrets(props.clone());
         assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_ok());
-        unsafe {set_var(TELEMETRY_RISINGWAVE_CLOUD_UUID, "demo_cloud_uuid");}
+        unsafe {
+            set_var(TELEMETRY_RISINGWAVE_CLOUD_UUID, "demo_cloud_uuid");
+        }
         assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_err());
-        unsafe {remove_var(TELEMETRY_RISINGWAVE_CLOUD_UUID);}
+        unsafe {
+            remove_var(TELEMETRY_RISINGWAVE_CLOUD_UUID);
+        }
     }
 
     #[test]

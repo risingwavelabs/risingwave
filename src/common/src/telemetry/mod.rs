@@ -39,8 +39,9 @@ pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
 const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test";
-pub use risingwave_telemetry_event::TELEMETRY_RISINGWAVE_CLOUD_UUID;
-pub use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
+pub use risingwave_telemetry_event::{
+    TELEMETRY_RISINGWAVE_CLOUD_UUID, get_telemetry_risingwave_cloud_uuid,
+};
 
 pub fn is_cloud_hosted() -> bool {
     get_telemetry_risingwave_cloud_uuid().is_some()
