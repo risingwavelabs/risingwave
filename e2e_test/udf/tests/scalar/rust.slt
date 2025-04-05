@@ -1,0 +1,88 @@
+statement ok
+create function int_42() returns int language rust as $$
+    fn int_42() -> i32 {
+        42
+    }
+$$;
+
+statement ok
+create function gcd(int, int) returns int language rust as $$
+    fn gcd(mut a: i32, mut b: i32) -> i32 {
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    }
+$$;
+
+statement ok
+create function decimal_add(a decimal, b decimal) returns decimal language rust as $$
+    fn decimal_add(a: Decimal, b: Decimal) -> Decimal {
+        a + b
+    }
+$$;
+
+statement ok
+create function datetime(d date, t time) returns timestamp language rust as $$
+    fn datetime(date: NaiveDate, time: NaiveTime) -> NaiveDateTime {
+        NaiveDateTime::new(date, time)
+    }
+$$;
+
+statement ok
+create function jsonb_access(json jsonb, index int) returns jsonb language rust as $$
+    fn jsonb_access(json: serde_json::Value, index: i32) -> Option<serde_json::Value> {
+        json.get(index as usize).cloned()
+    }
+$$;
+
+statement ok
+create function sum_array(integer[]) returns integer language rust as $$
+    fn sum_array(xs: &[i32]) -> i32 {
+        xs.iter().sum()
+    }
+$$;
+
+statement ok
+create function key_value(varchar) returns struct<key varchar, value varchar> language rust as $$
+    #[derive(StructType)]
+    struct KeyValue<'a> {
+        key: &'a str,
+        value: &'a str,
+    }
+    #[function("key_value(varchar) -> struct KeyValue")]
+    fn key_value(kv: &str) -> Option<KeyValue<'_>> {
+        let (key, value) = kv.split_once('=')?;
+        Some(KeyValue { key, value })
+    }
+$$;
+
+# TODO(rc): Rust version of `return_all`
+include ./fallback/return_all.slt.part
+
+statement ok
+create function series(n int) returns table (x int) language rust as $$
+    fn series(n: i32) -> impl Iterator<Item = i32> {
+        (0..n).into_iter()
+    }
+$$;
+
+statement ok
+create function key_values(varchar) returns table (key varchar, value varchar) language rust as $$
+    #[derive(StructType)]
+    struct KeyValue<'a> {
+        // note that field names are case-insensitive
+        key: &'a str,
+        value: &'a str,
+    }
+    #[function("key_values(varchar) -> setof struct KeyValue")]
+    fn key_values(kv: &str) -> impl Iterator<Item = KeyValue<'_>> {
+        kv.split(',').filter_map(|kv| {
+            kv.split_once('=')
+                .map(|(key, value)| KeyValue { key, value })
+        })
+    }
+$$;
+
+include ./test.slt.part
+include ./drop.slt.part

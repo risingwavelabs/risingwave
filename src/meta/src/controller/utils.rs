@@ -58,13 +58,13 @@ use sea_orm::sea_query::{
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DerivePartialModel, EntityTrait,
-    FromQueryResult, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Set,
-    Statement,
+    FromQueryResult, IntoActiveModel, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait, Set, Statement,
 };
 use thiserror_ext::AsReport;
 
 use crate::controller::ObjectModel;
-use crate::model::FragmentActorDispatchers;
+use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -906,6 +906,37 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::ConnectionId(id)
         | PbGrantObject::SecretId(id) => *id as _,
     }
+}
+
+pub async fn insert_fragment_relations(
+    db: &impl ConnectionTrait,
+    downstream_fragment_relations: &FragmentDownstreamRelation,
+) -> MetaResult<()> {
+    for (upstream_fragment_id, downstreams) in downstream_fragment_relations {
+        for downstream in downstreams {
+            let relation = fragment_relation::Model {
+                source_fragment_id: *upstream_fragment_id as _,
+                target_fragment_id: downstream.downstream_fragment_id as _,
+                dispatcher_type: downstream.dispatcher_type,
+                dist_key_indices: downstream
+                    .dist_key_indices
+                    .iter()
+                    .map(|idx| *idx as i32)
+                    .collect_vec()
+                    .into(),
+                output_indices: downstream
+                    .output_indices
+                    .iter()
+                    .map(|idx| *idx as i32)
+                    .collect_vec()
+                    .into(),
+            };
+            FragmentRelation::insert(relation.into_active_model())
+                .exec(db)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn get_fragment_actor_dispatchers<C>(

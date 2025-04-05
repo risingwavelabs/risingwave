@@ -49,7 +49,7 @@ MAIN_CRON_TEST_MAP = {
     "upload-micro-benchmarks": ["noelkwan"],
     "backwards-compat-tests": ["noelkwan"],
     "sqlsmith-differential-tests": ["noelkwan"],
-    "backfill-tests": ["noelkwan"],
+    "backfill-tests": ["noelkwan", "yiming"],
     "e2e-standalone-binary-tests": ["noelkwan"],
     "e2e-single-node-binary-tests": ["pin", "peng", "noelkwan"],
     "e2e-test-opendal-parallel": ["congyi"],

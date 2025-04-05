@@ -120,12 +120,12 @@ pub enum LogStoreReadItem {
     },
     Barrier {
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        is_stop: bool,
     },
-    UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
-pub trait LogWriterPostFlushCurrentEpochFn<'a> =
-    FnOnce(Option<Arc<Bitmap>>) -> BoxFuture<'a, LogStoreResult<()>>;
+pub trait LogWriterPostFlushCurrentEpochFn<'a> = FnOnce() -> BoxFuture<'a, LogStoreResult<()>>;
 
 #[must_use]
 pub struct LogWriterPostFlushCurrentEpoch<'a>(
@@ -137,9 +137,15 @@ impl<'a> LogWriterPostFlushCurrentEpoch<'a> {
         Self(Box::new(f))
     }
 
-    pub async fn post_yield_barrier(self, new_vnodes: Option<Arc<Bitmap>>) -> LogStoreResult<()> {
-        self.0(new_vnodes).await
+    pub async fn post_yield_barrier(self) -> LogStoreResult<()> {
+        self.0().await
     }
+}
+
+pub struct FlushCurrentEpochOptions {
+    pub is_checkpoint: bool,
+    pub new_vnode_bitmap: Option<Arc<Bitmap>>,
+    pub is_stop: bool,
 }
 
 pub trait LogWriter: Send {
@@ -160,7 +166,7 @@ pub trait LogWriter: Send {
     fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
+        options: FlushCurrentEpochOptions,
     ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
@@ -407,7 +413,6 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
                         self.next_chunk_id = 0;
                         Ok(Either::Right((epoch, item)))
                     }
-                    LogStoreReadItem::UpdateVnodeBitmap(_) => Ok(Either::Right((epoch, item))),
                 }
             }
         }
@@ -534,7 +539,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                             return self.apply_rate_limit(split_chunk).await;
                         },
                         Either::Right(item) => {
-                            assert!(matches!(item.1, LogStoreReadItem::Barrier{..} | LogStoreReadItem::UpdateVnodeBitmap(_)));
+                            assert!(matches!(item.1, LogStoreReadItem::Barrier{..}));
                             return Ok(item);
                         },
                     }
@@ -645,12 +650,9 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
     async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
+        options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
-        let post_flush = self
-            .inner
-            .flush_current_epoch(next_epoch, is_checkpoint)
-            .await?;
+        let post_flush = self.inner.flush_current_epoch(next_epoch, options).await?;
         self.metrics
             .log_store_latest_write_epoch
             .set(next_epoch as _);

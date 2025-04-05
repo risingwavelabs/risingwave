@@ -368,7 +368,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
     > + Send {
         self.state.read_persisted_log_store(
-            &self.metrics,
+            self.metrics.persistent_log_read_metrics.clone(),
             self.first_write_epoch.expect("should have init"),
             range_start,
         )
@@ -491,7 +491,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                             }
                             KvLogStoreItem::Barrier { is_checkpoint } => {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
-                                LogStoreReadItem::Barrier { is_checkpoint }
+                                LogStoreReadItem::Barrier {
+                                    is_checkpoint,
+                                    new_vnode_bitmap: None,
+                                    is_stop: false,
+                                }
                             }
                         };
                         return Ok((epoch, item));
@@ -600,7 +604,14 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     item_epoch
                 );
                 self.latest_offset = Some(TruncateOffset::Barrier { epoch: item_epoch });
-                (item_epoch, LogStoreReadItem::Barrier { is_checkpoint })
+                (
+                    item_epoch,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
+                    },
+                )
             }
         })
     }
@@ -667,7 +678,11 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         let table_id = self.table_id;
         async move {
             tracing::trace!(
-                "reading flushed chunk from buffer: start_seq_id: {start_seq_id}, end_seq_id: {end_seq_id}, chunk_id: {chunk_id}"
+                start_seq_id,
+                end_seq_id,
+                chunk_id,
+                item_epoch,
+                "reading flushed chunk"
             );
             let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let range_start =
@@ -684,7 +699,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                                 (Included(range_start), Included(range_end)),
                                 ReadOptions {
                                     prefetch_options:
-                                    PrefetchOptions::prefetch_for_large_range_scan(),
+                                        PrefetchOptions::prefetch_for_large_range_scan(),
                                     cache_policy: CachePolicy::Fill(CacheHint::Low),
                                     table_id,
                                     ..Default::default()
@@ -694,8 +709,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     )
                 }
             }))
-                .instrument_await("Wait Create Iter Stream")
-                .await?;
+            .instrument_await("Wait Create Iter Stream")
+            .await?;
 
             let chunk = serde
                 .deserialize_stream_chunk(
@@ -709,7 +724,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .await?;
 
             Ok((chunk_id, chunk, item_epoch))
-        }.instrument_await("Read Flushed Chunk")
+        }
+        .instrument_await("Read Flushed Chunk")
     }
 }
 
@@ -723,7 +739,7 @@ pub(crate) enum LogStoreReadStateStreamRangeStart {
 impl<S: StateStoreRead> LogStoreReadState<S> {
     pub(crate) fn read_persisted_log_store(
         &self,
-        metrics: &KvLogStoreMetrics,
+        read_metrics: KvLogStoreReadMetrics,
         first_write_epoch: u64,
         range_start: LogStoreReadStateStreamRangeStart,
     ) -> impl Future<
@@ -744,7 +760,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         let range_end = serde.serialize_pk_epoch_prefix(first_write_epoch);
 
         let state_store = self.state_store.clone();
-        let read_metrics = metrics.persistent_log_read_metrics.clone();
         let table_id = self.table_id;
         let streams_future = try_join_all(self.serde.vnodes().iter_vnodes().map(move |vnode| {
             let key_range = prefixed_range_with_vnode(

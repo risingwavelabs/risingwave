@@ -71,9 +71,6 @@ cluster_stop() {
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-# preparing for external java udf tests
-mkdir -p e2e_test/udf/java/target/
-buildkite-agent artifact download udf.jar e2e_test/udf/java/target/
 # preparing for extended mode tests
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
@@ -116,10 +113,6 @@ python3 ./e2e_test/subscription/main.py
 
 echo "--- e2e, $mode, Apache Superset"
 risedev slt -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
-
-echo "--- e2e, $mode, external udf"
-python3 -m pip install --break-system-packages arrow-udf==0.3.0
-risedev slt -p 4566 -d dev './e2e_test/udf/external/main.slt'
 
 echo "--- Kill cluster"
 cluster_stop

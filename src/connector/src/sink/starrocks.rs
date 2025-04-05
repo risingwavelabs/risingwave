@@ -22,7 +22,6 @@ use bytes::Bytes;
 use mysql_async::Opts;
 use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
@@ -586,10 +585,6 @@ impl SinkWriter for StarrocksSinkWriter {
             tracing::debug!(?txn_label, "rollback transaction");
             self.txn_client.rollback(txn_label).await?;
         }
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }

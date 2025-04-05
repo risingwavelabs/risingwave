@@ -120,7 +120,7 @@ impl CoordinatorStreamHandle {
         Ok(())
     }
 
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub async fn stop(mut self) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::Stop(true)),
         })

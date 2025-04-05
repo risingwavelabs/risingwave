@@ -16,10 +16,10 @@ use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_storage::StateStore;
 use tokio::time::Duration;
 
+use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{KV_LOG_STORE_V2_INFO, KvLogStoreMetrics};
 use crate::error::StreamResult;
-use crate::executor::{Executor, SyncedKvLogStoreExecutor};
+use crate::executor::{Executor, SyncedKvLogStoreExecutor, SyncedKvLogStoreMetrics};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -43,7 +43,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             let join_fragment_id = 0;
             let name = "sync_log_store";
             let target = "unaligned_hash_join";
-            KvLogStoreMetrics::new_inner(
+            SyncedKvLogStoreMetrics::new(
                 streaming_metrics,
                 actor_id,
                 join_fragment_id,
@@ -61,6 +61,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
 
         let pause_duration_ms = node.pause_duration_ms as _;
         let buffer_max_size = node.buffer_size as usize;
+        let chunk_size = actor_context.streaming_config.developer.chunk_size as u32;
 
         let executor = SyncedKvLogStoreExecutor::new(
             actor_context,
@@ -69,6 +70,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             serde,
             store,
             buffer_max_size,
+            chunk_size,
             upstream,
             Duration::from_millis(pause_duration_ms),
         );

@@ -14,6 +14,7 @@
 
 use std::collections::VecDeque;
 use std::marker::PhantomData;
+use std::num::NonZero;
 use std::ops::Deref;
 use std::pin::pin;
 use std::time::Instant;
@@ -64,9 +65,9 @@ use super::elasticsearch_opensearch::elasticsearch_converter::{
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
 use crate::error::ConnectorResult;
-use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::writer::SinkWriter;
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
     SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
@@ -311,7 +312,7 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
@@ -405,7 +406,7 @@ impl LogSinker for RemoteLogSinker {
                                         epoch,
                                         chunk_id: batch_id as _,
                                     },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -424,7 +425,7 @@ impl LogSinker for RemoteLogSinker {
                                 truncate_matched_offset(
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -465,7 +466,7 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Chunk { epoch, chunk_id }, None));
                             }
-                            LogStoreReadItem::Barrier { is_checkpoint } => {
+                            LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                                 let offset = TruncateOffset::Barrier { epoch };
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;
@@ -492,7 +493,6 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Barrier { epoch }, start_time));
                             }
-                            LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                         }
                     }
                 }
@@ -525,7 +525,7 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     type Coordinator = RemoteCoordinator;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
@@ -536,22 +536,13 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let metrics = SinkWriterMetrics::new(&writer_param);
-        Ok(CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
+        CoordinatedLogSinker::new(
+            &writer_param,
             self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
             CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
+            NonZero::new(1).unwrap(),
         )
-        .await?
-        .into_log_sinker(metrics))
+        .await
     }
 
     fn is_coordinated_sink(&self) -> bool {

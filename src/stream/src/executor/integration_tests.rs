@@ -73,11 +73,12 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel_for_test();
         let actor_future = async move {
             let input = Executor::new(
-                ExecutorInfo {
-                    schema: input_schema,
-                    pk_indices: PkIndices::new(),
-                    identity: "ReceiverExecutor".to_owned(),
-                },
+                ExecutorInfo::new(
+                    input_schema,
+                    PkIndices::new(),
+                    "ReceiverExecutor".to_owned(),
+                    0,
+                ),
                 ReceiverExecutor::for_test(
                     actor_id,
                     input_rx,
@@ -143,12 +144,13 @@ async fn test_merger_sum_aggr() {
         let expr_context = expr_context.clone();
         async move {
             let receiver_op = Executor::new(
-                ExecutorInfo {
+                ExecutorInfo::new(
                     // input schema of local simple agg
-                    schema: Schema::new(vec![Field::unnamed(DataType::Int64)]),
-                    pk_indices: PkIndices::new(),
-                    identity: "ReceiverExecutor".to_owned(),
-                },
+                    Schema::new(vec![Field::unnamed(DataType::Int64)]),
+                    PkIndices::new(),
+                    "ReceiverExecutor".to_owned(),
+                    0,
+                ),
                 ReceiverExecutor::for_test(
                     actor_id,
                     rx,
@@ -199,12 +201,13 @@ async fn test_merger_sum_aggr() {
                 Field::unnamed(DataType::Int64),
             ]);
             let merger = Executor::new(
-                ExecutorInfo {
+                ExecutorInfo::new(
                     // output schema of local simple agg
-                    schema: schema.clone(),
-                    pk_indices: PkIndices::new(),
-                    identity: "MergeExecutor".to_owned(),
-                },
+                    schema.clone(),
+                    PkIndices::new(),
+                    "MergeExecutor".to_owned(),
+                    0,
+                ),
                 MergeExecutor::for_test(
                     actor_ctx.id,
                     outputs,
