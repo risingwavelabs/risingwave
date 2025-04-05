@@ -884,6 +884,9 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
+    // check enforce using secret for some props on cloud
+    ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
+
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_properties,
