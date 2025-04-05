@@ -28,8 +28,8 @@ use with_options::WithOptions;
 use self::source::reader::PulsarSplitReader;
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
-use crate::source::SourceProperties;
 use crate::error::ConnectorError;
+use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
@@ -48,7 +48,9 @@ impl crate::source::UnknownFields for PulsarProperties {
 }
 
 impl EnforceSecretOnCloud for PulsarProperties {
-    fn enforce_secret_on_cloud<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> Result<(), ConnectorError> {
         for prop in prop_iter {
             PulsarCommon::enforce_one(prop)?;
         }

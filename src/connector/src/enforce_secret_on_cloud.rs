@@ -12,22 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
-use once_cell::sync::Lazy;
+use phf::{Set, phf_set};
 use risingwave_common::telemetry::is_cloud_hosted;
 
 use crate::error::ConnectorResult as Result;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnforceSecretOnCloudError {
-    #[error("{} is enforced to be a SECRET on RisingWave Cloud", .0)]
+    #[error("{} is enforced to be a SECRET on RisingWave Cloud, please use `CREATE SECRET` first", .0)]
     SecretProperty(String),
 }
 
 pub trait EnforceSecretOnCloud {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Lazy<HashSet<&'static str>> =
-        Lazy::new(|| HashSet::new());
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {};
 
     fn enforce_secret_on_cloud<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<()> {
         if !is_cloud_hosted() {
@@ -35,7 +32,7 @@ pub trait EnforceSecretOnCloud {
         }
         for prop in prop_iter {
             if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
-                return Err(EnforceSecretOnCloudError::SecretProperty(prop.to_string()).into());
+                return Err(EnforceSecretOnCloudError::SecretProperty(prop.to_owned()).into());
             }
         }
         Ok(())
@@ -46,7 +43,7 @@ pub trait EnforceSecretOnCloud {
             return Ok(());
         }
         if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
-            return Err(EnforceSecretOnCloudError::SecretProperty(prop.to_string()).into());
+            return Err(EnforceSecretOnCloudError::SecretProperty(prop.to_owned()).into());
         }
         Ok(())
     }

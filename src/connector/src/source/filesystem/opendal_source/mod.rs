@@ -26,9 +26,8 @@ use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
-use std::collections::HashSet;
 
-use once_cell::sync::Lazy;
+use phf::{Set, phf_set};
 
 use self::opendal_reader::OpendalReader;
 use super::OpendalFsSplit;
@@ -83,8 +82,10 @@ pub struct GcsProperties {
 }
 
 impl EnforceSecretOnCloud for GcsProperties {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Lazy<HashSet<&'static str>> =
-        Lazy::new(|| HashSet::from(["gcs.credential", "gcs.service_account"]));
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "gcs.credential",
+        "gcs.service_account"
+    };
 }
 
 impl UnknownFields for GcsProperties {
@@ -245,12 +246,10 @@ pub struct AzblobProperties {
 }
 
 impl EnforceSecretOnCloud for AzblobProperties {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Lazy<HashSet<&'static str>> = Lazy::new(|| {
-        HashSet::from([
-            "azblob.credentials.account_key",
-            "azblob.credentials.account_name",
-        ])
-    });
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "azblob.credentials.account_key",
+        "azblob.credentials.account_name",
+    };
 }
 
 impl UnknownFields for AzblobProperties {

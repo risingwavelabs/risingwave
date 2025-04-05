@@ -13,9 +13,7 @@
 // limitations under the License.
 pub mod enumerator;
 
-use std::collections::HashSet;
-
-use once_cell::sync::Lazy;
+use phf::{Set, phf_set};
 use serde::Deserialize;
 
 use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
@@ -48,8 +46,10 @@ pub struct S3PropertiesCommon {
 }
 
 impl EnforceSecretOnCloud for S3PropertiesCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Lazy<HashSet<&'static str>> =
-        Lazy::new(|| HashSet::from(["s3.credentials.access", "s3.credentials.secret"]));
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "s3.credentials.access",
+        "s3.credentials.secret",
+    };
 }
 
 #[derive(Debug, Clone, PartialEq)]
