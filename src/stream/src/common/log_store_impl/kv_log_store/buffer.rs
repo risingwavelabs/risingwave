@@ -24,23 +24,23 @@ use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOff
 use tokio::sync::Notify;
 
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
+    KvLogStoreMetrics, ReaderTruncationOffsetType, SeqId,
 };
 
 #[derive(Clone)]
 pub(crate) enum LogStoreBufferItem {
     StreamChunk {
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         flushed: bool,
         chunk_id: ChunkId,
     },
 
     Flushed {
         vnode_bitmap: Bitmap,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         chunk_id: ChunkId,
     },
 
@@ -118,8 +118,8 @@ impl LogStoreBufferInner {
         &mut self,
         epoch: u64,
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> Option<StreamChunk> {
         if !self.can_add_stream_chunk() {
             Some(chunk)
@@ -155,8 +155,8 @@ impl LogStoreBufferInner {
     fn add_flushed(
         &mut self,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         new_vnode_bitmap: Bitmap,
     ) {
         if let Some((
@@ -257,8 +257,8 @@ impl LogStoreBufferSender {
     pub(crate) fn add_flushed(
         &self,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         vnode_bitmap: Bitmap,
     ) {
         self.buffer
@@ -271,8 +271,8 @@ impl LogStoreBufferSender {
         &self,
         epoch: u64,
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> Option<StreamChunk> {
         let ret = self
             .buffer
@@ -309,7 +309,7 @@ impl LogStoreBufferSender {
 
     pub(crate) fn flush_all_unflushed(
         &mut self,
-        mut flush_fn: impl FnMut(&StreamChunk, u64, SeqIdType, SeqIdType) -> LogStoreResult<()>,
+        mut flush_fn: impl FnMut(&StreamChunk, u64, SeqId, SeqId) -> LogStoreResult<()>,
     ) -> LogStoreResult<()> {
         let mut inner_guard = self.buffer.inner();
         let inner = inner_guard.deref_mut();

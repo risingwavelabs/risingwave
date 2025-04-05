@@ -93,7 +93,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqIdType,
+    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -352,8 +352,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
 struct FlushedChunkInfo {
     epoch: u64,
-    start_seq_id: SeqIdType,
-    end_seq_id: SeqIdType,
+    start_seq_id: SeqId,
+    end_seq_id: SeqId,
     flush_info: FlushInfo,
     vnode_bitmap: Bitmap,
 }
@@ -381,8 +381,8 @@ enum WriteFuture<S: LocalStateStore> {
     },
     FlushingChunk {
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         future: Pin<Box<LogStoreStateWriteChunkFuture<S>>>,
         stream: BoxedMessageStream,
     },
@@ -400,8 +400,8 @@ impl<S: LocalStateStore> WriteFuture<S> {
         write_state: LogStoreWriteState<S>,
         chunk: StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> Self {
         tracing::trace!(
             start_seq_id,
@@ -665,7 +665,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     }
                                     Message::Chunk(chunk) => {
                                         let start_seq_id = seq_id;
-                                        let new_seq_id = seq_id + chunk.cardinality() as SeqIdType;
+                                        let new_seq_id = seq_id + chunk.cardinality() as SeqId;
                                         let end_seq_id = new_seq_id - 1;
                                         let epoch = write_state.epoch().curr;
                                         tracing::trace!(
@@ -956,8 +956,8 @@ impl SyncedLogStoreBuffer {
 
     fn add_or_flush_chunk(
         &mut self,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         chunk: StreamChunk,
         epoch: u64,
     ) -> Option<StreamChunk> {
@@ -985,8 +985,8 @@ impl SyncedLogStoreBuffer {
     /// This doesn't contain any data, but it contains the metadata to read the flushed chunk.
     fn add_flushed_item_to_buffer(
         &mut self,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         new_vnode_bitmap: Bitmap,
         epoch: u64,
     ) {
@@ -1041,8 +1041,8 @@ impl SyncedLogStoreBuffer {
     fn add_chunk_to_buffer(
         &mut self,
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         epoch: u64,
     ) {
         let chunk_id = self.next_chunk_id;

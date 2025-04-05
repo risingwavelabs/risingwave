@@ -31,9 +31,7 @@ use risingwave_storage::store::{
 };
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{
-    FlushInfo, ReaderTruncationOffsetType, SeqIdType,
-};
+use crate::common::log_store_impl::kv_log_store::{FlushInfo, ReaderTruncationOffsetType, SeqId};
 
 pub(crate) struct LogStoreReadState<S: StateStoreRead> {
     pub(super) table_id: TableId,
@@ -181,8 +179,8 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         mut self,
         chunk: StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> LogStoreStateWriteChunkFuture<S> {
         async move {
             let result = try {
@@ -210,12 +208,12 @@ impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
         &mut self,
         chunk: &StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> LogStoreResult<()> {
         tracing::trace!(epoch, start_seq_id, end_seq_id, "write_chunk");
         for (i, (op, row)) in chunk.rows().enumerate() {
-            let seq_id = start_seq_id + (i as SeqIdType);
+            let seq_id = start_seq_id + (i as SeqId);
             assert!(seq_id <= end_seq_id);
             let (vnode, key, value) = self.inner.serde.serialize_data_row(epoch, seq_id, op, row);
             if let Some(written_vnodes) = &mut self.written_vnodes {
