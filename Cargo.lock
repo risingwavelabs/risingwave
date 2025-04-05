@@ -5563,12 +5563,13 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-bigquery"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53c74d23c9a4da78184e6c9d4e12f14f0ce86d96d6d9c8cc3308d803019a0d7"
+checksum = "f09bf057f5a44f4975252492feea3a7b26ca0693cbe12511317504c3c02fca5e"
 dependencies = [
  "anyhow",
  "arrow 53.2.0",
+ "async-stream",
  "async-trait",
  "backon 1.2.0",
  "base64 0.21.7",
@@ -5578,6 +5579,7 @@ dependencies = [
  "google-cloud-googleapis",
  "google-cloud-token",
  "num-bigint",
+ "prost-types 0.13.4",
  "reqwest 0.12.4",
  "reqwest-middleware",
  "serde",
