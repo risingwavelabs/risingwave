@@ -214,7 +214,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             }
         }
 
-        {
+
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
@@ -234,7 +234,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             self.recovery(paused, RecoveryReason::Bootstrap)
                 .instrument(span)
                 .await;
-        }
+
 
         self.run_inner(shutdown_rx).await
     }
