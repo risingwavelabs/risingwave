@@ -1026,6 +1026,52 @@ mod tests {
     const EPOCH1: u64 = test_epoch(2);
     const EPOCH2: u64 = test_epoch(3);
 
+    fn assert_value_eq(expected: LogStoreOp, actual: LogStoreOp) {
+        match (expected, actual) {
+            (
+                LogStoreOp::Barrier {
+                    is_checkpoint: expected_is_checkpoint,
+                },
+                LogStoreOp::Barrier {
+                    is_checkpoint: actual_is_checkpoint,
+                },
+            ) => {
+                assert_eq!(expected_is_checkpoint, actual_is_checkpoint);
+            }
+            (
+                LogStoreOp::Row {
+                    op: expected_op,
+                    row: expected_row,
+                    ..
+                },
+                LogStoreOp::Row {
+                    op: actual_op,
+                    row: actual_row,
+                    ..
+                },
+            ) => {
+                assert_eq!(expected_op, actual_op);
+                assert_eq!(expected_row, actual_row);
+            }
+            (
+                LogStoreOp::Update {
+                    old_value: expected_old_value,
+                    new_value: expected_new_value,
+                    ..
+                },
+                LogStoreOp::Update {
+                    old_value: actual_old_value,
+                    new_value: actual_new_value,
+                    ..
+                },
+            ) => {
+                assert_eq!(expected_old_value, actual_old_value);
+                assert_eq!(expected_new_value, actual_new_value);
+            }
+            (e, a) => panic!("expected: {:?}, got: {:?}", e, a),
+        }
+    }
+
     #[test]
     fn test_serde_v1() {
         #[expect(deprecated)]
@@ -1070,12 +1116,13 @@ mod tests {
             let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
-            let (decoded_epoch, _, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
                     row: deserialized_row,
+                    ..
                 } => {
                     assert_eq!(&op, &deserialized_op);
                     assert_eq!(row.to_owned_row(), deserialized_row);
@@ -1088,7 +1135,7 @@ mod tests {
         let (key, encoded_barrier) = serde.serialize_barrier(epoch, SINGLETON_VNODE, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_barrier).unwrap() {
-            (decoded_epoch, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
                 assert_eq!(decoded_epoch, epoch);
             }
@@ -1108,12 +1155,13 @@ mod tests {
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
-            let (decoded_epoch, _, row_op) = serde.deserialize(&value).unwrap();
+            let (decoded_epoch, row_op) = serde.deserialize(&value).unwrap();
             assert_eq!(decoded_epoch, epoch);
             match row_op {
                 LogStoreRowOp::Row {
                     op: deserialized_op,
                     row: deserialized_row,
+                    ..
                 } => {
                     assert_eq!(&op, &deserialized_op);
                     assert_eq!(row.to_owned_row(), deserialized_row);
@@ -1127,7 +1175,7 @@ mod tests {
             serde.serialize_barrier(epoch, SINGLETON_VNODE, true);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(&encoded_checkpoint_barrier).unwrap() {
-            (decoded_epoch, _, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert_eq!(decoded_epoch, epoch);
                 assert!(is_checkpoint);
             }
@@ -1378,30 +1426,23 @@ mod tests {
             let mut j = 0;
             while j < ops[i].len() {
                 let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                assert_eq!(EPOCH1, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
-                    assert_eq!(
-                        (
-                            EPOCH1,
-                            LogStoreOp::Update {
-                                old_value: rows[i][j].clone(),
-                                new_value: rows[i][j + 1].clone()
-                            }
-                        ),
-                        (epoch, op)
-                    );
+                    let expected_op = LogStoreOp::Update {
+                        seq_id: 0,
+                        old_value: rows[i][j].clone(),
+                        new_value: rows[i][j + 1].clone(),
+                    };
+                    assert_value_eq(expected_op, op);
                     j += 2;
                 } else {
-                    assert_eq!(
-                        (
-                            EPOCH1,
-                            LogStoreOp::Row {
-                                op: ops[i][j],
-                                row: rows[i][j].clone(),
-                            }
-                        ),
-                        (epoch, op)
-                    );
+                    let expected_op = LogStoreOp::Row {
+                        seq_id: 0,
+                        op: ops[i][j],
+                        row: rows[i][j].clone(),
+                    };
+                    assert_value_eq(expected_op, op);
                     j += 1;
                 }
             }
@@ -1428,30 +1469,23 @@ mod tests {
             let mut j = 0;
             while j < ops[i].len() {
                 let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                assert_eq!(EPOCH2, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
-                    assert_eq!(
-                        (
-                            EPOCH2,
-                            LogStoreOp::Update {
-                                old_value: rows[i][j].clone(),
-                                new_value: rows[i][j + 1].clone()
-                            }
-                        ),
-                        (epoch, op)
-                    );
+                    let expected_op = LogStoreOp::Update {
+                        seq_id: 0,
+                        old_value: rows[i][j].clone(),
+                        new_value: rows[i][j + 1].clone(),
+                    };
+                    assert_value_eq(expected_op, op);
                     j += 2;
                 } else {
-                    assert_eq!(
-                        (
-                            EPOCH2,
-                            LogStoreOp::Row {
-                                op: ops[i][j],
-                                row: rows[i][j].clone(),
-                            }
-                        ),
-                        (epoch, op)
-                    );
+                    let expected_op = LogStoreOp::Row {
+                        seq_id: 0,
+                        op: ops[i][j],
+                        row: rows[i][j].clone(),
+                    };
+                    assert_value_eq(expected_op, op);
                     j += 1;
                 }
             }
