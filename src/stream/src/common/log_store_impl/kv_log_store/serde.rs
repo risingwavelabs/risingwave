@@ -670,6 +670,7 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
 
+    #[expect(dead_code)]
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
         pub vnode: VirtualNode,
