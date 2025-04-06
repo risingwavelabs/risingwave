@@ -89,17 +89,25 @@ impl ReadInfo {
 
 #[derive(Debug)]
 enum LogStoreRowOp {
-    Row { op: Op, row: OwnedRow },
-    Barrier { is_checkpoint: bool },
+    Row {
+        seq_id: SeqId,
+        op: Op,
+        row: OwnedRow,
+    },
+    Barrier {
+        is_checkpoint: bool,
+    },
 }
 
 #[derive(Debug, PartialEq)]
 enum LogStoreOp {
     Row {
+        seq_id: SeqId,
         op: Op,
         row: OwnedRow,
     },
     Update {
+        seq_id: SeqId,
         old_value: OwnedRow,
         new_value: OwnedRow,
     },
@@ -111,14 +119,14 @@ enum LogStoreOp {
 impl From<LogStoreRowOp> for LogStoreOp {
     fn from(value: LogStoreRowOp) -> Self {
         match value {
-            LogStoreRowOp::Row { op, row } => {
+            LogStoreRowOp::Row { seq_id, op, row } => {
                 if cfg!(debug_assertions) {
                     assert_ne!(op, Op::UpdateDelete);
                     assert_ne!(op, Op::UpdateInsert);
                 } else if op == Op::UpdateDelete || op == Op::UpdateInsert {
                     warn!(?op, "create LogStoreOp from single update op");
                 }
-                Self::Row { op, row }
+                Self::Row { seq_id, op, row }
             }
             LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier { is_checkpoint },
         }
@@ -346,10 +354,7 @@ impl LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
-    fn deserialize(
-        &self,
-        value_bytes: &[u8],
-    ) -> value_encoding::Result<(Epoch, Option<SeqId>, LogStoreRowOp)> {
+    fn deserialize(&self, value_bytes: &[u8]) -> value_encoding::Result<(Epoch, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(value_bytes)?;
 
         let payload_row = OwnedRow::new(row_data[self.pk_info.predefined_column_len()..].to_vec());
@@ -371,18 +376,22 @@ impl LogStoreRowSerde {
 
         let op = match row_op_code {
             INSERT_OP_CODE => LogStoreRowOp::Row {
+                seq_id: seq_id.expect("seq_id should be present for all rows"),
                 op: Op::Insert,
                 row: payload_row,
             },
             DELETE_OP_CODE => LogStoreRowOp::Row {
+                seq_id: seq_id.expect("seq_id should be present for all rows"),
                 op: Op::Delete,
                 row: payload_row,
             },
             UPDATE_INSERT_OP_CODE => LogStoreRowOp::Row {
+                seq_id: seq_id.expect("seq_id should be present for all rows"),
                 op: Op::UpdateInsert,
                 row: payload_row,
             },
             UPDATE_DELETE_OP_CODE => LogStoreRowOp::Row {
+                seq_id: seq_id.expect("seq_id should be present for all rows"),
                 op: Op::UpdateDelete,
                 row: payload_row,
             },
@@ -400,7 +409,7 @@ impl LogStoreRowSerde {
             }
             _ => unreachable!("invalid row op code: {}", row_op_code),
         };
-        Ok((epoch, seq_id, op))
+        Ok((epoch, op))
     }
 
     pub(crate) async fn deserialize_stream_chunk<I: StateStoreReadIter>(
@@ -427,7 +436,7 @@ impl LogStoreRowSerde {
             let op = row.op;
             let row_size = row.size;
             match (epoch, op) {
-                (epoch, LogStoreOp::Row { op, row }) => {
+                (epoch, LogStoreOp::Row { op, row, .. }) => {
                     if epoch != expected_epoch {
                         return Err(anyhow!(
                             "decoded epoch {} not match expected epoch {}",
@@ -451,6 +460,7 @@ impl LogStoreRowSerde {
                     LogStoreOp::Update {
                         new_value,
                         old_value,
+                        ..
                     },
                 ) => {
                     if epoch != expected_epoch {
@@ -592,7 +602,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         let mut read_info = ReadInfo::new();
         while let Some((epoch, row_op, row_read_size)) = this.next_op().await? {
             match row_op {
-                LogStoreOp::Row { op, row } => {
+                LogStoreOp::Row { op, row, .. } => {
                     read_info.read_one_row(row_read_size);
                     ops.push(op);
                     if let Some(chunk) = data_chunk_builder.append_one_row(row) {
@@ -607,6 +617,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                 LogStoreOp::Update {
                     new_value,
                     old_value,
+                    ..
                 } => {
                     read_info.read_update(row_read_size);
                     if !data_chunk_builder.can_append_update() {
@@ -659,11 +670,9 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
 
-    #[expect(dead_code)]
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
         pub epoch: u64,
-        pub seq_id: Option<SeqId>,
         pub op: LogStoreOp,
         pub size: usize,
     }
@@ -671,7 +680,6 @@ mod stream_de {
     #[derive(Debug)]
     pub(super) struct RawLogStoreRow {
         pub epoch: u64,
-        pub seq_id: Option<SeqId>,
         pub op: LogStoreRowOp,
         pub size: usize,
     }
@@ -686,13 +694,8 @@ mod stream_de {
         may_merge_update(
             iter.into_stream(move |(key, value)| -> StorageResult<RawLogStoreRow> {
                 let size = key.user_key.table_key.len() + value.len();
-                let (epoch, seq_id, op) = serde.deserialize(value)?;
-                Ok(RawLogStoreRow {
-                    epoch,
-                    seq_id,
-                    op,
-                    size,
-                })
+                let (epoch, op) = serde.deserialize(value)?;
+                Ok(RawLogStoreRow { epoch, op, size })
             })
             .map_err(Into::into),
         )
@@ -706,12 +709,12 @@ mod stream_de {
         pin_mut!(stream);
         while let Some(RawLogStoreRow {
             epoch,
-            seq_id,
             op,
             size: row_size,
         }) = stream.try_next().await?
         {
             if let LogStoreRowOp::Row {
+                seq_id,
                 op: Op::UpdateDelete,
                 row: old_value,
             } = op
@@ -721,8 +724,8 @@ mod stream_de {
                     let next_item_epoch = row.epoch;
                     let next_op = row.op;
                     let next_row_size = row.size;
-                    let next_seq_id = row.seq_id;
                     if let LogStoreRowOp::Row {
+                        seq_id: next_seq_id,
                         op: Op::UpdateInsert,
                         row: new_value,
                     } = next_op
@@ -736,8 +739,8 @@ mod stream_de {
                         }
                         yield LogStoreRow {
                             epoch,
-                            seq_id: next_seq_id,
                             op: LogStoreOp::Update {
+                                seq_id: next_seq_id,
                                 new_value,
                                 old_value,
                             },
@@ -755,8 +758,8 @@ mod stream_de {
                         }
                         yield LogStoreRow {
                             epoch,
-                            seq_id,
                             op: LogStoreOp::Row {
+                                seq_id,
                                 op: Op::UpdateDelete,
                                 row: old_value,
                             },
@@ -764,7 +767,6 @@ mod stream_de {
                         };
                         yield LogStoreRow {
                             epoch,
-                            seq_id,
                             op: LogStoreOp::from(next_op),
                             size: row_size,
                         };
@@ -778,8 +780,8 @@ mod stream_de {
                     }
                     yield LogStoreRow {
                         epoch,
-                        seq_id,
                         op: LogStoreOp::Row {
+                            seq_id,
                             op: Op::UpdateDelete,
                             row: old_value,
                         },
@@ -789,7 +791,6 @@ mod stream_de {
             } else {
                 yield LogStoreRow {
                     epoch,
-                    seq_id,
                     op: LogStoreOp::from(op),
                     size: row_size,
                 };
