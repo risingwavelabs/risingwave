@@ -679,19 +679,19 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         let mut read_info = ReadInfo::new();
         while let Some(row) = this.next_op().await? {
             let epoch = row.epoch;
-            let seq_id = row.seq_id;
+            let seq_id = row.get_seq_id();
             let vnode = row.vnode;
             let row_op = row.op;
             let row_read_size = row.size;
             match row_op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
-                    progress.insert(epoch, (vnode, seq_id.expect("all rows should have seq_id")));
+                    progress.insert(epoch, (vnode, seq_id));
                 }
                 _ => {}
             }
 
             match row_op {
-                LogStoreOp::Row { op, row } => {
+                LogStoreOp::Row { op, row, .. } => {
                     read_info.read_one_row(row_read_size);
                     ops.push(op);
                     if let Some(chunk) = data_chunk_builder.append_one_row(row) {
@@ -706,6 +706,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                 LogStoreOp::Update {
                     new_value,
                     old_value,
+                    ..
                 } => {
                     read_info.read_update(row_read_size);
                     if !data_chunk_builder.can_append_update() {
@@ -761,13 +762,21 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
 
-    #[expect(dead_code)]
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
         pub vnode: VirtualNode,
         pub epoch: u64,
         pub op: LogStoreOp,
         pub size: usize,
+    }
+
+    impl LogStoreRow {
+        pub(super) fn get_seq_id(&self) -> Option<SeqId> {
+            match &self.op {
+                LogStoreOp::Row { seq_id, .. } | LogStoreOp::Update { seq_id, .. } => Some(*seq_id),
+                LogStoreOp::Barrier { .. } => None,
+            }
+        }
     }
 
     #[derive(Debug)]
