@@ -67,7 +67,6 @@ async fn test_merger_sum_aggr() {
         let input_schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let shared_context = barrier_test_env.shared_context.clone();
         let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let expr_context = expr_context.clone();
         let (tx, rx) = channel_for_test();
@@ -79,13 +78,8 @@ async fn test_merger_sum_aggr() {
                     "ReceiverExecutor".to_owned(),
                     0,
                 ),
-                ReceiverExecutor::for_test(
-                    actor_id,
-                    input_rx,
-                    shared_context.clone(),
-                    local_barrier_manager.clone(),
-                )
-                .boxed(),
+                ReceiverExecutor::for_test(actor_id, input_rx, local_barrier_manager.clone())
+                    .boxed(),
             );
             let agg_calls = vec![
                 AggCall::from_pretty("(count:int8)"),
@@ -151,13 +145,7 @@ async fn test_merger_sum_aggr() {
                     "ReceiverExecutor".to_owned(),
                     0,
                 ),
-                ReceiverExecutor::for_test(
-                    actor_id,
-                    rx,
-                    shared_context.clone(),
-                    local_barrier_manager.clone(),
-                )
-                .boxed(),
+                ReceiverExecutor::for_test(actor_id, rx, local_barrier_manager.clone()).boxed(),
             );
             let dispatcher = DispatchExecutor::new(
                 receiver_op,
@@ -190,7 +178,6 @@ async fn test_merger_sum_aggr() {
 
     let items = Arc::new(Mutex::new(vec![]));
     let actor_future = {
-        let shared_context = barrier_test_env.shared_context.clone();
         let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let expr_context = expr_context.clone();
         let items = items.clone();
@@ -211,7 +198,6 @@ async fn test_merger_sum_aggr() {
                 MergeExecutor::for_test(
                     actor_ctx.id,
                     outputs,
-                    shared_context.clone(),
                     local_barrier_manager.clone(),
                     schema,
                 )

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+use anyhow::anyhow;
 use futures::FutureExt;
 use futures::stream::FuturesOrdered;
 use prometheus::HistogramTimer;
@@ -28,8 +29,8 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_storage::StateStoreImpl;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::progress::BackfillState;
@@ -37,7 +38,7 @@ use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::{
-    ActorId, LocalBarrierManager, PartialGraphId, SharedContext, StreamActorManager,
+    ActorId, LocalBarrierManager, PartialGraphId, SharedContext, StreamActorManager, UpDownActorIds,
 };
 
 struct IssuedState {
@@ -81,6 +82,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     DatabaseInitialPartialGraph, InitialPartialGraph,
 };
 
+use crate::executor::exchange::permit::Receiver;
 use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
 
@@ -375,6 +377,7 @@ pub(crate) struct ResetDatabaseOutput {
 }
 
 pub(crate) enum DatabaseStatus {
+    ReceivedExchangeRequest(Vec<(UpDownActorIds, oneshot::Sender<StreamResult<Receiver>>)>),
     Running(DatabaseManagedBarrierState),
     Suspended(SuspendedDatabaseState),
     Resetting(ResettingDatabaseState),
@@ -385,6 +388,11 @@ pub(crate) enum DatabaseStatus {
 impl DatabaseStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
+            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
+                for (_, sender) in pending_requests.drain(..) {
+                    let _ = sender.send(Err(anyhow!("database aborted").into()));
+                }
+            }
             DatabaseStatus::Running(state) => {
                 state.abort_and_wait_actors().await;
             }
@@ -404,6 +412,9 @@ impl DatabaseStatus {
 
     pub(crate) fn state_for_request(&mut self) -> Option<&mut DatabaseManagedBarrierState> {
         match self {
+            DatabaseStatus::ReceivedExchangeRequest(_) => {
+                unreachable!("should not handle request")
+            }
             DatabaseStatus::Running(state) => Some(state),
             DatabaseStatus::Suspended(_) => None,
             DatabaseStatus::Resetting(_) => {
@@ -420,6 +431,7 @@ impl DatabaseStatus {
         cx: &mut Context<'_>,
     ) -> Poll<ManagedBarrierStateEvent> {
         match self {
+            DatabaseStatus::ReceivedExchangeRequest(_) => Poll::Pending,
             DatabaseStatus::Running(state) => state.poll_next_event(cx),
             DatabaseStatus::Suspended(_) => Poll::Pending,
             DatabaseStatus::Resetting(state) => state.join_handle.poll_unpin(cx).map(|result| {
@@ -453,6 +465,12 @@ impl DatabaseStatus {
         reset_request_id: u32,
     ) {
         let join_handle = match replace(self, DatabaseStatus::Unspecified) {
+            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
+                for (_, sender) in pending_requests {
+                    let _ = sender.send(Err(anyhow!("database reset").into()));
+                }
+                tokio::spawn(async move { ResetDatabaseOutput { root_err: None } })
+            }
             DatabaseStatus::Running(state) => {
                 assert_eq!(database_id, state.database_id);
                 info!(
@@ -497,7 +515,6 @@ impl DatabaseStatus {
 
 pub(crate) struct ManagedBarrierState {
     pub(crate) databases: HashMap<DatabaseId, DatabaseStatus>,
-    pub(crate) current_shared_context: HashMap<DatabaseId, Arc<SharedContext>>,
 }
 
 pub(super) enum ManagedBarrierStateEvent {
@@ -519,36 +536,19 @@ impl ManagedBarrierState {
         term_id: String,
     ) -> Self {
         let mut databases = HashMap::new();
-        let mut current_shared_context = HashMap::new();
         for database in initial_partial_graphs {
             let database_id = DatabaseId::new(database.database_id);
             assert!(!databases.contains_key(&database_id));
-            let shared_context = Arc::new(SharedContext::new(
-                database_id,
-                &actor_manager.env,
-                term_id.clone(),
-            ));
-            shared_context.add_actors(
-                database
-                    .graphs
-                    .iter()
-                    .flat_map(|graph| graph.actor_infos.iter())
-                    .cloned(),
-            );
             let state = DatabaseManagedBarrierState::new(
                 database_id,
+                term_id.clone(),
                 actor_manager.clone(),
-                shared_context.clone(),
                 database.graphs,
             );
             databases.insert(database_id, DatabaseStatus::Running(state));
-            current_shared_context.insert(database_id, shared_context);
         }
 
-        Self {
-            databases,
-            current_shared_context,
-        }
+        Self { databases }
     }
 
     pub(super) fn next_event(
@@ -575,7 +575,6 @@ pub(crate) struct DatabaseManagedBarrierState {
 
     actor_manager: Arc<StreamActorManager>,
 
-    pub(super) current_shared_context: Arc<SharedContext>,
     pub(super) local_barrier_manager: LocalBarrierManager,
 
     barrier_event_rx: UnboundedReceiver<LocalBarrierEvent>,
@@ -586,12 +585,19 @@ impl DatabaseManagedBarrierState {
     /// Create a barrier manager state. This will be called only once.
     pub(super) fn new(
         database_id: DatabaseId,
+        term_id: String,
         actor_manager: Arc<StreamActorManager>,
-        current_shared_context: Arc<SharedContext>,
         initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
+        let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env, term_id));
+        shared_context.add_actors(
+            initial_partial_graphs
+                .iter()
+                .flat_map(|graph| graph.actor_infos.iter())
+                .cloned(),
+        );
         let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
-            LocalBarrierManager::new();
+            LocalBarrierManager::new(shared_context);
         Self {
             database_id,
             actor_states: Default::default(),
@@ -605,7 +611,6 @@ impl DatabaseManagedBarrierState {
                 .collect(),
             table_ids: Default::default(),
             actor_manager,
-            current_shared_context,
             local_barrier_manager,
             barrier_event_rx,
             actor_failure_rx,
@@ -783,7 +788,6 @@ impl DatabaseManagedBarrierState {
                 fragment_id,
                 node,
                 (*subscriptions).clone(),
-                self.current_shared_context.clone(),
                 self.local_barrier_manager.clone(),
             );
             assert!(
@@ -858,7 +862,9 @@ impl DatabaseManagedBarrierState {
         for (partial_graph_id, graph_state) in &mut self.graph_states {
             if let Some(barrier) = graph_state.may_have_collected_all() {
                 if let Some(actors_to_stop) = barrier.all_stop_actors() {
-                    self.current_shared_context.drop_actors(actors_to_stop);
+                    self.local_barrier_manager
+                        .shared_context
+                        .drop_actors(actors_to_stop);
                 }
                 return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
                     partial_graph_id: *partial_graph_id,
@@ -871,7 +877,9 @@ impl DatabaseManagedBarrierState {
                 LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
                     if let Some((partial_graph_id, barrier)) = self.collect(actor_id, epoch) {
                         if let Some(actors_to_stop) = barrier.all_stop_actors() {
-                            self.current_shared_context.drop_actors(actors_to_stop);
+                            self.local_barrier_manager
+                                .shared_context
+                                .drop_actors(actors_to_stop);
                         }
                         return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
                             partial_graph_id,
