@@ -93,7 +93,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, ReaderTruncationOffsetType, SeqId,
+    FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -552,7 +552,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         // 2. On vnode update
         'recreate_consume_stream: loop {
             let mut seq_id = FIRST_SEQ_ID;
-            let truncation_offset = None;
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
                 current_size: 0,
@@ -636,7 +635,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                     &mut write_state,
                                                     barrier.clone(),
                                                     &self.metrics,
-                                                    truncation_offset,
+                                                    &mut progress,
                                                     &mut buffer,
                                                 )
                                                 .await?;
@@ -875,7 +874,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &SyncedKvLogStoreMetrics,
-        truncation_offset: Option<ReaderTruncationOffsetType>,
+        progress: &mut LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
@@ -915,7 +914,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         metrics
             .storage_write_size
             .inc_by(flush_info.flush_size as _);
-        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, truncation_offset);
+        let post_seal = write_state.seal_current_epoch_with_progress(barrier.epoch.curr, progress);
 
         // Add to buffer
         buffer.buffer.push_back((

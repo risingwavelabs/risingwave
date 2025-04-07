@@ -14,8 +14,10 @@
 
 use itertools::Itertools;
 use parse_display::Display;
+use risingwave_common::bitmap::Bitmap;
 
 use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::bitmap::BitmapBuilder;
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
 use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ScalarRefImpl};
@@ -140,6 +142,12 @@ impl VirtualNode {
     /// Iterates over all virtual nodes.
     pub fn all(vnode_count: usize) -> AllVirtualNodeIter {
         (0..vnode_count).map(Self::from_index)
+    }
+
+    pub fn to_bitmap(self) -> Bitmap {
+        let mut bitmap = BitmapBuilder::default();
+        bitmap.set(self.to_index(), true);
+        bitmap.finish()
     }
 }
 

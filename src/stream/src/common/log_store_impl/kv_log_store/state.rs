@@ -30,7 +30,9 @@ use risingwave_storage::store::{
 };
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{FlushInfo, ReaderTruncationOffsetType, SeqId};
+use crate::common::log_store_impl::kv_log_store::{
+    FlushInfo, LogStoreVnodeProgress, ReaderTruncationOffsetType, SeqId,
+};
 
 pub(crate) struct LogStoreReadState<S: StateStoreRead> {
     pub(super) table_id: TableId,
@@ -132,6 +134,52 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
 
         self.on_post_seal = true;
         LogStorePostSealCurrentEpoch { inner: self }
+    }
+
+    pub(crate) fn seal_current_epoch_with_progress(
+        &mut self,
+        next_epoch: u64,
+        progress: &mut LogStoreVnodeProgress,
+    ) -> LogStorePostSealCurrentEpoch<'_, S> {
+        assert!(!self.on_post_seal);
+        let watermark = progress
+            .drain()
+            .map(|(vnode, (epoch, seq_id))| {
+                let bitmap = vnode.to_bitmap();
+                let truncation_offset = (epoch, seq_id);
+                VnodeWatermark::new(
+                    bitmap.into(),
+                    self.serde
+                        .serialize_truncation_offset_watermark(truncation_offset),
+                )
+            })
+            .collect();
+        self.state_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    watermark,
+                    WatermarkSerdeType::PkPrefix,
+                )),
+                switch_op_consistency_level: None,
+            },
+        );
+        let epoch = self.epoch.as_mut().expect("should have init");
+        epoch.prev = epoch.curr;
+        epoch.curr = next_epoch;
+
+        self.on_post_seal = true;
+        LogStorePostSealCurrentEpoch { inner: self }
+    }
+
+    pub(crate) fn aligned_init_range_start(&self) -> Option<Bytes> {
+        (0..self.serde.vnodes().len())
+            .flat_map(|vnode| {
+                self.state_store
+                    .get_table_watermark(VirtualNode::from_index(vnode))
+            })
+            .max()
     }
 }
 
