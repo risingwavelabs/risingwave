@@ -1268,7 +1268,10 @@ mod tests {
         tx.send(()).unwrap();
         let chunk = serde
             .deserialize_stream_chunk(
-                once(FromStreamStateStoreIter::new(stream.boxed())),
+                once((
+                    VirtualNode::ZERO,
+                    FromStreamStateStoreIter::new(stream.boxed()),
+                )),
                 start_seq_id,
                 end_seq_id,
                 EPOCH1,
@@ -1372,7 +1375,7 @@ mod tests {
             let (s, t1, t2, op_list, row_list) =
                 gen_single_test_stream(serde.clone(), &mut seq_id, (100 * i) as _);
             let s = FromStreamStateStoreIter::new(s.boxed());
-            streams.push(s);
+            streams.push((VirtualNode::ZERO, s));
             tx1.push(Some(t1));
             tx2.push(Some(t2));
             ops.push(op_list);
@@ -1551,7 +1554,7 @@ mod tests {
         const CHUNK_SIZE: usize = 3;
 
         let stream = merge_log_store_item_stream(
-            vec![stream],
+            vec![(VirtualNode::ZERO, stream)],
             serde,
             CHUNK_SIZE,
             KvLogStoreReadMetrics::for_test(),
@@ -1662,8 +1665,8 @@ mod tests {
 
         let stream = merge_log_store_item_stream(
             vec![
-                FromStreamStateStoreIter::new(empty()),
-                FromStreamStateStoreIter::new(empty()),
+                (VirtualNode::ZERO, FromStreamStateStoreIter::new(empty())),
+                (VirtualNode::ZERO, FromStreamStateStoreIter::new(empty())),
             ],
             serde,
             CHUNK_SIZE,
