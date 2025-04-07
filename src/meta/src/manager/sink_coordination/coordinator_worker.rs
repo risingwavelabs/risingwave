@@ -271,7 +271,7 @@ impl CoordinationHandleManager {
             .filter(|handle_id| !requests.handle_ids.contains(handle_id))
             .cloned()
             .collect();
-        while !remaining_handles.is_empty() && !requests.aligned() {
+        while !remaining_handles.is_empty() || !requests.aligned() {
             let (handle_id, event) = self.next_event().await?;
             match event {
                 CoordinationHandleManagerEvent::NewHandle => {
