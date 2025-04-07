@@ -18,9 +18,9 @@ use risingwave_common::util::deployment::Deployment;
 use crate::error::ConnectorResult as Result;
 
 #[derive(Debug, thiserror::Error)]
-pub enum EnforceSecretOnCloudError {
-    #[error("{} is enforced to be a SECRET on RisingWave Cloud, please use `CREATE SECRET` first", .0)]
-    SecretProperty(String),
+#[error("{key} is enforced to be a SECRET on RisingWave Cloud, please use `CREATE SECRET` first")]
+pub struct EnforceSecretOnCloudError {
+    key: String,
 }
 
 pub trait EnforceSecretOnCloud {
@@ -32,7 +32,10 @@ pub trait EnforceSecretOnCloud {
         }
         for prop in prop_iter {
             if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
-                return Err(EnforceSecretOnCloudError::SecretProperty(prop.to_owned()).into());
+                return Err(EnforceSecretOnCloudError {
+                    key: prop.to_owned(),
+                }
+                .into());
             }
         }
         Ok(())
@@ -43,7 +46,10 @@ pub trait EnforceSecretOnCloud {
             return Ok(());
         }
         if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
-            return Err(EnforceSecretOnCloudError::SecretProperty(prop.to_owned()).into());
+            return Err(EnforceSecretOnCloudError {
+                key: prop.to_owned(),
+            }
+            .into());
         }
         Ok(())
     }

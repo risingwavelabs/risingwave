@@ -82,7 +82,7 @@ def_anyhow_newtype! {
 
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
-    EnforceSecretOnCloudError => "Enforce Secret Error",
+    EnforceSecretOnCloudError => transparent,
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
