@@ -857,7 +857,6 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 mod tests {
     use maplit::*;
     use nexmark::event::EventType;
-    use risingwave_common::telemetry::TELEMETRY_RISINGWAVE_CLOUD_UUID;
 
     use super::*;
     use crate::source::cdc::{DebeziumCdcSplit, Mysql};
