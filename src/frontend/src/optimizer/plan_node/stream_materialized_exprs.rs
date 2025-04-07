@@ -157,17 +157,12 @@ impl StreamMaterializedExprs {
         self.exprs
             .iter()
             .zip_eq_fast(schema.fields().iter().skip(input_schema_len))
-            .enumerate()
-            .map(|(i, (expr, field))| AliasedExpr {
+            .map(|(expr, field)| AliasedExpr {
                 expr: ExprDisplay {
                     expr,
                     input_schema: self.input.schema(),
                 },
-                alias: if self.field_names.contains_key(&i) {
-                    Some(field.name.clone())
-                } else {
-                    None
-                },
+                alias: Some(field.name.clone()),
             })
             .collect()
     }
