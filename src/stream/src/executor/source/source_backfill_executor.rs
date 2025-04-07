@@ -815,7 +815,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     ///
     /// Note: at the beginning, the actor will only read the state written by itself.
     /// It needs to _wait until it can read all actors' written data_.
-    /// i.e., wait for the second checkpoint has been available.
+    /// i.e., wait for the first checkpoint has been available.
     ///
     /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
