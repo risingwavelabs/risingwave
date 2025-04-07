@@ -110,5 +110,9 @@ harness = false
 name = "stream_hash_join_mem"
 harness = false
 
+[[bench]]
+name = "stream_asof_join_rt"
+harness = false
+
 [lints]
 workspace = true
