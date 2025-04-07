@@ -54,7 +54,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
+    KvLogStoreMetrics, KvLogStoreReadMetrics, LogStoreVnodeProgress, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -126,7 +126,9 @@ impl RewindDelay {
 enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// `Some` means consuming historical log data
     ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
-    ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
+    ReadFlushedChunk(
+        BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeProgress)>>,
+    ),
     Reset(Option<LogStoreReadStateStreamRangeStart>),
     Empty,
 }
@@ -507,7 +509,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 }
             }
             KvLogStoreReaderFutureState::ReadFlushedChunk(future) => {
-                let (chunk_id, chunk, item_epoch) = future.await?;
+                let (chunk_id, chunk, item_epoch, _) = future.await?;
                 self.future_state = KvLogStoreReaderFutureState::Empty;
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,
@@ -574,7 +576,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         .boxed()
                 };
 
-                let (_, chunk, _) = set_and_drive_future!(
+                let (_, chunk, _, _) = set_and_drive_future!(
                     &mut self.future_state,
                     ReadFlushedChunk,
                     read_flushed_chunk_future
@@ -673,7 +675,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
-    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
+    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeProgress)>> + 'static
+    {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
         let table_id = self.table_id;
@@ -711,7 +714,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
             .instrument_await("Wait Create Iter Stream")
             .await?;
 
-            let chunk = serde
+            let (progress, chunk) = serde
                 .deserialize_stream_chunk(
                     iters,
                     start_seq_id,
@@ -722,7 +725,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .instrument_await("Deserialize Stream Chunk")
                 .await?;
 
-            Ok((chunk_id, chunk, item_epoch))
+            Ok((chunk_id, chunk, item_epoch, progress))
         }
         .instrument_await("Read Flushed Chunk")
     }
