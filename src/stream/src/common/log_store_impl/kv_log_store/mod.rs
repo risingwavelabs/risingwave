@@ -47,14 +47,18 @@ use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
-pub(crate) type SeqIdType = i32;
+// TODO: unify with `risingwave_common::Epoch`
+
+pub(crate) type Epoch = u64;
+
+pub(crate) type SeqId = i32;
 type RowOpCodeType = i16;
 
-pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
+pub(crate) const FIRST_SEQ_ID: SeqId = 0;
 
 /// Readers truncate the offset at the granularity of seq id.
 /// None `SeqIdType` means that the whole epoch is truncated.
-pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
+pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqId>);
 
 #[derive(Clone)]
 pub struct KvLogStoreReadMetrics {
@@ -254,7 +258,7 @@ pub(crate) struct KvLogStorePkInfo {
     pub predefined_columns: &'static [(&'static str, DataType)],
     pub pk_orderings: &'static [OrderType],
     pub compute_pk:
-        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> KvLogStorePkRow,
+        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqId>) -> KvLogStorePkRow,
 }
 
 impl KvLogStorePkInfo {
@@ -287,14 +291,14 @@ mod v1 {
     use risingwave_common::types::ScalarImpl;
 
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::SeqId;
 
     #[deprecated]
     pub(crate) static KV_LOG_STORE_V1_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             _vnode: VirtualNode,
             encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
+            seq_id: Option<SeqId>,
         ) -> KvLogStorePkRow {
             KvLogStorePkRow::from_array_len(
                 [
@@ -338,13 +342,13 @@ mod v2 {
     use risingwave_common::types::ScalarImpl;
 
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::SeqId;
 
     pub(crate) static KV_LOG_STORE_V2_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             vnode: VirtualNode,
             encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
+            seq_id: Option<SeqId>,
         ) -> KvLogStorePkRow {
             KvLogStorePkRow::from([
                 Some(ScalarImpl::Int64(encoded_epoch)),
@@ -1847,6 +1851,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
                 (
@@ -1861,6 +1866,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
@@ -1908,6 +1914,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
                 (
@@ -1922,6 +1929,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
@@ -1979,6 +1987,7 @@ mod tests {
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
                         new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],

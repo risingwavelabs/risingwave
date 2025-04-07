@@ -6,7 +6,7 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 echo "--- Build Rust UDF"
-cd e2e_test/udf/wasm
+cd e2e_test/udf/embedded_wasm
 rustup target add wasm32-wasip1
 cargo build --release --target wasm32-wasip1
 cd ../../..
@@ -19,7 +19,7 @@ mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integr
 cd ..
 
 echo "--- Build Java UDF"
-cd e2e_test/udf/java
+cd e2e_test/udf/remote_java
 mvn -B package
 cd ../../..
 
@@ -34,8 +34,8 @@ tar --zstd -cf java-binding-integration-test.tar.zst bin java/java-binding-integ
 
 echo "--- Upload built artifacts"
 cp java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz ./risingwave-connector.tar.gz
-cp e2e_test/udf/java/target/risingwave-udf-example.jar ./udf.jar
-cp e2e_test/udf/wasm/target/wasm32-wasip1/release/udf.wasm udf.wasm
+cp e2e_test/udf/remote_java/target/risingwave-udf-example.jar ./udf.jar
+cp e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm udf.wasm
 buildkite-agent artifact upload ./risingwave-connector.tar.gz
 buildkite-agent artifact upload ./java-binding-integration-test.tar.zst
 buildkite-agent artifact upload ./udf.jar

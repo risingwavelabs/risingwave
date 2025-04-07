@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::{Context, anyhow};
 use await_tree::InstrumentAwait;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
-    LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter,
-    LogWriterPostFlushCurrentEpoch, TruncateOffset,
+    FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult,
+    LogWriter, LogWriterPostFlushCurrentEpoch, TruncateOffset,
 };
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -35,8 +32,7 @@ enum InMemLogStoreItem {
     StreamChunk(StreamChunk),
     Barrier {
         next_epoch: u64,
-        is_checkpoint: bool,
-        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        options: FlushCurrentEpochOptions,
     },
 }
 
@@ -177,11 +173,10 @@ impl LogReader for BoundedInMemLogStoreReader {
                         ))
                     }
                     InMemLogStoreItem::Barrier {
-                        is_checkpoint,
                         next_epoch,
-                        new_vnode_bitmap,
+                        options,
                     } => {
-                        if is_checkpoint {
+                        if options.is_checkpoint {
                             self.epoch_progress = AwaitingTruncate {
                                 next_epoch,
                                 sealed_epoch: current_epoch,
@@ -195,8 +190,9 @@ impl LogReader for BoundedInMemLogStoreReader {
                         Ok((
                             current_epoch,
                             LogStoreReadItem::Barrier {
-                                is_checkpoint,
-                                new_vnode_bitmap,
+                                is_checkpoint: options.is_checkpoint,
+                                new_vnode_bitmap: options.new_vnode_bitmap,
+                                is_stop: options.is_stop,
                             },
                         ))
                     }
@@ -282,14 +278,13 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
-        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+        let is_checkpoint = options.is_checkpoint;
         self.item_tx
             .send(InMemLogStoreItem::Barrier {
                 next_epoch,
-                is_checkpoint,
-                new_vnode_bitmap,
+                options,
             })
             .instrument_await("in_mem_send_item_barrier")
             .await

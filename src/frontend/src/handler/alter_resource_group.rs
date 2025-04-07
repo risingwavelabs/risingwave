@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -68,7 +69,10 @@ pub async fn handle_alter_resource_group(
         }
     };
 
-    let resource_group = resource_group.map(resolve_resource_group).transpose()?;
+    let resource_group = resource_group
+        .map(resolve_resource_group)
+        .transpose()?
+        .flatten();
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
@@ -84,15 +88,22 @@ pub async fn handle_alter_resource_group(
     Ok(builder.into())
 }
 
-pub(crate) fn resolve_resource_group(resource_group: SetVariableValue) -> Result<String> {
+// Resolve the resource group from the given SetVariableValue.
+pub(crate) fn resolve_resource_group(resource_group: SetVariableValue) -> Result<Option<String>> {
     Ok(match resource_group {
-        SetVariableValue::Single(SetVariableValueSingle::Ident(ident)) => ident.real_value(),
-        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::SingleQuotedString(v))) => {
-            v
+        SetVariableValue::Single(SetVariableValueSingle::Ident(ident)) => Some(ident.real_value()),
+        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::SingleQuotedString(v)))
+            if v.as_str().eq_ignore_ascii_case(DEFAULT_RESOURCE_GROUP) =>
+        {
+            None
         }
+        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::SingleQuotedString(v))) => {
+            Some(v)
+        }
+        SetVariableValue::Default => None,
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a valid number or adaptive".to_owned(),
+                "target resource group must be a valid string or default".to_owned(),
             )
             .into());
         }

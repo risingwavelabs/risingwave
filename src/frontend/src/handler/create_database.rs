@@ -74,7 +74,10 @@ pub async fn handle_create_database(
         session.user_id()
     };
 
-    let resource_group = resource_group.map(resolve_resource_group).transpose()?;
+    let resource_group = resource_group
+        .map(resolve_resource_group)
+        .transpose()?
+        .flatten();
 
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 

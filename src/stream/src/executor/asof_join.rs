@@ -903,6 +903,7 @@ mod tests {
             schema,
             pk_indices: vec![0, 1, 3, 4],
             identity: "HashJoinExecutor".to_owned(),
+            0,
         };
 
         let executor = AsOfJoinExecutor::<MemoryStateStore, T>::new(

@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 
 use hytra::TrAdder;
 use prometheus::core::{Atomic, AtomicU64, GenericCounter, GenericGauge};
+use prometheus::proto::Metric;
 use prometheus::register_int_counter_with_registry;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
@@ -141,4 +142,17 @@ impl PartialOrd for MetricLevel {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
+}
+
+pub fn get_label<T: std::str::FromStr>(metric: &Metric, label: &str) -> Option<T> {
+    metric
+        .get_label()
+        .iter()
+        .find(|lp| lp.get_name() == label)
+        .and_then(|lp| lp.get_value().parse::<T>().ok())
+}
+
+// Must ensure the label exists and can be parsed into `T`
+pub fn get_label_infallible<T: std::str::FromStr>(metric: &Metric, label: &str) -> T {
+    get_label(metric, label).expect("label not found or can't be parsed")
 }
