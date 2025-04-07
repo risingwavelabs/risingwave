@@ -3548,8 +3548,22 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
                 AlterSourceOperation::SetSourceRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SOURCE SET PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSourceOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
-                return self.expected("SCHEMA or SOURCE_RATE_LIMIT after SET");
+                return self.expected("SCHEMA, SOURCE_RATE_LIMIT or PARALLELISM after SET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
@@ -3563,9 +3577,7 @@ impl Parser<'_> {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
         } else {
-            return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
-            );
+            return self.expected("RENAME, ADD COLUMN, OWNER TO or SET after ALTER SOURCE");
         };
 
         Ok(Statement::AlterSource {
