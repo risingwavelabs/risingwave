@@ -93,7 +93,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqId,
+    FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, ReaderTruncationOffsetType, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -302,7 +302,8 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>;
+type ReadFlushedChunkFuture =
+    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeProgress)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
@@ -551,7 +552,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         // 2. On vnode update
         'recreate_consume_stream: loop {
             let mut seq_id = FIRST_SEQ_ID;
-            let mut truncation_offset = None;
+            let truncation_offset = None;
             let mut buffer = SyncedLogStoreBuffer {
                 buffer: VecDeque::new(),
                 current_size: 0,
@@ -578,6 +579,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
 
+            let mut progress = LogStoreVnodeProgress::new();
+
             loop {
                 let select_result = {
                     let read_future = async {
@@ -585,7 +588,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             pending().await
                         } else {
                             read_future_state
-                                .next_chunk(&read_state, &mut buffer, &self.metrics)
+                                .next_chunk(&mut progress, &read_state, &mut buffer, &self.metrics)
                                 .await
                         }
                     };
@@ -748,10 +751,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 *sleep_future = None;
                             }
                         }
-                        let (chunk, new_truncate_offset) = result?;
-                        if let Some(new_truncate_offset) = new_truncate_offset {
-                            truncation_offset = Some(new_truncate_offset);
-                        }
+                        let chunk = result?;
                         self.metrics
                             .total_read_count
                             .inc_by(chunk.cardinality() as _);
@@ -768,33 +768,30 @@ type PersistedStream<S> = Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRe
 
 enum ReadFuture<S: StateStoreRead> {
     ReadingPersistedStream(PersistedStream<S>),
-    ReadingFlushedChunk {
-        future: ReadFlushedChunkFuture,
-        truncate_offset: ReaderTruncationOffsetType,
-    },
+    ReadingFlushedChunk { future: ReadFlushedChunkFuture },
     Idle,
 }
 
 // Read methods
 impl<S: StateStoreRead> ReadFuture<S> {
-    // TODO: should change to always return a truncate offset to ensure that each stream chunk has a truncate offset
     async fn next_chunk(
         &mut self,
+        progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
-    ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
+    ) -> StreamExecutorResult<StreamChunk> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
-                while let Some((_epoch, _progress, item)) = stream.try_next().await? {
+                while let Some((_epoch, mut latest_progress, item)) = stream.try_next().await? {
+                    progress.extend(latest_progress.drain());
                     match item {
                         KvLogStoreItem::Barrier { .. } => {
                             continue;
                         }
                         KvLogStoreItem::StreamChunk(chunk) => {
-                            // TODO: should have truncate offset when consuming historical data
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
-                            return Ok((chunk, None));
+                            return Ok(chunk);
                         }
                     }
                 }
@@ -827,7 +824,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             cardinality = chunk.cardinality(),
                             "read buffered chunk of size"
                         );
-                        return Ok((chunk, Some((item_epoch, Some(end_seq_id)))));
+                        return Ok(chunk);
                     }
                     LogStoreBufferItem::Flushed {
                         vnode_bitmap,
@@ -836,7 +833,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         chunk_id,
                     } => {
                         tracing::trace!(start_seq_id, end_seq_id, chunk_id, "read flushed chunk");
-                        let truncate_offset = (item_epoch, Some(end_seq_id));
                         let read_metrics = metrics.flushed_buffer_read_metrics.clone();
                         let future = read_state
                             .read_flushed_chunk(
@@ -848,10 +844,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                                 read_metrics,
                             )
                             .boxed();
-                        *self = ReadFuture::ReadingFlushedChunk {
-                            future,
-                            truncate_offset,
-                        };
+                        *self = ReadFuture::ReadingFlushedChunk { future };
                         break;
                     }
                     LogStoreBufferItem::Barrier { .. } => {
@@ -861,20 +854,18 @@ impl<S: StateStoreRead> ReadFuture<S> {
             },
         }
 
-        let (future, truncate_offset) = match self {
+        let future = match self {
             ReadFuture::ReadingPersistedStream(_) | ReadFuture::Idle => {
                 unreachable!("should be at ReadingFlushedChunk")
             }
-            ReadFuture::ReadingFlushedChunk {
-                future,
-                truncate_offset,
-            } => (future, *truncate_offset),
+            ReadFuture::ReadingFlushedChunk { future, .. } => future,
         };
 
-        let (_, chunk, _) = future.await?;
+        let (_, chunk, _, mut local_progress) = future.await?;
+        progress.extend(local_progress.drain());
         tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
         *self = ReadFuture::Idle;
-        Ok((chunk, Some(truncate_offset)))
+        Ok(chunk)
     }
 }
 
