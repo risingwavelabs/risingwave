@@ -517,14 +517,16 @@ impl ParseTo for CreateSinkStatement {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
+        let mut columns = Vec::new();
         let into_table_name = if p.parse_keyword(Keyword::INTO) {
             impl_parse_to!(into_table_name: ObjectName, p);
+
+            // we only allow specify columns when creating sink into a table
+            columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
             Some(into_table_name)
         } else {
             None
         };
-
-        let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
 
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
@@ -572,6 +574,9 @@ impl fmt::Display for CreateSinkStatement {
         if let Some(into_table) = &self.into_table_name {
             impl_fmt_display!([Keyword::INTO], v);
             impl_fmt_display!([into_table], v);
+            if !self.columns.is_empty() {
+                v.push(format!("({})", display_comma_separated(&self.columns)));
+            }
         }
         impl_fmt_display!(sink_from, v, self);
         if let Some(ref emit_mode) = self.emit_mode {
