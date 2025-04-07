@@ -52,7 +52,8 @@ statement ok
 create function key_values(varchar) returns table (key varchar, value varchar)
 language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
 
-include ./test.slt.part
+include ./test_basic.slt.part
+include ./test_complex.slt.part
 
 statement ok
 drop function gcd(int,int,int);

@@ -84,5 +84,6 @@ create function key_values(varchar) returns table (key varchar, value varchar) l
     }
 $$;
 
-include ./test.slt.part
+include ./test_basic.slt.part
+include ./test_complex.slt.part
 include ./drop.slt.part

@@ -100,5 +100,6 @@ export function* key_values(kv) {
 }
 $$;
 
-include ./test.slt.part
+include ./test_basic.slt.part
+include ./test_complex.slt.part
 include ./drop.slt.part
