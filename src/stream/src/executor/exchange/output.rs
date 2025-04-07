@@ -58,7 +58,7 @@ impl Output {
     }
 }
 
-/// Create a [`LocalOutput`] or [`RemoteOutput`] instance for the current actor id and the
+/// Create a [`Output`] instance for the current actor id and the
 /// downstream actor id. Used by dispatchers.
 pub fn new_output(
     context: &SharedContext,
