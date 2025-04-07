@@ -623,10 +623,10 @@ impl GlobalStreamManager {
         let database_id = DatabaseId::new(
             self.metadata_manager
                 .catalog_controller
-                .get_object_database_id(job_id as ObjectId)
+                .get_object_database_id(table_id as ObjectId)
                 .await? as _,
         );
-        let job_id = TableId::new(job_id);
+        let table_id = TableId::new(table_id);
 
         let worker_nodes = self
             .metadata_manager
@@ -648,7 +648,7 @@ impl GlobalStreamManager {
             .sum::<usize>();
         let max_parallelism = self
             .metadata_manager
-            .get_job_max_parallelism(job_id)
+            .get_job_max_parallelism(table_id)
             .await?;
 
         match parallelism {
