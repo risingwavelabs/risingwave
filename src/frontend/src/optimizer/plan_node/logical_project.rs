@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -259,12 +259,14 @@ impl ToStream for LogicalProject {
 
         // Extract UDFs to `MaterializedExprs` operator
         let mut udf_field_names = BTreeMap::new();
+        let mut udf_expr_indices = HashSet::new();
         let udf_exprs: Vec<_> = self
             .exprs()
             .iter()
             .enumerate()
             .filter_map(|(idx, expr)| {
-                if let ExprImpl::UserDefinedFunction(_) = expr {
+                if expr.has_user_defined_function() {
+                    udf_expr_indices.insert(idx);
                     if let Some(name) = self.core.field_names.get(&idx) {
                         udf_field_names.insert(idx, name.clone());
                     }
@@ -287,8 +289,9 @@ impl ToStream for LogicalProject {
             let final_exprs = self
                 .exprs()
                 .iter()
-                .map(|expr| {
-                    if let ExprImpl::UserDefinedFunction(_) = expr {
+                .enumerate()
+                .map(|(idx, expr)| {
+                    if udf_expr_indices.contains(&idx) {
                         let output_idx = input_len + udf_pos;
                         udf_pos += 1;
                         InputRef::new(output_idx, expr.return_type()).into()
