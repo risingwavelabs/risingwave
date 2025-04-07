@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use phf::{Set, phf_set};
-use risingwave_common::telemetry::is_cloud_hosted;
+use risingwave_common::util::deployment::Deployment;
 
 use crate::error::ConnectorResult as Result;
 
@@ -27,7 +27,7 @@ pub trait EnforceSecretOnCloud {
     const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {};
 
     fn enforce_secret_on_cloud<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<()> {
-        if !is_cloud_hosted() {
+        if !Deployment::is_cloud_hosted() {
             return Ok(());
         }
         for prop in prop_iter {
@@ -39,7 +39,7 @@ pub trait EnforceSecretOnCloud {
     }
 
     fn enforce_one(prop: &str) -> Result<()> {
-        if !is_cloud_hosted() {
+        if !Deployment::is_cloud_hosted() {
             return Ok(());
         }
         if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {

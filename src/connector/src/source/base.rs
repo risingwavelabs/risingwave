@@ -966,12 +966,14 @@ mod tests {
 
         let props_with_secret = WithOptionsSecResolved::without_secrets(props.clone());
         assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_ok());
+
         unsafe {
-            set_var(TELEMETRY_RISINGWAVE_CLOUD_UUID, "demo_cloud_uuid");
+            // comes from risingwave_common::util::deployment::Deployment
+            set_var("RISINGWAVE_CLOUD", "1");
         }
         assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_err());
         unsafe {
-            remove_var(TELEMETRY_RISINGWAVE_CLOUD_UUID);
+            remove_var("RISINGWAVE_CLOUD");
         }
     }
 
