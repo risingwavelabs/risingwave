@@ -112,7 +112,7 @@ impl VirtualNode {
         Self(scalar as _)
     }
 
-    pub fn from_datum(datum: DatumRef<'_>) -> Self {
+    pub fn from_datum_ref(datum: DatumRef<'_>) -> Self {
         Self::from_scalar(datum.expect("should not be none").into_int16())
     }
 
