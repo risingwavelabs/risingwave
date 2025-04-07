@@ -98,7 +98,7 @@ impl<S: StateStore> StateTableWrapper<S> {
     fn insert(&mut self, row: impl Row) {
         let owned_row = row.into_owned_row();
         let pk = (&owned_row)
-            .project(&self.inner.pk_indices())
+            .project(self.inner.pk_indices())
             .into_owned_row();
 
         // Store the record and update the cache
