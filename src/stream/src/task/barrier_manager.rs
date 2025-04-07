@@ -550,8 +550,8 @@ impl LocalBarrierWorker {
                                 unreachable!()
                             }
                         },
-                        Entry::Vacant(entery) => {
-                            entery.insert(DatabaseStatus::ReceivedExchangeRequest(vec![(
+                        Entry::Vacant(entry) => {
+                            entry.insert(DatabaseStatus::ReceivedExchangeRequest(vec![(
                                 ids,
                                 result_sender,
                             )]));
