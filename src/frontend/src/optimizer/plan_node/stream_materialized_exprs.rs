@@ -76,11 +76,7 @@ impl StreamMaterializedExprs {
         let input_watermark_cols = input.watermark_columns();
 
         // Determine if we have a watermark column for state cleaning
-        let state_clean_col_idx = input_watermark_cols.iter().cloned().next().map(|(i, _)| i);
-            Some(idx)
-        } else {
-            None
-        };
+        let state_clean_col_idx = input_watermark_cols.iter().next().map(|(i, _)| i);
 
         // Create a functional dependency set that includes dependencies from UDF inputs to outputs
         let input_len = input.schema().len();
