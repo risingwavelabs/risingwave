@@ -76,11 +76,7 @@ impl StreamMaterializedExprs {
         let input_watermark_cols = input.watermark_columns();
 
         // Determine if we have a watermark column for state cleaning
-        let state_clean_col_idx = if !input_watermark_cols.is_empty() {
-            let (idx, _) = input_watermark_cols
-                .iter()
-                .next()
-                .expect("Expected at least one watermark column");
+        let state_clean_col_idx = input_watermark_cols.iter().cloned().next().map(|(i, _)| i);
             Some(idx)
         } else {
             None
