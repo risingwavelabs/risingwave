@@ -31,7 +31,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
-rw-diagnose-tools = { git = "https://github.com/risingwavelabs/rw-diagnose-tools" }
+rw-diagnose-tools = { git = "https://github.com/risingwavelabs/rw-diagnose-tools", rev = "725249f" }
 sea-orm = { workspace = true }
 serde = "1"
 serde_json = "1"
