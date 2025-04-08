@@ -32,7 +32,7 @@ use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::aggregate::StatelessSimpleAggExecutor;
 use crate::executor::dispatch::*;
-use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
+use crate::executor::exchange::output::Output;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::project::ProjectExecutor;
 use crate::executor::test_utils::agg_executor::{
@@ -98,7 +98,7 @@ async fn test_merger_sum_aggr() {
                     .unwrap();
             let consumer = SenderConsumer {
                 input: aggregator.boxed(),
-                channel: Box::new(LocalOutput::new(233, tx)),
+                channel: Output::new(233, tx),
             };
 
             let actor = Actor::new(
@@ -131,7 +131,7 @@ async fn test_merger_sum_aggr() {
         let (actor_future, channel) = make_actor(rx);
         outputs.push(channel);
         actor_futures.push(actor_future);
-        inputs.push(Box::new(LocalOutput::new(233, tx)) as BoxedOutput);
+        inputs.push(Output::new(233, tx));
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -345,7 +345,7 @@ impl StreamConsumer for MockConsumer {
 /// `SenderConsumer` consumes data from input executor and send it into a channel.
 pub struct SenderConsumer {
     input: Box<dyn Execute>,
-    channel: BoxedOutput,
+    channel: Output,
 }
 
 impl StreamConsumer for SenderConsumer {
