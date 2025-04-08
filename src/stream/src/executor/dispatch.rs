@@ -1324,7 +1324,6 @@ mod tests {
             ReceiverExecutor::for_test(
                 actor_id,
                 rx,
-                barrier_test_env.shared_context.clone(),
                 barrier_test_env.local_barrier_manager.clone(),
             )
             .boxed(),

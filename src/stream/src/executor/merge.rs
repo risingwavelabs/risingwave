@@ -32,7 +32,7 @@ use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
 };
 use crate::executor::prelude::*;
-use crate::task::SharedContext;
+use crate::task::LocalBarrierManager;
 
 pub(crate) enum MergeExecutorUpstream {
     Singleton(BoxedInput),
@@ -43,7 +43,7 @@ pub(crate) struct MergeExecutorInput {
     upstream: MergeExecutorUpstream,
     actor_context: ActorContextRef,
     upstream_fragment_id: UpstreamFragmentId,
-    shared_context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
     executor_stats: Arc<StreamingMetrics>,
     pub(crate) info: ExecutorInfo,
     chunk_size: usize,
@@ -54,7 +54,7 @@ impl MergeExecutorInput {
         upstream: MergeExecutorUpstream,
         actor_context: ActorContextRef,
         upstream_fragment_id: UpstreamFragmentId,
-        shared_context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         info: ExecutorInfo,
         chunk_size: usize,
@@ -63,7 +63,7 @@ impl MergeExecutorInput {
             upstream,
             actor_context,
             upstream_fragment_id,
-            shared_context,
+            local_barrier_manager,
             executor_stats,
             info,
             chunk_size,
@@ -78,7 +78,7 @@ impl MergeExecutorInput {
                 fragment_id,
                 self.upstream_fragment_id,
                 input,
-                self.shared_context,
+                self.local_barrier_manager,
                 self.executor_stats,
                 barrier_rx,
             )
@@ -88,7 +88,7 @@ impl MergeExecutorInput {
                 fragment_id,
                 self.upstream_fragment_id,
                 inputs,
-                self.shared_context,
+                self.local_barrier_manager,
                 self.executor_stats,
                 barrier_rx,
                 self.chunk_size,
@@ -126,8 +126,7 @@ pub struct MergeExecutor {
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
 
-    /// Shared context of the stream manager.
-    context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
@@ -148,7 +147,7 @@ impl MergeExecutor {
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         upstreams: SelectReceivers,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         barrier_rx: mpsc::UnboundedReceiver<Barrier>,
         chunk_size: usize,
@@ -159,7 +158,7 @@ impl MergeExecutor {
             upstreams,
             fragment_id,
             upstream_fragment_id,
-            context,
+            local_barrier_manager,
             metrics,
             barrier_rx,
             chunk_size,
@@ -171,7 +170,6 @@ impl MergeExecutor {
     pub fn for_test(
         actor_id: ActorId,
         inputs: Vec<super::exchange::permit::Receiver>,
-        shared_context: Arc<SharedContext>,
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
     ) -> Self {
@@ -197,7 +195,7 @@ impl MergeExecutor {
             514,
             1919,
             upstream,
-            shared_context,
+            local_barrier_manager,
             metrics.into(),
             barrier_rx,
             100,
@@ -311,7 +309,7 @@ impl MergeExecutor {
                                 .iter()
                                 .map(|&upstream_actor_id| {
                                     new_input(
-                                        &self.context,
+                                        &self.local_barrier_manager,
                                         self.metrics.clone(),
                                         self.actor_context.id,
                                         self.fragment_id,
@@ -863,7 +861,6 @@ mod tests {
         let merger = MergeExecutor::for_test(
             actor_id,
             rxs,
-            barrier_test_env.shared_context.clone(),
             barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
         );
@@ -928,7 +925,7 @@ mod tests {
             .into_iter()
             .map(|upstream_actor_id| {
                 new_input(
-                    &ctx,
+                    &barrier_test_env.local_barrier_manager,
                     metrics.clone(),
                     actor_id,
                     fragment_id,
@@ -973,7 +970,7 @@ mod tests {
             fragment_id,
             upstream_fragment_id,
             upstream,
-            ctx.clone(),
+            barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
             barrier_rx,
             100,
