@@ -76,11 +76,12 @@ pub async fn setup_bench_stream_asof_join(
         .into_iter()
         .collect();
 
-    let info = ExecutorInfo {
-        schema: output_schema.clone(),
-        pk_indices: vec![0, 1, 3, 4],
-        identity: "AsOfJoinExecutor".to_owned(),
-    };
+    let info = ExecutorInfo::new(
+        output_schema.clone(),
+        vec![0, 1, 3, 4],
+        "AsOfJoinExecutor".to_owned(),
+        0,
+    );
 
     let params_l = JoinParams::new(vec![0], vec![1]);
     let params_r = JoinParams::new(vec![0], vec![1]);
@@ -217,22 +218,23 @@ pub async fn handle_streams(
     let expected_count = match join_type {
         AsOfJoinType::Inner => {
             workload.jk_cardinality
-                * (workload.upper_bound - workload.step_size_r + workload.step_size_l)
-                / workload.step_size_l
+                * ((workload.upper_bound - workload.step_size_r + workload.step_size_l)
+                / workload.step_size_l)
+                as usize
         }
         AsOfJoinType::LeftOuter => {
-            workload.jk_cardinality * (workload.upper_bound as f64 * upper_bound_factor) as usize
-                / workload.step_size_l
+            workload.jk_cardinality * ((workload.upper_bound as f64 * upper_bound_factor) as usize
+                / workload.step_size_l) as usize
         }
         _ => panic!("Unsupported join type"),
     };
-    // dbg!(&expected_count);
+
     let mut current_count = 0;
     while current_count < expected_count {
         match stream.next().await {
             Some(Ok(Message::Chunk(c))) => {
                 current_count += c.cardinality();
-                if expected_count > 100000 {
+                if workload.step_size_l >= 100 {
                     // dbg!(&expected_count, &current_count);
                 }
             }
