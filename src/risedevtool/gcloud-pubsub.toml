@@ -11,7 +11,11 @@ GCLOUD_SDK_DIR = "google-cloud-sdk"
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = ["ENABLE_PUBSUB"] }
+condition = { env_set = [
+    "ENABLE_PUBSUB",
+], files_not_exist = [
+    "${PREFIX_BIN}/gcloud",
+] }
 description = "Download and enable Google Pubsub Emulator"
 script = '''
 #!/usr/bin/env bash

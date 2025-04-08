@@ -29,8 +29,8 @@ use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::log_store::{
-    LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory, LogWriter, LogWriterExt,
-    LogWriterMetrics,
+    FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
+    LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
@@ -322,11 +322,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let post_flush = log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                        .flush_current_epoch(
+                            barrier.epoch.curr,
+                            FlushCurrentEpochOptions {
+                                is_checkpoint: barrier.kind.is_checkpoint(),
+                                new_vnode_bitmap: update_vnode_bitmap.clone(),
+                                is_stop: barrier.is_stop(actor_id),
+                            },
+                        )
                         .await?;
 
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let mutation = barrier.mutation.clone();
                     yield Message::Barrier(barrier);
                     if F::REBUILD_SINK_ON_UPDATE_VNODE_BITMAP
@@ -339,7 +346,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         rx.await
                             .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
                     }
-                    post_flush.post_yield_barrier(update_vnode_bitmap).await?;
+                    post_flush.post_yield_barrier().await?;
 
                     if let Some(mutation) = mutation.as_deref() {
                         match mutation {
@@ -718,11 +725,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, pk_indices, "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -851,11 +854,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![0, 1],
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, vec![0, 1], "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -957,11 +956,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, pk_indices, "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 

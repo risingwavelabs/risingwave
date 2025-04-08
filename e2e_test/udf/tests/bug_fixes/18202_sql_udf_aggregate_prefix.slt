@@ -1,0 +1,12 @@
+# https://github.com/risingwavelabs/risingwave/issues/18202
+
+statement ok
+create function as2 ( int[] ) returns bigint language sql as 'select array_sum($1)';
+
+query I
+select aggregate:as2(a) from (values (1), (2)) t(a);
+----
+3
+
+statement ok
+drop function as2;

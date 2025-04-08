@@ -12,48 +12,99 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::DerefMut;
-use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::bitmap::Bitmap;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use risingwave_pb::connector_service::SinkMetadata;
 
-use crate::sink::{SinkCommitCoordinator, SinkWriter};
+use super::SinkCommittedEpochSubscriber;
+use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
+use crate::sink::{LogSinker, SinkCommitCoordinator, SinkLogReader};
 
-pub type BoxWriter<CM> = Box<dyn SinkWriter<CommitMetadata = CM> + Send + 'static>;
 pub type BoxCoordinator = Box<dyn SinkCommitCoordinator + Send + 'static>;
 
+pub type BoxLogSinker = Box<
+    dyn for<'a> FnOnce(&'a mut dyn DynLogReader) -> BoxFuture<'a, crate::sink::Result<!>>
+        + Send
+        + 'static,
+>;
+
 #[async_trait]
-impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
-    type CommitMetadata = CM;
+pub trait DynLogReader: Send {
+    async fn dyn_start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()>;
+    async fn dyn_next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)>;
 
-    async fn begin_epoch(&mut self, epoch: u64) -> crate::sink::Result<()> {
-        self.deref_mut().begin_epoch(epoch).await
+    fn dyn_truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
+}
+
+#[async_trait]
+impl<R: SinkLogReader> DynLogReader for R {
+    async fn dyn_start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
+        R::start_from(self, start_offset).await
     }
 
-    async fn write_batch(&mut self, chunk: StreamChunk) -> crate::sink::Result<()> {
-        self.deref_mut().write_batch(chunk).await
+    async fn dyn_next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        R::next_item(self).await
     }
 
-    async fn barrier(&mut self, is_checkpoint: bool) -> crate::sink::Result<CM> {
-        self.deref_mut().barrier(is_checkpoint).await
+    fn dyn_truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        R::truncate(self, offset)
+    }
+}
+
+impl SinkLogReader for &mut dyn DynLogReader {
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        (*self).dyn_start_from(start_offset)
     }
 
-    async fn abort(&mut self) -> crate::sink::Result<()> {
-        self.deref_mut().abort().await
+    fn next_item(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
+        (*self).dyn_next_item()
     }
 
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> crate::sink::Result<()> {
-        self.deref_mut().update_vnode_bitmap(vnode_bitmap).await
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        (*self).dyn_truncate(offset)
+    }
+}
+
+pub fn boxed_log_sinker(log_sinker: impl LogSinker) -> BoxLogSinker {
+    fn make_future<'a>(
+        log_sinker: impl LogSinker,
+        log_reader: &'a mut dyn DynLogReader,
+    ) -> BoxFuture<'a, crate::sink::Result<!>> {
+        log_sinker.consume_log_and_sink(log_reader).boxed()
+    }
+
+    // Note: it's magical that the following expression can be cast to the expected return type
+    // without any explicit conversion, such as `<expr> as _` or `<expr>.into()`.
+    // TODO: may investigate the reason. The currently successful compilation seems volatile to future compatibility.
+    Box::new(move |log_reader: &mut dyn DynLogReader| make_future(log_sinker, log_reader))
+}
+
+#[async_trait]
+impl LogSinker for BoxLogSinker {
+    async fn consume_log_and_sink(
+        self,
+        mut log_reader: impl SinkLogReader,
+    ) -> crate::sink::Result<!> {
+        (self)(&mut log_reader).await
     }
 }
 
 #[async_trait]
 impl SinkCommitCoordinator for BoxCoordinator {
-    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
-        self.deref_mut().init().await
+    async fn init(
+        &mut self,
+        subscriber: SinkCommittedEpochSubscriber,
+    ) -> crate::sink::Result<Option<u64>> {
+        self.deref_mut().init(subscriber).await
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> crate::sink::Result<()> {

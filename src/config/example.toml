@@ -182,6 +182,9 @@ stream_switch_jdbc_pg_to_native = false
 stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
 stream_enable_explain_analyze_stats = true
+stream_iceberg_list_interval_sec = 1
+stream_iceberg_fetch_batch_size = 1024
+stream_iceberg_sink_positional_delete_cache_size = 1024
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
@@ -218,7 +221,7 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
-time_travel_version_cache_capacity = 2
+time_travel_version_cache_capacity = 10
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"

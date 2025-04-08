@@ -1,0 +1,31 @@
+statement ok
+create aggregate weighted_avg(value int, weight int) returns float language javascript as $$
+    export function create_state() {
+        return {sum: 0, weight: 0};
+    }
+    export function accumulate(state, value, weight) {
+        if (value == null || weight == null) {
+            return state;
+        }
+        state.sum += value * weight;
+        state.weight += weight;
+        return state;
+    }
+    export function retract(state, value, weight) {
+        if (value == null || weight == null) {
+            return state;
+        }
+        state.sum -= value * weight;
+        state.weight -= weight;
+        return state;
+    }
+    export function finish(state) {
+        if (state.weight == 0) {
+            return null;
+        }
+        return state.sum / state.weight;
+    }
+$$;
+
+include ./test.slt.part
+include ./drop.slt.part

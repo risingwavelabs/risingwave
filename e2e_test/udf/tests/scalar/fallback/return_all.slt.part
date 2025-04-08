@@ -1,0 +1,8 @@
+statement ok
+create function return_all(a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>)
+returns struct<a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
+language javascript as $$
+export function return_all(a, b, c, d, e, f, g, h, i, j, s) {
+    return {a,b,c,d,e,f,g,h,i,j,s};
+}
+$$;

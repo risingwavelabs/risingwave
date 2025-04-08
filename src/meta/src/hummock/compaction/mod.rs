@@ -36,7 +36,7 @@ use risingwave_pb::hummock::compaction_config::CompactionMode;
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
-use super::{EmergencyState, check_emergency_state};
+use super::GroupStateValidator;
 use crate::MetaOpts;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
@@ -126,8 +126,9 @@ impl CompactStatus {
             }
             _ => {
                 let compaction_group_config = &group.compaction_config;
-                if let EmergencyState::Emergency =
-                    check_emergency_state(levels, compaction_group_config.as_ref())
+                let group_state =
+                    GroupStateValidator::group_state(levels, compaction_group_config.as_ref());
+                if (group_state.is_write_stop() || group_state.is_emergency())
                     && compaction_group_config.enable_emergency_picker
                 {
                     let selector_context = CompactionSelectorContext {

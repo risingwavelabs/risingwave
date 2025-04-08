@@ -387,6 +387,20 @@ WITH (
 FORMAT DEBEZIUM_MONGO ENCODE JSON
 
 statement ok
+CREATE TABLE mongo_customers_strong_schema (
+	_id BIGINT PRIMARY KEY,
+	email VARCHAR,
+	first_name VARCHAR,
+	last_name VARCHAR
+)
+WITH (
+	connector = 'kafka',
+	properties.bootstrap.server = 'message_queue:29092',
+	topic = 'debezium_mongo_json_customers'
+)
+FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = true )
+
+statement ok
 CREATE TABLE mongo_customers_no_schema_field (
 	_id BIGINT PRIMARY KEY,
 	payload jsonb
@@ -396,6 +410,20 @@ WITH (
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers_no_schema_field')
 FORMAT DEBEZIUM_MONGO ENCODE JSON
+
+statement ok
+CREATE TABLE mongo_customers_no_schema_field_strong_schema (
+	_id BIGINT PRIMARY KEY,
+	email VARCHAR,
+	first_name VARCHAR,
+	last_name VARCHAR
+)
+WITH (
+	connector = 'kafka',
+	properties.bootstrap.server = 'message_queue:29092',
+	topic = 'debezium_mongo_json_customers_no_schema_field'
+)
+FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = true )
 
 statement ok
 CREATE TABLE upsert_students_default_key (
@@ -753,6 +781,20 @@ query II
 SELECT
 	*
 FROM
+	mongo_customers_strong_schema
+ORDER BY
+	_id;
+----
+1001 sally.thomas@acme.com Sally Thomas
+1002 gbailey@foobar.com George Bailey
+1003 ed@walker.com Edward Walker
+1004 annek@noanswer.org Anne Kretchmar
+
+
+query II
+SELECT
+	*
+FROM
 	mongo_customers_no_schema_field
 ORDER BY
 	_id;
@@ -762,6 +804,19 @@ ORDER BY
 1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
 1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
 
+
+query II
+SELECT
+	*
+FROM
+	mongo_customers_no_schema_field_strong_schema
+ORDER BY
+	_id;
+----
+1001 sally.thomas@acme.com Sally Thomas
+1002 gbailey@foobar.com George Bailey
+1003 ed@walker.com Edward Walker
+1004 annek@noanswer.org Anne Kretchmar
 
 query II
 SELECT

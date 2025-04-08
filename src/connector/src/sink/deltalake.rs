@@ -30,25 +30,23 @@ use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::DatabaseConnection;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 
-use super::coordinate::CoordinatedSinkWriter;
-use super::decouple_checkpoint_log_sink::{
-    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
-};
+use super::coordinate::CoordinatedLogSinker;
+use super::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use super::writer::SinkWriter;
 use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
 };
 use crate::connector_common::AwsAuthProps;
 
@@ -291,7 +289,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
 
 impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
-    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
@@ -303,33 +301,20 @@ impl Sink for DeltaLakeSink {
         )
         .await?;
 
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let writer = CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
-            self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
-                ))
-            })?,
-            inner,
-        )
-        .await?;
-
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
+        let writer = CoordinatedLogSinker::new(
+            &writer_param,
+            self.param.clone(),
+            inner,
             commit_checkpoint_interval,
-        ))
+        )
+        .await?;
+
+        Ok(writer)
     }
 
     async fn validate(&self) -> Result<()> {
@@ -384,7 +369,7 @@ impl Sink for DeltaLakeSink {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
         })
@@ -484,10 +469,6 @@ impl SinkWriter for DeltaLakeSinkWriter {
             adds,
         })?))
     }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
 }
 
 pub struct DeltaLakeSinkCommitter {
@@ -496,7 +477,7 @@ pub struct DeltaLakeSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         tracing::info!("DeltaLake commit coordinator inited.");
         Ok(None)
     }
