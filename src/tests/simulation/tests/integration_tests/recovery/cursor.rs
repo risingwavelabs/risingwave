@@ -38,7 +38,7 @@ async fn test_cursor_recovery() -> Result<()> {
     session.run("INSERT INTO t1 VALUES (2, 2);").await?;
 
     session
-        .run("DECLARE test_cursor CURSOR FOR sub SINCE begin();")
+        .run("DECLARE test_cursor SUBSCRIPTION CURSOR FOR sub SINCE begin();")
         .await?;
 
     let result1 = session.run("FETCH NEXT FROM test_cursor").await?;
@@ -51,7 +51,7 @@ async fn test_cursor_recovery() -> Result<()> {
     let mut session2 = cluster.start_session();
 
     session2
-        .run("DECLARE test_cursor CURSOR FOR sub SINCE begin();")
+        .run("DECLARE test_cursor SUBSCRIPTION CURSOR FOR sub SINCE begin();")
         .await?;
 
     session2.run("INSERT INTO t1 VALUES (3, 3);").await?;
