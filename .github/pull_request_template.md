@@ -1,5 +1,7 @@
 I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Agreement](https://raw.githubusercontent.com/risingwavelabs/risingwave/17af8a747593ebdbfa826691daf75bdab7d14fa0/.github/contributor-license-agreement.txt).
 
+Highest Release Version: 2.3
+
 
 
 ## What's changed and what's your intention?
