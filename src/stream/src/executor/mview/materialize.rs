@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
@@ -23,7 +23,9 @@ use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
+};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -180,7 +182,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             let msg = msg?;
             self.materialize_cache.evict();
 
-            yield match msg {
+            let msg = match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     self.metrics
@@ -194,11 +196,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && self.version_column_index.is_none()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
                     match self.conflict_behavior {
-                        ConflictBehavior::Overwrite
-                        | ConflictBehavior::IgnoreConflict
-                        | ConflictBehavior::DoUpdateIfNotNull
-                            if !do_not_handle_conflict =>
-                        {
+                        checked_conflict_behaviors!() if !do_not_handle_conflict => {
                             if chunk.cardinality() == 0 {
                                 // empty chunk
                                 continue;
@@ -237,17 +235,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 .filter_map(|(((op, k), v), vis)| vis.then_some((*op, k, v)))
                                 .collect_vec();
 
-                            let fixed_changes = self
+                            let change_buffer = self
                                 .materialize_cache
                                 .handle(
                                     row_ops,
                                     &self.state_table,
-                                    &self.conflict_behavior,
+                                    self.conflict_behavior,
                                     &self.metrics,
                                 )
                                 .await?;
 
-                            match generate_output(fixed_changes, data_types.clone())? {
+                            match generate_output(change_buffer, data_types.clone())? {
                                 Some(output_chunk) => {
                                     self.state_table.write_chunk(output_chunk.clone());
                                     self.state_table.try_flush().await?;
@@ -300,7 +298,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
                     {
                         if cache_may_stale {
-                            self.materialize_cache.data.clear();
+                            self.materialize_cache.lru_cache.clear();
                         }
                     }
 
@@ -310,7 +308,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                     continue;
                 }
-            }
+            };
+            yield msg;
         }
     }
 
@@ -414,7 +413,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 
 /// Construct output `StreamChunk` from given buffer.
 fn generate_output(
-    changes: MaterializeBuffer,
+    change_buffer: ChangeBuffer,
     data_types: Vec<DataType>,
 ) -> StreamExecutorResult<Option<StreamChunk>> {
     // construct output chunk
@@ -422,7 +421,7 @@ fn generate_output(
     let mut new_ops: Vec<Op> = vec![];
     let mut new_rows: Vec<Bytes> = vec![];
     let row_deserializer = RowDeserializer::new(data_types.clone());
-    for (_, row_op) in changes.into_parts() {
+    for (_, row_op) in change_buffer.into_parts() {
         match row_op {
             KeyOp::Insert(value) => {
                 new_ops.push(Op::Insert);
@@ -459,19 +458,20 @@ fn generate_output(
     }
 }
 
-/// `MaterializeBuffer` is a buffer to handle chunk into `KeyOp`.
-pub struct MaterializeBuffer {
+/// `ChangeBuffer` is a buffer to handle chunk into `KeyOp`.
+/// TODO(rc): merge with `TopNStaging`.
+struct ChangeBuffer {
     buffer: HashMap<Vec<u8>, KeyOp>,
 }
 
-impl MaterializeBuffer {
+impl ChangeBuffer {
     fn new() -> Self {
         Self {
             buffer: HashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, pk: Vec<u8>, value: Bytes) {
+    fn insert(&mut self, pk: Vec<u8>, value: Bytes) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -488,7 +488,7 @@ impl MaterializeBuffer {
         }
     }
 
-    pub fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
+    fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
         let entry: Entry<'_, Vec<u8>, KeyOp> = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -509,7 +509,7 @@ impl MaterializeBuffer {
         }
     }
 
-    pub fn update(&mut self, pk: Vec<u8>, old_value: Bytes, new_value: Bytes) {
+    fn update(&mut self, pk: Vec<u8>, old_value: Bytes, new_value: Bytes) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -529,7 +529,7 @@ impl MaterializeBuffer {
         }
     }
 
-    pub fn into_parts(self) -> HashMap<Vec<u8>, KeyOp> {
+    fn into_parts(self) -> HashMap<Vec<u8>, KeyOp> {
         self.buffer
     }
 }
@@ -548,8 +548,8 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 }
 
 /// A cache for materialize executors.
-pub struct MaterializeCache<SD> {
-    data: ManagedLruCache<Vec<u8>, CacheValue>,
+struct MaterializeCache<SD> {
+    lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -558,33 +558,36 @@ pub struct MaterializeCache<SD> {
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(
+    fn new(
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
         version_column_index: Option<u32>,
     ) -> Self {
-        let cache: ManagedLruCache<Vec<u8>, CacheValue> =
+        let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
             ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
-            data: cache,
+            lru_cache,
             row_serde,
             version_column_index,
             _serde: PhantomData,
         }
     }
 
-    pub async fn handle<S: StateStore>(
+    async fn handle<S: StateStore>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
-        conflict_behavior: &ConflictBehavior,
+        conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
-    ) -> StreamExecutorResult<MaterializeBuffer> {
+    ) -> StreamExecutorResult<ChangeBuffer> {
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
             .collect();
+
+        // Populate the LRU cache with the keys in input chunk.
+        // For new keys, row values are set to None.
         self.fetch_keys(
             key_set.iter().map(|v| v.deref()),
             table,
@@ -592,155 +595,124 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             metrics,
         )
         .await?;
-        let mut fixed_changes = MaterializeBuffer::new();
+
+        let mut change_buffer = ChangeBuffer::new();
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
-        for (op, key, value) in row_ops {
-            let mut update_cache = false;
-            let fixed_changes = &mut fixed_changes;
-            // When you change the fixed_changes buffer, you must mark `update_cache` to true so the cache and downstream can be consistent.
-            let fixed_changes = || {
-                update_cache = true;
-                fixed_changes
-            };
+        for (op, key, row) in row_ops {
+            assert_matches!(conflict_behavior, checked_conflict_behaviors!());
+
             match op {
                 Op::Insert | Op::UpdateInsert => {
+                    let Some(old_row) = self.get_expected(&key) else {
+                        // not exists before, meaning no conflict, simply insert
+                        change_buffer.insert(key.clone(), row.clone());
+                        self.lru_cache.put(key, Some(CompactedRow { row }));
+                        continue;
+                    };
+
+                    // now conflict happens, handle it according to the specified behavior
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    let mut handle_conflict = true;
-                                    if let Some(idx) = version_column_index {
-                                        let old_row_deserialized = row_serde
-                                            .deserializer
-                                            .deserialize(old_row.row.clone())?;
-                                        let new_row_deserialized =
-                                            row_serde.deserializer.deserialize(value.clone())?;
+                            let need_overwrite = if let Some(idx) = version_column_index {
+                                let old_row_deserialized =
+                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                let new_row_deserialized =
+                                    row_serde.deserializer.deserialize(row.clone())?;
 
-                                        handle_conflict = should_handle_conflict(
-                                            old_row_deserialized.index(idx as usize),
-                                            new_row_deserialized.index(idx as usize),
-                                        );
-                                    }
-                                    if handle_conflict {
-                                        fixed_changes().update(
-                                            key.clone(),
-                                            old_row.row.clone(),
-                                            value.clone(),
-                                        )
-                                    } else {
-                                        update_cache = false;
-                                    }
-                                }
-                                None => fixed_changes().insert(key.clone(), value.clone()),
+                                version_is_newer_or_equal(
+                                    old_row_deserialized.index(idx as usize),
+                                    new_row_deserialized.index(idx as usize),
+                                )
+                            } else {
+                                // no version column specified, just overwrite
+                                true
+                            };
+                            if need_overwrite {
+                                change_buffer.update(key.clone(), old_row.row.clone(), row.clone());
+                                self.lru_cache.put(key.clone(), Some(CompactedRow { row }));
                             };
                         }
                         ConflictBehavior::IgnoreConflict => {
-                            match self.force_get(&key) {
-                                Some(_) => (),
-                                None => {
-                                    fixed_changes().insert(key.clone(), value.clone());
-                                }
-                            };
+                            // ignore conflict, do nothing
                         }
-
                         ConflictBehavior::DoUpdateIfNotNull => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
-                                    // todo(wcy-fdu):find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
-                                    let mut old_row_deserialized_vec = row_serde
-                                        .deserializer
-                                        .deserialize(old_row.row.clone())?
-                                        .into_inner()
-                                        .into_vec();
-                                    let new_row_deserialized =
-                                        row_serde.deserializer.deserialize(value.clone())?;
-                                    let mut handle_conflict = true;
-                                    if let Some(idx) = version_column_index {
-                                        handle_conflict = should_handle_conflict(
-                                            &old_row_deserialized_vec[idx as usize],
-                                            new_row_deserialized.index(idx as usize),
-                                        );
-                                    }
-                                    if handle_conflict {
-                                        execute_do_update_if_not_null_replacement(
-                                            &mut old_row_deserialized_vec,
-                                            new_row_deserialized,
-                                        );
-                                        let new_row = OwnedRow::new(old_row_deserialized_vec);
-                                        let new_row_bytes =
-                                            Bytes::from(row_serde.serializer.serialize(new_row));
-                                        fixed_changes().update(
-                                            key.clone(),
-                                            old_row.row.clone(),
-                                            new_row_bytes.clone(),
-                                        );
-                                        // Since `DoUpdateIfNotNull` may generate values that differ from both the new row and old row,
-                                        // an update cache needs to be done here.
-                                        self.data.push(
-                                            key.clone(),
-                                            Some(CompactedRow { row: new_row_bytes }),
-                                        );
-                                    }
-                                    update_cache = false;
-                                }
-                                None => {
-                                    fixed_changes().insert(key.clone(), value.clone());
-                                    update_cache = true;
-                                }
+                            // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
+                            // TODO(wcy-fdu): find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
+
+                            let old_row_deserialized =
+                                row_serde.deserializer.deserialize(old_row.row.clone())?;
+                            let new_row_deserialized =
+                                row_serde.deserializer.deserialize(row.clone())?;
+                            let need_overwrite = if let Some(idx) = version_column_index {
+                                version_is_newer_or_equal(
+                                    old_row_deserialized.index(idx as usize),
+                                    new_row_deserialized.index(idx as usize),
+                                )
+                            } else {
+                                true
                             };
+
+                            if need_overwrite {
+                                let mut row_deserialized_vec =
+                                    old_row_deserialized.into_inner().into_vec();
+                                replace_if_not_null(
+                                    &mut row_deserialized_vec,
+                                    new_row_deserialized,
+                                );
+                                let updated_row = OwnedRow::new(row_deserialized_vec);
+                                let updated_row_bytes =
+                                    Bytes::from(row_serde.serializer.serialize(updated_row));
+
+                                change_buffer.update(
+                                    key.clone(),
+                                    old_row.row.clone(),
+                                    updated_row_bytes.clone(),
+                                );
+                                self.lru_cache.put(
+                                    key.clone(),
+                                    Some(CompactedRow {
+                                        row: updated_row_bytes,
+                                    }),
+                                );
+                            }
                         }
                         _ => unreachable!(),
                     };
-
-                    if update_cache {
-                        match conflict_behavior {
-                            ConflictBehavior::Overwrite
-                            | ConflictBehavior::IgnoreConflict
-                            | ConflictBehavior::DoUpdateIfNotNull => {
-                                self.data.push(key, Some(CompactedRow { row: value }));
-                            }
-
-                            _ => unreachable!(),
-                        }
-                    }
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     match conflict_behavior {
-                        ConflictBehavior::Overwrite
-                        | ConflictBehavior::IgnoreConflict
-                        | ConflictBehavior::DoUpdateIfNotNull => {
-                            // delete a nonexistent value
-                            if let Some(old_row) = self.force_get(&key) {
-                                fixed_changes().delete(key.clone(), old_row.row.clone());
+                        checked_conflict_behaviors!() => {
+                            if let Some(old_row) = self.get_expected(&key) {
+                                change_buffer.delete(key.clone(), old_row.row.clone());
+                                // put a None into the cache to represent deletion
+                                self.lru_cache.put(key, None);
+                            } else {
+                                // delete a non-existent value
+                                // this is allowed in the case of mview conflict, so ignore
                             };
                         }
                         _ => unreachable!(),
                     };
-
-                    if update_cache {
-                        self.data.push(key, None);
-                    }
                 }
             }
         }
-        Ok(fixed_changes)
+        Ok(change_buffer)
     }
 
     async fn fetch_keys<'a, S: StateStore>(
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
-        conflict_behavior: &ConflictBehavior,
+        conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
             metrics.materialize_cache_total_count.inc();
 
-            if self.data.contains(key) {
+            if self.lru_cache.contains(key) {
                 metrics.materialize_cache_hit_count.inc();
                 continue;
             }
@@ -753,12 +725,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
-            let (key, value) = result?;
+            let (key, row) = result?;
+            // for keys that are not in the table, `value` is None
             match conflict_behavior {
-                ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull => {
-                    self.data.push(key, value)
-                }
-                ConflictBehavior::IgnoreConflict => self.data.push(key, value),
+                checked_conflict_behaviors!() => self.lru_cache.put(key, row),
                 _ => unreachable!(),
             };
         }
@@ -766,8 +736,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         Ok(())
     }
 
-    pub fn force_get(&mut self, key: &[u8]) -> &CacheValue {
-        self.data.get(key).unwrap_or_else(|| {
+    fn get_expected(&mut self, key: &[u8]) -> &CacheValue {
+        self.lru_cache.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
                 key
@@ -776,62 +746,41 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     }
 
     fn evict(&mut self) {
-        self.data.evict()
+        self.lru_cache.evict()
     }
 }
 
-/// Generates a new row with the behavior of "do update if not null" by replacing columns in the old row with non-empty columns in the new row.
-///
-/// # Arguments
-///
-/// * `old_row` - The old row containing the original values.
-/// * `new_row` - The new row containing the replacement values.
+/// Replace columns in an existing row with the corresponding columns in a replacement row, if the
+/// column value in the replacement row is not null.
 ///
 /// # Example
 ///
 /// ```no_run
-/// let old_row = vec![Some(1), None, Some(3)];
-/// let mut new_row = vec![Some(10), Some(20), None];
-///
-///
-/// // After the execute_do_update_if_not_null_replacement function call, old_row will be [Some(10), Some(20), Some(3)].
+/// let mut row = vec![Some(1), None, Some(3)];
+/// let replacement = vec![Some(10), Some(20), None];
+/// replace_if_not_null(&mut row, replacement);
 /// ```
-fn execute_do_update_if_not_null_replacement(
-    old_row: &mut Vec<Option<ScalarImpl>>,
-    new_row: OwnedRow,
-) {
-    for (old_col, new_col) in old_row.iter_mut().zip_eq_fast(new_row) {
+///
+/// After the call, `row` will be `[Some(10), Some(20), Some(3)]`.
+fn replace_if_not_null(row: &mut Vec<Option<ScalarImpl>>, replacement: OwnedRow) {
+    for (old_col, new_col) in row.iter_mut().zip_eq_fast(replacement) {
         if let Some(new_value) = new_col {
             *old_col = Some(new_value);
         }
     }
 }
-/// Determines whether pk conflict should be handled based on the version column of the new and old rows.
-///
-/// # Arguments
-///
-/// * `old_version_column`: The version column value of the old row.
-/// * `new_version_column`: The version column value of the new row.
-///
-/// # Returns
-///
-/// A boolean value indicating whether a conflict should be handled.
-///
-/// If both the new row's version column and the old row's version column are Some, the function will return true if the new row's version is greater than or equal to the old row's version.
-/// If the new row's version column is None and the old row's version column is Some, do not handle pk conflict.
-/// If both the new row's version column and the old row's version column are None, should handle pk conflict.
-fn should_handle_conflict(
-    old_version_column: &Option<ScalarImpl>,
-    new_version_column: &Option<ScalarImpl>,
+
+/// Determines whether pk conflict handling should update an existing row with newly-received value,
+/// according to the value of version column of the new and old rows.
+fn version_is_newer_or_equal(
+    old_version: &Option<ScalarImpl>,
+    new_version: &Option<ScalarImpl>,
 ) -> bool {
-    match (old_version_column, new_version_column) {
+    match (old_version, new_version) {
         (None, None) => true,
         (None, Some(_)) => true,
         (Some(_), None) => false,
-        (Some(old_version_col), Some(new_version_col)) => !matches!(
-            old_version_col.default_cmp(new_version_col),
-            Ordering::Greater
-        ),
+        (Some(old_version), Some(new_version)) => old_version.default_cmp(new_version).is_le(),
     }
 }
 
