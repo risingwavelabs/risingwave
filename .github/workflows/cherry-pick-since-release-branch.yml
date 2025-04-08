@@ -109,7 +109,9 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          ref: needs.get-target-release-branches.outputs.pr_sha
+          # For automatic trigger from PR events, `pr_sha` is unset,
+          # and it will checkout the latest commit on the branch by default.
+          ref: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
 
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
