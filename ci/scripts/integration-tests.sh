@@ -51,7 +51,7 @@ fi
 if [ "${BUILDKITE_SOURCE}" == "webhook" ]; then
   # Use ghcr nightly image for webhook build (PR). If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
   # use yesterday's date
-  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date -v -1d '+%Y%m%d')"
+  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date -d '-1 day' '+%Y%m%d')"
   echo Docker image: "$RW_IMAGE"
 fi
 
