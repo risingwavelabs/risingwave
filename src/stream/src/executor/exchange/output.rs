@@ -19,7 +19,7 @@ use super::error::ExchangeChannelClosed;
 use super::permit::Sender;
 use crate::error::StreamResult;
 use crate::executor::DispatcherMessageBatch as Message;
-use crate::task::{ActorId, SharedContext};
+use crate::task::ActorId;
 
 /// `LocalOutput` sends data to a local channel.
 #[derive(Educe)]
@@ -56,16 +56,4 @@ impl Output {
     pub fn actor_id(&self) -> ActorId {
         self.actor_id
     }
-}
-
-/// Create a [`Output`] instance for the current actor id and the
-/// downstream actor id. Used by dispatchers.
-pub fn new_output(
-    context: &SharedContext,
-    actor_id: ActorId,
-    down_id: ActorId,
-) -> StreamResult<Output> {
-    let tx = context.take_sender(&(actor_id, down_id))?;
-
-    Ok(Output::new(down_id, tx))
 }

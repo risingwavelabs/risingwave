@@ -223,6 +223,11 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
     },
+    RegisterLocalUpstreamOutput {
+        actor_id: ActorId,
+        upstream_actor_id: ActorId,
+        tx: permit::Sender,
+    },
 }
 
 #[derive(strum_macros::Display)]
@@ -515,36 +520,42 @@ impl LocalBarrierWorker {
                 ids,
                 result_sender,
             } => {
-                let result = try {
-                    if self.term_id != term_id {
+                let err = if self.term_id != term_id {
+                    {
                         warn!(
                             ?ids,
                             term_id,
                             current_term_id = self.term_id,
                             "take receiver on unmatched term_id"
                         );
-                        Err(anyhow!(
+                        anyhow!(
                             "take receiver {:?} on unmatched term_id {} to current term_id {}",
                             ids,
                             term_id,
                             self.term_id
-                        ))?;
+                        )
                     }
-                    let result = match self.state.databases.entry(database_id) {
+                } else {
+                    match self.state.databases.entry(database_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
                                 pending_requests.push((ids, result_sender));
                                 return;
                             }
-                            DatabaseStatus::Running(database) => database
-                                .local_barrier_manager
-                                .shared_context
-                                .take_receiver(ids),
+                            DatabaseStatus::Running(database) => {
+                                let (upstream_actor_id, actor_id) = ids;
+                                database.new_actor_output_request(
+                                    actor_id,
+                                    upstream_actor_id,
+                                    NewOutputRequest::Remote(result_sender),
+                                );
+                                return;
+                            }
                             DatabaseStatus::Suspended(_) => {
-                                Err(anyhow!("database suspended").into())
+                                anyhow!("database suspended")
                             }
                             DatabaseStatus::Resetting(_) => {
-                                Err(anyhow!("database resetting").into())
+                                anyhow!("database resetting")
                             }
                             DatabaseStatus::Unspecified => {
                                 unreachable!()
@@ -557,10 +568,9 @@ impl LocalBarrierWorker {
                             )]));
                             return;
                         }
-                    };
-                    result?
+                    }
                 };
-                let _ = result_sender.send(result);
+                let _ = result_sender.send(Err(err.into()));
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
@@ -669,6 +679,8 @@ mod await_epoch_completed_future {
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
+
+use crate::executor::exchange::permit;
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -887,18 +899,19 @@ impl LocalBarrierWorker {
             Entry::Occupied(entry) => {
                 let status = entry.into_mut();
                 if let DatabaseStatus::ReceivedExchangeRequest(pending_requests) = status {
-                    let database = DatabaseManagedBarrierState::new(
+                    let mut database = DatabaseManagedBarrierState::new(
                         database_id,
                         self.term_id.clone(),
                         self.actor_manager.clone(),
                         vec![],
                     );
-                    for (ids, result_sender) in pending_requests.drain(..) {
-                        let result = database
-                            .local_barrier_manager
-                            .shared_context
-                            .take_receiver(ids);
-                        let _ = result_sender.send(result);
+                    for ((upstream_actor_id, actor_id), result_sender) in pending_requests.drain(..)
+                    {
+                        database.new_actor_output_request(
+                            actor_id,
+                            upstream_actor_id,
+                            NewOutputRequest::Remote(result_sender),
+                        );
                     }
                     *status = DatabaseStatus::Running(database);
                 }
@@ -1091,6 +1104,11 @@ impl<T> EventSender<T> {
     }
 }
 
+pub(crate) enum NewOutputRequest {
+    Local(permit::Sender),
+    Remote(oneshot::Sender<StreamResult<permit::Receiver>>),
+}
+
 impl LocalBarrierManager {
     pub(super) fn new(
         shared_context: Arc<SharedContext>,
@@ -1139,6 +1157,20 @@ impl LocalBarrierManager {
         self.send_event(LocalBarrierEvent::RegisterBarrierSender {
             actor_id,
             barrier_sender: tx,
+        });
+        rx
+    }
+
+    pub fn register_local_upstream_output(
+        &self,
+        actor_id: ActorId,
+        upstream_actor_id: ActorId,
+    ) -> permit::Receiver {
+        let (tx, rx) = self.shared_context.new_channel();
+        self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
+            actor_id,
+            upstream_actor_id,
+            tx,
         });
         rx
     }

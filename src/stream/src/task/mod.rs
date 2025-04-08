@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-
-use anyhow::anyhow;
-use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
-use crate::error::StreamResult;
-use crate::executor::exchange::permit::{self, Receiver, Sender};
+use crate::executor::exchange::permit::{Receiver, Sender};
 
 mod barrier_manager;
 mod env;
@@ -32,10 +27,13 @@ pub use env::*;
 use risingwave_common::catalog::DatabaseId;
 pub use stream_manager::*;
 
+use crate::executor::exchange::permit;
+
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
 pub type DispatcherId = u64;
+/// (`upstream_actor_id`, `downstream_actor_id`)
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
@@ -71,25 +69,6 @@ pub struct SharedContext {
     pub(crate) database_id: DatabaseId,
     term_id: String,
 
-    /// Stores the senders and receivers for later `Processor`'s usage.
-    ///
-    /// Each actor has several senders and several receivers. Senders and receivers are created
-    /// during `update_actors` and stored in a channel map. Upon `build_actors`, all these channels
-    /// will be taken out and built into the executors and outputs.
-    /// One sender or one receiver can be uniquely determined by the upstream and downstream actor
-    /// id.
-    ///
-    /// There are three cases when we need local channels to pass around messages:
-    /// 1. pass `Message` between two local actors
-    /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
-    ///    `ReceiverExecutor` or `MergerExecutor`.
-    /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    ///    `ExchangeServiceImpl`.
-    ///
-    /// The channel serves as a buffer because `ExchangeServiceImpl`
-    /// is on the server-side and we will also introduce backpressure.
-    channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
-
     /// Stores the local address.
     ///
     /// It is used to test whether an actor is local or not,
@@ -118,7 +97,6 @@ impl SharedContext {
         Self {
             database_id,
             term_id,
-            channel_map: Default::default(),
             addr: env.server_address().clone(),
             config: env.config().as_ref().to_owned(),
             compute_client_pool: env.client_pool(),
@@ -139,7 +117,6 @@ impl SharedContext {
         Self {
             database_id: TEST_DATABASE_ID,
             term_id: "for_test".into(),
-            channel_map: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
@@ -154,45 +131,16 @@ impl SharedContext {
         }
     }
 
-    /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one
-    /// with the configured permits.
-    fn get_or_insert_channels(
-        &self,
-        ids: UpDownActorIds,
-    ) -> MappedMutexGuard<'_, ConsumableChannelPair> {
-        MutexGuard::map(self.channel_map.lock(), |map| {
-            map.entry(ids).or_insert_with(|| {
-                let (tx, rx) = permit::channel(
-                    self.config.developer.exchange_initial_permits,
-                    self.config.developer.exchange_batched_permits,
-                    self.config.developer.exchange_concurrent_barriers,
-                );
-                (Some(tx), Some(rx))
-            })
-        })
-    }
-
-    pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
-        self.get_or_insert_channels(*ids)
-            .0
-            .take()
-            .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
-    }
-
-    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
-        self.get_or_insert_channels(ids)
-            .1
-            .take()
-            .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
+    /// Create a new channel pair.
+    pub fn new_channel(&self) -> (Sender, Receiver) {
+        permit::channel(
+            self.config.developer.exchange_initial_permits,
+            self.config.developer.exchange_batched_permits,
+            self.config.developer.exchange_concurrent_barriers,
+        )
     }
 
     pub fn config(&self) -> &StreamingConfig {
         &self.config
-    }
-
-    pub(super) fn drop_actors(&self, actors: &HashSet<ActorId>) {
-        self.channel_map
-            .lock()
-            .retain(|(up_id, _), _| !actors.contains(up_id));
     }
 }

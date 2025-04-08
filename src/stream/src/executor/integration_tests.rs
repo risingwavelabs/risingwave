@@ -159,7 +159,9 @@ async fn test_merger_sum_aggr() {
                 shared_context.clone(),
                 metrics,
                 config::default::developer::stream_chunk_size(),
-            );
+            )
+            .await
+            .unwrap();
             let actor = Actor::new(
                 dispatcher,
                 vec![],
