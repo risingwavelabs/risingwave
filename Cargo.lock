@@ -11237,6 +11237,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_stream",
+ "rw-diagnose-tools",
  "sea-orm",
  "serde",
  "serde_json",
@@ -12692,6 +12693,17 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
+]
+
+[[package]]
+name = "rw-diagnose-tools"
+version = "0.1.0"
+source = "git+https://github.com/risingwavelabs/rw-diagnose-tools?rev=725249f#725249f5420ffdcff7796d2e71cdbc03434168f4"
+dependencies = [
+ "anyhow",
+ "itertools 0.12.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
