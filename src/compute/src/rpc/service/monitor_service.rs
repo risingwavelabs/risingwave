@@ -27,6 +27,7 @@ use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUA
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetStreamingStatsRequest,
     GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
@@ -77,12 +78,21 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
         let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k.0, v.to_string()))
+                .map(|(k, v)| {
+                    (
+                        k.0,
+                        if req.actor_traces_format == ActorTracesFormat::Text as i32 {
+                            v.to_string()
+                        } else {
+                            serde_json::to_string(&v).unwrap()
+                        },
+                    )
+                })
                 .collect()
         } else {
             Default::default()
