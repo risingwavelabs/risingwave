@@ -18,6 +18,7 @@ use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use futures::{FutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
@@ -25,22 +26,24 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::PbDispatcher;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use smallvec::{SmallVec, smallvec};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
 use tracing::{Instrument, event};
 
-use super::exchange::output::{Output, new_output};
+use super::exchange::output::Output;
 use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
 use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
-use crate::task::{DispatcherId, SharedContext};
+use crate::task::{DispatcherId, NewOutputRequest, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -110,9 +113,60 @@ struct DispatchExecutorInner {
     actor_id: u32,
     context: Arc<SharedContext>,
     metrics: DispatchExecutorMetrics,
+    new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+    pending_new_output_requests: HashMap<ActorId, NewOutputRequest>,
 }
 
 impl DispatchExecutorInner {
+    async fn collect_outputs(
+        &mut self,
+        downstream_actors: &[ActorId],
+    ) -> StreamResult<Vec<Output>> {
+        fn resolve_output(
+            downstream_actor: ActorId,
+            request: NewOutputRequest,
+            context: &SharedContext,
+        ) -> Output {
+            let tx = match request {
+                NewOutputRequest::Local(tx) => tx,
+                NewOutputRequest::Remote(result_sender) => {
+                    let (tx, rx) = context.new_channel();
+                    let _ = result_sender.send(Ok(rx));
+                    tx
+                }
+            };
+            Output::new(downstream_actor, tx)
+        }
+        let mut outputs = Vec::with_capacity(downstream_actors.len());
+        for downstream_actor in downstream_actors {
+            let output =
+                if let Some(request) = self.pending_new_output_requests.remove(downstream_actor) {
+                    resolve_output(*downstream_actor, request, &self.context)
+                } else {
+                    loop {
+                        let (requested_actor, request) = self
+                            .new_output_request_rx
+                            .recv()
+                            .await
+                            .ok_or_else(|| anyhow!("end of new output request"))?;
+                        if requested_actor == *downstream_actor {
+                            break resolve_output(requested_actor, request, &self.context);
+                        } else {
+                            assert!(
+                                self.pending_new_output_requests
+                                    .insert(requested_actor, request)
+                                    .is_none(),
+                                "duplicated inflight new output requests from actor {}",
+                                requested_actor
+                            );
+                        }
+                    }
+                };
+            outputs.push(output);
+        }
+        Ok(outputs)
+    }
+
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
         let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
@@ -123,7 +177,7 @@ impl DispatchExecutorInner {
                 }
                 // Only the first barrier in a batch can be mutation.
                 let mutation = barrier_batch[0].mutation.clone();
-                self.pre_mutate_dispatchers(&mutation)?;
+                self.pre_mutate_dispatchers(&mutation).await?;
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
@@ -174,19 +228,18 @@ impl DispatchExecutorInner {
     }
 
     /// Add new dispatchers to the executor. Will check whether their ids are unique.
-    fn add_dispatchers<'a>(
+    async fn add_dispatchers<'a>(
         &mut self,
         new_dispatchers: impl IntoIterator<Item = &'a PbDispatcher>,
     ) -> StreamResult<()> {
-        let new_dispatchers: Vec<_> = new_dispatchers
-            .into_iter()
-            .map(|d| {
-                DispatcherImpl::new(&self.context, self.actor_id, d)
-                    .map(|dispatcher| self.metrics.monitor_dispatcher(dispatcher))
-            })
-            .try_collect()?;
-
-        self.dispatchers.extend(new_dispatchers);
+        for dispatcher in new_dispatchers {
+            let outputs = self
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, dispatcher)?;
+            let dispatcher = self.metrics.monitor_dispatcher(dispatcher);
+            self.dispatchers.push(dispatcher);
+        }
 
         assert!(
             self.dispatchers
@@ -209,12 +262,10 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
     /// outputs.
-    fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
-        let outputs: Vec<_> = update
-            .added_downstream_actor_id
-            .iter()
-            .map(|&id| new_output(&self.context, self.actor_id, id))
-            .try_collect()?;
+    async fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
+        let outputs = self
+            .collect_outputs(&update.added_downstream_actor_id)
+            .await?;
 
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.add_outputs(outputs);
@@ -245,7 +296,10 @@ impl DispatchExecutorInner {
     }
 
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
-    fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
+    async fn pre_mutate_dispatchers(
+        &mut self,
+        mutation: &Option<Arc<Mutation>>,
+    ) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(());
         };
@@ -253,7 +307,7 @@ impl DispatchExecutorInner {
         match mutation {
             Mutation::Add(AddMutation { adds, .. }) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
             }
             Mutation::Update(UpdateMutation {
@@ -262,12 +316,12 @@ impl DispatchExecutorInner {
                 ..
             }) => {
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
 
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
-                        self.pre_update_dispatcher(update)?;
+                        self.pre_update_dispatcher(update).await?;
                     }
                 }
             }
@@ -280,16 +334,16 @@ impl DispatchExecutorInner {
                 },
             ) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
 
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
 
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
-                        self.pre_update_dispatcher(update)?;
+                        self.pre_update_dispatcher(update).await?;
                     }
                 }
             }
@@ -351,15 +405,16 @@ impl DispatchExecutorInner {
 }
 
 impl DispatchExecutor {
-    pub fn new(
+    pub(crate) async fn new(
         mut input: Executor,
-        dispatchers: Vec<DispatcherImpl>,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<stream_plan::Dispatcher>,
         actor_id: u32,
         fragment_id: u32,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
-        chunk_size: usize,
-    ) -> Self {
+    ) -> StreamResult<Self> {
+        let chunk_size = context.config().developer.chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
@@ -379,19 +434,23 @@ impl DispatchExecutor {
             metrics,
             actor_out_record_cnt,
         };
-        let dispatchers = dispatchers
-            .into_iter()
-            .map(|dispatcher| metrics.monitor_dispatcher(dispatcher))
-            .collect();
-        Self {
-            input,
-            inner: DispatchExecutorInner {
-                dispatchers,
-                actor_id,
-                context,
-                metrics,
-            },
+        let mut inner = DispatchExecutorInner {
+            dispatchers: Default::default(),
+            actor_id,
+            context,
+            metrics,
+            new_output_request_rx,
+            pending_new_output_requests: Default::default(),
+        };
+        for dispatcher in dispatchers {
+            let outputs = inner
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
+            let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
+            inner.dispatchers.push(dispatcher);
         }
+        Ok(Self { input, inner })
     }
 }
 
@@ -514,17 +573,7 @@ pub enum DispatcherImpl {
 }
 
 impl DispatcherImpl {
-    pub fn new(
-        context: &SharedContext,
-        actor_id: ActorId,
-        dispatcher: &PbDispatcher,
-    ) -> StreamResult<Self> {
-        let outputs = dispatcher
-            .downstream_actor_id
-            .iter()
-            .map(|&down_id| new_output(context, actor_id, down_id))
-            .collect::<StreamResult<Vec<_>>>()?;
-
+    pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
         let output_indices = dispatcher
             .output_indices
             .iter()
@@ -1162,10 +1211,10 @@ mod tests {
     use futures::pin_mut;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
-    use risingwave_common::config;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_pb::stream_plan::DispatcherType;
+    use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
@@ -1275,6 +1324,7 @@ mod tests {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
 
         let simple_dispatcher_id = 888;
@@ -1321,15 +1371,20 @@ mod tests {
             )
             .boxed(),
         );
-        let executor = Box::new(DispatchExecutor::new(
-            input,
-            vec![broadcast_dispatcher, simple_dispatcher],
-            actor_id,
-            fragment_id,
-            ctx.clone(),
-            metrics,
-            config::default::developer::stream_chunk_size(),
-        ))
+        let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
+        let executor = Box::new(
+            DispatchExecutor::new(
+                input,
+                new_output_request_rx,
+                vec![broadcast_dispatcher, simple_dispatcher],
+                actor_id,
+                fragment_id,
+                ctx.clone(),
+                metrics,
+            )
+            .await
+            .unwrap(),
+        )
         .execute();
         pin_mut!(executor);
 
