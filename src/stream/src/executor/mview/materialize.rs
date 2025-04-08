@@ -755,7 +755,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// let mut row = vec![Some(1), None, Some(3)];
 /// let replacement = vec![Some(10), Some(20), None];
 /// replace_if_not_null(&mut row, replacement);
