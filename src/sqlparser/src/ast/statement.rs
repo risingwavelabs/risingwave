@@ -399,10 +399,14 @@ impl fmt::Display for FormatEncodeOptions {
         write!(f, "FORMAT {} ENCODE {}", self.format, self.row_encode)?;
 
         if !self.row_options().is_empty() {
-            write!(f, " ({})", display_comma_separated(self.row_options()))
-        } else {
-            Ok(())
+            write!(f, " ({})", display_comma_separated(self.row_options()))?;
         }
+
+        if let Some(key_encode) = &self.key_encode {
+            write!(f, " KEY ENCODE {}", key_encode)?;
+        }
+
+        Ok(())
     }
 }
 
