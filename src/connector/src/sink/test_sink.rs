@@ -22,10 +22,12 @@ use sea_orm::DatabaseConnection;
 use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 
+use super::catalog::SinkId;
+
 pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
     + Send
     + 'static;
-pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection) -> BoxCoordinator + Send + 'static;
+pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection, SinkId) -> BoxCoordinator + Send + 'static;
 
 type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
 type BuildBoxCoordinator = Box<dyn BuildBoxCoordinatorTrait>;
@@ -69,7 +71,7 @@ impl Sink for TestSink {
         &self,
         db: DatabaseConnection,
     ) -> crate::sink::Result<Self::Coordinator> {
-        Ok(build_box_coordinator(db))
+        Ok(build_box_coordinator(db, self.param.sink_id))
     }
 }
 
@@ -125,18 +127,18 @@ pub fn register_build_coordinated_sink(
 pub fn register_build_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
 ) -> TestSinkRegistryGuard {
-    register_build_sink_inner(build_box_log_sinker, |_| {
+    register_build_sink_inner(build_box_log_sinker, |_, _| {
         unreachable!("no coordinator registered")
     })
 }
 
-fn build_box_coordinator(db: DatabaseConnection) -> BoxCoordinator {
+fn build_box_coordinator(db: DatabaseConnection,  sink_id: SinkId) -> BoxCoordinator {
     (get_registry()
         .build_box_sink
         .lock()
         .as_mut()
         .expect("should not be empty")
-        .1)(db)
+        .1)(db, sink_id)
 }
 
 async fn build_box_log_sinker(
