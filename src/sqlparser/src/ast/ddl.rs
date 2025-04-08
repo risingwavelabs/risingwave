@@ -197,14 +197,33 @@ pub enum AlterSubscriptionOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSourceOperation {
-    RenameSource { source_name: ObjectName },
-    AddColumn { column_def: ColumnDef },
-    ChangeOwner { new_owner_name: Ident },
-    SetSchema { new_schema_name: ObjectName },
-    FormatEncode { format_encode: FormatEncodeOptions },
+    RenameSource {
+        source_name: ObjectName,
+    },
+    AddColumn {
+        column_def: ColumnDef,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    FormatEncode {
+        format_encode: FormatEncodeOptions,
+    },
     RefreshSchema,
-    SetSourceRateLimit { rate_limit: i32 },
-    SwapRenameSource { target_source: ObjectName },
+    SetSourceRateLimit {
+        rate_limit: i32,
+    },
+    SwapRenameSource {
+        target_source: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -315,7 +334,7 @@ impl fmt::Display for AlterTableOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -351,7 +370,7 @@ impl fmt::Display for AlterIndexOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -378,7 +397,7 @@ impl fmt::Display for AlterViewOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -411,7 +430,7 @@ impl fmt::Display for AlterSinkOperation {
             } => {
                 write!(
                     f,
-                    "SET PARALLELISM TO {} {}",
+                    "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -470,6 +489,17 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::SwapRenameSource { target_source } => {
                 write!(f, "SWAP WITH {}", target_source)
+            }
+            AlterSourceOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }

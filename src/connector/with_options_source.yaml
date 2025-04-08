@@ -324,6 +324,10 @@ KafkaProperties:
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+  - name: properties.socket.keepalive.enable
+    field_type: bool
+    required: false
+    default: 'true'
   - name: properties.queued.min.messages
     field_type: usize
     comments: |-
