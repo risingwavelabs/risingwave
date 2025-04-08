@@ -25,6 +25,12 @@ mod scale;
 #[cfg(madsim)]
 mod utils;
 
+mod exactly_once_utils;
+
+#[cfg(madsim)]
+mod exactly_once_iceberg;
+#[cfg(madsim)]
+
 #[macro_export]
 macro_rules! assert_with_err_returned {
     ($condition:expr, $($rest:tt)*) => {{
