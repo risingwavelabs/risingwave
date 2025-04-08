@@ -441,10 +441,12 @@ impl CoordinatorWorker {
             let (handle_id, event) = self.handle_manager.next_event().await?;
             let (epoch, metadata) = match event {
                 CoordinationHandleManagerEvent::NewHandle => {
+                    println!("NewHandle {}", handle_id);
                     pending_new_handles.push(handle_id);
                     continue;
                 }
                 CoordinationHandleManagerEvent::UpdateVnodeBitmap => {
+                    println!("UpdateVnodeBitmap ");
                     running_handles = self
                         .handle_manager
                         .alter_parallelisms(
@@ -457,6 +459,7 @@ impl CoordinatorWorker {
                     continue;
                 }
                 CoordinationHandleManagerEvent::Stop => {
+                    println!("Stop ");
                     self.handle_manager.stop_handle(handle_id)?;
                     running_handles = self
                         .handle_manager
@@ -470,13 +473,19 @@ impl CoordinatorWorker {
                     continue;
                 }
                 CoordinationHandleManagerEvent::CommitRequest { epoch, metadata } => {
+                    println!("CommitRequest epoch = {} ", epoch);
                     (epoch, metadata)
                 }
                 CoordinationHandleManagerEvent::AlignInitialEpoch(_) => {
+                    println!("receive AlignInitialEpoch after initialization");
                     bail!("receive AlignInitialEpoch after initialization")
                 }
             };
             if !running_handles.contains(&handle_id) {
+                println!(
+                    "receiving commit request from non-running handle {}, running handles: {:?}",
+                    handle_id, running_handles
+                );
                 bail!(
                     "receiving commit request from non-running handle {}, running handles: {:?}",
                     handle_id,
