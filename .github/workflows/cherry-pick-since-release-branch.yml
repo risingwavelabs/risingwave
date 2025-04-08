@@ -16,6 +16,9 @@ on:
         required: true
         type: string
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   get-target-release-branches:
     if: |
