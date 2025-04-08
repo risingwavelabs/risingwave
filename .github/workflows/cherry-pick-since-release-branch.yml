@@ -108,14 +108,13 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
-        with:
-          # For automatic trigger from PR events, `pr_sha` is unset,
-          # and it will checkout the latest commit on the branch by default.
-          ref: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
 
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
         with:
+          # For automatic trigger from PR events, `pr_sha` is unset,
+          # and it will use the triggering SHA (GITHUB_SHA) instead.
+          commit_sha: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
           pr_branch: ${{ matrix.branch }}
           pr_labels: "cherry-pick"
           pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', needs.get-target-release-branches.outputs.pr_number, matrix.branch) }}
