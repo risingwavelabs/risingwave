@@ -43,7 +43,7 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::{StateStore, dispatch_state_store};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
@@ -53,17 +53,16 @@ use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Execute, Executor,
-    ExecutorInfo, MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor,
-    WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
+    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::barrier_manager::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
 use crate::task::{
-    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager, StreamEnvironment,
-    UpDownActorIds,
+    ActorId, FragmentId, LocalBarrierManager, NewOutputRequest, StreamActorManager,
+    StreamEnvironment, UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -283,32 +282,6 @@ impl LocalBarrierWorker {
 }
 
 impl StreamActorManager {
-    /// Create dispatchers with downstream information registered before
-    fn create_dispatcher(
-        &self,
-        env: StreamEnvironment,
-        input: Executor,
-        dispatchers: &[stream_plan::Dispatcher],
-        actor_id: ActorId,
-        fragment_id: FragmentId,
-        shared_context: &Arc<SharedContext>,
-    ) -> StreamResult<DispatchExecutor> {
-        let dispatcher_impls = dispatchers
-            .iter()
-            .map(|dispatcher| DispatcherImpl::new(shared_context, actor_id, dispatcher))
-            .try_collect()?;
-
-        Ok(DispatchExecutor::new(
-            input,
-            dispatcher_impls,
-            actor_id,
-            fragment_id,
-            shared_context.clone(),
-            self.streaming_metrics.clone(),
-            env.config().developer.chunk_size,
-        ))
-    }
-
     fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> u64 {
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
@@ -603,6 +576,7 @@ impl StreamActorManager {
         node: Arc<StreamNode>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         local_barrier_manager: LocalBarrierManager,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         {
             let actor_id = actor.actor_id;
@@ -630,14 +604,16 @@ impl StreamActorManager {
                 )
                 .await?;
 
-            let dispatcher = self.create_dispatcher(
-                self.env.clone(),
+            let dispatcher = DispatchExecutor::new(
                 executor,
-                &actor.dispatchers,
+                new_output_request_rx,
+                actor.dispatchers,
                 actor_id,
                 fragment_id,
-                &local_barrier_manager.shared_context,
-            )?;
+                local_barrier_manager.shared_context.clone(),
+                self.streaming_metrics.clone(),
+            )
+            .await?;
             let actor = Actor::new(
                 dispatcher,
                 subtasks,
@@ -659,6 +635,7 @@ impl StreamActorManager {
         node: Arc<StreamNode>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         local_barrier_manager: LocalBarrierManager,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
         {
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -676,7 +653,8 @@ impl StreamActorManager {
                         fragment_id,
                         node,
                         related_subscriptions,
-                        barrier_manager.clone()
+                        barrier_manager.clone(),
+                        new_output_request_rx
                     ).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
