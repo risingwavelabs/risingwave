@@ -941,7 +941,9 @@ impl LogicalJoin {
         // For inner joins, pull non-equal conditions to a filter operator on top of it by default.
         // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
         // as opposed to the HashJoin, which applies the condition row-wise.
-        // However, the default behavior of pulling up non-equal conditions can be overidden by
+        // However, the default behavior of pulling up non-equal conditions can be overidden by the
+        // session variable `streaming_force_filter_inside_join` as it can save unnecessary
+        // materialization of rows only to be filtered later.
 
         let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
 
