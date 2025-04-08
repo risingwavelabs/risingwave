@@ -42,8 +42,15 @@ if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
   echo Docker image: "$RW_IMAGE"
 fi
 
-if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "webhook" ]; then
-  # Use ghcr nightly image for scheduled build/PR build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
+if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+  # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
+  # use yesterday's date
+  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date -v -1d '+%Y%m%d')"
+  echo Docker image: "$RW_IMAGE"
+fi
+
+if [ "${BUILDKITE_SOURCE}" == "webhook" ]; then
+  # Use ghcr nightly image for webhook build (PR). If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
   echo Docker image: "$RW_IMAGE"
 fi
