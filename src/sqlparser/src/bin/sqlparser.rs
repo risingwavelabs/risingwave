@@ -14,7 +14,7 @@
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
 
-use std::io;
+use std::io::{self, Read as _};
 
 use risingwave_sqlparser::parser::Parser;
 
@@ -26,7 +26,7 @@ fn main() {
     tracing_subscriber::fmt::init();
 
     let mut buffer = String::new();
-    io::stdin().read_line(&mut buffer).unwrap();
+    io::stdin().read_to_string(&mut buffer).unwrap();
     let result = Parser::parse_sql(&buffer);
     match result {
         Ok(statements) => {

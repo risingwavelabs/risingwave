@@ -673,19 +673,38 @@ impl<'a> Tokenizer<'a> {
                     let mut op = trial.peeking_take_while(|c| matches!(c,
                         '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '!' | '@' | '#' | '%' | '^' | '&' | '|' | '`' | '?'
                     ));
-                    let pos = op.find("--");
-                    if let Some(pos) = pos {
-                        for _ in 0..pos { // TODO: pos is byte index, but we need char count
-                            self.next();
+                    let slash_star = op.find("/*");
+                    let dash_dash = op.find("--");
+                    let pos = match (slash_star, dash_dash) {
+                        (Some(s), Some(d)) => Some(s.min(d)),
+                        (Some(s), None) => Some(s),
+                        (None, Some(d)) => Some(d),
+                        (None, None) => None,
+                    };
+                    match pos {
+                        Some(0) => match self.next() {
+                            Some('-') => {
+                                self.next(); // consume the second '-', starting a single-line comment
+                                let comment = self.tokenize_single_line_comment();
+                            
+                                return Ok(Some(Token::Whitespace(Whitespace::SingleLineComment {
+                                    prefix: "--".to_owned(),
+                                    comment,
+                                })));
+                            }
+                            Some('/') => {
+                                self.next(); // consume the '*', starting a multi-line comment
+                                return self.tokenize_multiline_comment();
+                            }
+                            _ => unreachable!(),
                         }
-                        op = op[..pos].to_string();
-                        let comment = self.tokenize_single_line_comment();
-                        /*
-                        Ok(Some(Token::Whitespace(Whitespace::SingleLineComment {
-                            prefix: "--".to_owned(),
-                            comment,
-                        })))
-                        */
+                        Some(pos) => {
+                            op.truncate(pos);
+                            for _ in op.chars() {
+                                self.next();
+                            }
+                        }
+                        None => { *self = trial; }
                     }
                     match op.as_str() {
                         "+" => Ok(Some(Token::Plus)),
