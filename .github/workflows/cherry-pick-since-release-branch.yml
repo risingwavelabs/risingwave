@@ -28,11 +28,12 @@ jobs:
     outputs:
       branches: ${{ steps.filter-release-branches.outputs.branches }}
       pr_number: ${{ steps.filter-release-branches.outputs.pr_number }}
+      pr_sha: ${{ steps.filter-release-branches.outputs.pr_sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures all branches are fetched
+          fetch-depth: 0 # Ensures all branches are fetched
 
       - name: Get all release branches including label version and higher
         id: filter-release-branches
@@ -42,6 +43,10 @@ jobs:
             base_version="${{ github.event.inputs.base_version }}"
             pr_number="${{ github.event.inputs.pr_number }}"
             echo "Using manually provided base version: $base_version for PR #$pr_number"
+            # Get the PR merge commit SHA
+            pr_sha=$(gh pr view $pr_number --repo ${{ github.repository }} --json mergeCommit --jq .mergeCommit.oid)
+            echo "PR merge commit SHA: $pr_sha"
+            echo "pr_sha=$pr_sha" >> "$GITHUB_OUTPUT"
           else
             # For automatic trigger from PR events
             if [[ ${{ github.event.action }} == 'labeled' ]]; then
@@ -100,6 +105,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
+        with:
+          ref: needs.get-target-release-branches.outputs.pr_sha
 
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
