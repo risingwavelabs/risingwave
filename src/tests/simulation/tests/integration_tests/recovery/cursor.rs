@@ -34,12 +34,8 @@ async fn test_cursor_recovery() -> Result<()> {
     session.run(SUBSCRIPTION_CREATE).await?;
     sleep(Duration::from_secs(1)).await;
 
-    session
-        .run("INSERT INTO test_db.test_schema.test_table VALUES (1, 1);")
-        .await?;
-    session
-        .run("INSERT INTO test_db.test_schema.test_table VALUES (2, 2);")
-        .await?;
+    session.run("INSERT INTO t1 VALUES (1, 1);").await?;
+    session.run("INSERT INTO t1 VALUES (2, 2);").await?;
 
     session
         .run("DECLARE test_cursor CURSOR FOR sub SINCE begin();")
@@ -58,12 +54,8 @@ async fn test_cursor_recovery() -> Result<()> {
         .run("DECLARE test_cursor CURSOR FOR sub SINCE begin();")
         .await?;
 
-    session2
-        .run("INSERT INTO test_db.test_schema.test_table VALUES (3, 3);")
-        .await?;
-    session2
-        .run("INSERT INTO test_db.test_schema.test_table VALUES (4, 4);")
-        .await?;
+    session2.run("INSERT INTO t1 VALUES (3, 3);").await?;
+    session2.run("INSERT INTO t1 VALUES (4, 4);").await?;
 
     let result1 = session2.run("FETCH NEXT FROM test_cursor").await?;
     assert_eq!(result1, "1,1");
