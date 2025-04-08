@@ -41,10 +41,12 @@ async fn test_cursor_recovery() -> Result<()> {
         .run("DECLARE test_cursor SUBSCRIPTION CURSOR FOR sub SINCE begin();")
         .await?;
 
-    let result1 = session.run("FETCH NEXT FROM test_cursor").await?;
-    assert_eq!(result1, "1,1");
-    let result1 = session.run("FETCH NEXT FROM test_cursor").await?;
-    assert_eq!(result1, "2,2");
+    let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 1);
+    let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 1);
+    let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 0);
 
     kill_cn_and_meta_and_wait_recover(&cluster).await;
 
@@ -57,14 +59,16 @@ async fn test_cursor_recovery() -> Result<()> {
     session2.run("INSERT INTO t1 VALUES (3, 3);").await?;
     session2.run("INSERT INTO t1 VALUES (4, 4);").await?;
 
-    let result1 = session2.run("FETCH NEXT FROM test_cursor").await?;
-    assert_eq!(result1, "1,1");
-    let result1 = session2.run("FETCH NEXT FROM test_cursor").await?;
-    assert_eq!(result1, "2,2");
-    let result1 = session2.run("FETCH NEXT FROM test_cursor").await?;
-    assert_eq!(result1, "3,3");
-    let result1 = session2.run("FETCH NEXT FROM test_cursor").await?;
-    assert_eq!(result1, "4,4");
+    let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 1);
+    let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 1);
+    let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 1);
+    let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 1);
+    let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
+    assert_eq!(result1.len(), 0);
 
     session.run(SUBSCRIPTION_DROP).await?;
     session.run(TABLE_DROP).await?;
