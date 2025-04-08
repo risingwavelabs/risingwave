@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig,
+    load_config, BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -161,6 +161,7 @@ pub struct FrontendEnv {
     spill_metrics: Arc<BatchSpillMetrics>,
 
     batch_config: BatchConfig,
+    frontend_config: FrontendConfig,
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
     udf_config: UdfConfig,
@@ -242,6 +243,7 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            frontend_config: FrontendConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
             udf_config: UdfConfig::default(),
@@ -485,6 +487,7 @@ impl FrontendEnv {
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
+                frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
                 udf_config: config.udf,
@@ -566,6 +569,10 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
+    }
+
+    pub fn frontend_config(&self) -> &FrontendConfig {
+        &self.frontend_config
     }
 
     pub fn meta_config(&self) -> &MetaConfig {

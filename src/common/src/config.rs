@@ -149,6 +149,10 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
+    pub frontend: FrontendConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
@@ -557,6 +561,12 @@ pub struct ServerConfig {
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct FrontendConfig {
+    #[serde(default = "default::frontend::max_task_schedule_parallelism")]
+    pub max_task_schedule_parallelism: u64,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -2139,6 +2149,12 @@ pub mod default {
             .into_iter()
             .map(str::to_string)
             .collect()
+        }
+    }
+
+    pub mod frontend {
+        pub fn max_task_schedule_parallelism() -> u64 {
+            10
         }
     }
 

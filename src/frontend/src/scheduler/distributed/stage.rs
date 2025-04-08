@@ -67,8 +67,6 @@ use crate::scheduler::plan_fragmenter::{
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
-const TASK_SCHEDULING_PARALLELISM: usize = 10;
-
 #[derive(Debug)]
 enum StageState {
     /// We put `msg_sender` in `Pending` state to avoid holding it in `StageExecution`. In this
@@ -472,7 +470,13 @@ impl StageRunner {
         }
 
         // Await each future and convert them into a set of streams.
-        let buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
+        let buffered = stream::iter(futures).buffer_unordered(
+            self.ctx
+                .session()
+                .env()
+                .frontend_config()
+                .max_task_schedule_parallelism as usize,
+        );
         let buffered_streams = buffered.try_collect::<Vec<_>>().await?;
 
         // Merge different task streams into a single stream.
