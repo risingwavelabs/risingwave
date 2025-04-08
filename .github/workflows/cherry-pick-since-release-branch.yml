@@ -49,7 +49,7 @@ jobs:
             echo "pr_sha=$pr_sha" >> "$GITHUB_OUTPUT"
           else
             # For automatic trigger from PR events
-            if [[ ${{ github.event.action }} == 'labeled' ]]; then
+            if [[ "${{ github.event.action }}" == 'labeled' ]]; then
               label="${{ github.event.label.name }}"
             else
               labels='${{ toJson(github.event.pull_request.labels) }}'
