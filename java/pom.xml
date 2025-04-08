@@ -43,12 +43,10 @@
         <module>java-binding-benchmark</module>
         <module>connector-node/connector-api</module>
         <module>connector-node/risingwave-sink-iceberg</module>
-        <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-es-7</module>
         <module>connector-node/risingwave-sink-cassandra</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
-        <module>connector-node/risingwave-sink-deltalake-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/risingwave-source-cdc-test</module>
         <module>connector-node/assembly</module>
@@ -265,11 +263,6 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-connector-service</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-deltalake</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
