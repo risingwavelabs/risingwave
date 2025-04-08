@@ -51,15 +51,15 @@ pub async fn handle_alter_system(
             .await?;
 
         if let Some(value) = value {
-            builder.notice(format!(
-                "The config #{param_name} of the current session has already been set to #{value}"
+            builder = builder.notice(format!(
+                "The config {param_name} of the current session has already been set to {value}"
             ));
             handler_args
                 .session
                 .set_config(param_name.as_str(), value)?;
         } else {
-            builder.notice(format!(
-                "The config #{param_name} of the current session has already been reset to default"
+            builder = builder.notice(format!(
+                "The config {param_name} of the current session has already been reset to default"
             ));
             handler_args.session.reset_config(param_name.as_str())?;
         }
