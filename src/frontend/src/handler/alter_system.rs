@@ -39,14 +39,24 @@ pub async fn handle_alter_system(
     // Currently session params are separated from system params. If the param exist in session params, we set it. Otherwise
     // we try to set it as a system param.
     if SessionConfig::contains_param(&param_name) {
-        if SessionConfig::check_no_alter_sys(&param_name).unwrap() {
+        if SessionConfig::check_no_alter_sys(&param_name)? {
             return Err(ErrorCode::InternalError(format!(
                 "session param {} cannot be altered system wide",
                 param_name
             ))
             .into());
         }
-        meta_client.set_session_param(param_name, value).await?;
+        meta_client
+            .set_session_param(param_name.clone(), value.clone())
+            .await?;
+
+        if let Some(value) = value {
+            handler_args
+                .session
+                .set_config(param_name.as_str(), value)?;
+        } else {
+            handler_args.session.reset_config(param_name.as_str())?;
+        }
     } else {
         let params = meta_client.set_system_param(param_name, value).await?;
         if let Some(params) = params {
