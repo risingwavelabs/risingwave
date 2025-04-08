@@ -360,5 +360,5 @@
     create table t (src int, dst int);
     select t1.src, t2.dst from t t1, t t2 where t1.src = t2.dst and t1.dst < t2.src;
   expected_outputs:
-    - batch_plan
-    - stream_plan
+  - batch_plan
+  - stream_plan
