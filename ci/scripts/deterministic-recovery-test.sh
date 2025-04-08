@@ -97,3 +97,11 @@ seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} .
 ${EXTRA_ARGS:-} \
 ./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/recovery-source-{}.log && rm $LOGDIR/recovery-source-{}.log) \
 | awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'
+
+echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, cursor"
+seq "$TEST_NUM" | parallel --ungroup 'set -o pipefail && ((MADSIM_TEST_SEED={} ./risingwave_simulation \
+--kill \
+--kill-rate=${KILL_RATE} \
+${EXTRA_ARGS:-} \
+./e2e_test/recovery/cursor.rs 2> $LOGDIR/recovery-cursor-{}.log && rm $LOGDIR/recovery-cursor-{}.log) \
+| awk -W interactive "{print \"(seed = {}): \" \$0; fflush()}")'
