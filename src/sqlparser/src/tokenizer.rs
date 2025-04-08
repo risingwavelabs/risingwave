@@ -422,6 +422,7 @@ impl fmt::Display for TokenizerError {
 impl std::error::Error for TokenizerError {}
 
 /// SQL Tokenizer
+#[derive(Clone)]
 pub struct Tokenizer<'a> {
     sql: &'a str,
     chars: Peekable<Chars<'a>>,
@@ -668,9 +669,24 @@ impl<'a> Tokenizer<'a> {
                 '}' => self.consume_and_return(Token::RBrace),
                 // operators
                 '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '!' | '@' | '#' | '%' | '^' | '&' | '|' | '`' | '?' => {
-                    let op = self.peeking_take_while(|c| matches!(c,
+                    let mut trial = self.clone();
+                    let mut op = trial.peeking_take_while(|c| matches!(c,
                         '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '!' | '@' | '#' | '%' | '^' | '&' | '|' | '`' | '?'
                     ));
+                    let pos = op.find("--");
+                    if let Some(pos) = pos {
+                        for _ in 0..pos { // TODO: pos is byte index, but we need char count
+                            self.next();
+                        }
+                        op = op[..pos].to_string();
+                        let comment = self.tokenize_single_line_comment();
+                        /*
+                        Ok(Some(Token::Whitespace(Whitespace::SingleLineComment {
+                            prefix: "--".to_owned(),
+                            comment,
+                        })))
+                        */
+                    }
                     match op.as_str() {
                         "+" => Ok(Some(Token::Plus)),
                         "-" => Ok(Some(Token::Minus)),
