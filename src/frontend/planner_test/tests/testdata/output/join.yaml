@@ -756,3 +756,43 @@
     ├── distribution key: [ 0, 1, 3, 4, 5, 6 ]
     └── read pk prefix len hint: 6
 
+- name: Force filter pushed down into join
+  sql: |
+    set streaming_force_filter_inside_join = true;
+    create table t (src int, dst int);
+    select t1.src, t2.dst from t t1, t t2 where t1.src = t2.dst and t1.dst < t2.src;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.src = t.dst AND (t.dst < t.src), output: [t.src, t.dst] }
+      ├─BatchExchange { order: [], dist: HashShard(t.src) }
+      │ └─BatchScan { table: t, columns: [t.src, t.dst], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t.dst) }
+        └─BatchScan { table: t, columns: [t.src, t.dst], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [src, dst, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, src], pk_columns: [t._row_id, t._row_id#1, src], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t.src, t._row_id, t._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t.src = t.dst AND (t.dst < t.src), output: [t.src, t.dst, t._row_id, t._row_id] }
+        ├─StreamExchange { dist: HashShard(t.src) }
+        │ └─StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.dst) }
+          └─StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: Pull up filter from join by default
+  sql: |
+    create table t (src int, dst int);
+    select t1.src, t2.dst from t t1, t t2 where t1.src = t2.dst and t1.dst < t2.src;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.src = t.dst AND (t.dst < t.src), output: [t.src, t.dst] }
+      ├─BatchExchange { order: [], dist: HashShard(t.src) }
+      │ └─BatchScan { table: t, columns: [t.src, t.dst], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t.dst) }
+        └─BatchScan { table: t, columns: [t.src, t.dst], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [src, dst, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, src], pk_columns: [t._row_id, t._row_id#1, src], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.src, t.dst, t._row_id, t._row_id] }
+      └─StreamFilter { predicate: (t.dst < t.src) }
+        └─StreamHashJoin { type: Inner, predicate: t.src = t.dst, output: all }
+          ├─StreamExchange { dist: HashShard(t.src) }
+          │ └─StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamExchange { dist: HashShard(t.dst) }
+            └─StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

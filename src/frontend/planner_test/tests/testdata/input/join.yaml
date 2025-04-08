@@ -347,3 +347,18 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+- name: Force filter pushed down into join
+  sql: |
+    set streaming_force_filter_inside_join = true;
+    create table t (src int, dst int);
+    select t1.src, t2.dst from t t1, t t2 where t1.src = t2.dst and t1.dst < t2.src;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: Pull up filter from join by default
+  sql: |
+    create table t (src int, dst int);
+    select t1.src, t2.dst from t t1, t t2 where t1.src = t2.dst and t1.dst < t2.src;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
