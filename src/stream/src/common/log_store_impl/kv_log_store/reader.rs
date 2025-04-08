@@ -53,7 +53,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqIdType,
+    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -668,8 +668,8 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         &self,
         vnode_bitmap: Bitmap,
         chunk_id: ChunkId,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
     ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
@@ -693,20 +693,18 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 // Use MAX EPOCH here because the epoch to consume may be below the safe
                 // epoch
                 async move {
-                    Ok::<_, anyhow::Error>(
-                        state_store
-                            .iter(
-                                (Included(range_start), Included(range_end)),
-                                ReadOptions {
-                                    prefetch_options:
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
-                                    cache_policy: CachePolicy::Fill(CacheHint::Low),
-                                    table_id,
-                                    ..Default::default()
-                                },
-                            )
-                            .await?,
-                    )
+                    let iter = state_store
+                        .iter(
+                            (Included(range_start), Included(range_end)),
+                            ReadOptions {
+                                prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                                cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                table_id,
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
+                    Ok::<_, anyhow::Error>((vnode, iter))
                 }
             }))
             .instrument_await("Wait Create Iter Stream")
@@ -782,6 +780,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     Duration::from_secs(10 * 60),
                 )
                 .await
+                .map(|iter| (vnode, iter))
             }
         }));
 

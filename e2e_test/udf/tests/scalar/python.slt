@@ -94,5 +94,6 @@ def key_values(kv):
             yield KeyValue(key, value)
 $$;
 
-include ./test.slt.part
+include ./test_basic.slt.part
+include ./test_complex.slt.part
 include ./drop.slt.part

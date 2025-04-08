@@ -64,3 +64,14 @@ test
 
 statement ok
 drop database db_with_resource_group;
+
+statement ok
+create database db_with_keyword_default_resource_group resource_group = default;
+
+query T
+select resource_group from rw_databases where name = 'db_with_keyword_default_resource_group';
+----
+default
+
+statement ok
+drop database db_with_keyword_default_resource_group;

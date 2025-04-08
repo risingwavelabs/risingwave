@@ -29,10 +29,10 @@ use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
-use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqIdType};
+use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqId};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
-    seq_id: SeqIdType,
+    seq_id: SeqId,
 
     state: LogStoreWriteState<LS>,
 
@@ -115,7 +115,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         }
         let epoch = self.state.epoch().curr;
         let start_seq_id = self.seq_id;
-        self.seq_id += chunk.cardinality() as SeqIdType;
+        self.seq_id += chunk.cardinality() as SeqId;
         let end_seq_id = self.seq_id - 1;
         if let Some(chunk) = self
             .tx
