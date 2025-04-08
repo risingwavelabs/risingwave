@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
+use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -38,6 +39,7 @@ use super::decouple_checkpoint_log_sink::{
 };
 use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterMetrics, SinkWriterParam};
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
@@ -68,6 +70,12 @@ pub struct ClickHouseCommon {
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
+}
+
+impl EnforceSecretOnCloud for ClickHouseCommon {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "clickhouse.password",
+    };
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -322,6 +330,17 @@ pub struct ClickHouseConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
+impl EnforceSecretOnCloud for ClickHouseConfig {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ClickHouseCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ClickHouseSink {
     pub config: ClickHouseConfig,
@@ -487,6 +506,7 @@ impl ClickHouseSink {
         Ok(())
     }
 }
+
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
