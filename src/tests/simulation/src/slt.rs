@@ -351,21 +351,18 @@ pub async fn run_slt_task(
                 connection,
                 ..
             } = &record
+                && !manual_background_ddl_enabled
             {
                 let enable_random_background_ddl =
                     matches!(cmd, SqlCmd::CreateMaterializedView { .. })
-                        && !manual_background_ddl_enabled
                         && conditions.iter().all(|c| {
                             *c != Condition::SkipIf {
                                 label: "madsim".to_owned(),
                             }
                         })
                         && background_ddl_rate > 0.0;
-                let background_ddl_setting = if enable_random_background_ddl {
-                    rng.gen_bool(background_ddl_rate)
-                } else {
-                    manual_background_ddl_enabled
-                };
+                let background_ddl_setting =
+                    enable_random_background_ddl && rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),
@@ -374,6 +371,7 @@ pub async fn run_slt_task(
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
+                tracing::debug!("SET BACKGROUND_DDL={background_ddl_setting};");
                 background_ddl_enabled = background_ddl_setting;
             };
 
