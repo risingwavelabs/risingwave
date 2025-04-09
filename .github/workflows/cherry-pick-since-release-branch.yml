@@ -125,3 +125,4 @@ permissions:
   issues: write
   pull-requests: write
   contents: write
+  actions: write
