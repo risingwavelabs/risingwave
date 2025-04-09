@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use pgwire::pg_response::StatementType;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::AnalyzeTarget;
@@ -41,7 +43,11 @@ pub async fn handle_explain_analyze_stream_job(
 
     let meta_client = handler_args.session.env().meta_client();
     let fragments = net::get_fragments(meta_client, job_id).await?;
-
+    let dispatcher_fragment_ids = fragments.iter().map(|f| f.id).collect::<Vec<_>>();
+    let fragment_parallelisms = fragments
+        .iter()
+        .map(|f| (f.id, f.actors.len()))
+        .collect::<HashMap<_, _>>();
     let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
 
@@ -51,10 +57,17 @@ pub async fn handle_explain_analyze_stream_job(
         &handler_args,
         &worker_nodes,
         &executor_ids,
+        &dispatcher_fragment_ids,
         profiling_duration,
     )
     .await?;
-    let aggregated_stats = metrics::OperatorStats::aggregate(operator_to_executor, &executor_stats);
+    tracing::debug!(?executor_stats, "collected executor stats");
+    let aggregated_stats = metrics::OperatorStats::aggregate(
+        operator_to_executor,
+        &executor_stats,
+        &fragment_parallelisms,
+    );
+    tracing::debug!(?aggregated_stats, "collected aggregated stats");
 
     // Render graph with metrics
     let rows = render_graph_with_metrics(
@@ -173,6 +186,7 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &[ExecutorId],
+        dispatcher_fragment_ids: &[u32],
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
         let mut aggregated_stats = ExecutorStats::new();
@@ -182,10 +196,15 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.start_record(executor_ids, &stats.into_inner());
+            aggregated_stats.start_record(
+                executor_ids,
+                dispatcher_fragment_ids,
+                &stats.into_inner(),
+            );
         }
 
         sleep(profiling_duration).await;
@@ -196,10 +215,15 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.finish_record(executor_ids, &stats.into_inner());
+            aggregated_stats.finish_record(
+                executor_ids,
+                dispatcher_fragment_ids,
+                &stats.into_inner(),
+            );
         }
 
         Ok(aggregated_stats)
@@ -215,6 +239,7 @@ mod metrics {
 
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
 
     #[derive(Default, Debug)]
@@ -222,33 +247,44 @@ mod metrics {
         pub executor_id: ExecutorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
-        pub total_output_pending_ms: u64,
+        pub total_output_pending_ns: u64,
+    }
+
+    #[derive(Default, Debug)]
+    pub(super) struct DispatchMetrics {
+        pub fragment_id: FragmentId,
+        pub epoch: u32,
+        pub total_output_throughput: u64,
+        pub total_output_pending_ns: u64,
     }
 
     #[derive(Debug)]
     pub(super) struct ExecutorStats {
-        inner: HashMap<ExecutorId, ExecutorMetrics>,
+        executor_stats: HashMap<ExecutorId, ExecutorMetrics>,
+        dispatch_stats: HashMap<FragmentId, DispatchMetrics>,
     }
 
     impl ExecutorStats {
         pub(super) fn new() -> Self {
             ExecutorStats {
-                inner: HashMap::new(),
+                executor_stats: HashMap::new(),
+                dispatch_stats: HashMap::new(),
             }
         }
 
         pub fn get(&self, executor_id: &ExecutorId) -> Option<&ExecutorMetrics> {
-            self.inner.get(executor_id)
+            self.executor_stats.get(executor_id)
         }
 
         /// Establish metrics baseline for profiling
         pub(super) fn start_record<'a>(
             &mut self,
             executor_ids: &'a [ExecutorId],
+            dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                let stats = self.inner.entry(*executor_id).or_default();
+                let stats = self.executor_stats.entry(*executor_id).or_default();
                 stats.executor_id = *executor_id;
                 stats.epoch = 0;
                 stats.total_output_throughput += metrics
@@ -256,9 +292,25 @@ mod metrics {
                     .get(executor_id)
                     .cloned()
                     .unwrap_or(0);
-                stats.total_output_pending_ms += metrics
-                    .stream_node_output_blocking_duration_ms
+                stats.total_output_pending_ns += metrics
+                    .stream_node_output_blocking_duration_ns
                     .get(executor_id)
+                    .cloned()
+                    .unwrap_or(0);
+            }
+
+            for fragment_id in dispatch_fragment_ids {
+                let stats = self.dispatch_stats.entry(*fragment_id).or_default();
+                stats.fragment_id = *fragment_id;
+                stats.epoch = 0;
+                stats.total_output_throughput += metrics
+                    .dispatch_fragment_output_row_count
+                    .get(fragment_id)
+                    .cloned()
+                    .unwrap_or(0);
+                stats.total_output_pending_ns += metrics
+                    .dispatch_fragment_output_blocking_duration_ns
+                    .get(fragment_id)
                     .cloned()
                     .unwrap_or(0);
             }
@@ -268,22 +320,42 @@ mod metrics {
         pub(super) fn finish_record<'a>(
             &mut self,
             executor_ids: &'a [ExecutorId],
+            dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                if let Some(stats) = self.inner.get_mut(executor_id) {
+                if let Some(stats) = self.executor_stats.get_mut(executor_id) {
                     stats.total_output_throughput = metrics
                         .stream_node_output_row_count
                         .get(executor_id)
                         .cloned()
                         .unwrap_or(0)
                         - stats.total_output_throughput;
-                    stats.total_output_pending_ms = metrics
-                        .stream_node_output_blocking_duration_ms
+                    stats.total_output_pending_ns = metrics
+                        .stream_node_output_blocking_duration_ns
                         .get(executor_id)
                         .cloned()
                         .unwrap_or(0)
-                        - stats.total_output_pending_ms;
+                        - stats.total_output_pending_ns;
+                } else {
+                    // TODO: warn missing metrics!
+                }
+            }
+
+            for fragment_id in dispatch_fragment_ids {
+                if let Some(stats) = self.dispatch_stats.get_mut(fragment_id) {
+                    stats.total_output_throughput = metrics
+                        .dispatch_fragment_output_row_count
+                        .get(fragment_id)
+                        .cloned()
+                        .unwrap_or(0)
+                        - stats.total_output_throughput;
+                    stats.total_output_pending_ns = metrics
+                        .dispatch_fragment_output_blocking_duration_ns
+                        .get(fragment_id)
+                        .cloned()
+                        .unwrap_or(0)
+                        - stats.total_output_pending_ns;
                 } else {
                     // TODO: warn missing metrics!
                 }
@@ -292,13 +364,15 @@ mod metrics {
     }
 
     #[expect(dead_code)]
+    #[derive(Debug)]
     pub(super) struct OperatorMetrics {
         pub operator_id: OperatorId,
         pub epoch: u32,
         pub total_output_throughput: u64,
-        pub total_output_pending_ms: u64,
+        pub total_output_pending_ns: u64,
     }
 
+    #[derive(Debug)]
     pub(super) struct OperatorStats {
         inner: HashMap<OperatorId, OperatorMetrics>,
     }
@@ -308,20 +382,21 @@ mod metrics {
         pub(super) fn aggregate(
             operator_map: HashMap<OperatorId, Vec<ExecutorId>>,
             executor_stats: &ExecutorStats,
+            fragment_parallelisms: &HashMap<FragmentId, usize>,
         ) -> Self {
             let mut operator_stats = HashMap::new();
             for (operator_id, executor_ids) in operator_map {
                 let num_executors = executor_ids.len() as u64;
                 let mut total_output_throughput = 0;
-                let mut total_output_pending_ms = 0;
+                let mut total_output_pending_ns = 0;
                 for executor_id in executor_ids {
                     if let Some(stats) = executor_stats.get(&executor_id) {
                         total_output_throughput += stats.total_output_throughput;
-                        total_output_pending_ms += stats.total_output_pending_ms;
+                        total_output_pending_ns += stats.total_output_pending_ns;
                     }
                 }
-                let total_output_throughput = total_output_throughput / num_executors;
-                let total_output_pending_ms = total_output_pending_ms / num_executors;
+                let total_output_throughput = total_output_throughput;
+                let total_output_pending_ns = total_output_pending_ns / num_executors;
 
                 operator_stats.insert(
                     operator_id,
@@ -329,10 +404,32 @@ mod metrics {
                         operator_id,
                         epoch: 0,
                         total_output_throughput,
-                        total_output_pending_ms,
+                        total_output_pending_ns,
                     },
                 );
             }
+
+            for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
+                let operator_id = *fragment_id as OperatorId;
+                let total_output_throughput = dispatch_metrics.total_output_throughput;
+                let fragment_parallelism = fragment_parallelisms
+                    .get(fragment_id)
+                    .copied()
+                    .expect("should have fragment parallelism");
+                let total_output_pending_ns =
+                    dispatch_metrics.total_output_pending_ns / fragment_parallelism as u64;
+
+                operator_stats.insert(
+                    operator_id,
+                    OperatorMetrics {
+                        operator_id,
+                        epoch: 0,
+                        total_output_throughput,
+                        total_output_pending_ns,
+                    },
+                );
+            }
+
             OperatorStats {
                 inner: operator_stats,
             }
@@ -376,7 +473,7 @@ mod graph {
     impl StreamNode {
         fn new_for_dispatcher(fragment_id: u32) -> Self {
             StreamNode {
-                operator_id: 0,
+                operator_id: fragment_id as u64,
                 fragment_id,
                 identity: "Dispatcher".to_owned(),
                 actor_ids: vec![],
@@ -556,7 +653,7 @@ mod graph {
 
             let stats = stats.get(&node_id);
             let (output_throughput, output_latency) = stats
-                .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ms))
+                .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ns))
                 .unwrap_or((0, 0));
             let row = ExplainAnalyzeStreamJobOutput {
                 identity: identity_rendered,
@@ -568,9 +665,8 @@ mod graph {
                     .join(","),
                 output_rows_per_second: (output_throughput as f64 / profiling_duration_secs)
                     .to_string(),
-                downstream_backpressure_ratio: (Duration::from_millis(output_latency)
-                    .as_secs_f64()
-                    / node.actor_ids.len() as f64
+                downstream_backpressure_ratio: (Duration::from_nanos(output_latency).as_secs_f64()
+                    / usize::max(node.actor_ids.len(), 1) as f64
                     / profiling_duration_secs)
                     .to_string(),
             };

@@ -13,6 +13,6 @@ You may need to learn how to build and test RisingWave when implementing feature
 - Use `./risedev k` to stop a RisingWave instance started by `./risedev d`.
 - The log files of a running RisingWave are located in `.risingwave/log` folder in the workspace. You can check them (`tail` is suggested because they can be quite long) if things go wrong.
 - When a RisingWave instance is running, you can use `./risedev psql -c "<your query>"` to run SQL queries in RW.
-- Use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests. File globs like `/**/*.slt` is allowed.
+- When a RisingWave instance is running, you can use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests. File globs like `/**/*.slt` is allowed.
 - Integration tests and unit tests are valid Rust/Tokio tests, you can locate and run those related in a standard Rust way.
 - `./risedev` command is safe to run automatically.
