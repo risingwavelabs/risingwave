@@ -691,6 +691,7 @@ mod tests {
     use crate::executor::exchange::input::{Input, LocalInput, RemoteInput};
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
+    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
@@ -911,7 +912,6 @@ mod tests {
         let actor_id = 233;
         let (untouched, old, new) = (234, 235, 238); // upstream actors
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let ctx = barrier_test_env.shared_context.clone();
         let metrics = Arc::new(StreamingMetrics::unused());
 
         // untouched -> actor_id
@@ -978,11 +978,7 @@ mod tests {
         .boxed()
         .execute();
 
-        // 2. Take downstream receivers.
-        let txs = [untouched, old, new]
-            .into_iter()
-            .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
-            .collect::<HashMap<_, _>>();
+        let mut txs = HashMap::new();
         macro_rules! send {
             ($actors:expr, $msg:expr) => {
                 for actor in $actors {
@@ -1010,6 +1006,29 @@ mod tests {
             };
         }
 
+        macro_rules! collect_upstream_tx {
+            ($actors:expr) => {
+                for upstream_id in $actors {
+                    let mut output_requests = barrier_test_env
+                        .take_pending_new_output_requests(upstream_id)
+                        .await;
+                    assert_eq!(output_requests.len(), 1);
+                    let (downstream_actor_id, request) = output_requests.pop().unwrap();
+                    assert_eq!(actor_id, downstream_actor_id);
+                    let NewOutputRequest::Local(tx) = request else {
+                        unreachable!()
+                    };
+                    txs.insert(upstream_id, tx);
+                }
+            };
+        }
+
+        assert_recv_pending!();
+        barrier_test_env.flush_all_events().await;
+
+        // 2. Take downstream receivers.
+        collect_upstream_tx!([untouched, old]);
+
         // 3. Send a chunk.
         send!([untouched, old], Message::Chunk(build_test_chunk(1)).into());
         assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
@@ -1020,6 +1039,8 @@ mod tests {
             Message::Barrier(b1.clone().into_dispatcher()).into()
         );
         assert_recv_pending!(); // We should not receive the barrier, since merger is waiting for the new upstream new.
+
+        collect_upstream_tx!([new]);
 
         send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
@@ -1126,7 +1147,7 @@ mod tests {
                 addr.into(),
                 (0, 0),
                 (0, 0),
-                test_env.shared_context.database_id,
+                test_env.local_barrier_manager.shared_context.database_id,
                 Arc::new(StreamingMetrics::unused()),
                 BATCHED_PERMITS,
                 "for_test".into(),

@@ -243,7 +243,9 @@ pub(super) enum LocalActorOperation {
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
     #[cfg(test)]
-    GetCurrentSharedContext(oneshot::Sender<(Arc<SharedContext>, LocalBarrierManager)>),
+    GetCurrentLocalBarrierManager(oneshot::Sender<LocalBarrierManager>),
+    #[cfg(test)]
+    TakePendingNewOutputRequest(ActorId, oneshot::Sender<Vec<(ActorId, NewOutputRequest)>>),
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
     InspectState {
@@ -573,17 +575,30 @@ impl LocalBarrierWorker {
                 let _ = result_sender.send(Err(err.into()));
             }
             #[cfg(test)]
-            LocalActorOperation::GetCurrentSharedContext(sender) => {
+            LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
                 let database_status = self
                     .state
                     .databases
                     .get(&crate::task::TEST_DATABASE_ID)
                     .unwrap();
                 let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
-                let _ = sender.send((
-                    database_state.local_barrier_manager.shared_context.clone(),
-                    database_state.local_barrier_manager.clone(),
-                ));
+                let _ = sender.send(database_state.local_barrier_manager.clone());
+            }
+            #[cfg(test)]
+            LocalActorOperation::TakePendingNewOutputRequest(actor_id, sender) => {
+                let database_status = self
+                    .state
+                    .databases
+                    .get_mut(&crate::task::TEST_DATABASE_ID)
+                    .unwrap();
+
+                let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
+                assert!(!database_state.actor_states.contains_key(&actor_id));
+                let requests = database_state
+                    .actor_pending_new_output_requests
+                    .remove(&actor_id)
+                    .unwrap();
+                let _ = sender.send(requests);
             }
             #[cfg(test)]
             LocalActorOperation::Flush(sender) => {
@@ -1251,8 +1266,6 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 pub(crate) mod barrier_test_utils {
-    use std::sync::Arc;
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_pb::stream_service::streaming_control_stream_request::{
@@ -1270,11 +1283,10 @@ pub(crate) mod barrier_test_utils {
     use crate::executor::Barrier;
     use crate::task::barrier_manager::{ControlStreamHandle, EventSender, LocalActorOperation};
     use crate::task::{
-        ActorId, LocalBarrierManager, SharedContext, TEST_DATABASE_ID, TEST_PARTIAL_GRAPH_ID,
+        ActorId, LocalBarrierManager, NewOutputRequest, TEST_DATABASE_ID, TEST_PARTIAL_GRAPH_ID,
     };
 
     pub(crate) struct LocalBarrierTestEnv {
-        pub shared_context: Arc<SharedContext>,
         pub local_barrier_manager: LocalBarrierManager,
         pub(super) actor_op_tx: EventSender<LocalActorOperation>,
         pub request_tx: UnboundedSender<Result<StreamingControlStreamRequest, Status>>,
@@ -1310,13 +1322,12 @@ pub(crate) mod barrier_test_utils {
                 streaming_control_stream_response::Response::Init(_)
             );
 
-            let (shared_context, local_barrier_manager) = actor_op_tx
-                .send_and_await(LocalActorOperation::GetCurrentSharedContext)
+            let local_barrier_manager = actor_op_tx
+                .send_and_await(LocalActorOperation::GetCurrentLocalBarrierManager)
                 .await
                 .unwrap();
 
             Self {
-                shared_context,
                 local_barrier_manager,
                 actor_op_tx,
                 request_tx,
@@ -1356,6 +1367,16 @@ pub(crate) mod barrier_test_utils {
             let (tx, rx) = oneshot::channel();
             actor_op_tx.send_event(LocalActorOperation::Flush(tx));
             rx.await.unwrap()
+        }
+
+        pub(crate) async fn take_pending_new_output_requests(
+            &self,
+            actor_id: ActorId,
+        ) -> Vec<(ActorId, NewOutputRequest)> {
+            self.actor_op_tx
+                .send_and_await(|tx| LocalActorOperation::TakePendingNewOutputRequest(actor_id, tx))
+                .await
+                .unwrap()
         }
     }
 }

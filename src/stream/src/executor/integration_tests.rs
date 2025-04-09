@@ -20,7 +20,6 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
-use risingwave_common::config;
 use risingwave_common::types::*;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_expr::aggregate::AggCall;
@@ -133,7 +132,6 @@ async fn test_merger_sum_aggr() {
     let actor_id = gen_next_actor_id();
     let (input, rx) = channel_for_test();
     let actor_future = {
-        let shared_context = barrier_test_env.shared_context.clone();
         let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let expr_context = expr_context.clone();
         async move {
@@ -147,7 +145,7 @@ async fn test_merger_sum_aggr() {
                 ),
                 ReceiverExecutor::for_test(actor_id, rx, local_barrier_manager.clone()).boxed(),
             );
-            let dispatcher = DispatchExecutor::new(
+            let (dispatcher, _tx) = DispatchExecutor::for_test(
                 receiver_op,
                 vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
                     inputs,
@@ -156,12 +154,9 @@ async fn test_merger_sum_aggr() {
                 ))],
                 0,
                 0,
-                shared_context.clone(),
+                local_barrier_manager.shared_context.clone(),
                 metrics,
-                config::default::developer::stream_chunk_size(),
-            )
-            .await
-            .unwrap();
+            );
             let actor = Actor::new(
                 dispatcher,
                 vec![],
