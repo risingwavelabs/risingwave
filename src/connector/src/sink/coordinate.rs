@@ -81,10 +81,10 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
         let first_item = log_reader.next_item().await?;
         if let (Some(log_store_rewind_start_epoch), (first_epoch, _)) =
             (log_store_rewind_start_epoch, &first_item)
-            && log_store_rewind_start_epoch != *first_epoch
+            && log_store_rewind_start_epoch >= *first_epoch
         {
             bail!(
-                "log_store_rewind_start_epoch {} not matched with first_epoch {}",
+                "log_store_rewind_start_epoch {} not later than first_epoch {}",
                 log_store_rewind_start_epoch,
                 first_epoch
             );
