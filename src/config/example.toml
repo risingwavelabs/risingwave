@@ -129,6 +129,7 @@ frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
 redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
 enable_spill = true
+enable_lookup_join_prefetch = false
 
 [batch.developer]
 batch_connector_message_buffer_size = 16

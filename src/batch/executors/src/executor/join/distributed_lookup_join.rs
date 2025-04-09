@@ -198,6 +198,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let enable_lookup_join_prefetch =
+                source.context.get_config().enable_lookup_join_prefetch;
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
                 inner_side_key_types.clone(),
@@ -206,6 +208,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 vec![],
                 table,
                 chunk_size,
+                enable_lookup_join_prefetch,
             );
 
             let identity = source.plan_node().get_identity().clone();
@@ -296,6 +299,7 @@ struct InnerSideExecutorBuilder<S: StateStore> {
     row_list: Vec<OwnedRow>,
     table: StorageTable<S>,
     chunk_size: usize,
+    enable_lookup_join_prefetch: bool,
 }
 
 impl<S: StateStore> InnerSideExecutorBuilder<S> {
@@ -307,6 +311,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         row_list: Vec<OwnedRow>,
         table: StorageTable<S>,
         chunk_size: usize,
+        enable_lookup_join_prefetch: bool,
     ) -> Self {
         Self {
             outer_side_key_types,
@@ -316,6 +321,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
             row_list,
             table,
             chunk_size,
+            enable_lookup_join_prefetch,
         }
     }
 }
@@ -368,7 +374,10 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                     &pk_prefix,
                     ..,
                     false,
-                    PrefetchOptions::default(),
+                    PrefetchOptions {
+                        prefetch: self.enable_lookup_join_prefetch,
+                        for_large_query: false,
+                    },
                 )
                 .await?;
 
