@@ -29,10 +29,6 @@ use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct MqttSplitEnumerator {
-    #[expect(dead_code)]
-    topic: String,
-    #[expect(dead_code)]
-    client: rumqttc::v5::AsyncClient,
     topics: Arc<RwLock<HashSet<String>>>,
     connected: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
@@ -58,8 +54,6 @@ impl SplitEnumerator for MqttSplitEnumerator {
         client
             .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
             .await?;
-
-        let cloned_client = client.clone();
 
         let topics = Arc::new(RwLock::new(topics));
 
@@ -88,30 +82,23 @@ impl SplitEnumerator for MqttSplitEnumerator {
                             topics.insert(topic);
                         }
                     }
-                    Ok(_) => {}
+                    Ok(_)
+                    | Err(ConnectionError::Timeout(_))
+                    | Err(ConnectionError::RequestsDone) => {}
                     Err(err) => {
-                        if let ConnectionError::Timeout(_) = err {
-                            continue;
-                        }
                         tracing::error!(
-                            "Failed to subscribe to topic {}: {}",
+                            "Failed to fetch splits to topic {}: {}",
                             topic,
                             err.as_report(),
                         );
-                        connected_clone.store(false, std::sync::atomic::Ordering::Relaxed);
-                        cloned_client
-                            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
-                            .await
-                            .unwrap();
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await
                     }
                 }
             }
         });
 
         Ok(Self {
-            client,
             topics,
-            topic: properties.topic,
             connected,
             stopped,
         })
