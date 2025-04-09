@@ -125,7 +125,7 @@ impl MonitoredStorageMetrics {
         )
         .unwrap();
         let get_duration = RelabeledGuardedHistogramVec::with_metric_level(
-            MetricLevel::Critical,
+            MetricLevel::Info,
             get_duration,
             metric_level,
         );
@@ -178,7 +178,7 @@ impl MonitoredStorageMetrics {
         )
         .unwrap();
         let iter_init_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
-            MetricLevel::Critical,
+            MetricLevel::Info,
             iter_init_duration,
             metric_level,
             1,
@@ -196,7 +196,7 @@ impl MonitoredStorageMetrics {
         )
         .unwrap();
         let iter_scan_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
-            MetricLevel::Critical,
+            MetricLevel::Info,
             iter_scan_duration,
             metric_level,
             1,
