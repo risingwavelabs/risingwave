@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 use std::iter::once;
 use std::mem::take;
@@ -93,6 +93,9 @@ impl TestSinkStore {
 
     pub fn insert_many(&self, snapshot_id: i64, pairs: impl Iterator<Item = (i32, Vec<String>)>) {
         let mut inner = self.inner();
+        if inner.snapshot_id_to_data.contains_key(&snapshot_id) {
+            panic!("snapshot_id {} already exists!", snapshot_id);
+        }
         let entry = inner.snapshot_id_to_data.entry(snapshot_id).or_default();
 
         for (id, names) in pairs {
@@ -113,14 +116,21 @@ impl TestSinkStore {
     }
 
     pub fn check_simple_result(&self, id_list: &[i32]) -> anyhow::Result<()> {
+        println!("total id_list count is {}", id_list.len());
         let mut store_id_name_list = HashMap::new();
         let mut inner = self.inner();
         for inner_map in inner.snapshot_id_to_data.values() {
+            let mut seen_keys = HashSet::new();
             for (key, value) in inner_map {
-                store_id_name_list
-                    .entry(*key)
-                    .or_insert_with(Vec::new)
-                    .extend(value.clone());
+                if seen_keys.contains(key) {
+                    panic!("Duplicate key found: {}", key);
+                } else {
+                    seen_keys.insert(*key);
+                    store_id_name_list
+                        .entry(*key)
+                        .or_insert_with(Vec::new)
+                        .extend(value.clone());
+                }
             }
         }
         assert_eq!(store_id_name_list.len(), id_list.len());
@@ -207,11 +217,6 @@ impl SinkWriter for TestWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
-        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("write with err");
-            self.store.inc_err();
-            return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
-        }
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert);
             assert_eq!(row.len(), 2);
@@ -277,6 +282,12 @@ pub struct CoordinatedTestWriter {
     staging_store: StagingDataStore,
 }
 
+impl Drop for CoordinatedTestWriter {
+    fn drop(&mut self) {
+        self.parallelism_counter.fetch_sub(1, Relaxed);
+    }
+}
+
 #[async_trait]
 impl SinkWriter for CoordinatedTestWriter {
     type CommitMetadata = Option<SinkMetadata>;
@@ -287,11 +298,11 @@ impl SinkWriter for CoordinatedTestWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
-        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("write with err");
-            self.store.inc_err();
-            return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
-        }
+        // if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+        //     println!("write with err");
+        //     self.store.inc_err();
+        //     return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
+        // }
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert);
             assert_eq!(row.len(), 2);
@@ -317,12 +328,6 @@ impl SinkWriter for CoordinatedTestWriter {
     }
 }
 
-impl Drop for CoordinatedTestWriter {
-    fn drop(&mut self) {
-        self.parallelism_counter.fetch_sub(1, Relaxed);
-    }
-}
-
 pub struct TestIcebergExactlyOnceCoordinator {
     store: TestSinkStore,
     err_rate: Arc<AtomicU32>,
@@ -344,6 +349,10 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
             .iceberg_sink_has_pre_commit_metadata(&self.db, self.sink_id.sink_id())
             .await?
         {
+            println!(
+                "Sink id = {}: System table not empty! Recovery occurs!",
+                self.sink_id.sink_id()
+            );
             let ordered_metadata_list_by_end_epoch = self
                 .get_pre_commit_info_by_sink_id(&self.db, self.sink_id.sink_id())
                 .await?;
@@ -396,8 +405,9 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
                 last_recommit_epoch = end_epoch;
             }
             println!(
-                "Sink id = {}: iceberg commit coordinator inited.",
-                self.sink_id.sink_id()
+                "Sink id = {}: Recovery finished! Return end_epoch = {}",
+                self.sink_id.sink_id(),
+                last_recommit_epoch
             );
             return Ok(Some(last_recommit_epoch));
         } else {
@@ -429,10 +439,6 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
                 if committed_epoch >= epoch {
                     self.commit_inner(epoch, metadata, None).await?;
                 } else {
-                    println!(
-                        "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
-                        committed_epoch, epoch
-                    );
                     while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
                         println!("Received next committed epoch: {}", next_committed_epoch);
                         // If next_epoch meets the condition, execute commit immediately
@@ -469,6 +475,13 @@ impl TestIcebergExactlyOnceCoordinator {
             None => generate_unique_id(epoch),
         };
 
+        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+            println!("0---Error occur before pre commit.");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to pre commit to meta store"
+            )));
+        }
         if is_first_commit {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
@@ -489,6 +502,13 @@ impl TestIcebergExactlyOnceCoordinator {
             )
             .await?;
         }
+        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+            println!("1---Error occur before commit and after pre commit.");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to commit to external sink"
+            )));
+        }
         let file_ids = metadatas.into_iter().map(|metadata| {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
             usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
@@ -500,6 +520,37 @@ impl TestIcebergExactlyOnceCoordinator {
                 .map(|file_id| self.staging_store.get(file_id))
                 .flatten(),
         );
+        println!("Succeeded to commit to mock iceberg table in epoch {epoch}.");
+
+        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+            println!("2---Error occur after commit and before mark row deleted.");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to mark row deleted."
+            )));
+        }
+
+        self.mark_row_is_committed_by_sink_id_and_end_epoch(
+            &self.db,
+            self.sink_id.sink_id(),
+            epoch,
+        )
+        .await?;
+        println!(
+            "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
+            self.sink_id, epoch
+        );
+
+        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+            println!("3---Error occur after mark committed before deleting previous item.");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to pre commit to meta store"
+            )));
+        }
+
+        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch)
+            .await?;
         Ok(())
     }
 
@@ -513,6 +564,11 @@ impl TestIcebergExactlyOnceCoordinator {
         self.commit_inner(epoch, metadata, Some(snapshot_id))
             .await?;
         Ok(())
+    }
+
+    pub fn set_err_rate(&self, err_rate: f64) {
+        let err_rate = u32::MAX as f64 * err_rate;
+        self.err_rate.store(err_rate as _, Relaxed);
     }
 }
 
@@ -614,6 +670,45 @@ impl TestIcebergExactlyOnceCoordinator {
         }
     }
 
+    async fn delete_row_equal_to_end_epoch(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+        end_epoch: u64,
+    ) -> Result<()> {
+        let end_epoch_i64: i64 = end_epoch.try_into().unwrap();
+        match Entity::delete_many()
+            .filter(Column::SinkId.eq(sink_id))
+            .filter(Column::EndEpoch.eq(end_epoch_i64))
+            .exec(db)
+            .await
+        {
+            Ok(result) => {
+                let deleted_count = result.rows_affected;
+
+                if deleted_count == 0 {
+                    println!(
+                        "Sink id = {}: no item deleted in iceberg exactly once system table, end_epoch < {}.",
+                        sink_id, end_epoch
+                    );
+                } else {
+                    println!(
+                        "Sink id = {}: deleted item in iceberg exactly once system table, end_epoch < {}.",
+                        sink_id, end_epoch
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                println!(
+                    "Sink id = {}: error deleting from iceberg exactly once system table: {:?}",
+                    sink_id, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
     async fn iceberg_sink_has_pre_commit_metadata(
         &self,
         db: &DatabaseConnection,
@@ -685,10 +780,20 @@ pub struct SimulationTestSink {
     pub err_rate: Arc<AtomicU32>,
 }
 
+impl Drop for SimulationTestSink {
+    fn drop(&mut self) {
+        self.parallelism_counter.fetch_sub(1, Relaxed);
+    }
+}
+
 impl SimulationTestSink {
     pub fn register_new() -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
-        let err_rate = Arc::new(AtomicU32::new(0));
+        let err_rate1 = Arc::new(AtomicU32::new(0));
+
+        let err_rate = u32::MAX as f64 * 0.1;
+        let err_rate_for_committer = Arc::new(AtomicU32::new(err_rate as u32));
+
         let store = TestSinkStore::new();
 
         let _sink_guard = {
@@ -696,7 +801,7 @@ impl SimulationTestSink {
             register_build_coordinated_sink(
                 {
                     let parallelism_counter = parallelism_counter.clone();
-                    let err_rate = err_rate.clone();
+                    let err_rate = err_rate_for_committer.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     use risingwave_connector::sink::SinkWriterMetrics;
@@ -727,7 +832,7 @@ impl SimulationTestSink {
                     }
                 },
                 {
-                    let err_rate = err_rate.clone();
+                    let err_rate = err_rate_for_committer.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     move |db, sink_id| {
@@ -748,7 +853,7 @@ impl SimulationTestSink {
             _sink_guard,
             parallelism_counter,
             store,
-            err_rate,
+            err_rate: err_rate1.clone(),
         }
     }
 

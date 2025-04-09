@@ -35,18 +35,18 @@ async fn test_exactly_once_sink_basic() -> Result<()> {
 async fn basic_test_inner() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
-    let source_parallelism = 6;
+    let source_parallelism = 1;
 
     let test_sink = SimulationTestSink::register_new();
-    let test_source = SimulationTestSource::register_new(source_parallelism, 0..10000, 0.01, 20);
-
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..10000, 1.0, 20);
+    test_sink.set_err_rate(0.1);
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism = 6").await?;
+    session.run("set streaming_parallelism = 1").await?;
 
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
-    test_sink.wait_initial_parallelism(6).await?;
+    test_sink.wait_initial_parallelism(1).await?;
 
     let internal_tables = session.run("show internal tables").await?;
 
