@@ -43,7 +43,7 @@ async fn test_cursor_recovery() -> Result<()> {
         .await?;
 
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1.len(), 1);
+    assert_eq!(result1, "1,1");
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
     assert_eq!(result1.len(), 1);
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
