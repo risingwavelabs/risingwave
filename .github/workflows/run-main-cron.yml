@@ -1,0 +1,29 @@
+name: Label ci/main-cron/run-all for cherry-pick PRs
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    branches:
+      - 'release-*'
+    types: ["labeled"]
+
+jobs:
+  label-run-main-cron:
+    if: |
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'cherry-pick'
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Label PR
+        run: |
+          pr_number="${{ github.event.pull_request.number }}"
+          echo "PR number: $pr_number"
+          echo "Labeling PR #$pr_number with ci/main-cron/run-all"
+          gh pr edit "$pr_number" --add-label "ci/main-cron/run-all"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
