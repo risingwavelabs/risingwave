@@ -519,6 +519,8 @@ pub async fn run_slt_task(
                                         }
                                     }
                                 }
+                                tracing::debug!(?cmd, "already dropped");
+                                break;
                             }
                             // allow 'not found' error when retry DROP statement
                             SqlCmd::Drop
