@@ -74,7 +74,7 @@ if [ "${ARCH}" == "aarch64" ]; then
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
 
-cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --features openssl-vendored --profile production
+cargo build -p risingwave_cmd_all --features "rw-static-link" --features all-udf --features openssl-vendored --profile production
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --features openssl-vendored --profile production
 
 echo "--- check link info"
