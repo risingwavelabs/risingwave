@@ -38,7 +38,7 @@ struct DataTypeParsingState {
     /// Since we can't distinguish between `>>` and `> >` in tokenizer, we need to handle this case in the parser.
     /// When we want a [`>`][Token::Gt] but actually consumed a [`>>`][Token::ShiftRight], we set this to true.
     /// When the value was true and we want a [`>`][Token::Gt], we just set this to false instead of really consume it.
-    remaining_close: Rc<RefCell<bool>>,
+    remaining_close: Rc<RefCell<usize>>,
 }
 
 type StatefulStream<S> = Stateful<S, DataTypeParsingState>;
@@ -50,6 +50,7 @@ where
 {
     let remaining_close1 = input.state.remaining_close.clone();
     let remaining_close2 = input.state.remaining_close.clone();
+    let remaining_close3 = input.state.remaining_close.clone();
 
     // Consume an abstract `>`, it may be the `remaining_close1` flag set by previous `>>`.
     let consume_close = trace(
@@ -58,8 +59,8 @@ where
             trace(
                 "consume_remaining_close",
                 move |input: &mut StatefulStream<S>| -> ModalResult<()> {
-                    if *remaining_close1.borrow() {
-                        *remaining_close1.borrow_mut() = false;
+                    if let Some(rem) = remaining_close1.borrow().checked_sub(1) {
+                        *remaining_close1.borrow_mut() = rem;
                         Ok(())
                     } else {
                         fail(input)
@@ -72,7 +73,18 @@ where
                 (
                     Token::ShiftRight,
                     move |_input: &mut StatefulStream<S>| -> ModalResult<()> {
-                        *remaining_close2.borrow_mut() = true;
+                        *remaining_close2.borrow_mut() = 1;
+                        Ok(())
+                    },
+                )
+                    .void(),
+            ),
+            trace(
+                "produce_remaining_close",
+                (
+                    Token::Op(">>>".to_owned()),
+                    move |_input: &mut StatefulStream<S>| -> ModalResult<()> {
+                        *remaining_close3.borrow_mut() = 2;
                         Ok(())
                     },
                 )
@@ -84,7 +96,7 @@ where
 
     // If there is an `over-consumed' `>`, we shouldn't handle `,`.
     let sep = |input: &mut StatefulStream<S>| -> ModalResult<()> {
-        if *input.state.remaining_close.borrow() {
+        if *input.state.remaining_close.borrow() > 0 {
             fail(input)
         } else {
             Token::Comma.void().parse_next(input)
@@ -132,7 +144,7 @@ where
         data_type_stateful,
         trace("data_type_verify_state", |input: &mut StatefulStream<S>| {
             // If there is remaining `>`, we should fail.
-            if *input.state.remaining_close.borrow() {
+            if *input.state.remaining_close.borrow() > 0 {
                 Err(ErrMode::Cut(ContextError::from_external_error(
                     input,
                     UnconsumedShiftRight,
@@ -153,7 +165,7 @@ where
 {
     let base = data_type_stateful_inner.parse_next(input)?;
     // Shall not peek for `Token::LBracket` when `>>` is partially consumed.
-    if *input.state.remaining_close.borrow() {
+    if *input.state.remaining_close.borrow() > 0 {
         return Ok(base);
     }
     (

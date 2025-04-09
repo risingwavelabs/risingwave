@@ -63,6 +63,8 @@ pub enum Token {
     Comma,
     /// Whitespace (space, tab, etc)
     Whitespace(Whitespace),
+    /// Custom Operator
+    Op(String),
     /// Double equals sign `==`
     DoubleEq,
     /// Equality operator `=`
@@ -197,6 +199,7 @@ impl fmt::Display for Token {
             Token::Parameter(s) => write!(f, "${}", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
+            Token::Op(op) => write!(f, "{}", op),
             Token::DoubleEq => f.write_str("=="),
             Token::Spaceship => f.write_str("<=>"),
             Token::Eq => f.write_str("="),
@@ -765,7 +768,7 @@ impl<'a> Tokenizer<'a> {
                         "?|" => Ok(Some(Token::QuestionMarkPipe)),
                         "?&" => Ok(Some(Token::QuestionMarkAmpersand)),
                         "?" => Ok(Some(Token::QuestionMark)),
-                        _ => Ok(Some(Token::DoubleEq)),
+                        _ => Ok(Some(Token::Op(op))),
                     }
                 }
                 other => self.consume_and_return(Token::Char(other)),
