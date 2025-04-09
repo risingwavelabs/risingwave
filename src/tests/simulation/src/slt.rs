@@ -488,7 +488,7 @@ pub async fn run_slt_task(
                             | SqlCmd::CreateSink {
                                 is_sink_into_table: false,
                             } => {
-                                tracing::debug!(?cmd, "already exists");
+                                tracing::debug!(?cmd, ?e, "already exists");
                                 break;
                             }
                             SqlCmd::CreateMaterializedView { ref name }
