@@ -27,10 +27,9 @@ use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::row::{CompactedRow, RowDeserializer};
-use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
@@ -581,6 +580,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<ChangeBuffer> {
+        assert_matches!(conflict_behavior, checked_conflict_behaviors!());
+
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
@@ -600,8 +601,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
         for (op, key, row) in row_ops {
-            assert_matches!(conflict_behavior, checked_conflict_behaviors!());
-
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let Some(old_row) = self.get_expected(&key) else {
@@ -776,12 +775,7 @@ fn version_is_newer_or_equal(
     old_version: &Option<ScalarImpl>,
     new_version: &Option<ScalarImpl>,
 ) -> bool {
-    match (old_version, new_version) {
-        (None, None) => true,
-        (None, Some(_)) => true,
-        (Some(_), None) => false,
-        (Some(old_version), Some(new_version)) => old_version.default_cmp(new_version).is_le(),
-    }
+    cmp_datum(old_version, new_version, OrderType::ascending_nulls_first()).is_le()
 }
 
 #[cfg(test)]
