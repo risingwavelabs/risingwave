@@ -128,7 +128,9 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                             let name = tokens.next()?.to_owned();
                             SqlCmd::CreateMaterializedView { name }
                         } else {
-                            let name = next.to_owned();
+                            let next = next.to_owned();
+                            let mut name = next.split("("); // handle mv(col_name ...) pattern
+                            let name = name.next().expect("MV should have name").to_owned();
                             SqlCmd::CreateMaterializedView { name }
                         }
                     }
