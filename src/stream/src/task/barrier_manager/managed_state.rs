@@ -572,7 +572,8 @@ impl ManagedBarrierState {
 pub(crate) struct DatabaseManagedBarrierState {
     database_id: DatabaseId,
     pub(super) actor_states: HashMap<ActorId, InflightActorState>,
-    actor_pending_new_output_requests: HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
+    pub(super) actor_pending_new_output_requests:
+        HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
     pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
@@ -783,7 +784,7 @@ impl DatabaseManagedBarrierState {
             assert!(!is_stop_actor(actor_id));
             assert!(new_actors.insert(actor_id));
             assert!(request.actor_ids_to_collect.contains(&actor_id));
-            let (new_output_request_tx, new_output_request_rx) = mpsc::unbounded_channel();
+            let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
             if let Some(pending_requests) = self.actor_pending_new_output_requests.remove(&actor_id)
             {
                 for request in pending_requests {
