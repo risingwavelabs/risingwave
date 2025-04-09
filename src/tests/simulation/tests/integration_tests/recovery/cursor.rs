@@ -43,9 +43,9 @@ async fn test_cursor_recovery() -> Result<()> {
         .await?;
 
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1, "1,1");
+    assert!(result1.contains("1 1 Insert"));
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1.len(), 1);
+    assert!(result1.contains("2 2 Insert"));
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
     assert_eq!(result1.len(), 0);
 
@@ -62,13 +62,13 @@ async fn test_cursor_recovery() -> Result<()> {
     session.run("flush").await?;
 
     let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1, "1,1");
+    assert!(result1.contains("1 1 Insert"));
     let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1, "1,1");
+    assert!(result1.contains("2 2 Insert"));
     let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1, "1,1");
+    assert!(result1.contains("3 3 Insert"));
     let result1 = session2.run("FETCH NEXT FROM test_cursor;").await?;
-    assert_eq!(result1.len(), 1);
+    assert!(result1.contains("4 4 Insert"));
     let result1 = session.run("FETCH NEXT FROM test_cursor;").await?;
     assert_eq!(result1.len(), 0);
 
