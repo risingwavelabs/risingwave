@@ -451,7 +451,7 @@ pub async fn run_slt_task(
                                 }
                             )
                         {
-                            tracing::debug!(iteration = i, "Retry for background ddl");
+                            tracing::debug!(iteration = i, name, "Retry for background ddl");
                             match wait_background_mv_finished(name).await {
                                 Ok(_) => {
                                     tracing::debug!(
@@ -493,6 +493,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("exists")
                                     && e.to_string().contains("Catalog error") =>
                             {
+                                tracing::debug!(?cmd, "already exists");
                                 break
                             }
                             // allow 'not found' error when retry DROP statement
@@ -501,6 +502,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("not found")
                                     && e.to_string().contains("Catalog error") =>
                             {
+                                tracing::debug!(?cmd, "already dropped");
                                 break
                             }
 
