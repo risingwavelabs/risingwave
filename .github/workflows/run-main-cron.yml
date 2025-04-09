@@ -8,13 +8,10 @@ on:
   pull_request:
     branches:
       - 'release-*'
-    types: ["labeled"]
+    types: [synchronize]
 
 jobs:
   label-run-main-cron:
-    if: |
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'cherry-pick'
     runs-on: ubuntu-latest
     steps:
       - name: checkout
