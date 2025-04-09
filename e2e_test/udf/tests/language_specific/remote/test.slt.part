@@ -4,7 +4,7 @@
 #   cd e2e_test/udf/remote_java && mvn package && java -jar target/udf.jar
 
 # Create a function.
-statement ok
+statement ok retry 3 backoff 5s
 create function int_42() returns int as int_42 using link 'http://localhost:8815';
 
 # Argument or return type mismatch.
