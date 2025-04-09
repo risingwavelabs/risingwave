@@ -690,7 +690,7 @@ mod tests {
             length,
             start: 0,
             record_count: Some(0),
-            data_file_path: "test.parquet".to_string(),
+            data_file_path: "test.parquet".to_owned(),
             data_file_content: DataContentType::Data,
             data_file_format: iceberg::spec::DataFileFormat::Parquet,
             schema: Arc::new(Schema::builder().build().unwrap()),
