@@ -168,6 +168,11 @@ pub struct SessionConfig {
     #[parameter(default = true, alias = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
+    /// Force filtering to be done inside the join whenever there's a choice between optimizations.
+    /// Defaults to false.
+    #[parameter(default = false, alias = "rw_streaming_force_filter_inside_join")]
+    streaming_force_filter_inside_join: bool,
+
     /// Enable arrangement backfill for streaming queries. Defaults to true.
     /// When set to true, the parallelism of the upstream fragment will be
     /// decoupled from the parallelism of the downstream scan fragment.
