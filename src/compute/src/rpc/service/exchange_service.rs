@@ -175,6 +175,13 @@ impl ExchangeServiceImpl {
                     permits.add_permits(permits_to_add);
                 }
                 Either::Right(MessageWithPermits { message, permits }) => {
+                    let message = match message {
+                        DispatcherMessageBatch::Chunk(chunk) => {
+                            DispatcherMessageBatch::Chunk(chunk.compact())
+                        }
+                        msg @ (DispatcherMessageBatch::Watermark(_)
+                        | DispatcherMessageBatch::BarrierBatch(_)) => msg,
+                    };
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {

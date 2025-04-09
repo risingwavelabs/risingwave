@@ -45,7 +45,7 @@ pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
-use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
