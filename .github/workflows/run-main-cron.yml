@@ -8,7 +8,7 @@ on:
   pull_request:
     branches:
       - 'release-*'
-    types: [synchronize]
+    types: [opened]
 
 jobs:
   label-run-main-cron:
