@@ -962,6 +962,12 @@ statement ok
 DROP TABLE mongo_customers_no_schema_field;
 
 statement ok
+DROP TABLE mongo_customers_strong_schema;
+
+statement ok
+DROP TABLE mongo_customers_no_schema_field_strong_schema;
+
+statement ok
 DROP TABLE upsert_students;
 
 statement ok

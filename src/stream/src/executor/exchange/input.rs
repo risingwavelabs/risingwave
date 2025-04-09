@@ -29,7 +29,7 @@ use crate::executor::{
     BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
     DispatcherMessageStream, DispatcherMessageStreamItem,
 };
-use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
+use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
 
 /// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
 /// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
@@ -355,13 +355,14 @@ impl Input for RemoteInput {
 /// Create a [`LocalInput`] or [`RemoteInput`] instance with given info. Used by merge executors and
 /// receiver executors.
 pub(crate) fn new_input(
-    context: &SharedContext,
+    local_barrier_manager: &LocalBarrierManager,
     metrics: Arc<StreamingMetrics>,
     actor_id: ActorId,
     fragment_id: FragmentId,
     upstream_actor_id: ActorId,
     upstream_fragment_id: FragmentId,
 ) -> StreamResult<BoxedInput> {
+    let context = &local_barrier_manager.shared_context;
     let upstream_addr = context
         .get_actor_info(&upstream_actor_id)?
         .get_host()?

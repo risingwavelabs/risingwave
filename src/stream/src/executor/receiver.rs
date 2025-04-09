@@ -23,7 +23,7 @@ use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
 };
 use crate::executor::prelude::*;
-use crate::task::{FragmentId, SharedContext};
+use crate::task::{FragmentId, LocalBarrierManager};
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -41,8 +41,7 @@ pub struct ReceiverExecutor {
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
 
-    /// Shared context of the stream manager.
-    context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
 
     /// Metrics
     metrics: Arc<StreamingMetrics>,
@@ -63,7 +62,7 @@ impl ReceiverExecutor {
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         input: BoxedInput,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         barrier_rx: mpsc::UnboundedReceiver<Barrier>,
     ) -> Self {
@@ -71,9 +70,9 @@ impl ReceiverExecutor {
             input,
             actor_context: ctx,
             upstream_fragment_id,
+            local_barrier_manager,
             metrics,
             fragment_id,
-            context,
             barrier_rx,
         }
     }
@@ -82,7 +81,6 @@ impl ReceiverExecutor {
     pub fn for_test(
         actor_id: ActorId,
         input: super::exchange::permit::Receiver,
-        shared_context: Arc<SharedContext>,
         local_barrier_manager: crate::task::LocalBarrierManager,
     ) -> Self {
         use super::exchange::input::LocalInput;
@@ -95,7 +93,7 @@ impl ReceiverExecutor {
             514,
             1919,
             LocalInput::new(input, 0).boxed_input(),
-            shared_context,
+            local_barrier_manager,
             StreamingMetrics::unused().into(),
             barrier_rx,
         )
@@ -164,7 +162,7 @@ impl Execute for ReceiverExecutor {
 
                             // Create new upstream receiver.
                             let mut new_upstream = new_input(
-                                &self.context,
+                                &self.local_barrier_manager,
                                 self.metrics.clone(),
                                 self.actor_context.id,
                                 self.fragment_id,
@@ -262,7 +260,7 @@ mod tests {
         barrier_test_env.flush_all_events().await;
 
         let input = new_input(
-            &ctx,
+            &barrier_test_env.local_barrier_manager,
             metrics.clone(),
             actor_id,
             fragment_id,
@@ -276,7 +274,7 @@ mod tests {
             fragment_id,
             upstream_fragment_id,
             input,
-            ctx.clone(),
+            barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
             barrier_test_env
                 .local_barrier_manager
