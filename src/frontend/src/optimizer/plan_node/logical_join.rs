@@ -938,14 +938,26 @@ impl LogicalJoin {
         let logical_join = self.clone_with_left_right(left, right);
 
         // Convert to Hash Join for equal joins
-        // For inner joins, pull non-equal conditions to a filter operator on top of it
+        // For inner joins, pull non-equal conditions to a filter operator on top of it by default.
         // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
         // as opposed to the HashJoin, which applies the condition row-wise.
+        // However, the default behavior of pulling up non-equal conditions can be overridden by the
+        // session variable `streaming_force_filter_inside_join` as it can save unnecessary
+        // materialization of rows only to be filtered later.
 
         let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
+
+        let force_filter_inside_join = self
+            .base
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_force_filter_inside_join();
+
         let pull_filter = self.join_type() == JoinType::Inner
             && stream_hash_join.eq_join_predicate().has_non_eq()
-            && stream_hash_join.inequality_pairs().is_empty();
+            && stream_hash_join.inequality_pairs().is_empty()
+            && (!force_filter_inside_join);
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 

@@ -1,5 +1,5 @@
 system ok
-python3 e2e_test/udf/test.py &
+python3 e2e_test/udf/remote_python/test.py &
 
 # wait for server to start
 sleep 10s
@@ -35,14 +35,14 @@ CREATE MATERIALIZED VIEW mv_always_retry AS SELECT sleep_always_retry(v1) as s1 
 
 # Immediately kill the server, sleep
 system ok
-pkill -9 -f e2e_test/udf/test.py
+pkill -9 -f e2e_test/udf/remote_python/test.py
 
 # wait, test always retry
 sleep 60s
 
 # Restart the server
 system ok
-python3 e2e_test/udf/test.py &
+python3 e2e_test/udf/remote_python/test.py &
 
 # Wait for materialized view to be complete
 statement ok
@@ -67,7 +67,7 @@ SET BACKGROUND_DDL=false;
 
 # close the server
 system ok
-pkill -f e2e_test/udf/test.py
+pkill -f e2e_test/udf/remote_python/test.py
 
 statement ok
 DROP TABLE t CASCADE;

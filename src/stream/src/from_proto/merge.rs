@@ -20,13 +20,13 @@ use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, MergeExecutor, MergeExecutorInput, MergeExecutorUpstream};
-use crate::task::SharedContext;
+use crate::task::LocalBarrierManager;
 
 pub struct MergeExecutorBuilder;
 
 impl MergeExecutorBuilder {
     pub(crate) fn new_input(
-        shared_context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         info: ExecutorInfo,
@@ -43,7 +43,7 @@ impl MergeExecutorBuilder {
             .flatten()
             .map(|&upstream_actor_id| {
                 new_input(
-                    &shared_context,
+                    &local_barrier_manager,
                     executor_stats.clone(),
                     actor_context.id,
                     actor_context.fragment_id,
@@ -77,7 +77,7 @@ impl MergeExecutorBuilder {
             upstreams,
             actor_context,
             upstream_fragment_id,
-            shared_context,
+            local_barrier_manager,
             executor_stats,
             info,
             chunk_size,
@@ -97,7 +97,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         Ok(Self::new_input(
-            params.shared_context,
+            params.local_barrier_manager,
             params.executor_stats,
             params.actor_context,
             params.info,

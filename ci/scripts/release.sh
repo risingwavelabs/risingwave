@@ -73,7 +73,7 @@ if [ "${ARCH}" == "aarch64" ]; then
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
 
-cargo build -p risingwave_cmd_all --features "rw-static-link" --features external-udf --features wasm-udf --features js-udf --features openssl-vendored --profile production
+cargo build -p risingwave_cmd_all --features "rw-static-link" --features all-udf --features openssl-vendored --profile production
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --features openssl-vendored --profile production
 
 echo "--- check link info"
@@ -124,23 +124,26 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 
     echo "--- Release upload risingwave asset"
     tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risingwave
-    gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
+    gh release upload --clobber "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
 
     echo "--- Release upload risingwave debug info"
     tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz risingwave.dwp
-    gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz
+    gh release upload --clobber "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz
 
     echo "--- Release upload risectl asset"
     tar -czvf risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risectl
-    gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
+    gh release upload --clobber "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
 
-    echo "--- Release upload connector libs asset"
-    tar -czvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
-    gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+    connector_assets=$(gh release view "${BUILDKITE_TAG}" --json assets --jq '.assets[] | select(.name | contains("risingwave-connector"))' | wc -l)
+    if [[ ${connector_assets} -eq 0 ]]; then
+      echo "--- Release upload connector libs asset"
+      tar -czvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
+      gh release upload --clobber "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+    fi
 
     echo "--- Release upload risingwave-all-in-one asset"
     tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz risingwave libs
-    gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz
+    gh release upload --clobber "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux-all-in-one.tar.gz
   else
     echo "--- Skipped upload RW assets"
   fi

@@ -165,6 +165,18 @@ impl IcebergFileScanTask {
             IcebergFileScanTask::CountStar(_) => false,
         }
     }
+
+    pub fn files(&self) -> Vec<String> {
+        match self {
+            IcebergFileScanTask::Data(file_scan_tasks)
+            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
+            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => file_scan_tasks
+                .iter()
+                .map(|task| task.data_file_path.clone())
+                .collect(),
+            IcebergFileScanTask::CountStar(_) => vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -234,7 +246,9 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
-        // Iceberg source does not support streaming queries
+        // Like file source, iceberg streaming source has a List Executor and a Fetch Executor,
+        // instead of relying on SplitEnumerator on meta.
+        // TODO: add some validation logic here.
         Ok(vec![])
     }
 }
@@ -576,7 +590,7 @@ impl IcebergSplitEnumerator {
 }
 
 pub struct IcebergScanOpts {
-    pub batch_size: usize,
+    pub chunk_size: usize,
     pub need_seq_num: bool,
     pub need_file_path_and_pos: bool,
 }
@@ -586,7 +600,7 @@ pub async fn scan_task_to_chunk(
     table: Table,
     data_file_scan_task: FileScanTask,
     IcebergScanOpts {
-        batch_size,
+        chunk_size,
         need_seq_num,
         need_file_path_and_pos,
     }: IcebergScanOpts,
@@ -606,7 +620,7 @@ pub async fn scan_task_to_chunk(
     let data_file_path = data_file_scan_task.data_file_path.clone();
     let data_sequence_number = data_file_scan_task.sequence_number;
 
-    let reader = table.reader_builder().with_batch_size(batch_size).build();
+    let reader = table.reader_builder().with_batch_size(chunk_size).build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
     // FIXME: what if the start position is not 0? The logic for index seems not correct.
@@ -628,7 +642,7 @@ pub async fn scan_task_to_chunk(
             columns.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
                 vec![data_file_path.as_str(); visibility.len()],
             ))));
-            let index_start = (index * batch_size) as i64;
+            let index_start = (index * chunk_size) as i64;
             columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
                 (index_start..(index_start + visibility.len() as i64)).collect::<Vec<i64>>(),
             ))));

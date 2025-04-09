@@ -1,5 +1,5 @@
 system ok
-python3 e2e_test/udf/test.py &
+python3 e2e_test/udf/remote_python/test.py &
 
 # wait for server to start
 sleep 1s
@@ -8,7 +8,7 @@ statement ok
 CREATE FUNCTION sleep(INT) RETURNS INT AS 'sleep' USING LINK 'http://localhost:8815';
 
 system ok
-sleep 1 && pkill -f e2e_test/udf/test.py &
+sleep 1 && pkill -f e2e_test/udf/remote_python/test.py &
 
 # python server should not exit until the query is finished
 query I
@@ -20,14 +20,14 @@ select sleep(2);
 sleep 1s
 
 system ok
-python3 e2e_test/udf/test.py &
+python3 e2e_test/udf/remote_python/test.py &
 
 # wait for server to start
 sleep 1s
 
 # force kill python server
 system ok
-sleep 1 && pkill -9 -f e2e_test/udf/test.py &
+sleep 1 && pkill -9 -f e2e_test/udf/remote_python/test.py &
 
 query error
 select sleep(2);
