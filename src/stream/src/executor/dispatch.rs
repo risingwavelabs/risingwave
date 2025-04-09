@@ -406,7 +406,7 @@ impl DispatchExecutorInner {
 
 impl DispatchExecutor {
     pub(crate) async fn new(
-        mut input: Executor,
+        input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
         actor_id: u32,
@@ -414,6 +414,64 @@ impl DispatchExecutor {
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
+        let mut executor = Self::new_inner(
+            input,
+            new_output_request_rx,
+            vec![],
+            actor_id,
+            fragment_id,
+            context,
+            metrics,
+        );
+        let inner = &mut executor.inner;
+        for dispatcher in dispatchers {
+            let outputs = inner
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
+            let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
+            inner.dispatchers.push(dispatcher);
+        }
+        Ok(executor)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        input: Executor,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: u32,
+        fragment_id: u32,
+        context: Arc<SharedContext>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> (
+        Self,
+        tokio::sync::mpsc::UnboundedSender<(ActorId, NewOutputRequest)>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        (
+            Self::new_inner(
+                input,
+                rx,
+                dispatchers,
+                actor_id,
+                fragment_id,
+                context,
+                metrics,
+            ),
+            tx,
+        )
+    }
+
+    fn new_inner(
+        mut input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: u32,
+        fragment_id: u32,
+        context: Arc<SharedContext>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let chunk_size = context.config().developer.chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
@@ -434,23 +492,21 @@ impl DispatchExecutor {
             metrics,
             actor_out_record_cnt,
         };
-        let mut inner = DispatchExecutorInner {
-            dispatchers: Default::default(),
-            actor_id,
-            context,
-            metrics,
-            new_output_request_rx,
-            pending_new_output_requests: Default::default(),
-        };
-        for dispatcher in dispatchers {
-            let outputs = inner
-                .collect_outputs(&dispatcher.downstream_actor_id)
-                .await?;
-            let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
-            let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
-            inner.dispatchers.push(dispatcher);
+        let dispatchers = dispatchers
+            .into_iter()
+            .map(|dispatcher| metrics.monitor_dispatcher(dispatcher))
+            .collect();
+        Self {
+            input,
+            inner: DispatchExecutorInner {
+                dispatchers,
+                actor_id,
+                context,
+                metrics,
+                new_output_request_rx,
+                pending_new_output_requests: Default::default(),
+            },
         }
-        Ok(Self { input, inner })
     }
 }
 
@@ -1314,31 +1370,20 @@ mod tests {
         // actor_id -> untouched, old, new, old_simple, new_simple
 
         let broadcast_dispatcher_id = 666;
-        let broadcast_dispatcher = DispatcherImpl::new(
-            &ctx,
-            actor_id,
-            &PbDispatcher {
-                r#type: DispatcherType::Broadcast as _,
-                dispatcher_id: broadcast_dispatcher_id,
-                downstream_actor_id: vec![untouched, old],
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        let broadcast_dispatcher = PbDispatcher {
+            r#type: DispatcherType::Broadcast as _,
+            dispatcher_id: broadcast_dispatcher_id,
+            downstream_actor_id: vec![untouched, old],
+            ..Default::default()
+        };
 
         let simple_dispatcher_id = 888;
-        let simple_dispatcher = DispatcherImpl::new(
-            &ctx,
-            actor_id,
-            &PbDispatcher {
-                r#type: DispatcherType::Simple as _,
-                dispatcher_id: simple_dispatcher_id,
-                downstream_actor_id: vec![old_simple],
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let simple_dispatcher = PbDispatcher {
+            r#type: DispatcherType::Simple as _,
+            dispatcher_id: simple_dispatcher_id,
+            downstream_actor_id: vec![old_simple],
+            ..Default::default()
+        };
 
         let dispatcher_updates = maplit::hashmap! {
             actor_id => vec![PbDispatcherUpdate {
@@ -1371,7 +1416,20 @@ mod tests {
             )
             .boxed(),
         );
+
         let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
+        let mut rxs = [untouched, old, new, old_simple, new_simple]
+            .into_iter()
+            .map(|id| {
+                (id, {
+                    let (tx, rx) = channel_for_test();
+                    new_output_request_tx
+                        .send((id, NewOutputRequest::Local(tx)))
+                        .unwrap();
+                    rx
+                })
+            })
+            .collect::<HashMap<_, _>>();
         let executor = Box::new(
             DispatchExecutor::new(
                 input,
@@ -1386,13 +1444,9 @@ mod tests {
             .unwrap(),
         )
         .execute();
+
         pin_mut!(executor);
 
-        // 2. Take downstream receivers.
-        let mut rxs = [untouched, old, new, old_simple, new_simple]
-            .into_iter()
-            .map(|id| (id, ctx.take_receiver((actor_id, id)).unwrap()))
-            .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {
                 rxs.get_mut(&$down_id).unwrap().try_recv()
