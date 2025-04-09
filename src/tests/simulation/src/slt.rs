@@ -484,17 +484,41 @@ pub async fn run_slt_task(
                             }
                             | SqlCmd::CreateSink {
                                 is_sink_into_table: false,
-                            }
-                            | SqlCmd::CreateMaterializedView { .. }
-                                if i != 0
-                                    // It should not be a gRPC request to meta error,
-                                    // otherwise it means that the catalog is not yet populated to fe.
-                                    && !e.to_string().contains("gRPC request to meta service failed")
-                                    && e.to_string().contains("exists")
-                                    && e.to_string().contains("Catalog error") =>
-                            {
+                            } => {
                                 tracing::debug!(?cmd, "already exists");
-                                break
+                                break;
+                            }
+                            SqlCmd::CreateMaterializedView { ref name }
+                                if i != 0
+                                // It should not be a gRPC request to meta error,
+                                // otherwise it means that the catalog is not yet populated to fe.
+                                && !e.to_string().contains("gRPC request to meta service failed")
+                                && e.to_string().contains("exists")
+                                && e.to_string().contains("Catalog error") =>
+                            {
+                                if background_ddl_enabled {
+                                    match wait_background_mv_finished(name).await {
+                                        Ok(_) => {
+                                            tracing::debug!(
+                                                iteration = i,
+                                                "Record with background_ddl {:?} finished",
+                                                record
+                                            );
+                                            break;
+                                        }
+                                        Err(err) => {
+                                            tracing::error!(
+                                                iteration = i,
+                                                ?err,
+                                                "failed to wait for background mv to finish creating"
+                                            );
+                                            if i >= MAX_RETRY {
+                                                panic!("failed to run test after retry {i} times, error={err:#?}");
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
                             }
                             // allow 'not found' error when retry DROP statement
                             SqlCmd::Drop
@@ -503,7 +527,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("Catalog error") =>
                             {
                                 tracing::debug!(?cmd, "already dropped");
-                                break
+                                break;
                             }
 
                             // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
