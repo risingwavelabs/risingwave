@@ -616,6 +616,10 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+
+    /// Enable storage block prefetch for lookup join.
+    #[serde(default = "default::batch::enable_lookup_join_prefetch")]
+    pub enable_lookup_join_prefetch: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -2122,6 +2126,10 @@ pub mod default {
 
         pub fn enable_spill() -> bool {
             true
+        }
+
+        pub fn enable_lookup_join_prefetch() -> bool {
+            false
         }
 
         pub fn statement_timeout_in_sec() -> u32 {
