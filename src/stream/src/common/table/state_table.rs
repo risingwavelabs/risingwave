@@ -106,6 +106,9 @@ pub struct StateTableInner<
     /// State store for accessing snapshot data
     store: S,
 
+    /// Current epoch
+    epoch: Option<EpochPair>,
+
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -186,6 +189,7 @@ where
     /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
+        assert_eq!(None, self.epoch.replace(epoch), "should not init for twice");
         Ok(())
     }
 
@@ -512,6 +516,7 @@ where
             table_id,
             local_store: local_state_store,
             store,
+            epoch: None,
             pk_serde,
             row_serde,
             pk_indices,
@@ -537,11 +542,6 @@ where
 
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
-    }
-
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn epoch(&self) -> u64 {
-        self.local_store.epoch()
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -681,7 +681,6 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
@@ -1068,7 +1067,10 @@ where
     ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
     {
         assert!(!self.on_post_commit);
-        assert_eq!(self.epoch(), new_epoch.prev);
+        assert_eq!(
+            self.epoch.expect("should only be called after init").curr,
+            new_epoch.prev
+        );
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
             self.op_consistency_level = new_consistency_level;
@@ -1084,7 +1086,7 @@ where
         });
         trace!(
             table_id = %self.table_id,
-            epoch = ?self.epoch(),
+            epoch = ?self.epoch,
             "commit state table"
         );
 
@@ -1103,6 +1105,7 @@ where
                 switch_op_consistency_level,
             },
         );
+        self.epoch = Some(new_epoch);
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
@@ -1341,10 +1344,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
         };
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
@@ -1359,10 +1360,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
         };
 
         Ok(self

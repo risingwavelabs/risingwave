@@ -172,8 +172,6 @@ pub enum Operation {
         opts: TracedSealCurrentEpochOptions,
     },
 
-    LocalStorageEpoch,
-
     LocalStorageIsDirty,
 
     TryFlush,
@@ -290,7 +288,6 @@ pub enum OperationResult {
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    LocalStorageEpoch(TraceResult<u64>),
     LocalStorageIsDirty(TraceResult<bool>),
 }
 

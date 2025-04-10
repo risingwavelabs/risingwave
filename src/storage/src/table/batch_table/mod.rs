@@ -370,8 +370,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
-        let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        let read_committed = wait_epoch.is_read_committed();
         self.store
             .try_wait_epoch(
                 wait_epoch,
@@ -397,9 +395,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            read_version_from_backup: read_backup,
-            read_committed,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
@@ -642,7 +637,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
-                    wait_epoch,
                     vnode,
                     prefetch_options,
                 )
@@ -652,7 +646,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
-                    wait_epoch,
                     vnode,
                     prefetch_options,
                 )
@@ -668,7 +661,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         read_snapshot: &S::ReadSnapshot,
         prefix_hint: Option<Bytes>,
         encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
-        wait_epoch: HummockReadEpoch,
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send + use<K, S, SD>>
@@ -684,15 +676,10 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
 
         {
             let prefix_hint = prefix_hint.clone();
-            let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-            let read_committed = wait_epoch.is_read_committed();
             {
                 let read_options = ReadOptions {
                     prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
-                    table_id: self.table_id,
-                    read_version_from_backup: read_backup,
-                    read_committed,
                     prefetch_options,
                     cache_policy,
                 };
@@ -946,7 +933,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 &read_snapshot,
                 None,
                 (start_bound.as_ref(), Unbounded),
-                epoch,
                 vnode,
                 prefetch_options,
             )
