@@ -793,10 +793,7 @@ mod tests {
     use risingwave_storage::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use risingwave_storage::store::{
-        LocalStateStore, NewLocalOptions, NewReadSnapshotOptions, ReadOptions,
-        SealCurrentEpochOptions, StateStoreRead,
-    };
+    use risingwave_storage::store::*;
     use risingwave_storage::{StateStore, StateStoreIter};
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
