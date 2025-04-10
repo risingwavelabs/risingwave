@@ -20,7 +20,7 @@ use std::num::NonZero;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicUsize};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -57,12 +57,15 @@ use tokio::time::sleep;
 
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-pub const CREATE_SOURCE: &str = "create source test_source (id int, name varchar) with (connector = 'test') FORMAT PLAIN ENCODE JSON";
-pub const CREATE_SINK: &str =
-    "create sink test_sink from test_source with (connector = 'test', type = 'upsert')";
-pub const DROP_SINK: &str = "drop sink test_sink";
-pub const DROP_SOURCE: &str = "drop source test_source";
-
+/// `TestSinkStoreInner` is designed to mock the Iceberg behavior with exactly-once
+/// semantics. It utilizes a `BTreeMap<snapshot_id, HashMap<id, name>>` to simulate
+/// an external Iceberg. Each commit in Iceberg is accompanied by a unique snapshot ID,
+/// which serves as the key. By checking whether a specific `snapshot_id` exists in
+/// the `snapshot_id_to_data` BTreeMap, we can replicate the real-world scenario of
+/// verifying if data from a particular commit exists in Iceberg.
+///
+/// Note: Iceberg operates under the principle of transactional commits; therefore,
+/// there is no scenario where part of a batch succeeds while another part fails.
 pub struct TestSinkStoreInner {
     id_name: HashMap<i32, Vec<String>>,
     // snapshot_id -> id + name map
@@ -115,12 +118,23 @@ impl TestSinkStore {
         self.inner.lock().unwrap()
     }
 
+    pub fn count_total_keys(&self) -> usize {
+        let mut inner = self.inner();
+        let mut total_keys = 0;
+
+        for inner_map in inner.snapshot_id_to_data.values() {
+            total_keys += inner_map.len();
+        }
+
+        total_keys
+    }
+
     pub fn check_simple_result(&self, id_list: &[i32]) -> anyhow::Result<()> {
         println!("total id_list count is {}", id_list.len());
         let mut store_id_name_list = HashMap::new();
         let mut inner = self.inner();
+        let mut seen_keys = HashSet::new();
         for inner_map in inner.snapshot_id_to_data.values() {
-            let mut seen_keys = HashSet::new();
             for (key, value) in inner_map {
                 if seen_keys.contains(key) {
                     panic!("Duplicate key found: {}", key);
@@ -133,6 +147,7 @@ impl TestSinkStore {
                 }
             }
         }
+        println!("store_id_name_list.len() = {:?}", store_id_name_list.len());
         assert_eq!(store_id_name_list.len(), id_list.len());
         for id in id_list {
             let names = store_id_name_list.get(id).unwrap();
@@ -168,15 +183,27 @@ impl TestSinkStore {
         self.inner().err_count
     }
 
-    pub async fn wait_for_count(&self, count: usize) -> anyhow::Result<()> {
+    pub async fn wait_for_count_and_check_duplicate(&self, count: usize) -> anyhow::Result<()> {
         let mut prev_count = 0;
         let mut has_printed = false;
+        let mut consecutive_matches = 0;
         loop {
             sleep(Duration::from_secs(1)).await;
             let curr_count = self.id_count();
-            if curr_count >= count {
-                assert_eq!(count, curr_count);
-                break;
+            if curr_count > count {
+                panic!(
+                    "Not exactly once, duplicated! current count {:?} is greater than expect count {:?}",
+                    curr_count, count
+                );
+            }
+
+            if curr_count == count {
+                consecutive_matches += 1;
+                if consecutive_matches >= 5 {
+                    break;
+                }
+            } else {
+                consecutive_matches = 0;
             }
             if curr_count == prev_count {
                 if !has_printed {
@@ -298,11 +325,6 @@ impl SinkWriter for CoordinatedTestWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
-        // if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-        //     println!("write with err");
-        //     self.store.inc_err();
-        //     return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
-        // }
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert);
             assert_eq!(row.len(), 2);
@@ -328,7 +350,14 @@ impl SinkWriter for CoordinatedTestWriter {
     }
 }
 
-pub struct TestIcebergExactlyOnceCoordinator {
+/// `SimulationTestIcebergCommitter` mocks the behavior of the Iceberg committer
+/// with exactly-once semantics. During the commit process, it first pre-commits
+/// metadata to the meta store. After a successful commit, it deletes the previously
+/// persisted metadata. In the recovery phase, it determines how to perform exactly-once
+/// data recovery based on the system table information and `snapshot_id` from the
+/// meta store. While the actual sinking process mocks the Iceberg behavior, all
+/// other logic remains consistent with the real Iceberg committer.
+pub struct SimulationTestIcebergCommitter {
     store: TestSinkStore,
     err_rate: Arc<AtomicU32>,
     last_commit_epoch: u64,
@@ -339,7 +368,7 @@ pub struct TestIcebergExactlyOnceCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
+impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
     async fn init(
         &mut self,
         subscriber: SinkCommittedEpochSubscriber,
@@ -369,6 +398,11 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
                     });
                 }
 
+                if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+                    println!("Time period 0 -- Error occur during recovery.");
+                    self.store.inc_err();
+                    return Err(SinkError::Internal(anyhow::anyhow!("fail to recovery")));
+                }
                 match (
                     committed,
                     self.is_snapshot_id_in_iceberg(snapshot_id).await?,
@@ -405,7 +439,7 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
                 last_recommit_epoch = end_epoch;
             }
             println!(
-                "Sink id = {}: Recovery finished! Return end_epoch = {}",
+                "Sink id = {}: Recovery finished! Rewind log store from end_epoch = {}",
                 self.sink_id.sink_id(),
                 last_recommit_epoch
             );
@@ -439,6 +473,11 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
                 if committed_epoch >= epoch {
                     self.commit_inner(epoch, metadata, None).await?;
                 } else {
+                    println!(
+                        "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
+                        committed_epoch,
+                        epoch
+                    );
                     while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
                         println!("Received next committed epoch: {}", next_committed_epoch);
                         // If next_epoch meets the condition, execute commit immediately
@@ -457,7 +496,7 @@ impl SinkCommitCoordinator for TestIcebergExactlyOnceCoordinator {
     }
 }
 
-impl TestIcebergExactlyOnceCoordinator {
+impl SimulationTestIcebergCommitter {
     async fn commit_inner(
         &mut self,
         epoch: u64,
@@ -472,11 +511,11 @@ impl TestIcebergExactlyOnceCoordinator {
 
         let snapshot_id = match snapshot_id {
             Some(previous_snapshot_id) => previous_snapshot_id,
-            None => generate_unique_id(epoch),
+            None => generate_unique_snapshot_id(epoch),
         };
 
         if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("0---Error occur before pre commit.");
+            println!("Time period 1 -- Error occur before pre commit to meta store.");
             self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!(
                 "fail to pre commit to meta store"
@@ -503,10 +542,12 @@ impl TestIcebergExactlyOnceCoordinator {
             .await?;
         }
         if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("1---Error occur before commit and after pre commit.");
+            println!(
+                "Time period 2 -- Error occur before commit to external sink and after pre commit."
+            );
             self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!(
-                "fail to commit to external sink"
+                "fail to commit to external sink."
             )));
         }
         let file_ids = metadatas.into_iter().map(|metadata| {
@@ -523,7 +564,9 @@ impl TestIcebergExactlyOnceCoordinator {
         println!("Succeeded to commit to mock iceberg table in epoch {epoch}.");
 
         if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("2---Error occur after commit and before mark row deleted.");
+            println!(
+                "Time period 3 -- Error occur after commit to external sink and before mark row deleted."
+            );
             self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!(
                 "fail to mark row deleted."
@@ -542,10 +585,12 @@ impl TestIcebergExactlyOnceCoordinator {
         );
 
         if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("3---Error occur after mark committed before deleting previous item.");
+            println!(
+                "Time period 4 -- Error occur after mark committed before deleting previous item."
+            );
             self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!(
-                "fail to pre commit to meta store"
+                "fail to delete previous item in meta store."
             )));
         }
 
@@ -565,15 +610,10 @@ impl TestIcebergExactlyOnceCoordinator {
             .await?;
         Ok(())
     }
-
-    pub fn set_err_rate(&self, err_rate: f64) {
-        let err_rate = u32::MAX as f64 * err_rate;
-        self.err_rate.store(err_rate as _, Relaxed);
-    }
 }
 
 // mock iceberg sink handle system table
-impl TestIcebergExactlyOnceCoordinator {
+impl SimulationTestIcebergCommitter {
     async fn persist_pre_commit_metadata(
         &self,
         db: DatabaseConnection,
@@ -670,45 +710,6 @@ impl TestIcebergExactlyOnceCoordinator {
         }
     }
 
-    async fn delete_row_equal_to_end_epoch(
-        &self,
-        db: &DatabaseConnection,
-        sink_id: u32,
-        end_epoch: u64,
-    ) -> Result<()> {
-        let end_epoch_i64: i64 = end_epoch.try_into().unwrap();
-        match Entity::delete_many()
-            .filter(Column::SinkId.eq(sink_id))
-            .filter(Column::EndEpoch.eq(end_epoch_i64))
-            .exec(db)
-            .await
-        {
-            Ok(result) => {
-                let deleted_count = result.rows_affected;
-
-                if deleted_count == 0 {
-                    println!(
-                        "Sink id = {}: no item deleted in iceberg exactly once system table, end_epoch < {}.",
-                        sink_id, end_epoch
-                    );
-                } else {
-                    println!(
-                        "Sink id = {}: deleted item in iceberg exactly once system table, end_epoch < {}.",
-                        sink_id, end_epoch
-                    );
-                }
-                Ok(())
-            }
-            Err(e) => {
-                println!(
-                    "Sink id = {}: error deleting from iceberg exactly once system table: {:?}",
-                    sink_id, e
-                );
-                Err(e.into())
-            }
-        }
-    }
-
     async fn iceberg_sink_has_pre_commit_metadata(
         &self,
         db: &DatabaseConnection,
@@ -768,30 +769,34 @@ pub fn simple_name_of_id(id: i32) -> String {
     format!("name-{}", id)
 }
 
-fn generate_unique_id(epoch: u64) -> i64 {
-    let transformed = epoch.wrapping_add(233);
-    transformed as i64
+fn generate_unique_snapshot_id(epoch: u64) -> i64 {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let timestamp_nanos = now.as_nanos() as i64;
+    let unique_snapshot_id = timestamp_nanos.wrapping_add(233);
+    unique_snapshot_id as i64
 }
 
-pub struct SimulationTestSink {
+pub struct SimulationTestIcebergExactlyOnceSink {
     _sink_guard: TestSinkRegistryGuard,
     pub store: TestSinkStore,
     pub parallelism_counter: Arc<AtomicUsize>,
     pub err_rate: Arc<AtomicU32>,
 }
 
-impl Drop for SimulationTestSink {
+impl Drop for SimulationTestIcebergExactlyOnceSink {
     fn drop(&mut self) {
         self.parallelism_counter.fetch_sub(1, Relaxed);
     }
 }
 
-impl SimulationTestSink {
-    pub fn register_new() -> Self {
+impl SimulationTestIcebergExactlyOnceSink {
+    pub fn register_new_with_err_rate(err_rate: f64) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
-        let err_rate1 = Arc::new(AtomicU32::new(0));
 
-        let err_rate = u32::MAX as f64 * 0.1;
+        let err_rate = u32::MAX as f64 * err_rate;
+        let err_rate_for_writer = Arc::new(AtomicU32::new(0));
         let err_rate_for_committer = Arc::new(AtomicU32::new(err_rate as u32));
 
         let store = TestSinkStore::new();
@@ -836,7 +841,7 @@ impl SimulationTestSink {
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     move |db, sink_id| {
-                        Box::new(TestIcebergExactlyOnceCoordinator {
+                        Box::new(SimulationTestIcebergCommitter {
                             err_rate: err_rate.clone(),
                             store: store.clone(),
                             last_commit_epoch: 0,
@@ -853,13 +858,8 @@ impl SimulationTestSink {
             _sink_guard,
             parallelism_counter,
             store,
-            err_rate: err_rate1.clone(),
+            err_rate: err_rate_for_writer.clone(),
         }
-    }
-
-    pub fn set_err_rate(&self, err_rate: f64) {
-        let err_rate = u32::MAX as f64 * err_rate;
-        self.err_rate.store(err_rate as _, Relaxed);
     }
 
     pub async fn wait_initial_parallelism(&self, parallelism: usize) -> Result<()> {
@@ -869,155 +869,6 @@ impl SimulationTestSink {
         assert_eq!(self.parallelism_counter.load(Relaxed), parallelism);
         Ok(())
     }
-}
-
-pub fn build_stream_chunk(
-    row_iter: impl Iterator<Item = (i32, String, String, String)>,
-) -> StreamChunk {
-    static ROW_ID_GEN: LazyLock<Arc<AtomicI64>> = LazyLock::new(|| Arc::new(AtomicI64::new(0)));
-
-    let mut builder = DataChunkBuilder::new(
-        vec![
-            DataType::Int32,
-            DataType::Varchar,
-            DataType::Serial,
-            DataType::Varchar,
-            DataType::Varchar,
-        ],
-        100000,
-    );
-    for (id, name, split_id, offset) in row_iter {
-        let row_id = ROW_ID_GEN.fetch_add(1, Relaxed);
-        std::assert!(
-            builder
-                .append_one_row([
-                    Some(ScalarImpl::Int32(id)),
-                    Some(ScalarImpl::Utf8(name.into())),
-                    Some(ScalarImpl::Serial(Serial::from(row_id))),
-                    Some(ScalarImpl::Utf8(split_id.into())),
-                    Some(ScalarImpl::Utf8(offset.into())),
-                ])
-                .is_none()
-        );
-    }
-    let chunk = builder.consume_all().unwrap();
-    let ops = (0..chunk.cardinality()).map(|_| Op::Insert).collect_vec();
-    StreamChunk::from_parts(ops, chunk)
-}
-
-pub struct SimulationTestSource {
-    _source_guard: TestSourceRegistryGuard,
-    pub id_list: Vec<i32>,
-    pub create_stream_count: Arc<AtomicUsize>,
-}
-
-impl SimulationTestSource {
-    pub fn register_new(
-        source_parallelism: usize,
-        id_list: impl Iterator<Item = i32>,
-        sample_rate: f32,
-        pause_interval: usize,
-    ) -> Self {
-        let mut id_list: Vec<i32> = id_list.collect_vec();
-        let count = (id_list.len() as f32 * sample_rate) as usize;
-        id_list.shuffle(&mut rand::rng());
-        let id_list = id_list[0..count].iter().cloned().collect_vec();
-        let mut id_lists = vec![vec![]; source_parallelism];
-        for id in &id_list {
-            id_lists[*id as usize % source_parallelism].push(*id);
-        }
-        let create_stream_count = Arc::new(AtomicUsize::new(0));
-        let id_lists_clone = id_lists.iter().map(|l| Arc::new(l.clone())).collect_vec();
-        let box_source_create_stream_count = create_stream_count.clone();
-        let _source_guard = register_test_source(BoxSource::new(
-            move |_, _| {
-                Ok((0..source_parallelism)
-                    .map(|i: usize| TestSourceSplit {
-                        id: format!("{}", i).as_str().into(),
-                        properties: Default::default(),
-                        offset: "".to_string(),
-                    })
-                    .collect_vec())
-            },
-            move |_, splits, _, _, _| {
-                box_source_create_stream_count.fetch_add(1, Relaxed);
-                select_all(splits.into_iter().map(|split| {
-                    let split_id: usize = split.id.parse().unwrap();
-                    let id_list = id_lists_clone[split_id].clone();
-                    let mut offset = if split.offset == "" {
-                        0
-                    } else {
-                        split.offset.parse::<usize>().unwrap() + 1
-                    };
-
-                    let mut stream: BoxStream<'static, StreamChunk> = empty().boxed();
-
-                    while offset < id_list.len() {
-                        let mut chunks = Vec::new();
-                        while offset < id_list.len() && chunks.len() < pause_interval {
-                            let id = id_list[offset];
-                            let chunk = build_stream_chunk(once((
-                                id,
-                                simple_name_of_id(id),
-                                split.id.to_string(),
-                                offset.to_string(),
-                            )));
-                            chunks.push(chunk);
-
-                            offset += 1;
-                        }
-
-                        stream = stream
-                            .chain(
-                                async move { stream::iter(chunks) }
-                                    .into_stream()
-                                    .chain(
-                                        async move {
-                                            sleep(Duration::from_millis(100)).await;
-                                            stream::iter(Vec::new())
-                                        }
-                                        .into_stream(),
-                                    )
-                                    .flatten(),
-                            )
-                            .boxed();
-                    }
-
-                    stream
-                        .chain(async { pending::<StreamChunk>().await }.into_stream())
-                        .map(|chunk| Ok(chunk))
-                        .boxed()
-                }))
-                .boxed()
-            },
-        ));
-
-        Self {
-            _source_guard,
-            id_list,
-            create_stream_count,
-        }
-    }
-}
-
-pub async fn start_sink_test_cluster() -> Result<Cluster> {
-    let config_path = {
-        let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
-        file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
-            .expect("failed to write config file");
-        file.into_temp_path()
-    };
-
-    Cluster::start(Configuration {
-        config_path: ConfigPath::Temp(config_path.into()),
-        frontend_nodes: 1,
-        compute_nodes: 3,
-        meta_nodes: 1,
-        compactor_nodes: 1,
-        compute_node_cores: 2,
-        ..Default::default()
-    })
-    .await
 }
 
 pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {

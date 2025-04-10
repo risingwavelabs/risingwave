@@ -21,32 +21,33 @@ use itertools::Itertools;
 use risingwave_connector::sink::catalog::SinkId;
 use tokio::time::sleep;
 
-use crate::sink::exactly_once_utils::{
-    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
+use crate::sink::exactly_once_utils::SimulationTestIcebergExactlyOnceSink;
+use crate::sink::utils::{
+    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSource,
     start_sink_test_cluster,
 };
+use risingwave_simulation::cluster::{Cluster, KillOpts};
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
+
 
 #[tokio::test]
 async fn test_exactly_once_sink_basic() -> Result<()> {
-    basic_test_inner().await
-}
-
-async fn basic_test_inner() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
-    let source_parallelism = 1;
+    let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestIcebergExactlyOnceSink::register_new_with_err_rate(0.1);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..10000, 1.0, 20);
-    test_sink.set_err_rate(0.1);
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism = 1").await?;
+    session.run("set streaming_parallelism = 6").await?;
 
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
-    test_sink.wait_initial_parallelism(1).await?;
+
+    let count = test_source.id_list.len();
+
+    test_sink.wait_initial_parallelism(6).await?;
 
     let internal_tables = session.run("show internal tables").await?;
 
@@ -83,7 +84,7 @@ async fn basic_test_inner() -> Result<()> {
 
     test_sink
         .store
-        .wait_for_count(test_source.id_list.len())
+        .wait_for_count_and_check_duplicate(test_source.id_list.len())
         .await?;
 
     let result: String = session.run("select * from rw_sink_decouple").await?;
@@ -99,7 +100,11 @@ async fn basic_test_inner() -> Result<()> {
         source_parallelism,
         test_source.create_stream_count.load(Relaxed)
     );
-
+    println!(
+        "totol id nums in external sink is {:?}, test_source.id_list len is {:?}",
+        test_sink.store.count_total_keys(),
+        test_source.id_list.len()
+    );
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.checkpoint_count() > 0);
