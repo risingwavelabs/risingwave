@@ -57,6 +57,7 @@ macro_rules! for_all_features {
             { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
             { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
             { IcebergSinkWithGlue,  Paid,       "Delivering data to Iceberg with Glue catalog." },
+            { ResourceGroup,        Paid,       "Resource group to isolate workload and failure." },
         }
     };
 }
