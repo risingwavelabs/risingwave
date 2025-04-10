@@ -158,9 +158,9 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 50
     retry: *auto-retry
-    parallelism: 10
+    parallelism: 30
 
   - group: "end-to-end connector test (release)"
     steps:
