@@ -219,12 +219,12 @@ pub async fn handle_streams(
         AsOfJoinType::Inner => {
             workload.jk_cardinality
                 * ((workload.upper_bound - workload.step_size_r + workload.step_size_l)
-                / workload.step_size_l)
-                as usize
+                    / workload.step_size_l) as usize
         }
         AsOfJoinType::LeftOuter => {
-            workload.jk_cardinality * ((workload.upper_bound as f64 * upper_bound_factor) as usize
-                / workload.step_size_l) as usize
+            workload.jk_cardinality
+                * ((workload.upper_bound as f64 * upper_bound_factor) as usize
+                    / workload.step_size_l) as usize
         }
         _ => panic!("Unsupported join type"),
     };

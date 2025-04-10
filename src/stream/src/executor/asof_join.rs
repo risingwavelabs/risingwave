@@ -899,12 +899,7 @@ mod tests {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo::new(
-            schema,
-            vec![0, 1, 3, 4],
-            "AsOfJoinExecutor".to_owned(),
-            0,
-        );
+        let info = ExecutorInfo::new(schema, vec![0, 1, 3, 4], "AsOfJoinExecutor".to_owned(), 0);
 
         let executor = AsOfJoinExecutor::<MemoryStateStore, T>::new(
             ActorContext::for_test(123),
