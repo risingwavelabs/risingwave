@@ -924,6 +924,10 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
             vnodes: option.vnodes,
         }
     }
+
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch").curr
+    }
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
@@ -1066,10 +1070,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         }
         self.inner
             .ingest_batch(kv_pairs, vec![], self.epoch(), self.table_id)
-    }
-
-    fn epoch(&self) -> u64 {
-        self.epoch.expect("should have set the epoch").curr
     }
 
     fn is_dirty(&self) -> bool {

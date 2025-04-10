@@ -219,10 +219,6 @@ impl LocalReplay for LocalReplayImpl {
         self.0.seal_current_epoch(next_epoch, opts.into());
     }
 
-    fn epoch(&self) -> u64 {
-        self.0.epoch()
-    }
-
     async fn flush(&mut self) -> Result<usize> {
         self.0.flush().await.map_err(|_| TraceError::FlushFailed)
     }

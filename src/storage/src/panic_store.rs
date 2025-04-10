@@ -118,10 +118,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn epoch(&self) -> u64 {
-        panic!("should not operate on the panic state store!");
-    }
-
     fn is_dirty(&self) -> bool {
         panic!("should not operate on the panic state store!");
     }

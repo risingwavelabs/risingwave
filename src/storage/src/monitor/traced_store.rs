@@ -247,13 +247,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
         res
     }
 
-    fn epoch(&self) -> u64 {
-        let span = TraceSpan::new_epoch_span(self.storage_type);
-        let res = self.inner.epoch();
-        span.may_send_result(OperationResult::LocalStorageEpoch(TraceResult::Ok(res)));
-        res
-    }
-
     fn is_dirty(&self) -> bool {
         let span = TraceSpan::new_is_dirty_span(self.storage_type);
         let res = self.inner.is_dirty();

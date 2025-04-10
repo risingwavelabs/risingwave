@@ -253,10 +253,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         self.inner.flush().instrument_await("store_flush".verbose())
     }
 
-    fn epoch(&self) -> u64 {
-        self.inner.epoch()
-    }
-
     fn is_dirty(&self) -> bool {
         self.inner.is_dirty()
     }

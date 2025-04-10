@@ -188,6 +188,10 @@ impl LocalHummockFlushedSnapshotReader {
 }
 
 impl LocalHummockStorage {
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch").curr
+    }
+
     fn current_epoch_with_gap(&self) -> EpochWithGap {
         EpochWithGap::new(self.epoch(), self.spill_offset)
     }
@@ -492,10 +496,6 @@ impl LocalStateStore for LocalHummockStorage {
         }
 
         Ok(())
-    }
-
-    fn epoch(&self) -> u64 {
-        self.epoch.expect("should have set the epoch").curr
     }
 
     fn is_dirty(&self) -> bool {

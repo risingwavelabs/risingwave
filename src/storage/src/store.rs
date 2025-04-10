@@ -393,7 +393,6 @@ pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     fn flush(&mut self) -> impl StorageFuture<'_, usize>;
 
     fn try_flush(&mut self) -> impl StorageFuture<'_, ()>;
-    fn epoch(&self) -> u64;
 
     fn is_dirty(&self) -> bool;
 
