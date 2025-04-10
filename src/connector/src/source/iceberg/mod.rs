@@ -25,7 +25,7 @@ use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
 use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::{DataContentType, ManifestList};
+use iceberg::spec::DataContentType;
 use iceberg::table::Table;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
@@ -435,27 +435,20 @@ impl IcebergSplitEnumerator {
         snapshot_id: i64,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         let mut record_counts = 0;
-        let manifest_list: ManifestList = table
-            .metadata()
-            .snapshot_by_id(snapshot_id)
-            .unwrap()
-            .load_manifest_list(table.file_io(), table.metadata())
-            .await
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .with_delete_file_processing_enabled(true)
+            .build()
             .map_err(|e| anyhow!(e))?;
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
 
-        for entry in manifest_list.entries() {
-            let manifest = entry
-                .load_manifest(table.file_io())
-                .await
-                .map_err(|e| anyhow!(e))?;
-            let mut manifest_entries_stream =
-                futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
-
-            while let Some(manifest_entry) = manifest_entries_stream.next().await {
-                let file = manifest_entry.data_file();
-                assert_eq!(file.content_type(), DataContentType::Data);
-                record_counts += file.record_count();
-            }
+        #[for_await]
+        for task in file_scan_stream {
+            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            assert_eq!(task.data_file_content, DataContentType::Data);
+            assert!(task.deletes.is_empty());
+            record_counts += task.record_count.expect("must have");
         }
         let split = IcebergSplit {
             split_id: 0,
