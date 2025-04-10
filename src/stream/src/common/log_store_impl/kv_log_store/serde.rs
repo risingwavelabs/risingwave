@@ -679,12 +679,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         let mut read_info = ReadInfo::new();
         while let Some(row) = this.next_op().await? {
             let epoch = row.epoch;
-            let seq_id = row.get_seq_id();
             let vnode = row.vnode;
             let row_op = row.op;
             let row_read_size = row.size;
             match row_op {
-                LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
+                LogStoreOp::Row { seq_id, .. } | LogStoreOp::Update { seq_id, .. } => {
                     progress.insert(vnode, seq_id);
                 }
                 _ => {}
@@ -773,15 +772,6 @@ mod stream_de {
         pub epoch: u64,
         pub op: LogStoreOp,
         pub size: usize,
-    }
-
-    impl LogStoreRow {
-        pub(super) fn get_seq_id(&self) -> Option<SeqId> {
-            match &self.op {
-                LogStoreOp::Row { seq_id, .. } | LogStoreOp::Update { seq_id, .. } => Some(*seq_id),
-                LogStoreOp::Barrier { .. } => None,
-            }
-        }
     }
 
     #[derive(Debug)]
