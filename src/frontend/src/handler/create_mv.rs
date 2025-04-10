@@ -205,6 +205,12 @@ pub async fn handle_create_mv_bound(
 
         let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
+        if resource_group.is_some() {
+            risingwave_common::license::Feature::ResourceGroup
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
         if resource_group.is_some()
             && !context
                 .session_ctx()
