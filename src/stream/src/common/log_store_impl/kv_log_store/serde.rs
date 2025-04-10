@@ -973,7 +973,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         {
             let mut row = result?;
             let vnode = row.vnode;
-            let mut aligned_vnodes = BitmapBuilder::with_capacity(self.serde.vnodes().len());
+            let mut aligned_vnodes = BitmapBuilder::zeroed(self.serde.vnodes().len());
             let decoded_epoch = row.epoch;
             self.may_init_epoch(decoded_epoch)?;
             match &mut row.op {
