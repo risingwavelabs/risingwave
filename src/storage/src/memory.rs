@@ -1072,10 +1072,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
             .ingest_batch(kv_pairs, vec![], self.epoch(), self.table_id)
     }
 
-    fn is_dirty(&self) -> bool {
-        self.mem_table.is_dirty()
-    }
-
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert_eq!(
             self.epoch.replace(options.epoch),
@@ -1098,7 +1094,7 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-        assert!(!self.is_dirty());
+        assert!(!self.mem_table.is_dirty());
         if let Some(value_checker) = opts.switch_op_consistency_level {
             self.mem_table.op_consistency_level.update(&value_checker);
         }

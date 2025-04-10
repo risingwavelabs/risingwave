@@ -585,10 +585,6 @@ where
         &self.value_indices
     }
 
-    fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty() || self.pending_watermark.is_some()
-    }
-
     pub fn is_consistent_op(&self) -> bool {
         matches!(
             self.op_consistency_level,
@@ -758,10 +754,6 @@ where
         &mut self,
         new_vnodes: Arc<Bitmap>,
     ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
-        assert!(
-            !self.inner.is_dirty(),
-            "vnode bitmap should only be updated when state table is clean"
-        );
         let prev_vnodes = self
             .inner
             .local_store
@@ -1091,11 +1083,11 @@ where
         );
 
         let mut table_watermarks = None;
-        if self.is_dirty() {
-            self.local_store
-                .flush()
-                .instrument(tracing::info_span!("state_table_flush"))
-                .await?;
+        self.local_store
+            .flush()
+            .instrument(tracing::info_span!("state_table_flush"))
+            .await?;
+        if self.pending_watermark.is_some() {
             table_watermarks = self.commit_pending_watermark();
         }
         self.local_store.seal_current_epoch(
