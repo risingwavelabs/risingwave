@@ -63,6 +63,7 @@ use crate::hummock::{
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use crate::opts::StorageOpts;
+use crate::panic_store::PanicStateStore;
 use crate::store::*;
 
 struct HummockStorageShutdownGuard {
@@ -674,6 +675,17 @@ impl StateStoreRead for HummockStorageReadSnapshot {
     }
 }
 
+impl StateStoreReadVector for HummockStorageReadSnapshot {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        _vec: Vector,
+        _options: VectorNearestOptions,
+        _on_nearest_item_fn: impl OnNearestItem<O>,
+    ) -> StorageResult<Vec<O>> {
+        unimplemented!()
+    }
+}
+
 impl StateStoreReadLog for HummockStorage {
     type ChangeLogIter = ChangeLogIterator;
 
@@ -798,6 +810,7 @@ impl HummockStorage {
 impl StateStore for HummockStorage {
     type Local = LocalHummockStorage;
     type ReadSnapshot = HummockStorageReadSnapshot;
+    type VectorWriter = PanicStateStore;
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
@@ -829,6 +842,10 @@ impl StateStore for HummockStorage {
             hummock_meta_client: self.hummock_meta_client.clone(),
             simple_time_travel_version_cache: self.simple_time_travel_version_cache.clone(),
         })
+    }
+
+    async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
+        unimplemented!()
     }
 }
 
