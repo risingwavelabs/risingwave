@@ -659,7 +659,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     }
 
     #[expect(dead_code)]
-    #[try_stream(ok = (LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
+    #[try_stream(ok = (Epoch, LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
     async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
         let mut ops = Vec::with_capacity(chunk_size);
@@ -698,6 +698,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         read_info.report(&this.metrics);
                         yield (
+                            epoch,
                             take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
@@ -713,6 +714,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         let chunk = data_chunk_builder.consume_all().expect("must not be empty");
                         yield (
+                            epoch,
                             take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
@@ -723,6 +725,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         read_info.report(&this.metrics);
                         yield (
+                            epoch,
                             take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
@@ -734,11 +737,13 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     if let Some(chunk) = data_chunk_builder.consume_all() {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         yield (
+                            epoch,
                             take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
                     yield (
+                        epoch,
                         take(&mut progress),
                         KvLogStoreItem::Barrier { is_checkpoint },
                     )
