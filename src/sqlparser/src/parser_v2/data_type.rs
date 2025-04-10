@@ -59,8 +59,9 @@ where
             trace(
                 "consume_remaining_close",
                 move |input: &mut StatefulStream<S>| -> ModalResult<()> {
-                    if let Some(rem) = remaining_close1.borrow().checked_sub(1) {
-                        *remaining_close1.borrow_mut() = rem;
+                    let rem = *remaining_close1.borrow();
+                    if let Some(sub1) = rem.checked_sub(1) {
+                        *remaining_close1.borrow_mut() = sub1;
                         Ok(())
                     } else {
                         fail(input)
