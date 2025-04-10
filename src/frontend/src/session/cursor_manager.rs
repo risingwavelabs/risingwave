@@ -555,10 +555,15 @@ impl SubscriptionCursor {
                     if let Some(row) = remaining_rows.pop_front() {
                         // 1. Fetch the next row
                         if from_snapshot {
-                            return Ok(Some(Self::build_row(row.0, None, formats, &session_data)?));
+                            return Ok(Some(Self::build_row(
+                                row.take(),
+                                None,
+                                formats,
+                                &session_data,
+                            )?));
                         } else {
                             return Ok(Some(Self::build_row(
-                                row.0,
+                                row.take(),
                                 Some(rw_timestamp),
                                 formats,
                                 &session_data,
@@ -775,8 +780,7 @@ impl SubscriptionCursor {
             table_catalog,
             &session,
             context.into(),
-            rw_timestamp,
-            rw_timestamp,
+            rw_timestamp.map(|rw_timestamp| (rw_timestamp, rw_timestamp)),
             version_id,
             seek_pk_row,
         )
@@ -843,7 +847,7 @@ impl SubscriptionCursor {
             vec![Some(op), None]
         };
         row.extend(new_row);
-        Ok(Row(row))
+        Ok(Row::new(row))
     }
 
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
@@ -858,8 +862,7 @@ impl SubscriptionCursor {
         table_catalog: Arc<TableCatalog>,
         session: &SessionImpl,
         context: OptimizerContextRef,
-        old_epoch: Option<u64>,
-        new_epoch: Option<u64>,
+        epoch_range: Option<(u64, u64)>,
         version_id: HummockVersionId,
         seek_pk_rows: Option<Row>,
     ) -> Result<BatchQueryPlanResult> {
@@ -889,7 +892,7 @@ impl SubscriptionCursor {
             let mut pk_rows = vec![];
             let mut values = vec![];
             for (seek_pk, (data_type, column_index)) in
-                seek_pk_rows.0.into_iter().zip_eq_fast(pks.into_iter())
+                seek_pk_rows.take().into_iter().zip_eq_fast(pks.into_iter())
             {
                 if let Some(seek_pk) = seek_pk {
                     pk_rows.push(InputRef {
@@ -932,14 +935,13 @@ impl SubscriptionCursor {
             (None, None)
         };
 
-        let (seq_scan, out_fields, out_names) = if old_epoch.is_some() && new_epoch.is_some() {
+        let (seq_scan, out_fields, out_names) = if let Some(epoch_range) = epoch_range {
             let core = generic::LogScan::new(
                 table_catalog.name.clone(),
                 output_col_idx,
                 Rc::new(table_catalog.table_desc()),
                 context,
-                old_epoch.unwrap(),
-                new_epoch.unwrap(),
+                epoch_range,
                 version_id,
             );
             let batch_log_seq_scan = BatchLogSeqScan::new(core, scan);
@@ -947,7 +949,6 @@ impl SubscriptionCursor {
             let out_names = batch_log_seq_scan.core().column_names();
             (batch_log_seq_scan.into(), out_fields, out_names)
         } else {
-            assert!(old_epoch.is_none() && new_epoch.is_none());
             let core = generic::TableScan::new(
                 table_catalog.name.clone(),
                 output_col_idx,

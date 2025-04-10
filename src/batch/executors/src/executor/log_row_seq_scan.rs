@@ -143,7 +143,11 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let old_epoch = old_epoch.epoch;
         let new_epoch = new_epoch.epoch;
 
-        let scan_range = build_scan_range_from_pb(&log_store_seq_scan_node.scan_range, table_desc)?;
+        let scan_range = log_store_seq_scan_node
+            .scan_range
+            .as_ref()
+            .map(|scan_range| build_scan_range_from_pb(scan_range, table_desc))
+            .unwrap_or_else(|| Ok(ScanRange::full()))?;
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);

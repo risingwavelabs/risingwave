@@ -47,8 +47,7 @@ pub struct LogScan {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 
-    pub old_epoch: u64,
-    pub new_epoch: u64,
+    pub epoch_range: (u64, u64),
     pub version_id: HummockVersionId,
 }
 
@@ -105,8 +104,7 @@ impl LogScan {
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
-        old_epoch: u64,
-        new_epoch: u64,
+        epoch_range: (u64, u64),
         version_id: HummockVersionId,
     ) -> Self {
         Self {
@@ -115,8 +113,7 @@ impl LogScan {
             table_desc,
             chunk_size: None,
             ctx,
-            old_epoch,
-            new_epoch,
+            epoch_range,
             version_id,
         }
     }

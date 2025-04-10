@@ -99,8 +99,10 @@ impl Distill for BatchLogSeqScan {
             });
             vec.push(("distribution", dist));
         }
-        vec.push(("old_epoch", Pretty::from(self.core.old_epoch.to_string())));
-        vec.push(("new_epoch", Pretty::from(self.core.new_epoch.to_string())));
+        vec.push((
+            "epoch_range",
+            Pretty::from(format!("{:?}", self.core.epoch_range)),
+        ));
         vec.push(("version_id", Pretty::from(self.core.version_id.to_string())));
         if let Some(scan_range) = &self.scan_range {
             let order_names = match verbose {
@@ -138,7 +140,7 @@ impl TryToBatchPb for BatchLogSeqScan {
             old_epoch: Some(BatchQueryEpoch {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
-                        epoch: self.core.old_epoch,
+                        epoch: self.core.epoch_range.0,
                         hummock_version_id: 0,
                     },
                 )),
@@ -146,7 +148,7 @@ impl TryToBatchPb for BatchLogSeqScan {
             new_epoch: Some(BatchQueryEpoch {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
-                        epoch: self.core.new_epoch,
+                        epoch: self.core.epoch_range.1,
                         hummock_version_id: 0,
                     },
                 )),

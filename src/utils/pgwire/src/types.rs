@@ -23,7 +23,7 @@ use crate::error::{PsqlError, PsqlResult};
 /// A row of data returned from the database by a query.
 #[derive(Debug, Clone)]
 // NOTE: Since we only support simple query protocol, the values are represented as strings.
-pub struct Row(pub Vec<Option<Bytes>>);
+pub struct Row(Vec<Option<Bytes>>);
 
 impl Row {
     /// Create a row from values.

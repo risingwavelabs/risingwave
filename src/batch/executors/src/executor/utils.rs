@@ -265,45 +265,26 @@ pub fn build_scan_ranges_from_pb(
     } else {
         Ok(scan_ranges
             .iter()
-            .map(|scan_range| {
-                let pk_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|order| {
-                        DataType::from(
-                            table_desc.columns[order.column_index as usize]
-                                .column_type
-                                .as_ref()
-                                .unwrap(),
-                        )
-                    })
-                    .collect_vec();
-                ScanRange::new(scan_range.clone(), pk_types)
-            })
+            .map(|scan_range| build_scan_range_from_pb(scan_range, table_desc))
             .try_collect()?)
     }
 }
 
 pub fn build_scan_range_from_pb(
-    scan_range: &Option<PbScanRange>,
+    scan_range: &PbScanRange,
     table_desc: &StorageTableDesc,
 ) -> Result<ScanRange> {
-    match scan_range {
-        Some(scan_range) => {
-            let pk_types = table_desc
-                .pk
-                .iter()
-                .map(|order| {
-                    DataType::from(
-                        table_desc.columns[order.column_index as usize]
-                            .column_type
-                            .as_ref()
-                            .unwrap(),
-                    )
-                })
-                .collect_vec();
-            ScanRange::new(scan_range.clone(), pk_types)
-        }
-        None => Ok(ScanRange::full()),
-    }
+    let pk_types = table_desc
+        .pk
+        .iter()
+        .map(|order| {
+            DataType::from(
+                table_desc.columns[order.column_index as usize]
+                    .column_type
+                    .as_ref()
+                    .unwrap(),
+            )
+        })
+        .collect_vec();
+    ScanRange::new(scan_range.clone(), pk_types)
 }
