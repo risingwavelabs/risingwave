@@ -142,7 +142,6 @@ impl Execute for ReceiverExecutor {
                             let new_upstream_fragment_id = update
                                 .new_upstream_fragment_id
                                 .unwrap_or(self.upstream_fragment_id);
-                            let added_upstream_actor_id = update.added_upstream_actor_id.clone();
                             let removed_upstream_actor_id: Vec<_> =
                                 if update.new_upstream_fragment_id.is_some() {
                                     vec![self.input.actor_id()]
@@ -155,7 +154,8 @@ impl Execute for ReceiverExecutor {
                                 vec![self.input.actor_id()],
                                 "the removed upstream actor should be the same as the current input"
                             );
-                            let upstream_actor_id = *added_upstream_actor_id
+                            let upstream_actor = update
+                                .added_upstream_actors
                                 .iter()
                                 .exactly_one()
                                 .expect("receiver should have exactly one upstream");
@@ -166,7 +166,7 @@ impl Execute for ReceiverExecutor {
                                 self.metrics.clone(),
                                 self.actor_context.id,
                                 self.fragment_id,
-                                upstream_actor_id,
+                                upstream_actor,
                                 new_upstream_fragment_id,
                             )
                             .context("failed to create upstream input")?;
@@ -223,12 +223,6 @@ mod tests {
 
         // 1. Register info in context.
 
-        ctx.add_actors(
-            [actor_id, old, new]
-                .into_iter()
-                .map(helper_make_local_actor),
-        );
-
         // old -> actor_id
         // new -> actor_id
 
@@ -240,7 +234,7 @@ mod tests {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
+                added_upstream_actors: vec![helper_make_local_actor(new)],
                 removed_upstream_actor_id: vec![old],
             }
         };
@@ -264,7 +258,7 @@ mod tests {
             metrics.clone(),
             actor_id,
             fragment_id,
-            old,
+            &helper_make_local_actor(old),
             upstream_fragment_id,
         )
         .unwrap();

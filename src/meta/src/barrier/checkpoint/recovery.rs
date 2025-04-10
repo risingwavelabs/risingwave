@@ -442,7 +442,10 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            let mut builder = FragmentEdgeBuilder::new(database_fragment_info.fragment_infos());
+            let mut builder = FragmentEdgeBuilder::new(
+                database_fragment_info.fragment_infos(),
+                control_stream_manager,
+            );
             builder.add_relations(&fragment_relations);
             let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(
