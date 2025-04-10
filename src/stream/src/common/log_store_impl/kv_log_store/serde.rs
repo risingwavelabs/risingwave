@@ -685,7 +685,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             let row_read_size = row.size;
             match row_op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
-                    progress.insert(vnode, (epoch, seq_id));
+                    progress.insert(vnode, seq_id);
                 }
                 _ => {}
             }
