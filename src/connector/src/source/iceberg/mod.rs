@@ -545,13 +545,19 @@ impl IcebergSplitEnumerator {
 
         #[derive(Default)]
         struct FileScanTaskGroup {
+            idx: usize,
             tasks: Vec<FileScanTask>,
             total_length: u64,
         }
 
         impl Ord for FileScanTaskGroup {
             fn cmp(&self, other: &Self) -> Ordering {
-                self.total_length.cmp(&other.total_length)
+                // when total_length is the same, we will sort by index
+                if self.total_length == other.total_length {
+                    self.idx.cmp(&other.idx)
+                } else {
+                    self.total_length.cmp(&other.total_length)
+                }
             }
         }
 
@@ -571,8 +577,12 @@ impl IcebergSplitEnumerator {
 
         let mut heap = BinaryHeap::new();
         // push all groups into heap
-        for _ in 0..split_num {
-            heap.push(Reverse(FileScanTaskGroup::default()));
+        for idx in 0..split_num {
+            heap.push(Reverse(FileScanTaskGroup {
+                idx,
+                tasks: vec![],
+                total_length: 0,
+            }));
         }
 
         for file_task in file_scan_tasks {
@@ -685,12 +695,12 @@ mod tests {
 
     use super::*;
 
-    fn create_file_scan_task(length: u64) -> FileScanTask {
+    fn create_file_scan_task(length: u64, id: u64) -> FileScanTask {
         FileScanTask {
             length,
             start: 0,
             record_count: Some(0),
-            data_file_path: "test.parquet".to_owned(),
+            data_file_path: format!("test_{}.parquet", id).to_owned(),
             data_file_content: DataContentType::Data,
             data_file_format: iceberg::spec::DataFileFormat::Parquet,
             schema: Arc::new(Schema::builder().build().unwrap()),
@@ -705,7 +715,7 @@ mod tests {
     #[test]
     fn test_split_n_vecs_basic() {
         let file_scan_tasks = (1..=12)
-            .map(|i| create_file_scan_task(i + 100))
+            .map(|i| create_file_scan_task(i + 100, i))
             .collect::<Vec<_>>(); // Ensure the correct function is called
 
         let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 3);
@@ -735,7 +745,7 @@ mod tests {
 
     #[test]
     fn test_split_n_vecs_single_task() {
-        let file_scan_tasks = vec![create_file_scan_task(100)];
+        let file_scan_tasks = vec![create_file_scan_task(100, 1)];
         let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 3);
         assert_eq!(groups.len(), 3);
         assert_eq!(groups.iter().filter(|group| !group.is_empty()).count(), 1);
@@ -744,11 +754,11 @@ mod tests {
     #[test]
     fn test_split_n_vecs_uneven_distribution() {
         let file_scan_tasks = vec![
-            create_file_scan_task(1000),
-            create_file_scan_task(100),
-            create_file_scan_task(100),
-            create_file_scan_task(100),
-            create_file_scan_task(100),
+            create_file_scan_task(1000, 1),
+            create_file_scan_task(100, 2),
+            create_file_scan_task(100, 3),
+            create_file_scan_task(100, 4),
+            create_file_scan_task(100, 5),
         ];
 
         let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 2);
@@ -759,5 +769,41 @@ mod tests {
             .find(|group| group.iter().any(|task| task.length == 1000))
             .unwrap();
         assert_eq!(group_with_large_task.len(), 1);
+    }
+
+    #[test]
+    fn test_split_n_vecs_same_files_distribution() {
+        let file_scan_tasks = vec![
+            create_file_scan_task(100, 1),
+            create_file_scan_task(100, 2),
+            create_file_scan_task(100, 3),
+            create_file_scan_task(100, 4),
+            create_file_scan_task(100, 5),
+            create_file_scan_task(100, 6),
+            create_file_scan_task(100, 7),
+            create_file_scan_task(100, 8),
+        ];
+
+        let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks.clone(), 4)
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|task| task.data_file_path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        for _ in 0..10000 {
+            let groups_2 = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks.clone(), 4)
+                .iter()
+                .map(|g| {
+                    g.iter()
+                        .map(|task| task.data_file_path.clone())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(groups, groups_2);
+        }
     }
 }
