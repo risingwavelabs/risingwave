@@ -42,22 +42,23 @@ use super::{LicenseError, LicenseManager, Tier, report_telemetry};
 macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
-            // name                 min tier    doc
-            { TestPaid,             Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
-            { TimeTravel,           Paid,       "Query historical data within the retention period."},
-            { GlueSchemaRegistry,   Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
-            { SnowflakeSink,        Paid,       "Delivering data to SnowFlake." },
-            { DynamoDbSink,         Paid,       "Delivering data to DynamoDb." },
-            { OpenSearchSink,       Paid,       "Delivering data to OpenSearch." },
-            { BigQuerySink,         Paid,       "Delivering data to BigQuery." },
-            { ClickHouseSharedEngine,Paid,      "Delivering data to Shared tree on clickhouse cloud"},
-            { SecretManagement,     Paid,       "Secret management." },
-            { CdcTableSchemaMap,    Paid,       "Automatically map upstream schema to CDC Table."},
-            { SqlServerSink,        Paid,       "Sink data from RisingWave to SQL Server." },
-            { SqlServerCdcSource,   Paid,       "CDC source connector for Sql Server." },
-            { CdcAutoSchemaChange,  Paid,       "Auto replicate upstream DDL to CDC Table." },
-            { IcebergSinkWithGlue,  Paid,       "Delivering data to Iceberg with Glue catalog." },
-            { ResourceGroup,        Paid,       "Resource group to isolate workload and failure." },
+            // name                      min tier    doc
+            { TestPaid,                  Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
+            { TimeTravel,                Paid,       "Query historical data within the retention period."},
+            { GlueSchemaRegistry,        Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
+            { SnowflakeSink,             Paid,       "Delivering data to SnowFlake." },
+            { DynamoDbSink,              Paid,       "Delivering data to DynamoDb." },
+            { OpenSearchSink,            Paid,       "Delivering data to OpenSearch." },
+            { BigQuerySink,              Paid,       "Delivering data to BigQuery." },
+            { ClickHouseSharedEngine,    Paid,       "Delivering data to Shared tree on clickhouse cloud"},
+            { SecretManagement,          Paid,       "Secret management." },
+            { CdcTableSchemaMap,         Paid,       "Automatically map upstream schema to CDC Table."},
+            { SqlServerSink,             Paid,       "Sink data from RisingWave to SQL Server." },
+            { SqlServerCdcSource,        Paid,       "CDC source connector for Sql Server." },
+            { CdcAutoSchemaChange,       Paid,       "Auto replicate upstream DDL to CDC Table." },
+            { IcebergSinkWithGlue,       Paid,       "Delivering data to Iceberg with Glue catalog." },
+            { ResourceGroup,             Paid,       "Resource group to isolate workload and failure." },
+            { ElasticDiskCache,          Paid,       "Disk cache and refilling to boost performance and reduce object store access cost." },
         }
     };
 }
