@@ -682,17 +682,19 @@ impl<'a> Tokenizer<'a> {
                 // operators
                 op_chars!(all) => {
                     let mut trial = self.clone();
-                    let mut op = trial.peeking_take_while(|c| matches!(c, op_chars!(all)));
-                    let slash_star = op.find("/*");
-                    let dash_dash = op.find("--");
+                    let op_taken = trial.peeking_take_while(|c| matches!(c, op_chars!(all)));
+                    // It is safe to assume byte index is char index in `op_token` below.
+                    let slash_star = op_taken.find("/*");
+                    let dash_dash = op_taken.find("--");
                     let pos = match (slash_star, dash_dash) {
-                        (Some(s), Some(d)) => Some(s.min(d)),
-                        (Some(s), None) => Some(s),
-                        (None, Some(d)) => Some(d),
-                        (None, None) => None,
+                        (Some(s), Some(d)) => s.min(d),
+                        (Some(s), None) => s,
+                        (None, Some(d)) => d,
+                        (None, None) => op_taken.len(),
                     };
-                    match pos {
-                        Some(0) => match self.next() {
+                    let mut op = &op_taken[..pos];
+                    if op.is_empty() {
+                        match self.next() {
                             Some('-') => {
                                 self.next(); // consume the second '-', starting a single-line comment
                                 let comment = self.tokenize_single_line_comment();
@@ -709,18 +711,26 @@ impl<'a> Tokenizer<'a> {
                                 return self.tokenize_multiline_comment();
                             }
                             _ => unreachable!(),
-                        },
-                        Some(pos) => {
-                            op.truncate(pos);
-                            for _ in op.chars() {
-                                self.next();
-                            }
                         }
-                        None => {
-                            *self = trial;
+                    };
+                    #[expect(clippy::manual_pattern_char_comparison)]
+                    if op.len() > 1
+                        && op.ends_with(['+', '-'])
+                        && !op.contains(|c| matches!(c, op_chars!(ext)))
+                    {
+                        op = op.trim_end_matches(['+', '-']);
+                        if op.is_empty() {
+                            op = &op_taken[..1];
                         }
                     }
-                    match op.as_str() {
+                    if op.len() == op_taken.len() {
+                        *self = trial;
+                    } else {
+                        for _ in op.chars() {
+                            self.next();
+                        }
+                    }
+                    match op {
                         "+" => Ok(Some(Token::Plus)),
                         "-" => Ok(Some(Token::Minus)),
                         "->" => Ok(Some(Token::Arrow)),
@@ -768,7 +778,7 @@ impl<'a> Tokenizer<'a> {
                         "?|" => Ok(Some(Token::QuestionMarkPipe)),
                         "?&" => Ok(Some(Token::QuestionMarkAmpersand)),
                         "?" => Ok(Some(Token::QuestionMark)),
-                        _ => Ok(Some(Token::Op(op))),
+                        _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
                 }
                 other => self.consume_and_return(Token::Char(other)),
