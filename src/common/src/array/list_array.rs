@@ -18,7 +18,7 @@ use std::fmt::{self, Debug, Display};
 use std::future::Future;
 use std::mem::size_of;
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 use itertools::Itertools;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
@@ -725,6 +725,9 @@ impl From<ListRef<'_>> for ListValue {
     }
 }
 
+#[derive(Debug)]
+pub struct BinErr;
+
 impl ListValue {
     /// Construct an array from literal string.
     pub fn from_str(input: &str, data_type: &DataType) -> Result<Self, String> {
@@ -955,6 +958,69 @@ impl ListValue {
         let array = parser.parse_array()?;
         parser.expect_end()?;
         Ok(array)
+    }
+
+    pub fn from_binary(mut input: Bytes, data_type: &DataType) -> Result<Self, BinErr> {
+        fn parse_dimension(
+            input: &mut Bytes,
+            data_type: &DataType,
+            dim: usize,
+            element_oid: i32,
+            lengths: &[u32],
+        ) -> Result<Datum, BinErr> {
+            if dim >= lengths.len() {
+                if data_type.is_array() {
+                    return Err(BinErr);
+                }
+                if data_type.to_oid() != element_oid {
+                    return Err(BinErr);
+                }
+                let buf_len = input.try_get_i32().map_err(|_| BinErr)?;
+                let Ok(buf_len) = usize::try_from(buf_len) else {
+                    // buf_len == -1 encodes a SQL NULL
+                    return Ok(Datum::None);
+                };
+                let buf = input.slice(..buf_len);
+                input.advance(buf_len);
+                return Ok(Datum::Some(
+                    ScalarImpl::from_binary(&buf, data_type).map_err(|_| BinErr)?,
+                ));
+            }
+            let length = lengths[dim] as usize;
+            let DataType::List(element_type) = data_type else {
+                return Err(BinErr);
+            };
+            // validate_array_type(element_type, ndim-1, element_oid),
+            let mut builder = element_type.create_array_builder(length);
+            for _ in 0..length {
+                let elem = parse_dimension(input, element_type, dim + 1, element_oid, lengths)?;
+                builder.append(elem);
+            }
+            Ok(Datum::Some(ScalarImpl::List(ListValue::new(
+                builder.finish(),
+            ))))
+        }
+
+        let ndim = input.try_get_i32().map_err(|_| BinErr)?;
+        let _has_null = input.try_get_i32().map_err(|_| BinErr)?;
+        let element_oid = input.try_get_i32().map_err(|_| BinErr)?;
+        let lengths = (0..ndim)
+            .map(|_| {
+                let len = input.try_get_i32().map_err(|_| BinErr)?;
+                let lower_bound = input.try_get_i32().map_err(|_| BinErr)?;
+                if lower_bound != 1 {
+                    return Err(BinErr);
+                }
+                if len < 0 {
+                    return Err(BinErr);
+                }
+                Ok(len as u32)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        match parse_dimension(&mut input, data_type, 0, element_oid, &lengths)? {
+            Some(ScalarImpl::List(l)) => Ok(l),
+            _ => unreachable!(),
+        }
     }
 }
 
