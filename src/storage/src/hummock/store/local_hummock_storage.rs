@@ -472,15 +472,7 @@ impl LocalStateStore for LocalHummockStorage {
                 }
             }
         }
-        self.flush_inner(
-            kv_pairs,
-            old_values,
-            WriteOptions {
-                epoch: self.epoch(),
-                table_id: self.table_id,
-            },
-        )
-        .await
+        self.flush_inner(kv_pairs, old_values).await
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
@@ -615,10 +607,9 @@ impl LocalHummockStorage {
         &mut self,
         sorted_items: Vec<SharedBufferItem>,
         old_values: Option<Vec<Bytes>>,
-        write_options: WriteOptions,
     ) -> StorageResult<usize> {
-        let epoch = write_options.epoch;
-        let table_id = write_options.table_id;
+        let epoch = self.epoch();
+        let table_id = self.table_id;
 
         let table_id_label = table_id.to_string();
         self.stats

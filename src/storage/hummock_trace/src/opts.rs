@@ -129,12 +129,6 @@ impl TracedReadOptions {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
-pub struct TracedWriteOptions {
-    pub epoch: u64,
-    pub table_id: TracedTableId,
-}
-
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableOption {
     pub retention_seconds: Option<u32>,
 }

@@ -90,13 +90,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     for batch in batches {
         runtime
-            .block_on(hummock_storage.ingest_batch(
-                batch,
-                WriteOptions {
-                    epoch,
-                    table_id: Default::default(),
-                },
-            ))
+            .block_on(hummock_storage.ingest_batch(batch))
             .unwrap();
     }
     hummock_storage.seal_current_epoch(HummockEpoch::MAX, SealCurrentEpochOptions::for_test());

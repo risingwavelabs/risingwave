@@ -175,16 +175,10 @@ pub(crate) mod tests {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local
-                .ingest_batch(
-                    vec![(
-                        TableKey(key.clone()),
-                        StorageValue::new_put(Bytes::from(new_val)),
-                    )],
-                    WriteOptions {
-                        epoch,
-                        table_id: Default::default(),
-                    },
-                )
+                .ingest_batch(vec![(
+                    TableKey(key.clone()),
+                    StorageValue::new_put(Bytes::from(new_val)),
+                )])
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {

@@ -35,7 +35,6 @@ use risingwave_hummock_sdk::table_watermark::{
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
-    TracedWriteOptions,
 };
 use risingwave_pb::hummock::PbVnodeWatermark;
 
@@ -525,21 +524,6 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
                 .0
         }
         None => 0,
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct WriteOptions {
-    pub epoch: u64,
-    pub table_id: TableId,
-}
-
-impl From<TracedWriteOptions> for WriteOptions {
-    fn from(value: TracedWriteOptions) -> Self {
-        Self {
-            epoch: value.epoch,
-            table_id: value.table_id.into(),
-        }
     }
 }
 

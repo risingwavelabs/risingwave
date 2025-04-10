@@ -115,16 +115,7 @@ async fn test_storage_basic() {
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // Write the first batch.
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     // Get the value after flushing to remote.
     let value = test_env
@@ -180,16 +171,7 @@ async fn test_storage_basic() {
         .storage
         .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
 
     // Get the value after flushing to remote.
     let value = test_env
@@ -215,16 +197,7 @@ async fn test_storage_basic() {
         .storage
         .start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
-    hummock_storage
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch3).await.unwrap();
 
     // Get the value after flushing to remote.
     let value = test_env
@@ -497,16 +470,7 @@ async fn test_state_store_sync() {
     ];
 
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     // ingest 24B batch
     let mut batch2 = vec![
@@ -524,16 +488,7 @@ async fn test_state_store_sync() {
         ),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     test_env
@@ -547,16 +502,7 @@ async fn test_state_store_sync() {
         StorageValue::new_put("6666"),
     )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch3).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     test_env
@@ -867,16 +813,7 @@ async fn test_delete_get() {
             StorageValue::new_put("222"),
         ),
     ];
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     test_env
@@ -898,16 +835,7 @@ async fn test_delete_get() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env
         .storage
@@ -971,16 +899,7 @@ async fn test_multiple_epoch_sync() {
             StorageValue::new_put("222"),
         ),
     ];
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     test_env
@@ -991,16 +910,7 @@ async fn test_multiple_epoch_sync() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     test_env
@@ -1017,16 +927,7 @@ async fn test_multiple_epoch_sync() {
             StorageValue::new_put("555"),
         ),
     ];
-    hummock_storage
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch3).await.unwrap();
     let test_get = |read_committed: bool| {
         let hummock_storage_clone = &test_env.storage;
         async move {
@@ -1167,16 +1068,7 @@ async fn test_iter_with_min_epoch() {
         .await
         .unwrap();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch1).await.unwrap();
 
     let epoch2 = (32 * 1000) << 16;
     test_env
@@ -1188,16 +1080,7 @@ async fn test_iter_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch2).await.unwrap();
 
     let epoch3 = (33 * 1000) << 16;
     test_env
@@ -1449,40 +1332,13 @@ async fn test_hummock_version_reader() {
             .init_for_test_with_prev_epoch(epoch1, prev_epoch)
             .await
             .unwrap();
-        hummock_storage
-            .ingest_batch(
-                batch_epoch1,
-                WriteOptions {
-                    epoch: epoch1,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+        hummock_storage.ingest_batch(batch_epoch1).await.unwrap();
 
         hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
-        hummock_storage
-            .ingest_batch(
-                batch_epoch2,
-                WriteOptions {
-                    epoch: epoch2,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+        hummock_storage.ingest_batch(batch_epoch2).await.unwrap();
 
         hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
-        hummock_storage
-            .ingest_batch(
-                batch_epoch3,
-                WriteOptions {
-                    epoch: epoch3,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+        hummock_storage.ingest_batch(batch_epoch3).await.unwrap();
 
         let epoch4 = (34 * 1000) << 16;
         test_env
@@ -1900,16 +1756,7 @@ async fn test_get_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch1).await.unwrap();
 
     let epoch2 = (32 * 1000) << 16;
     test_env
@@ -1921,16 +1768,7 @@ async fn test_get_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch2).await.unwrap();
 
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
