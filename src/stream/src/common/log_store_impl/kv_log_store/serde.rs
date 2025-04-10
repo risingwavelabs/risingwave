@@ -526,9 +526,13 @@ enum StreamState {
     BarrierEmitted { prev_epoch: u64 },
 }
 
+#[expect(dead_code)]
 pub(crate) enum KvLogStoreItem {
     StreamChunk(StreamChunk),
-    Barrier { is_checkpoint: bool },
+    Barrier {
+        vnodes: Arc<Bitmap>,
+        is_checkpoint: bool,
+    },
 }
 
 type PeekableLogStoreItemStream<S> = Peekable<LogStoreItemStream<S>>;
@@ -590,80 +594,14 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     }
 
     #[try_stream(ok = (u64, KvLogStoreItem), error = anyhow::Error)]
-    async fn into_log_store_item_stream(mut self, chunk_size: usize) {
-        assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
-        let mut ops = Vec::with_capacity(chunk_size);
-        let mut data_chunk_builder =
-            DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
-
-        if !self.init().await? {
-            // no data in all stream
-            return Ok(());
-        }
-
-        let this = self;
-        pin_mut!(this);
-
-        let mut read_info = ReadInfo::new();
-        while let Some(row) = this.next_op().await? {
-            let epoch = row.epoch;
-            let row_op = row.op;
-            let row_read_size = row.size;
-            match row_op {
-                LogStoreOp::Row { op, row, .. } => {
-                    read_info.read_one_row(row_read_size);
-                    ops.push(op);
-                    if let Some(chunk) = data_chunk_builder.append_one_row(row) {
-                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
-                        read_info.report(&this.metrics);
-                        yield (
-                            epoch,
-                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
-                        );
-                    }
-                }
-                LogStoreOp::Update {
-                    new_value,
-                    old_value,
-                    ..
-                } => {
-                    read_info.read_update(row_read_size);
-                    if !data_chunk_builder.can_append_update() {
-                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
-                        let chunk = data_chunk_builder.consume_all().expect("must not be empty");
-                        yield (
-                            epoch,
-                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
-                        );
-                    }
-                    ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
-                    assert!(data_chunk_builder.append_one_row(old_value).is_none());
-                    if let Some(chunk) = data_chunk_builder.append_one_row(new_value) {
-                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
-                        read_info.report(&this.metrics);
-                        yield (
-                            epoch,
-                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
-                        );
-                    }
-                }
-                LogStoreOp::Barrier { is_checkpoint, .. } => {
-                    read_info.read_one_row(row_read_size);
-                    read_info.report(&this.metrics);
-                    if let Some(chunk) = data_chunk_builder.consume_all() {
-                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
-                        yield (
-                            epoch,
-                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
-                        );
-                    }
-                    yield (epoch, KvLogStoreItem::Barrier { is_checkpoint })
-                }
-            }
+    async fn into_log_store_item_stream(self, chunk_size: usize) {
+        #[for_await]
+        for next in self.into_vnode_log_store_item_stream(chunk_size) {
+            let (epoch, _progress, item) = next?;
+            yield (epoch, item)
         }
     }
 
-    #[expect(dead_code)]
     #[try_stream(ok = (Epoch, LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
     async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
@@ -735,7 +673,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         );
                     }
                 }
-                LogStoreOp::Barrier { is_checkpoint, .. } => {
+                LogStoreOp::Barrier {
+                    vnodes,
+                    is_checkpoint,
+                } => {
                     read_info.read_one_row(row_read_size);
                     read_info.report(&this.metrics);
                     if let Some(chunk) = data_chunk_builder.consume_all() {
@@ -748,8 +689,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     }
                     yield (
                         epoch,
-                        take(&mut progress),
-                        KvLogStoreItem::Barrier { is_checkpoint },
+                        LogStoreVnodeProgress::new(),
+                        KvLogStoreItem::Barrier {
+                            vnodes,
+                            is_checkpoint,
+                        },
                     )
                 }
             }
