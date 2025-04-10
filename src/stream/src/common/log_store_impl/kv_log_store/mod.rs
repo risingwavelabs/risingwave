@@ -1022,10 +1022,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
-        test_update_vnode_recover_inner().await
-    }
-
-    async fn test_update_vnode_recover_inner() {
         let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
 
@@ -1209,6 +1205,24 @@ mod tests {
             .unwrap();
         reader.init().await.unwrap();
         reader.start_from(None).await.unwrap();
+        {
+            // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
+            // set to true, we won't receive the following commented items.
+            match reader.next_item().await.unwrap() {
+                (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                    assert_eq!(epoch, epoch1);
+                    assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+                }
+                _ => unreachable!(),
+            }
+            match reader.next_item().await.unwrap() {
+                (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
+                    assert_eq!(epoch, epoch1);
+                    assert!(!is_checkpoint);
+                }
+                _ => unreachable!(),
+            }
+        }
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
