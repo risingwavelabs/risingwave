@@ -25,10 +25,12 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
+use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
+use thiserror_ext::AsReport;
 
 use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
@@ -628,33 +630,37 @@ impl StateStoreImpl {
                 .storage(Engine::Large);
 
             if !opts.meta_file_cache_dir.is_empty() {
-                builder = builder
-                    .with_device_options(
-                        DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
-                            .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.meta_file_cache_file_capacity_mb * MB),
-                    )
-                    .with_recover_mode(opts.meta_file_cache_recover_mode)
-                    .with_compression(opts.meta_file_cache_compression)
-                    .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
-                    .with_large_object_disk_cache_options(
-                        LargeEngineOptions::new()
-                            .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                            .with_flushers(opts.meta_file_cache_flushers)
-                            .with_reclaimers(opts.meta_file_cache_reclaimers)
-                            .with_buffer_pool_size(
-                                opts.meta_file_cache_flush_buffer_threshold_mb * MB,
-                            ) // 128 MiB
-                            .with_clean_region_threshold(
-                                opts.meta_file_cache_reclaimers
-                                    + opts.meta_file_cache_reclaimers / 2,
-                            )
-                            .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
-                    );
-                if opts.meta_file_cache_insert_rate_limit_mb > 0 {
-                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
-                        opts.meta_file_cache_insert_rate_limit_mb * MB,
-                    )));
+                if let Err(e) = Feature::ElasticDiskCache.check_available() {
+                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                } else {
+                    builder = builder
+                        .with_device_options(
+                            DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
+                                .with_capacity(opts.meta_file_cache_capacity_mb * MB)
+                                .with_file_size(opts.meta_file_cache_file_capacity_mb * MB),
+                        )
+                        .with_recover_mode(opts.meta_file_cache_recover_mode)
+                        .with_compression(opts.meta_file_cache_compression)
+                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
+                        .with_large_object_disk_cache_options(
+                            LargeEngineOptions::new()
+                                .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                                .with_flushers(opts.meta_file_cache_flushers)
+                                .with_reclaimers(opts.meta_file_cache_reclaimers)
+                                .with_buffer_pool_size(
+                                    opts.meta_file_cache_flush_buffer_threshold_mb * MB,
+                                ) // 128 MiB
+                                .with_clean_region_threshold(
+                                    opts.meta_file_cache_reclaimers
+                                        + opts.meta_file_cache_reclaimers / 2,
+                                )
+                                .with_recover_concurrency(opts.meta_file_cache_recover_concurrency),
+                        );
+                    if opts.meta_file_cache_insert_rate_limit_mb > 0 {
+                        builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                            opts.meta_file_cache_insert_rate_limit_mb * MB,
+                        )));
+                    }
                 }
             }
 
@@ -678,33 +684,37 @@ impl StateStoreImpl {
                 .storage(Engine::Large);
 
             if !opts.data_file_cache_dir.is_empty() {
-                builder = builder
-                    .with_device_options(
-                        DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
-                            .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                            .with_file_size(opts.data_file_cache_file_capacity_mb * MB),
-                    )
-                    .with_recover_mode(opts.data_file_cache_recover_mode)
-                    .with_compression(opts.data_file_cache_compression)
-                    .with_runtime_options(opts.data_file_cache_runtime_config.clone())
-                    .with_large_object_disk_cache_options(
-                        LargeEngineOptions::new()
-                            .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                            .with_flushers(opts.data_file_cache_flushers)
-                            .with_reclaimers(opts.data_file_cache_reclaimers)
-                            .with_buffer_pool_size(
-                                opts.data_file_cache_flush_buffer_threshold_mb * MB,
-                            ) // 128 MiB
-                            .with_clean_region_threshold(
-                                opts.data_file_cache_reclaimers
-                                    + opts.data_file_cache_reclaimers / 2,
-                            )
-                            .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
-                    );
-                if opts.data_file_cache_insert_rate_limit_mb > 0 {
-                    builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
-                        opts.data_file_cache_insert_rate_limit_mb * MB,
-                    )));
+                if let Err(e) = Feature::ElasticDiskCache.check_available() {
+                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                } else {
+                    builder = builder
+                        .with_device_options(
+                            DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
+                                .with_capacity(opts.data_file_cache_capacity_mb * MB)
+                                .with_file_size(opts.data_file_cache_file_capacity_mb * MB),
+                        )
+                        .with_recover_mode(opts.data_file_cache_recover_mode)
+                        .with_compression(opts.data_file_cache_compression)
+                        .with_runtime_options(opts.data_file_cache_runtime_config.clone())
+                        .with_large_object_disk_cache_options(
+                            LargeEngineOptions::new()
+                                .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                                .with_flushers(opts.data_file_cache_flushers)
+                                .with_reclaimers(opts.data_file_cache_reclaimers)
+                                .with_buffer_pool_size(
+                                    opts.data_file_cache_flush_buffer_threshold_mb * MB,
+                                ) // 128 MiB
+                                .with_clean_region_threshold(
+                                    opts.data_file_cache_reclaimers
+                                        + opts.data_file_cache_reclaimers / 2,
+                                )
+                                .with_recover_concurrency(opts.data_file_cache_recover_concurrency),
+                        );
+                    if opts.data_file_cache_insert_rate_limit_mb > 0 {
+                        builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                            opts.data_file_cache_insert_rate_limit_mb * MB,
+                        )));
+                    }
                 }
             }
 
