@@ -951,13 +951,14 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .await
     }
 
-    async fn batch_iter_log_inner<K: CopyFromSlice>(
+    pub async fn batch_iter_vnode_log(
         &self,
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
         start_pk: Option<&OwnedRow>,
         vnode: VirtualNode,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>> + use<K, S, SD>> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static + use<S, SD>>
+    {
         let start_bound = if let Some(start_pk) = start_pk {
             let mut bytes = BytesMut::new();
             self.pk_serializer.serialize(start_pk, &mut bytes);
@@ -966,8 +967,60 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         } else {
             Unbounded
         };
-        let table_key_range =
-            prefixed_range_with_vnode::<&Bytes>((start_bound.as_ref(), Unbounded), vnode);
+        let stream = self
+            .batch_iter_log_inner::<()>(
+                start_epoch,
+                end_epoch,
+                (start_bound.as_ref(), Unbounded),
+                vnode,
+            )
+            .await?;
+        Ok(stream.map_ok(|(_, row)| row))
+    }
+
+    pub async fn batch_iter_log_with_pk_bounds(
+        &self,
+        start_epoch: u64,
+        end_epoch: HummockReadEpoch,
+        ordered: bool,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        pk_prefix: impl Row,
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send> {
+        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
+        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
+        let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
+        build_vnode_stream(
+            |vnode| {
+                self.batch_iter_log_inner(
+                    start_epoch,
+                    end_epoch,
+                    (start_key.as_ref(), end_key.as_ref()),
+                    vnode,
+                )
+            },
+            |vnode| {
+                self.batch_iter_log_inner(
+                    start_epoch,
+                    end_epoch,
+                    (start_key.as_ref(), end_key.as_ref()),
+                    vnode,
+                )
+            },
+            &vnodes,
+            ordered,
+        )
+        .await
+    }
+
+    async fn batch_iter_log_inner<K: CopyFromSlice>(
+        &self,
+        start_epoch: u64,
+        end_epoch: HummockReadEpoch,
+        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
+        vnode: VirtualNode,
+    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>> + Send + use<K, S, SD>>
+    {
+        let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
         let read_options = ReadLogOptions {
             table_id: self.table_id,
         };
@@ -984,36 +1037,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         .into_stream::<K>();
 
         Ok(iter)
-    }
-
-    pub async fn batch_iter_vnode_log(
-        &self,
-        start_epoch: u64,
-        end_epoch: HummockReadEpoch,
-        start_pk: Option<&OwnedRow>,
-        vnode: VirtualNode,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + use<S, SD>> {
-        let stream = self
-            .batch_iter_log_inner::<()>(start_epoch, end_epoch, start_pk, vnode)
-            .await?;
-        Ok(stream.map_ok(|(_, row)| row))
-    }
-
-    pub async fn batch_iter_log_with_pk_bounds(
-        &self,
-        start_epoch: u64,
-        end_epoch: HummockReadEpoch,
-        ordered: bool,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static + use<S, SD>>
-    {
-        let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
-        build_vnode_stream(
-            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
-            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
-            &vnodes,
-            ordered,
-        )
-        .await
     }
 
     /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
