@@ -41,6 +41,7 @@ use crate::hummock::utils::{
     sanity_check_enabled,
 };
 use crate::mem_table::{KeyOp, MemTable};
+use crate::panic_store::PanicStateStore;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -718,6 +719,17 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     }
 }
 
+impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        _vec: Vector,
+        _options: VectorNearestOptions,
+        _on_nearest_item_fn: impl OnNearestItem<O>,
+    ) -> StorageResult<Vec<O>> {
+        unimplemented!()
+    }
+}
+
 impl<R: RangeKv> RangeKvStateStore<R> {
     fn get_keyed_row_impl(
         &self,
@@ -877,6 +889,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = RangeKvLocalStateStore<R>;
     type ReadSnapshot = RangeKvStateStoreReadSnapshot<R>;
+    type VectorWriter = PanicStateStore;
 
     async fn try_wait_epoch(
         &self,
@@ -897,6 +910,10 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
         Ok(self.new_read_snapshot_impl(epoch.get_epoch(), options.table_id))
+    }
+
+    async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
+        unimplemented!()
     }
 }
 

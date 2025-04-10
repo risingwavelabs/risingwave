@@ -322,9 +322,15 @@ pub struct NewReadSnapshotOptions {
     pub table_id: TableId,
 }
 
+#[derive(Clone)]
+pub struct NewVectorWriterOptions {
+    pub table_id: TableId,
+}
+
 pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
-    type ReadSnapshot: StateStoreRead + Clone;
+    type ReadSnapshot: StateStoreRead + StateStoreReadVector + Clone;
+    type VectorWriter: StateStoreWriteVector;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -346,6 +352,11 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
         options: NewReadSnapshotOptions,
     ) -> impl StorageFuture<'_, Self::ReadSnapshot>;
+
+    fn new_vector_writer(
+        &self,
+        options: NewVectorWriterOptions,
+    ) -> impl Future<Output = Self::VectorWriter> + Send + '_;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
@@ -412,6 +423,33 @@ pub trait StateStoreWriteEpochControl: StaticSendSync {
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
+}
+
+pub type VectorItem = f64;
+#[derive(Clone)]
+pub struct Vector(#[expect(dead_code)] Vec<VectorItem>);
+pub type VectorDistance = f64;
+
+pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
+    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+}
+
+pub enum DistanceMeasurement {}
+
+pub struct VectorNearestOptions {
+    pub top_n: usize,
+    pub measure: DistanceMeasurement,
+}
+
+pub trait OnNearestItem<O> = for<'i> Fn(&'i Vector, VectorDistance, &'i [u8]) -> O + Send + 'static;
+
+pub trait StateStoreReadVector: StaticSendSync {
+    fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItem<O>,
+    ) -> impl StorageFuture<'_, Vec<O>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory

@@ -293,6 +293,7 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl
 impl<S: StateStore> StateStore for TracedStateStore<S> {
     type Local = TracedStateStore<S::Local, TableSnapshot>;
     type ReadSnapshot = TracedStateStore<S::ReadSnapshot, TableSnapshot>;
+    type VectorWriter = S::VectorWriter;
 
     async fn try_wait_epoch(
         &self,
@@ -324,6 +325,24 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
             .map(|snapshot| {
                 TracedStateStore::new_with_snapshot_epoch(snapshot, (table_id, Some(epoch)))
             })
+    }
+
+    fn new_vector_writer(
+        &self,
+        options: NewVectorWriterOptions,
+    ) -> impl Future<Output = Self::VectorWriter> + Send + '_ {
+        self.inner.new_vector_writer(options)
+    }
+}
+
+impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, TableSnapshot> {
+    fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItem<O>,
+    ) -> impl StorageFuture<'_, Vec<O>> {
+        self.inner.nearest(vec, options, on_nearest_item_fn)
     }
 }
 
