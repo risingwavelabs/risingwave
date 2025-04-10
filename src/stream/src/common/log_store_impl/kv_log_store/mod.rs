@@ -49,7 +49,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
 /// If truncating on barrier, the `seq_id` is `None`.
-pub(crate) type LogStoreVnodeProgress = HashMap<VirtualNode, (Epoch, Option<SeqId>)>;
+pub(crate) type LogStoreVnodeProgress = HashMap<VirtualNode, Option<SeqId>>;
 
 // TODO: unify with `risingwave_common::Epoch`
 pub(crate) type Epoch = u64;
