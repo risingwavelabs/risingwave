@@ -537,6 +537,18 @@ impl IcebergSplitEnumerator {
         Self::all_delete_parameters(&table, snapshot_id).await
     }
 
+    /// Uniformly distribute scan tasks to compute nodes.
+    /// It's deterministic so that it can best utilize the data locality.
+    ///
+    /// # Arguments
+    /// * `file_scan_tasks`: The file scan tasks to be split.
+    /// * `split_num`: The number of splits to be created.
+    ///
+    /// This algorithm is based on a min-heap. It will push all groups into the heap, and then pop the smallest group and add the file scan task to it.
+    /// Ensure that the total length of each group is as balanced as possible.
+    /// The time complexity is O(n log k), where n is the number of file scan tasks and k is the number of splits.
+    /// The space complexity is O(k), where k is the number of splits.
+    /// The algorithm is stable, so the order of the file scan tasks will be preserved.
     fn split_n_vecs(
         file_scan_tasks: Vec<FileScanTask>,
         split_num: usize,
