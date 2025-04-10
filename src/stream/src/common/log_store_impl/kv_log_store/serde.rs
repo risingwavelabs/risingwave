@@ -1094,9 +1094,11 @@ mod tests {
             (
                 LogStoreOp::Barrier {
                     is_checkpoint: expected_is_checkpoint,
+                    ..
                 },
                 LogStoreOp::Barrier {
                     is_checkpoint: actual_is_checkpoint,
+                    ..
                 },
             ) => {
                 assert_eq!(expected_is_checkpoint, actual_is_checkpoint);
@@ -1476,15 +1478,12 @@ mod tests {
         let epoch = row.epoch;
         let op = row.op;
 
-        assert_eq!(
-            (
-                EPOCH0,
-                LogStoreOp::Barrier {
-                    is_checkpoint: true
-                }
-            ),
-            (epoch, op)
-        );
+        assert_eq!(EPOCH0, epoch);
+        let actual = LogStoreOp::Barrier {
+            is_checkpoint: true,
+            vnodes: Arc::new(Bitmap::ones(0)),
+        };
+        assert_value_eq(actual, op);
 
         let mut index = (0..MERGE_SIZE).collect_vec();
         index.shuffle(&mut thread_rng());
@@ -1523,15 +1522,12 @@ mod tests {
         let epoch = row.epoch;
         let op = row.op;
 
-        assert_eq!(
-            (
-                EPOCH1,
-                LogStoreOp::Barrier {
-                    is_checkpoint: false
-                }
-            ),
-            (epoch, op)
-        );
+        assert_eq!(EPOCH1, epoch);
+        let actual = LogStoreOp::Barrier {
+            is_checkpoint: false,
+            vnodes: Arc::new(Bitmap::ones(0)),
+        };
+        assert_value_eq(actual, op);
 
         let mut index = (0..MERGE_SIZE).collect_vec();
         index.shuffle(&mut thread_rng());
@@ -1569,15 +1565,12 @@ mod tests {
         let row = stream.next_op().await.unwrap().unwrap();
         let epoch = row.epoch;
         let op = row.op;
-        assert_eq!(
-            (
-                EPOCH2,
-                LogStoreOp::Barrier {
-                    is_checkpoint: true,
-                }
-            ),
-            (epoch, op)
-        );
+        assert_eq!(EPOCH2, epoch);
+        let actual = LogStoreOp::Barrier {
+            is_checkpoint: true,
+            vnodes: Arc::new(Bitmap::ones(0)),
+        };
+        assert_value_eq(actual, op);
 
         assert!(stream.next_op().await.unwrap().is_none());
     }
@@ -1624,7 +1617,7 @@ mod tests {
         assert_eq!(EPOCH0, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(is_checkpoint);
             }
         }
@@ -1662,7 +1655,7 @@ mod tests {
         assert_eq!(EPOCH1, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(!is_checkpoint);
             }
         }
@@ -1700,7 +1693,7 @@ mod tests {
         assert_eq!(EPOCH2, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(is_checkpoint);
             }
         }
