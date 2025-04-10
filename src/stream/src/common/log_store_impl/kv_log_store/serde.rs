@@ -1,3 +1,4 @@
+use std::mem;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +23,7 @@ use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -112,6 +113,7 @@ enum LogStoreOp {
         new_value: OwnedRow,
     },
     Barrier {
+        vnodes: Arc<Bitmap>,
         is_checkpoint: bool,
     },
 }
@@ -128,7 +130,10 @@ impl From<LogStoreRowOp> for LogStoreOp {
                 }
                 Self::Row { seq_id, op, row }
             }
-            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier { is_checkpoint },
+            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier {
+                is_checkpoint,
+                vnodes: Arc::new(Bitmap::ones(0)),
+            },
         }
     }
 }
@@ -642,7 +647,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         );
                     }
                 }
-                LogStoreOp::Barrier { is_checkpoint } => {
+                LogStoreOp::Barrier { is_checkpoint, .. } => {
                     read_info.read_one_row(row_read_size);
                     read_info.report(&this.metrics);
                     if let Some(chunk) = data_chunk_builder.consume_all() {
@@ -730,7 +735,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         );
                     }
                 }
-                LogStoreOp::Barrier { is_checkpoint } => {
+                LogStoreOp::Barrier { is_checkpoint, .. } => {
                     read_info.read_one_row(row_read_size);
                     read_info.report(&this.metrics);
                     if let Some(chunk) = data_chunk_builder.consume_all() {
@@ -1022,15 +1027,21 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             .await
             .expect("row stream should not be empty when polled")
         {
-            let row = result?;
+            let mut row = result?;
+            let vnode = row.vnode;
+            let mut aligned_vnodes = BitmapBuilder::with_capacity(self.serde.vnodes().len());
             let decoded_epoch = row.epoch;
             self.may_init_epoch(decoded_epoch)?;
-            match &row.op {
+            match &mut row.op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
                     self.row_streams.push(stream.into_future());
                     return Ok(Some(row));
                 }
-                LogStoreOp::Barrier { is_checkpoint } => {
+                LogStoreOp::Barrier {
+                    is_checkpoint,
+                    vnodes,
+                } => {
+                    aligned_vnodes.set(vnode.to_index(), true);
                     self.check_is_checkpoint(*is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
@@ -1042,6 +1053,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
+                        let mut current_aligned_vnodes =
+                            BitmapBuilder::with_capacity(self.serde.vnodes().len());
+                        mem::swap(&mut aligned_vnodes, &mut current_aligned_vnodes);
+                        *vnodes = Arc::new(current_aligned_vnodes.finish());
                         return Ok(Some(row));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
