@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
@@ -29,10 +29,11 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId, SchemaId,
-    SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database,
-    fragment, fragment_relation, function, index, object, object_dependency, schema, secret, sink,
-    source, streaming_job, subscription, table, user, user_privilege, view,
+    actor, connection, database, fragment, fragment_relation, function, index, object,
+    object_dependency, schema, secret, sink, source, streaming_job, subscription, table,
+    user, user_privilege, view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId,
+    VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -392,7 +393,7 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated("database", name));
+        return Err(MetaError::catalog_duplicated("database", name, false));
     }
     Ok(())
 }
@@ -421,7 +422,11 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated("function", &pb_function.name));
+        return Err(MetaError::catalog_duplicated(
+            "function",
+            &pb_function.name,
+            false,
+        ));
     }
     Ok(())
 }
@@ -449,6 +454,7 @@ where
         return Err(MetaError::catalog_duplicated(
             "connection",
             &pb_connection.name,
+            false,
         ));
     }
     Ok(())
@@ -470,7 +476,11 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated("secret", &pb_secret.name));
+        return Err(MetaError::catalog_duplicated(
+            "secret",
+            &pb_secret.name,
+            false,
+        ));
     }
     Ok(())
 }
@@ -497,6 +507,7 @@ where
         return Err(MetaError::catalog_duplicated(
             "subscription",
             &pb_subscription.name,
+            false,
         ));
     }
     Ok(())
@@ -513,7 +524,7 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated("user", name));
+        return Err(MetaError::catalog_duplicated("user", name, false));
     }
     Ok(())
 }
@@ -530,7 +541,9 @@ where
 {
     macro_rules! check_duplicated {
         ($obj_type:expr, $entity:ident, $table:ident) => {
-            let count = Object::find()
+            let object_id = Object::find()
+                .select_only()
+                .column(object::Column::Oid)
                 .inner_join($entity)
                 .filter(
                     object::Column::DatabaseId
@@ -538,10 +551,40 @@ where
                         .and(object::Column::SchemaId.eq(Some(schema_id)))
                         .and($table::Column::Name.eq(name)),
                 )
-                .count(db)
+                .into_tuple::<ObjectId>()
+                .one(db)
                 .await?;
-            if count != 0 {
-                return Err(MetaError::catalog_duplicated($obj_type.as_str(), name));
+            if let Some(oid) = object_id {
+                let check_creation = if $obj_type == ObjectType::View {
+                    false
+                } else if $obj_type == ObjectType::Source {
+                    let source_info = Source::find_by_id(oid)
+                        .select_only()
+                        .column(source::Column::SourceInfo)
+                        .into_tuple::<Option<StreamSourceInfo>>()
+                        .one(db)
+                        .await?
+                        .unwrap();
+                    source_info.is_some() && source_info.unwrap().to_protobuf().is_shared()
+                } else {
+                    true
+                };
+                let under_creation = check_creation
+                    && !matches!(
+                        StreamingJob::find_by_id(oid)
+                            .select_only()
+                            .column(streaming_job::Column::JobStatus)
+                            .into_tuple::<JobStatus>()
+                            .one(db)
+                            .await?,
+                        Some(JobStatus::Created)
+                    );
+
+                return Err(MetaError::catalog_duplicated(
+                    $obj_type.as_str(),
+                    name,
+                    under_creation,
+                ));
             }
         };
     }
@@ -574,7 +617,7 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::catalog_duplicated("schema", name));
+        return Err(MetaError::catalog_duplicated("schema", name, false));
     }
 
     Ok(())
