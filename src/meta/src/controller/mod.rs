@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -34,10 +33,9 @@ use risingwave_pb::catalog::{
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
     PbView,
 };
-use sea_orm::sqlx::sqlite::SqliteConnectOptions;
 use sea_orm::{ConnectOptions, DatabaseConnection, DbBackend, ModelTrait};
 
-use crate::{MetaError, MetaResult, MetaStoreBackend, bail_invalid_parameter};
+use crate::{MetaError, MetaResult, MetaStoreBackend};
 
 pub mod catalog;
 pub mod cluster;
