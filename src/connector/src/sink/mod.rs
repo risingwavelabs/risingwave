@@ -524,8 +524,8 @@ impl SinkWriterMetrics {
     #[cfg(test)]
     pub fn for_test() -> Self {
         Self {
-            sink_commit_duration: LabelGuardedHistogram::test_histogram(),
-            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            sink_commit_duration: LabelGuardedHistogram::test_histogram::<4>(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter::<4>(),
         }
     }
 }

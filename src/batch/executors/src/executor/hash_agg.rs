@@ -764,7 +764,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge(), u64::MAX);
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), u64::MAX);
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(
@@ -813,7 +813,7 @@ mod tests {
 
             let mem_context = MemoryContext::new(
                 Some(parent_mem.clone()),
-                LabelGuardedIntGauge::test_int_gauge(),
+                LabelGuardedIntGauge::test_int_gauge::<4>(),
             );
             let actual_exec = HashAggExecutorBuilder::deserialize(
                 &agg_prost,
@@ -1104,7 +1104,7 @@ mod tests {
         };
 
         let mem_context =
-            MemoryContext::new_with_mem_limit(None, LabelGuardedIntGauge::test_int_gauge(), 0);
+            MemoryContext::new_with_mem_limit(None, LabelGuardedIntGauge::test_int_gauge::<4>(), 0);
         let actual_exec = HashAggExecutorBuilder::deserialize(
             &agg_prost,
             src_exec,

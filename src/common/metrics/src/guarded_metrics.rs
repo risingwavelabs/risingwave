@@ -158,9 +158,13 @@ pub type LabelGuardedGauge = LabelGuardedMetric<Gauge>;
 pub type LabelGuardedLocalHistogram = LabelGuardedMetric<LocalHistogram>;
 pub type LabelGuardedLocalIntCounter = LabelGuardedMetric<LocalIntCounter>;
 
-fn gen_test_label() -> Box<[&'static str]> {
+fn gen_test_label<const N: usize>() -> [&'static str; N] {
     const TEST_LABELS: [&str; 5] = ["test1", "test2", "test3", "test4", "test5"];
-    TEST_LABELS.to_vec().into_boxed_slice()
+    (0..N)
+        .map(|i| TEST_LABELS[i])
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
 }
 
 #[derive(Default)]
@@ -273,40 +277,40 @@ impl<T: MetricVecBuilder> LabelGuardedMetricVec<T> {
         }
     }
 
-    pub fn with_test_label(&self) -> LabelGuardedMetric<T::M> {
-        let labels = gen_test_label();
+    pub fn with_test_label<const N: usize>(&self) -> LabelGuardedMetric<T::M> {
+        let labels = gen_test_label::<N>();
         self.with_guarded_label_values(&labels)
     }
 }
 
 impl LabelGuardedIntCounterVec {
-    pub fn test_int_counter_vec() -> Self {
+    pub fn test_int_counter_vec<const N: usize>() -> Self {
         let registry = prometheus::Registry::new();
-        let labels = gen_test_label();
+        let labels = gen_test_label::<N>();
         register_guarded_int_counter_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 
 impl LabelGuardedIntGaugeVec {
-    pub fn test_int_gauge_vec() -> Self {
+    pub fn test_int_gauge_vec<const N: usize>() -> Self {
         let registry = prometheus::Registry::new();
-        let labels = gen_test_label();
+        let labels = gen_test_label::<N>();
         register_guarded_int_gauge_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 
 impl LabelGuardedGaugeVec {
-    pub fn test_gauge_vec() -> Self {
+    pub fn test_gauge_vec<const N: usize>() -> Self {
         let registry = prometheus::Registry::new();
-        let labels = gen_test_label();
+        let labels = gen_test_label::<N>();
         register_guarded_gauge_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
 
 impl LabelGuardedHistogramVec {
-    pub fn test_histogram_vec() -> Self {
+    pub fn test_histogram_vec<const N: usize>() -> Self {
         let registry = prometheus::Registry::new();
-        let labels = gen_test_label();
+        let labels = gen_test_label::<N>();
         register_guarded_histogram_vec_with_registry!("test", "test", &labels, &registry).unwrap()
     }
 }
@@ -355,26 +359,26 @@ impl<T> Deref for LabelGuardedMetric<T> {
 }
 
 impl LabelGuardedHistogram {
-    pub fn test_histogram() -> Self {
-        LabelGuardedHistogramVec::test_histogram_vec().with_test_label()
+    pub fn test_histogram<const N: usize>() -> Self {
+        LabelGuardedHistogramVec::test_histogram_vec::<N>().with_test_label::<N>()
     }
 }
 
 impl LabelGuardedIntCounter {
-    pub fn test_int_counter() -> Self {
-        LabelGuardedIntCounterVec::test_int_counter_vec().with_test_label()
+    pub fn test_int_counter<const N: usize>() -> Self {
+        LabelGuardedIntCounterVec::test_int_counter_vec::<N>().with_test_label::<N>()
     }
 }
 
 impl LabelGuardedIntGauge {
-    pub fn test_int_gauge() -> Self {
-        LabelGuardedIntGaugeVec::test_int_gauge_vec().with_test_label()
+    pub fn test_int_gauge<const N: usize>() -> Self {
+        LabelGuardedIntGaugeVec::test_int_gauge_vec::<N>().with_test_label::<N>()
     }
 }
 
 impl LabelGuardedGauge {
-    pub fn test_gauge() -> Self {
-        LabelGuardedGaugeVec::test_gauge_vec().with_test_label()
+    pub fn test_gauge<const N: usize>() -> Self {
+        LabelGuardedGaugeVec::test_gauge_vec::<N>().with_test_label::<N>()
     }
 }
 
@@ -416,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_label_guarded_metrics_drop() {
-        let vec = LabelGuardedIntCounterVec::test_int_counter_vec();
+        let vec = LabelGuardedIntCounterVec::test_int_counter_vec::<3>();
         let m1_1 = vec.with_guarded_label_values(&["1", "2", "3"]);
         assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         let m1_2 = vec.with_guarded_label_values(&["1", "2", "3"]);

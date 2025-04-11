@@ -70,8 +70,8 @@ impl KvLogStoreReadMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self {
-            storage_read_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_read_size: LabelGuardedIntCounter::test_int_counter(),
+            storage_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+            storage_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
         }
     }
 }
@@ -211,14 +211,14 @@ impl KvLogStoreMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
-            storage_write_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            rewind_count: LabelGuardedIntCounter::test_int_counter(),
-            rewind_delay: LabelGuardedHistogram::test_histogram(),
+            storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
+            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
             flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
         }
