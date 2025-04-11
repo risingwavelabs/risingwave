@@ -24,7 +24,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue, VectorVal};
 use crate::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
     Timestamp, Timestamptz,
@@ -148,6 +148,12 @@ impl RandValue for StructValue {
 impl RandValue for ListValue {
     fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
         ListValue::from_iter([rand.random::<i16>()])
+    }
+}
+
+impl RandValue for VectorVal {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        todo!("VECTOR_PLACEHOLDER")
     }
 }
 
