@@ -171,8 +171,8 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     state: LogStoreReadState<S>,
 
     rx: LogStoreBufferReceiver,
-    init_epoch_rx: Option<oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>>,
-    update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
+    init_epoch_rx: Option<oneshot::Receiver<EpochPair>>,
+    update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64)>,
 
     /// The first epoch that newly written by the log writer
     first_write_epoch: Option<u64>,
@@ -190,21 +190,17 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
-
-    align_epoch_on_init: bool,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
-        init_epoch_rx: oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>,
-        update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
+        init_epoch_rx: oneshot::Receiver<EpochPair>,
+        update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64)>,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
-        align_epoch_on_init: bool,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -220,7 +216,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             is_paused,
             identity,
             rewind_delay,
-            align_epoch_on_init,
         }
     }
 }
@@ -421,8 +416,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     }
 
     async fn init(&mut self) -> LogStoreResult<()> {
-        let aligned_range_start = if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
-            let (init_epoch, aligned_range_start) = init_epoch_rx
+        if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
+            let init_epoch = init_epoch_rx
                 .await
                 .map_err(|_| anyhow!("should get the first epoch"))?;
             let first_write_epoch = init_epoch.curr;
@@ -432,27 +427,17 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 None,
                 "should not init twice"
             );
-            aligned_range_start
         } else {
-            let (new_vnode_bitmap, write_epoch, aligned_range_start) = self
+            let (new_vnode_bitmap, write_epoch) = self
                 .update_vnode_bitmap_rx
                 .recv()
                 .await
                 .ok_or_else(|| anyhow!("failed to receive update vnode"))?;
             self.state.serde.update_vnode_bitmap(new_vnode_bitmap);
             self.first_write_epoch = Some(write_epoch);
-            aligned_range_start
         };
 
-        let range_start: LogStoreReadStateStreamRangeStart = if self.align_epoch_on_init
-            && let Some(range_start) = aligned_range_start.expect("should have aligned range start")
-        {
-            LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start)
-        } else {
-            LogStoreReadStateStreamRangeStart::Unbounded
-        };
-
-        self.future_state = KvLogStoreReaderFutureState::Reset(Some(range_start));
+        self.future_state = KvLogStoreReaderFutureState::Reset(None);
         self.latest_offset = None;
         self.truncate_offset = None;
         self.rewind_delay = RewindDelay::new(&self.metrics);
@@ -731,7 +716,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
 pub(crate) enum LogStoreReadStateStreamRangeStart {
     Unbounded,
     LastPersistedEpoch(u64),
-    SerializedInclusive(Bytes),
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
@@ -750,9 +734,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
             LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch) => {
                 // start from the next epoch of last_persisted_epoch
                 Included(serde.serialize_pk_epoch_prefix(last_persisted_epoch + 1))
-            }
-            LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start) => {
-                Included(range_start)
             }
         };
         let range_end = serde.serialize_pk_epoch_prefix(first_write_epoch);

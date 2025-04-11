@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::Bytes;
 use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
@@ -37,8 +36,8 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     state: LogStoreWriteState<LS>,
 
     tx: LogStoreBufferSender,
-    init_epoch_tx: Option<oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>>,
-    update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
+    init_epoch_tx: Option<oneshot::Sender<EpochPair>>,
+    update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64)>,
 
     metrics: KvLogStoreMetrics,
 
@@ -47,21 +46,17 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     is_paused: bool,
 
     identity: String,
-
-    align_epoch_on_init: bool,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreWriteState<LS>,
         tx: LogStoreBufferSender,
-        init_epoch_tx: oneshot::Sender<(EpochPair, Option<Option<Bytes>>)>,
-        update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
+        init_epoch_tx: oneshot::Sender<EpochPair>,
+        update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64)>,
         metrics: KvLogStoreMetrics,
         paused_notifier: watch::Sender<bool>,
         identity: String,
-        align_epoch_on_init: bool,
     ) -> Self {
         Self {
             seq_id: FIRST_SEQ_ID,
@@ -73,7 +68,6 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             paused_notifier,
             identity,
             is_paused: false,
-            align_epoch_on_init,
         }
     }
 }
@@ -90,16 +84,11 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             info!("KvLogStore of {} paused on bootstrap", self.identity);
         }
         self.seq_id = FIRST_SEQ_ID;
-        let init_offset_range_start = if self.align_epoch_on_init {
-            Some(self.state.aligned_init_range_start())
-        } else {
-            None
-        };
-        if let Err((e, _)) = self
+        if let Err(e) = self
             .init_epoch_tx
             .take()
             .expect("should be Some in first init")
-            .send((epoch, init_offset_range_start))
+            .send(epoch)
         {
             error!("unable to send init epoch: {:?}", e);
         }
@@ -173,24 +162,18 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         self.tx.barrier(epoch, options.is_checkpoint, next_epoch);
         let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;
-        let align_epoch_on_init = self.align_epoch_on_init;
         self.seq_id = FIRST_SEQ_ID;
         Ok(LogWriterPostFlushCurrentEpoch::new(move || {
             async move {
                 {
                     let new_vnodes = options.new_vnode_bitmap;
 
-                    let state = post_seal_epoch
+                    post_seal_epoch
                         .post_yield_barrier(new_vnodes.clone())
                         .await?;
                     if let Some(new_vnodes) = new_vnodes {
-                        let aligned_range_start = if align_epoch_on_init {
-                            Some(state.aligned_init_range_start())
-                        } else {
-                            None
-                        };
                         update_vnode_bitmap_tx
-                            .send((new_vnodes, next_epoch, aligned_range_start))
+                            .send((new_vnodes, next_epoch))
                             .map_err(|_| anyhow!("fail to send update vnode bitmap to reader"))?;
                         tx.clear();
                     }
