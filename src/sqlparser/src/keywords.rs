@@ -395,6 +395,7 @@ define_keywords!(
     PERIOD,
     PHYSICAL,
     PLACING,
+    PLAN,
     PORTION,
     POSITION,
     POSITION_REGEX,

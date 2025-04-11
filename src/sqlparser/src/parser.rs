@@ -237,6 +237,22 @@ impl Parser<'_> {
         Ok(stmts)
     }
 
+    /// Parse exactly one statement from a string.
+    pub fn parse_exactly_one(sql: &str) -> Result<Statement, ParserError> {
+        Parser::parse_sql(sql)
+            .map_err(|e| {
+                ParserError::ParserError(format!("failed to parse definition sql: {}", e))
+            })?
+            .into_iter()
+            .exactly_one()
+            .map_err(|e| {
+                ParserError::ParserError(format!(
+                    "expecting exactly one statement in definition: {}",
+                    e
+                ))
+            })
+    }
+
     /// Parse object name from a string.
     pub fn parse_object_name_str(s: &str) -> Result<ObjectName, ParserError> {
         let mut tokenizer = Tokenizer::new(s);
@@ -317,9 +333,21 @@ impl Parser<'_> {
                 }
                 Keyword::CANCEL => Ok(self.parse_cancel_job()?),
                 Keyword::KILL => Ok(self.parse_kill_process()?),
-                Keyword::DESCRIBE => Ok(Statement::Describe {
-                    name: self.parse_object_name()?,
-                }),
+                Keyword::DESCRIBE => {
+                    let plan = self.parse_keyword(Keyword::PLAN);
+                    let plan = if plan {
+                        let (options, analyze_duration) = self.parse_explain_options()?;
+                        if analyze_duration.is_some() {
+                            return self
+                                .expected("ANALYZE duration is not supported for DESCRIBE PLAN");
+                        }
+                        Some(options)
+                    } else {
+                        None
+                    };
+                    let name = self.parse_object_name()?;
+                    Ok(Statement::Describe { name, plan })
+                }
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -4285,7 +4313,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_explain(&mut self) -> ModalResult<Statement> {
+    fn parse_explain_options(&mut self) -> ModalResult<(ExplainOptions, Option<u64>)> {
         let mut options = ExplainOptions::default();
         let mut analyze_duration = None;
 
@@ -4347,7 +4375,6 @@ impl Parser<'_> {
             Ok(())
         };
 
-        let analyze = self.parse_keyword(Keyword::ANALYZE);
         // In order to support following statement, we need to peek before consume.
         // explain (select 1) union (select 1)
         if self.peek_token() == Token::LParen
@@ -4357,6 +4384,13 @@ impl Parser<'_> {
             self.parse_comma_separated(parse_explain_option)?;
             self.expect_token(&Token::RParen)?;
         }
+
+        Ok((options, analyze_duration))
+    }
+
+    pub fn parse_explain(&mut self) -> ModalResult<Statement> {
+        let analyze = self.parse_keyword(Keyword::ANALYZE);
+        let (options, analyze_duration) = self.parse_explain_options()?;
 
         if analyze {
             fn parse_analyze_target(parser: &mut Parser<'_>) -> ModalResult<Option<AnalyzeTarget>> {

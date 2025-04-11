@@ -1,0 +1,293 @@
+# Test DESCRIBE PLAN with complex relations and schemas
+
+# Setup test schema
+statement ok
+CREATE SCHEMA describe_plan_test;
+
+statement ok
+CREATE TABLE describe_plan_test.tbl (
+    id INT PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    age INT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    data JSONB
+);
+
+# Test materialized view with complex query
+statement ok
+CREATE MATERIALIZED VIEW describe_plan_test.complex_mv AS
+SELECT
+    t.name,
+    COUNT(*) as count,
+    AVG(t.age) as avg_age,
+    jsonb_agg(t.data) as all_data
+FROM describe_plan_test.tbl t
+WHERE t.age > 18
+GROUP BY t.name
+HAVING COUNT(*) > 1;
+
+# Test index with included columns and custom distribution
+statement ok
+CREATE INDEX idx ON describe_plan_test.tbl (name DESC, age)
+INCLUDE (created_at)
+DISTRIBUTED BY (name);
+
+# Test source with complex schema and options
+statement ok
+CREATE SOURCE describe_plan_test.src (
+    id INT,
+    event_time TIMESTAMP,
+    payload STRUCT<name VARCHAR, value INT>,
+    metadata MAP(VARCHAR, VARCHAR)
+) WITH (
+    connector = 'datagen',
+);
+
+# Test sink with transformation
+statement ok
+CREATE SINK describe_plan_test.snk AS
+SELECT
+    id,
+    name,
+    age,
+    created_at,
+    data->>'type' as type
+FROM describe_plan_test.tbl
+WHERE age >= 21
+WITH (connector ='blackhole')
+
+# Test view with subquery and joins
+statement ok
+CREATE VIEW describe_plan_test.complex_view AS
+WITH aged_users AS (
+    SELECT name, age
+    FROM describe_plan_test.tbl
+    WHERE age > 25
+)
+SELECT
+    t.name,
+    t.age,
+    m.count as appearance_count
+FROM aged_users t
+LEFT JOIN describe_plan_test.complex_mv m ON t.name = m.name;
+
+# Test special characters in relation names
+statement ok
+CREATE TABLE describe_plan_test."table.with.dots" (id INT PRIMARY KEY, value VARCHAR);
+
+statement ok
+CREATE VIEW describe_plan_test."view-with-dashes" AS SELECT * FROM describe_plan_test."table.with.dots";
+
+
+# Test DESCRIBE PLAN for each relation
+query ?
+DESCRIBE PLAN describe_plan_test.tbl;
+----
+StreamMaterialize { columns: [id, name, age, created_at, data], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
+└─StreamFilter { predicate: IsNotNull(name) }
+  └─StreamUnion { all: true }
+    └─StreamExchange { dist: HashShard(id) }
+      └─StreamDml { columns: [id, name, age, created_at, data] }
+        └─StreamSource
+
+
+# Test DESCRIBE PLAN for each relation
+query ?
+DESCRIBE PLAN (logical) describe_plan_test.tbl;
+----
+LogicalSource
+
+
+
+# Should show materialized view creation plan with complex aggregations
+query ?
+DESCRIBE PLAN describe_plan_test.complex_mv;
+----
+StreamMaterialize { columns: [name, count, avg_age, all_data], stream_key: [name], pk_columns: [name], pk_conflict: NoCheck }
+└─StreamProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+  └─StreamFilter { predicate: (count > 1:Int32) }
+    └─StreamHashAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+      └─StreamExchange { dist: HashShard(tbl.name) }
+        └─StreamFilter { predicate: (tbl.age > 18:Int32) }
+          └─StreamTableScan { table: tbl, columns: [name, age, data, id] }
+
+
+
+# Should show materialized view creation plan with complex aggregations
+query ?
+DESCRIBE PLAN (logical, trace) describe_plan_test.complex_mv;
+----
+Begin:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalProject { exprs: [tbl.name, tbl.age, tbl.data] }
+      └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
+        └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
+(empty)
+Project Remove:
+(empty)
+apply AggProjectMergeRule 1 time(s)
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
+      └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
+(empty)
+Common Sub-plan Sharing:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
+      └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
+(empty)
+Logical Filter Expression Simplify:
+(empty)
+apply LogicalFilterExpressionSimplifyRule 2 time(s)
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
+      └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
+(empty)
+Predicate Push Down:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp], predicate: (tbl.age > 18:Int32) }
+(empty)
+Predicate Push Down:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp], predicate: (tbl.age > 18:Int32) }
+(empty)
+Predicate Push Down:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp], predicate: (tbl.age > 18:Int32) }
+(empty)
+Prune Columns:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalScan { table: tbl, columns: [name, age, data], predicate: (tbl.age > 18:Int32) }
+(empty)
+Predicate Push Down:
+(empty)
+LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+└─LogicalFilter { predicate: (count > 1:Int32) }
+  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+    └─LogicalScan { table: tbl, columns: [name, age, data], predicate: (tbl.age > 18:Int32) }
+(empty)
+
+
+query error
+DESCRIBE PLAN idx;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table, source, sink or view not found: idx
+
+
+
+query error
+DESCRIBE PLAN describe_plan_test.src;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Feature is not yet implemented: unsupported statement CreateSource { stmt: CreateSourceStatement { temporary: false, if_not_exists: false, columns: [ColumnDef { name: Ident { value: "id", quote_style: None }, data_type: Some(Int), collation: None, options: [] }, ColumnDef { name: Ident { value: "event_time", quote_style: None }, data_type: Some(Timestamp(false)), collation: None, options: [] }, ColumnDef { name: Ident { value: "payload", quote_style: None }, data_type: Some(Struct([StructField { name: Ident { value: "name", quote_style: None }, data_type: Varchar }, StructField { name: Ident { value: "value", quote_style: None }, data_type: Int }])), collation: None, options: [] }, ColumnDef { name: Ident { value: "metadata", quote_style: None }, data_type: Some(Map((Varchar, Varchar))), collation: None, options: [] }], wildcard_idx: None, constraints: [], source_name: ObjectName([Ident { value: "describe_plan_test", quote_style: None }, Ident { value: "src", quote_style: None }]), with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "connector", quote_style: None }]), value: Value(SingleQuotedString("datagen")) }]), format_encode: V2(FormatEncodeOptions { format: Native, row_encode: Native, row_options: [], key_encode: None }), source_watermarks: [], include_column_options: [] } }
+No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+
+
+query error
+DESCRIBE PLAN describe_plan_test.snk;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table, source, sink or view not found: describe_plan_test.snk
+
+
+
+# Should show view creation plan with CTE and joins
+query ?
+DESCRIBE PLAN describe_plan_test.complex_view;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchLookupJoin { type: LeftOuter, predicate: tbl.name = complex_mv.name, lookup table: complex_mv }
+  └─BatchExchange { order: [], dist: UpstreamHashShard(tbl.name) }
+    └─BatchFilter { predicate: (tbl.age > 25:Int32) }
+      └─BatchScan { table: tbl, columns: [name, age] }
+
+
+# Should handle special characters in names
+query ??
+DESCRIBE PLAN describe_plan_test."table.with.dots";
+----
+StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
+└─StreamUnion { all: true }
+  └─StreamExchange { dist: HashShard(id) }
+    └─StreamDml { columns: [id, value] }
+      └─StreamSource
+
+
+query ??
+DESCRIBE PLAN describe_plan_test."view-with-dashes";
+----
+BatchExchange { order: [], dist: Single }
+└─BatchScan { table: table.with.dots, columns: [id, value] }
+
+
+# Test error cases
+# Non-existent schema
+query error
+DESCRIBE PLAN non_existent_schema.some_table;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table, source, sink or view not found: non_existent_schema.some_table
+
+
+# Non-existent relation in existing schema
+query error
+DESCRIBE PLAN describe_plan_test.non_existent_table;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table, source, sink or view not found: describe_plan_test.non_existent_table
+
+
+# System catalog (should fail)
+query ?
+DESCRIBE PLAN pg_catalog.pg_tables;
+----
+BatchProject { exprs: [rw_schemas.name, rw_tables.name, PgGetUserbyid(rw_tables.owner) as $expr1, null:Varchar] }
+└─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id }
+  ├─BatchHashAgg { group_key: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], aggs: [] }
+  │ └─BatchUnion { all: true }
+  │   ├─BatchScan { table: rw_tables, columns: [name, schema_id, owner] }
+  │   └─BatchScan { table: rw_system_tables, columns: [name, schema_id, owner] }
+  └─BatchFilter { predicate: (rw_schemas.name <> 'rw_catalog':Varchar) }
+    └─BatchScan { table: rw_schemas, columns: [id, name] }
+
+# Clean up
+statement ok
+DROP SCHEMA describe_plan_test CASCADE;

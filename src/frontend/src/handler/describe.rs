@@ -13,20 +13,24 @@
 // limitations under the License.
 
 use std::fmt::Display;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
-use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{ObjectName, display_comma_separated};
+use risingwave_common::types::{DataType, Fields};
+use risingwave_expr::bail;
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement, display_comma_separated};
 
+use super::explain::ExplainRow;
 use super::show::ShowColumnRow;
 use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
+use crate::session::SessionImpl;
 
 pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
@@ -233,8 +237,89 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         .into())
 }
 
-pub fn infer_describe() -> Vec<PgFieldDescriptor> {
-    fields_to_descriptors(ShowColumnRow::fields())
+pub fn infer_describe(plan: bool) -> Vec<PgFieldDescriptor> {
+    if plan {
+        vec![PgFieldDescriptor::new(
+            "Query Plan".to_owned(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
+        )]
+    } else {
+        fields_to_descriptors(ShowColumnRow::fields())
+    }
+}
+
+/// Generates the plan string for a given statement using the EXPLAIN logic.
+async fn generate_plan_string(
+    session: Arc<SessionImpl>,
+    handler_args: HandlerArgs,
+    stmt: Statement,
+    explain_options: ExplainOptions,
+) -> Result<RwPgResponse> {
+    let explain_handler_args = HandlerArgs::new(session, &stmt, handler_args.sql.clone())?;
+
+    let mut blocks = vec![];
+    super::explain::do_handle_explain(explain_handler_args, explain_options, stmt, &mut blocks)
+        .await?;
+
+    let rows = blocks.iter().flat_map(|b| b.lines()).map(|l| ExplainRow {
+        query_plan: l.into(),
+    });
+    Ok(PgResponse::builder(StatementType::DESCRIBE)
+        .rows(rows)
+        .into())
+}
+
+pub async fn handle_describe_plan(
+    handler_args: HandlerArgs,
+    object_name: ObjectName,
+    options: ExplainOptions,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let stmt = {
+        let mut binder = Binder::new_for_system(&session);
+
+        Binder::validate_cross_db_reference(&session.database(), &object_name)?;
+        let not_found_err =
+            CatalogError::NotFound("table, source, sink or view", object_name.to_string());
+
+        let stmt = if let Ok(relation) =
+            binder.bind_relation_by_name(object_name.clone(), None, None, false)
+        {
+            match relation {
+                Relation::Source(s) => s.catalog.create_sql_ast()?,
+                Relation::BaseTable(t) => t.table_catalog.create_sql_ast()?,
+                Relation::SystemTable(_t) => {
+                    bail!(ErrorCode::NotSupported(
+                        "system table has no plan to describe".to_owned(),
+                        "Use `DESCRIBE` instead.".to_owned(),
+                    ));
+                }
+                Relation::Share(_s) => {
+                    if let Ok(view) = binder.bind_view_by_name(object_name.clone()) {
+                        view.view_catalog.sql_ast()?
+                    } else {
+                        return Err(not_found_err.into());
+                    }
+                }
+                _ => {
+                    // Other relation types (Subquery, Join, etc.) are not directly describable.
+                    return Err(not_found_err.into());
+                }
+            }
+        } else if let Ok(_sink) = binder.bind_sink_by_name(object_name.clone()) {
+            // TODO: move SinkCatalog from connector to frontend to support this...
+            return Err(not_found_err.into());
+        } else {
+            return Err(not_found_err.into());
+        };
+
+        stmt
+    };
+
+    let res = generate_plan_string(session.clone(), handler_args.clone(), stmt, options).await?;
+
+    Ok(res)
 }
 
 #[cfg(test)]

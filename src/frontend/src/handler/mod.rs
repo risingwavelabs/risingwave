@@ -456,7 +456,13 @@ pub async fn handle(
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
-        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::Describe { name, plan } => {
+            if let Some(options) = plan {
+                describe::handle_describe_plan(handler_args, name, options).await
+            } else {
+                describe::handle_describe(handler_args, name)
+            }
+        }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,
