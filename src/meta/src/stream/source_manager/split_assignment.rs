@@ -34,8 +34,11 @@ impl SourceManager {
 
         let prev_splits = prev_actor_ids
             .iter()
-            .flat_map(|actor_id| core.actor_splits.get(actor_id).unwrap())
-            .map(|split| (split.id(), split.clone()))
+            .flat_map(|actor_id| {
+                // Note: File Source / Iceberg Source doesn't have splits assigned by meta.
+                core.actor_splits.get(actor_id).cloned().unwrap_or_default()
+            })
+            .map(|split| (split.id(), split))
             .collect();
 
         let empty_actor_splits = curr_actor_ids

@@ -12,7 +12,7 @@ Refer to the [RisingWave Developer Guide](https://risingwavelabs.github.io/risin
 >
 > Usually you will just need to run either batch tests or streaming tests. Other tests may need to be run under some specific settings, e.g., ddl tests need to be run on a fresh instance, and database tests need to first create a database and then connect to that database to run tests.
 >
-> You will never want to run all tests using `./e2e_test/**/*.slt`. You may refer to the [ci script](../ci/scripts/e2e-test-serial.sh) to see how to run all tests.
+> You will never want to run all tests using `./e2e_test/**/*.slt`. You may refer to the [ci script](../ci/scripts/e2e-test-parallel.sh) to see how to run all tests.
 
 ## How to test connectors
 

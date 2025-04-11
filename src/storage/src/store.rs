@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::array::Op;
@@ -35,7 +35,6 @@ use risingwave_hummock_sdk::table_watermark::{
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
-    TracedWriteOptions,
 };
 use risingwave_pb::hummock::PbVnodeWatermark;
 
@@ -256,30 +255,21 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait StateStoreRead: StaticSendSync {
+pub trait KeyValueFn<O> =
+    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'static;
+
+pub trait StateStoreGet: StaticSendSync {
+    fn on_key_value<O: Send + 'static>(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>>;
+}
+
+pub trait StateStoreRead: StateStoreGet + StaticSendSync {
     type Iter: StateStoreReadIter;
     type RevIter: StateStoreReadIter;
-
-    /// Point gets a value from the state store.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    /// Both full key and the value are returned.
-    fn get_keyed_row(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
-
-    /// Point gets a value from the state store.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    /// Only the value is returned.
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<Bytes>> {
-        self.get_keyed_row(key, read_options)
-            .map_ok(|v| v.map(|(_, v)| v))
-    }
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -361,18 +351,10 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StaticSendSync {
+pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
-
-    /// Point gets a value from the state store.
-    /// The result is based on the latest written snapshot.
-    fn get(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl StorageFuture<'_, Option<Bytes>>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -411,7 +393,6 @@ pub trait LocalStateStore: StaticSendSync {
     fn flush(&mut self) -> impl StorageFuture<'_, usize>;
 
     fn try_flush(&mut self) -> impl StorageFuture<'_, ()>;
-    fn epoch(&self) -> u64;
 
     fn is_dirty(&self) -> bool;
 
@@ -494,11 +475,6 @@ pub struct ReadOptions {
     pub cache_policy: CachePolicy,
 
     pub retention_seconds: Option<u32>,
-    pub table_id: TableId,
-    /// Read from historical hummock version of meta snapshot backup.
-    /// It should only be used by `StorageTable` for batch query.
-    pub read_version_from_backup: bool,
-    pub read_committed: bool,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -508,23 +484,32 @@ impl From<TracedReadOptions> for ReadOptions {
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
-            table_id: value.table_id.into(),
-            read_version_from_backup: value.read_version_from_backup,
-            read_committed: value.read_committed,
         }
     }
 }
 
-impl From<ReadOptions> for TracedReadOptions {
-    fn from(value: ReadOptions) -> Self {
-        Self {
+impl ReadOptions {
+    pub fn into_traced_read_options(
+        self,
+        table_id: TableId,
+        epoch: Option<HummockReadEpoch>,
+    ) -> TracedReadOptions {
+        let value = self;
+        let (read_version_from_backup, read_committed) = match epoch {
+            None | Some(HummockReadEpoch::NoWait(_)) => (false, false),
+            Some(HummockReadEpoch::Backup(_)) => (true, false),
+            Some(HummockReadEpoch::Committed(_))
+            | Some(HummockReadEpoch::BatchQueryCommitted(_, _))
+            | Some(HummockReadEpoch::TimeTravel(_)) => (false, true),
+        };
+        TracedReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
-            table_id: value.table_id.into(),
-            read_version_from_backup: value.read_version_from_backup,
-            read_committed: value.read_committed,
+            table_id: table_id.into(),
+            read_version_from_backup,
+            read_committed,
         }
     }
 }
@@ -538,21 +523,6 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
                 .0
         }
         None => 0,
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct WriteOptions {
-    pub epoch: u64,
-    pub table_id: TableId,
-}
-
-impl From<TracedWriteOptions> for WriteOptions {
-    fn from(value: TracedWriteOptions) -> Self {
-        Self {
-            epoch: value.epoch,
-            table_id: value.table_id.into(),
-        }
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::future::{pending, poll_fn};
@@ -337,6 +338,9 @@ impl LocalBarrierWorker {
                 .map(|(database_id, status)| {
                     (*database_id, {
                         match status {
+                            DatabaseStatus::ReceivedExchangeRequest(_) => {
+                                ("ReceivedExchangeRequest".to_owned(), None)
+                            }
                             DatabaseStatus::Running(state) => {
                                 ("running".to_owned(), Some(state.to_debug_info()))
                             }
@@ -353,23 +357,6 @@ impl LocalBarrierWorker {
                 .collect(),
             has_control_stream_connected: self.control_stream_handle.connected(),
         }
-    }
-
-    pub(crate) fn get_or_insert_database_shared_context<'a>(
-        current_shared_context: &'a mut HashMap<DatabaseId, Arc<SharedContext>>,
-        database_id: DatabaseId,
-        actor_manager: &StreamActorManager,
-        term_id: &String,
-    ) -> &'a Arc<SharedContext> {
-        current_shared_context
-            .entry(database_id)
-            .or_insert_with(|| {
-                Arc::new(SharedContext::new(
-                    database_id,
-                    &actor_manager.env,
-                    term_id.clone(),
-                ))
-            })
     }
 
     async fn next_completed_epoch(
@@ -444,7 +431,8 @@ impl LocalBarrierWorker {
                                         DatabaseStatus::Running(database) => {
                                             !database.actor_states.is_empty()
                                         }
-                                        DatabaseStatus::Suspended(_) | DatabaseStatus::Resetting(_) => {
+                                        DatabaseStatus::Suspended(_) | DatabaseStatus::Resetting(_) |
+                                            DatabaseStatus::ReceivedExchangeRequest(_) => {
                                             false
                                         }
                                         DatabaseStatus::Unspecified => {
@@ -487,7 +475,6 @@ impl LocalBarrierWorker {
                 let database_id = DatabaseId::new(req.database_id);
                 let result: StreamResult<()> = try {
                     let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                    self.update_actor_info(database_id, req.broadcast_info.iter().cloned());
                     self.send_barrier(&barrier, req)?;
                 };
                 result.map_err(|e| (database_id, e))?;
@@ -543,13 +530,35 @@ impl LocalBarrierWorker {
                             self.term_id
                         ))?;
                     }
-                    LocalBarrierWorker::get_or_insert_database_shared_context(
-                        &mut self.state.current_shared_context,
-                        database_id,
-                        &self.actor_manager,
-                        &self.term_id,
-                    )
-                    .take_receiver(ids)?
+                    let result = match self.state.databases.entry(database_id) {
+                        Entry::Occupied(mut entry) => match entry.get_mut() {
+                            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
+                                pending_requests.push((ids, result_sender));
+                                return;
+                            }
+                            DatabaseStatus::Running(database) => database
+                                .local_barrier_manager
+                                .shared_context
+                                .take_receiver(ids),
+                            DatabaseStatus::Suspended(_) => {
+                                Err(anyhow!("database suspended").into())
+                            }
+                            DatabaseStatus::Resetting(_) => {
+                                Err(anyhow!("database resetting").into())
+                            }
+                            DatabaseStatus::Unspecified => {
+                                unreachable!()
+                            }
+                        },
+                        Entry::Vacant(entry) => {
+                            entry.insert(DatabaseStatus::ReceivedExchangeRequest(vec![(
+                                ids,
+                                result_sender,
+                            )]));
+                            return;
+                        }
+                    };
+                    result?
                 };
                 let _ = result_sender.send(result);
             }
@@ -562,7 +571,7 @@ impl LocalBarrierWorker {
                     .unwrap();
                 let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
                 let _ = sender.send((
-                    database_state.current_shared_context.clone(),
+                    database_state.local_barrier_manager.shared_context.clone(),
                     database_state.local_barrier_manager.clone(),
                 ));
             }
@@ -874,20 +883,37 @@ impl LocalBarrierWorker {
     }
 
     fn add_partial_graph(&mut self, database_id: DatabaseId, partial_graph_id: PartialGraphId) {
-        let status = self.state.databases.entry(database_id).or_insert_with(|| {
-            DatabaseStatus::Running(DatabaseManagedBarrierState::new(
-                database_id,
-                self.actor_manager.clone(),
-                LocalBarrierWorker::get_or_insert_database_shared_context(
-                    &mut self.state.current_shared_context,
+        let status = match self.state.databases.entry(database_id) {
+            Entry::Occupied(entry) => {
+                let status = entry.into_mut();
+                if let DatabaseStatus::ReceivedExchangeRequest(pending_requests) = status {
+                    let database = DatabaseManagedBarrierState::new(
+                        database_id,
+                        self.term_id.clone(),
+                        self.actor_manager.clone(),
+                        vec![],
+                    );
+                    for (ids, result_sender) in pending_requests.drain(..) {
+                        let result = database
+                            .local_barrier_manager
+                            .shared_context
+                            .take_receiver(ids);
+                        let _ = result_sender.send(result);
+                    }
+                    *status = DatabaseStatus::Running(database);
+                }
+
+                status
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(DatabaseStatus::Running(DatabaseManagedBarrierState::new(
                     database_id,
-                    &self.actor_manager,
-                    &self.term_id,
-                )
-                .clone(),
-                vec![],
-            ))
-        });
+                    self.term_id.clone(),
+                    self.actor_manager.clone(),
+                    vec![],
+                )))
+            }
+        };
         if let Some(state) = status.state_for_request() {
             assert!(
                 state
@@ -932,7 +958,6 @@ impl LocalBarrierWorker {
                 }
             }
         }
-        self.state.current_shared_context.remove(&database_id);
         self.await_epoch_completed_futures.remove(&database_id);
         self.control_stream_handle.ack_reset_database(
             database_id,
@@ -1005,6 +1030,7 @@ impl DatabaseManagedBarrierState {
 pub struct LocalBarrierManager {
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
     actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
+    pub shared_context: Arc<SharedContext>,
 }
 
 impl LocalBarrierWorker {
@@ -1066,7 +1092,9 @@ impl<T> EventSender<T> {
 }
 
 impl LocalBarrierManager {
-    pub(super) fn new() -> (
+    pub(super) fn new(
+        shared_context: Arc<SharedContext>,
+    ) -> (
         Self,
         UnboundedReceiver<LocalBarrierEvent>,
         UnboundedReceiver<(ActorId, StreamError)>,
@@ -1077,6 +1105,7 @@ impl LocalBarrierManager {
             Self {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: err_tx,
+                shared_context,
             },
             event_rx,
             err_rx,
@@ -1186,19 +1215,6 @@ impl LocalBarrierManager {
         );
         EventSender(tx)
     }
-
-    pub fn for_test() -> Self {
-        let (tx, mut rx) = unbounded_channel();
-        let (failure_tx, failure_rx) = unbounded_channel();
-        let _join_handle = tokio::spawn(async move {
-            let _failure_rx = failure_rx;
-            while rx.recv().await.is_some() {}
-        });
-        Self {
-            barrier_event_sender: tx,
-            actor_failure_sender: failure_tx,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1251,7 +1267,6 @@ pub(crate) mod barrier_test_utils {
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             subscriptions: vec![],
-                            actor_infos: vec![],
                         }],
                     }],
                     term_id: "for_test".into(),
@@ -1292,7 +1307,6 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                            broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],
                             subscriptions_to_remove: vec![],

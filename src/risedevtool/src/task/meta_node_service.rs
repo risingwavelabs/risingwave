@@ -115,14 +115,15 @@ impl MetaNodeService {
 
         match &config.meta_backend {
             MetaBackend::Memory => {
-                cmd.arg("--backend")
-                    .arg("sql")
-                    .arg("--sql-endpoint")
-                    .arg("sqlite::memory:");
+                cmd.arg("--backend").arg("mem");
             }
             MetaBackend::Sqlite => {
                 let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
-                assert_eq!(sqlite_config.len(), 1);
+                assert_eq!(
+                    sqlite_config.len(),
+                    1,
+                    "should have exactly 1 sqlite config"
+                );
                 is_persistent_meta_store = true;
 
                 let prefix_data = env::var("PREFIX_DATA")?;

@@ -281,7 +281,7 @@ pub mod verify {
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::HummockReadEpoch;
-    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -289,6 +289,7 @@ pub mod verify {
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
+    #[expect(dead_code)]
     fn assert_result_eq<Item: PartialEq + Debug, E>(
         first: &std::result::Result<Item, E>,
         second: &std::result::Result<Item, E>,
@@ -321,26 +322,44 @@ pub mod verify {
         }
     }
 
+    impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
+        async fn on_key_value<O: Send + 'static>(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+            on_key_value_fn: impl KeyValueFn<O>,
+        ) -> StorageResult<Option<O>> {
+            let actual: Option<(FullKey<Bytes>, Bytes)> = self
+                .actual
+                .on_key_value(key.clone(), read_options.clone(), |key, value| {
+                    Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+                })
+                .await?;
+            if let Some(expected) = &self.expected {
+                let expected: Option<(FullKey<Bytes>, Bytes)> = expected
+                    .on_key_value(key, read_options, |key, value| {
+                        Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+                    })
+                    .await?;
+                assert_eq!(
+                    actual
+                        .as_ref()
+                        .map(|item| (item.0.epoch_with_gap.pure_epoch(), item)),
+                    expected
+                        .as_ref()
+                        .map(|item| (item.0.epoch_with_gap.pure_epoch(), item))
+                );
+            }
+
+            actual
+                .map(|(key, value)| on_key_value_fn(key.to_ref(), value.as_ref()))
+                .transpose()
+        }
+    }
+
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
-
-        async fn get_keyed_row(
-            &self,
-            key: TableKey<Bytes>,
-
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            let actual = self
-                .actual
-                .get_keyed_row(key.clone(), read_options.clone())
-                .await;
-            if let Some(expected) = &self.expected {
-                let expected = expected.get_keyed_row(key, read_options).await;
-                assert_result_eq(&actual, &expected);
-            }
-            actual
-        }
 
         // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
         // fail to compile.
@@ -456,19 +475,6 @@ pub mod verify {
         type Iter<'a> = impl StateStoreIter + 'a;
         type RevIter<'a> = impl StateStoreIter + 'a;
 
-        async fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
-            let actual = self.actual.get(key.clone(), read_options.clone()).await;
-            if let Some(expected) = &self.expected {
-                let expected = expected.get(key, read_options).await;
-                assert_result_eq(&actual, &expected);
-            }
-            actual
-        }
-
         #[expect(clippy::manual_async_fn)]
         fn iter(
             &self,
@@ -560,14 +566,6 @@ pub mod verify {
                 expected.seal_current_epoch(next_epoch, opts.clone());
             }
             self.actual.seal_current_epoch(next_epoch, opts);
-        }
-
-        fn epoch(&self) -> u64 {
-            let epoch = self.actual.epoch();
-            if let Some(expected) = &self.expected {
-                assert_eq!(epoch, expected.epoch());
-            }
-            epoch
         }
 
         fn is_dirty(&self) -> bool {
@@ -934,14 +932,16 @@ mod dyn_state_store {
     pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
-    pub trait DynStateStoreRead: StaticSendSync {
+    pub trait DynStateStoreGet: StaticSendSync {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>>;
+    }
 
+    #[async_trait::async_trait]
+    pub trait DynStateStoreRead: DynStateStoreGet + StaticSendSync {
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -971,16 +971,21 @@ mod dyn_state_store {
     pub type StateStoreReadDynRef = StateStorePointer<Arc<dyn DynStateStoreRead>>;
 
     #[async_trait::async_trait]
-    impl<S: StateStoreRead> DynStateStoreRead for S {
+    impl<S: StateStoreGet> DynStateStoreGet for S {
         async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
-
             read_options: ReadOptions,
         ) -> StorageResult<Option<StateStoreKeyedRow>> {
-            self.get_keyed_row(key, read_options).await
+            self.on_key_value(key, read_options, move |key, value| {
+                Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+            })
+            .await
         }
+    }
 
+    #[async_trait::async_trait]
+    impl<S: StateStoreRead> DynStateStoreRead for S {
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1021,13 +1026,7 @@ mod dyn_state_store {
     // For LocalStateStore
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
-    pub trait DynLocalStateStore: StaticSendSync {
-        async fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
-
+    pub trait DynLocalStateStore: DynStateStoreGet + StaticSendSync {
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1055,8 +1054,6 @@ mod dyn_state_store {
 
         async fn try_flush(&mut self) -> StorageResult<()>;
 
-        fn epoch(&self) -> u64;
-
         fn is_dirty(&self) -> bool;
 
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
@@ -1070,14 +1067,6 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     impl<S: LocalStateStore> DynLocalStateStore for S {
-        async fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
-            self.get(key, read_options).await
-        }
-
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1119,10 +1108,6 @@ mod dyn_state_store {
             self.try_flush().await
         }
 
-        fn epoch(&self) -> u64 {
-            self.epoch()
-        }
-
         fn is_dirty(&self) -> bool {
             self.is_dirty()
         }
@@ -1150,14 +1135,6 @@ mod dyn_state_store {
         type FlushedSnapshotReader = StateStoreReadDynRef;
         type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
         type RevIter<'a> = BoxLocalStateStoreIterStream<'a>;
-
-        fn get(
-            &self,
-            key: TableKey<Bytes>,
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-            (*self.0).get(key, read_options)
-        }
 
         fn iter(
             &self,
@@ -1202,10 +1179,6 @@ mod dyn_state_store {
 
         fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             (*self.0).try_flush()
-        }
-
-        fn epoch(&self) -> u64 {
-            (*self.0).epoch()
         }
 
         fn is_dirty(&self) -> bool {
@@ -1286,25 +1259,35 @@ mod dyn_state_store {
     }
 
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
+    state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynStateStoreGet);
 
     #[derive(Clone)]
     pub struct StateStorePointer<P>(pub(crate) P);
 
+    impl<P> StateStoreGet for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
+    {
+        async fn on_key_value<O: Send + 'static>(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+            on_key_value_fn: impl KeyValueFn<O>,
+        ) -> StorageResult<Option<O>> {
+            let option = self.as_ref().get_keyed_row(key, read_options).await?;
+            option
+                .map(|(key, value)| on_key_value_fn(key.to_ref(), value.as_ref()))
+                .transpose()
+        }
+    }
+
     impl<P> StateStoreRead for StateStorePointer<P>
     where
-        StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StaticSendSync,
+        StateStorePointer<P>: AsRef<dyn DynStateStoreRead> + StateStoreGet + StaticSendSync,
     {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
-
-        fn get_keyed_row(
-            &self,
-            key: TableKey<Bytes>,
-
-            read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-            self.as_ref().get_keyed_row(key, read_options)
-        }
 
         fn iter(
             &self,

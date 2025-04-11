@@ -408,11 +408,11 @@ impl CreatingStreamingJobControl {
         self.barrier_control.is_empty() && self.status.is_finishing()
     }
 
-    pub fn inflight_graph_info(&self) -> Option<&InflightStreamingJobInfo> {
+    pub fn is_consuming(&self) -> bool {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => Some(&self.graph_info),
-            CreatingStreamingJobStatus::Finishing(_) => None,
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => true,
+            CreatingStreamingJobStatus::Finishing(_) => false,
         }
     }
 

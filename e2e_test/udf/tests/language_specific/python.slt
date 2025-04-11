@@ -1,0 +1,64 @@
+statement ok
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language python as $$
+import json
+def to_string(a, b, c, d, e, f, g, h, i, j):
+    return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + json.dumps(j)
+$$;
+
+query T
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+False1234.56.78.9abcb'\x01\x02\x03'{"key": 1}
+
+statement ok
+drop function to_string;
+
+# show data types in python
+statement ok
+create function py_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns jsonb language python as $$
+def py_typeof(a, b, c, d, e, f, g, h, i, j):
+    return {
+        "boolean": type(a).__name__,
+        "smallint": type(b).__name__,
+        "int": type(c).__name__,
+        "bigint": type(d).__name__,
+        "real": type(e).__name__,
+        "float": type(f).__name__,
+        "decimal": type(g).__name__,
+        "varchar": type(h).__name__,
+        "bytea": type(i).__name__,
+        "jsonb": type(j).__name__,
+    };
+$$;
+
+query T
+select py_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+{"bigint": "int", "boolean": "bool", "bytea": "bytes", "decimal": "Decimal", "float": "float", "int": "int", "jsonb": "dict", "real": "float", "smallint": "int", "varchar": "str"}
+
+statement ok
+drop function py_typeof;
+
+statement ok
+create function mismatched_arguments() returns int language python as $$
+def mismatched_arguments(x):
+    return x
+$$;
+
+statement error missing 1 required positional argument: 'x'
+select mismatched_arguments();
+
+statement ok
+drop function mismatched_arguments;
+
+statement ok
+create function mismatched_return_type() returns int language python as $$
+def mismatched_return_type():
+    return 1.0
+$$;
+
+statement error 'float' object cannot be interpreted as an integer
+select mismatched_return_type();
+
+statement ok
+drop function mismatched_return_type;

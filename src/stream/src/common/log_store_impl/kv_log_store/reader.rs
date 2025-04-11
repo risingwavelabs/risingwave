@@ -53,7 +53,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqIdType,
+    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -259,6 +259,7 @@ pub(crate) mod timeout_auto_rebuild {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::TableKeyRange;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{ReadOptions, StateStoreRead};
@@ -271,6 +272,7 @@ pub(crate) mod timeout_auto_rebuild {
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
         state_store: Arc<S>,
         range: TableKeyRange,
+        table_id: TableId,
         options: ReadOptions,
         timeout: Duration,
     ) -> StorageResult<TimeoutAutoRebuildIter<S>> {
@@ -295,7 +297,7 @@ pub(crate) mod timeout_auto_rebuild {
                         curr_iter_item_count.0 = 0;
                         start_time = Instant::now();
                         info!(
-                            table_id = options.table_id.table_id,
+                            table_id = table_id.table_id,
                             iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
                             prev_iter_item_count,
                             total_iter_item_count = total_count.0,
@@ -668,14 +670,13 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         &self,
         vnode_bitmap: Bitmap,
         chunk_id: ChunkId,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
     ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
-        let table_id = self.table_id;
         async move {
             tracing::trace!(
                 start_seq_id,
@@ -693,20 +694,17 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 // Use MAX EPOCH here because the epoch to consume may be below the safe
                 // epoch
                 async move {
-                    Ok::<_, anyhow::Error>(
-                        state_store
-                            .iter(
-                                (Included(range_start), Included(range_end)),
-                                ReadOptions {
-                                    prefetch_options:
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
-                                    cache_policy: CachePolicy::Fill(CacheHint::Low),
-                                    table_id,
-                                    ..Default::default()
-                                },
-                            )
-                            .await?,
-                    )
+                    let iter = state_store
+                        .iter(
+                            (Included(range_start), Included(range_end)),
+                            ReadOptions {
+                                prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                                cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
+                    Ok::<_, anyhow::Error>((vnode, iter))
                 }
             }))
             .instrument_await("Wait Create Iter Stream")
@@ -772,16 +770,17 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 iter_with_timeout_rebuild(
                     state_store,
                     key_range,
+                    table_id,
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
                         cache_policy: CachePolicy::Fill(CacheHint::Low),
-                        table_id,
                         ..Default::default()
                     },
                     Duration::from_secs(10 * 60),
                 )
                 .await
+                .map(|iter| (vnode, iter))
             }
         }));
 
@@ -866,7 +865,6 @@ mod tests {
         }
 
         let read_options = ReadOptions {
-            table_id: TEST_TABLE_ID,
             ..Default::default()
         };
         let key_range = prefixed_range_with_vnode(

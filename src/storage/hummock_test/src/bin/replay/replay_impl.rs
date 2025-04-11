@@ -14,6 +14,7 @@
 
 use std::ops::Bound;
 
+use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -33,8 +34,8 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::hummock::store::LocalHummockStorage;
-use risingwave_storage::hummock::test_utils::*;
-use risingwave_storage::store::{LocalStateStore, StateStoreIterExt, to_owned_item};
+use risingwave_storage::hummock::test_utils::{StateStoreReadTestExt, StateStoreTestReadOptions};
+use risingwave_storage::store::*;
 use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
@@ -98,6 +99,18 @@ impl GlobalReplayImpl {
 
 impl GlobalReplay for GlobalReplayImpl {}
 
+fn convert_read_options(read_options: TracedReadOptions) -> StateStoreTestReadOptions {
+    StateStoreTestReadOptions {
+        table_id: read_options.table_id.table_id.into(),
+        prefix_hint: read_options.prefix_hint.map(Into::into),
+        prefetch_options: read_options.prefetch_options.into(),
+        cache_policy: read_options.cache_policy.into(),
+        read_committed: read_options.read_committed,
+        retention_seconds: read_options.retention_seconds,
+        read_version_from_backup: read_options.read_version_from_backup,
+    }
+}
+
 #[async_trait::async_trait]
 impl ReplayRead for GlobalReplayImpl {
     async fn iter(
@@ -111,9 +124,11 @@ impl ReplayRead for GlobalReplayImpl {
             key_range.1.map(TracedBytes::into).map(TableKey),
         );
 
+        let read_options = convert_read_options(read_options);
+
         let iter = self
             .store
-            .iter(key_range, epoch, read_options.into())
+            .iter(key_range, epoch, read_options)
             .await
             .unwrap();
         let stream = GlobalReplayIter::new(iter).into_stream().boxed();
@@ -126,9 +141,10 @@ impl ReplayRead for GlobalReplayImpl {
         epoch: u64,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
+        let read_options = convert_read_options(read_options);
         Ok(self
             .store
-            .get(TableKey(key.into()), epoch, read_options.into())
+            .get(TableKey(key.into()), epoch, read_options)
             .await
             .unwrap()
             .map(TracedBytes::from))
@@ -203,10 +219,6 @@ impl LocalReplay for LocalReplayImpl {
         self.0.seal_current_epoch(next_epoch, opts.into());
     }
 
-    fn epoch(&self) -> u64 {
-        self.0.epoch()
-    }
-
     async fn flush(&mut self) -> Result<usize> {
         self.0.flush().await.map_err(|_| TraceError::FlushFailed)
     }
@@ -248,12 +260,13 @@ impl LocalReplayRead for LocalReplayImpl {
         key: TracedBytes,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
-        Ok(
-            LocalStateStore::get(&self.0, TableKey(key.into()), read_options.into())
-                .await
-                .unwrap()
-                .map(TracedBytes::from),
-        )
+        Ok(self
+            .0
+            .on_key_value(TableKey(key.into()), read_options.into(), |_, value| {
+                Ok(TracedBytes::from(Bytes::copy_from_slice(value)))
+            })
+            .await
+            .unwrap())
     }
 }
 
