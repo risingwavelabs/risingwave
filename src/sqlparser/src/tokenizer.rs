@@ -509,11 +509,18 @@ impl<'a> Tokenizer<'a> {
     /// Get the next token or return None
     fn next_token(&mut self) -> Result<Option<Token>, TokenizerError> {
         macro_rules! op_chars {
-            (all) => {
-                '+' | '-' | '*' | '/' | '<' | '>' | '=' | op_chars!(ext)
+            // https://www.postgresql.org/docs/17/sql-syntax-lexical.html#SQL-SYNTAX-OPERATORS
+            (all as_pat) => {
+                '+' | '-' | '*' | '/' | '<' | '>' | '=' | op_chars!(ext as_pat)
             };
-            (ext) => {
-                '~' | '!' | '@' | '#' | '%' | '^' | '&' | '|' | '`' | '?'
+            (ext $m:ident) => {
+                op_chars!($m '~' '!' '@' '#' '%' '^' '&' '|' '`' '?')
+            };
+            (as_arr $($c:literal)+) => {
+                [ $($c),+ ]
+            };
+            (as_pat $($c:literal)+) => {
+                $($c)|+
             };
         }
 
@@ -680,10 +687,13 @@ impl<'a> Tokenizer<'a> {
                 '{' => self.consume_and_return(Token::LBrace),
                 '}' => self.consume_and_return(Token::RBrace),
                 // operators
-                op_chars!(all) => {
+                op_chars!(all as_pat) => {
                     let mut trial = self.clone();
-                    let op_taken = trial.peeking_take_while(|c| matches!(c, op_chars!(all)));
+                    let op_taken = trial.peeking_take_while(|c| matches!(c, op_chars!(all as_pat)));
                     // It is safe to assume byte index is char index in `op_token` below.
+
+                    // https://www.postgresql.org/docs/17/sql-syntax-lexical.html#SQL-SYNTAX-OPERATORS
+                    // https://github.com/postgres/postgres/blob/REL_17_4/src/backend/parser/scan.l#L900-L1006
                     let slash_star = op_taken.find("/*");
                     let dash_dash = op_taken.find("--");
                     let pos = match (slash_star, dash_dash) {
@@ -713,10 +723,9 @@ impl<'a> Tokenizer<'a> {
                             _ => unreachable!(),
                         }
                     };
-                    #[expect(clippy::manual_pattern_char_comparison)]
                     if op.len() > 1
                         && op.ends_with(['+', '-'])
-                        && !op.contains(|c| matches!(c, op_chars!(ext)))
+                        && !op.contains(op_chars!(ext as_arr))
                     {
                         op = op.trim_end_matches(['+', '-']);
                         if op.is_empty() {

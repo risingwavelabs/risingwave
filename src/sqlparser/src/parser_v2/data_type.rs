@@ -82,19 +82,14 @@ where
             ),
             trace(
                 "produce_remaining_close",
-                (
-                    super::token.verify_map(|t| match &t.token {
+                super::token
+                    .verify(|t| match &t.token {
                         Token::Op(op) if op.chars().all(|c| c == '>') => {
                             *remaining_close3.borrow_mut() = op.len() - 1;
-                            Some(())
+                            true
                         }
-                        _ => None,
-                    }),
-                    // move |_input: &mut StatefulStream<S>| -> ModalResult<()> {
-                    //     *remaining_close3.borrow_mut() = 2;
-                    //     Ok(())
-                    // },
-                )
+                        _ => false,
+                    })
                     .void(),
             ),
             Token::Gt.void(),
