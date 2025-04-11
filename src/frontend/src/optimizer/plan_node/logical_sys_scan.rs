@@ -18,6 +18,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
+use risingwave_common::session_config::RuntimeParameters;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
@@ -329,7 +330,11 @@ impl LogicalSysScan {
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
-                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
+                self.base
+                    .ctx()
+                    .session_ctx()
+                    .running_sql_runtime_parameters(RuntimeParameters::max_split_range_gap)
+                    as u64,
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.

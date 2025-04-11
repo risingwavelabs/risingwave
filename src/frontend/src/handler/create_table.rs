@@ -89,6 +89,7 @@ use crate::{Binder, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_common::session_config::RuntimeParameters;
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -1069,7 +1070,8 @@ pub(super) async fn handle_create_table_plan(
             let session = &handler_args.session;
             let db_name = &session.database();
             let user_name = &session.user_name();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
@@ -1507,8 +1509,9 @@ pub async fn create_iceberg_engine_table(
     let iceberg_database_name = rw_schema_name.clone();
     let iceberg_table_name = table_name.0.last().unwrap().real_value();
 
-    let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
-    let sink_decouple = session.config().sink_decouple();
+    let iceberg_engine_connection: String =
+        session.running_sql_runtime_parameters(RuntimeParameters::iceberg_engine_connection);
+    let sink_decouple = session.running_sql_runtime_parameters(RuntimeParameters::sink_decouple);
     if matches!(sink_decouple, SinkDecouple::Disable) {
         bail!(
             "Iceberg engine table only supports with sink decouple, try `set sink_decouple = false` to resolve it"
@@ -1738,7 +1741,7 @@ pub async fn create_iceberg_engine_table(
         .as_mut()
         .map(|x| x.with_properties.remove(COMMIT_CHECKPOINT_INTERVAL));
 
-    let sink_decouple = session.config().sink_decouple();
+    let sink_decouple = session.running_sql_runtime_parameters(RuntimeParameters::sink_decouple);
     if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
         bail!(
             "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"

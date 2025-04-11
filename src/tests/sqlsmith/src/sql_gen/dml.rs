@@ -46,6 +46,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             limit: None,
             offset: None,
             fetch: None,
+            settings: None,
         };
         Statement::Insert {
             table_name,

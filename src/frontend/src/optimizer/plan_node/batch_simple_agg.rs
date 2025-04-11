@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -47,8 +48,7 @@ impl BatchSimpleAgg {
         self.base
             .ctx()
             .session_ctx()
-            .config()
-            .enable_two_phase_agg()
+            .running_sql_runtime_parameters(RuntimeParameters::enable_two_phase_agg)
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

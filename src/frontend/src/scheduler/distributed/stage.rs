@@ -34,6 +34,7 @@ use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId 
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::SplitMetaData;
@@ -727,8 +728,15 @@ impl StageRunner {
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
         let expr_context = ExprContext {
-            time_zone: self.ctx.session().config().timezone().to_owned(),
-            strict_mode: self.ctx.session().config().batch_expr_strict_mode(),
+            time_zone: self
+                .ctx
+                .session()
+                .running_sql_runtime_parameters(RuntimeParameters::timezone)
+                .to_owned(),
+            strict_mode: self
+                .ctx
+                .session()
+                .running_sql_runtime_parameters(RuntimeParameters::batch_expr_strict_mode),
         };
         // If root, we execute it locally.
         if !self.is_root_stage() {

@@ -52,6 +52,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -526,7 +527,10 @@ impl PlanRoot {
         // Add Logstore for Unaligned join
         // Apply this BEFORE delta join rule, because delta join removes
         // the join
-        if ctx.session_ctx().config().streaming_enable_unaligned_join() {
+        if ctx
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_enable_unaligned_join)
+        {
             plan = plan.optimize_by_rules(&OptimizationStage::new(
                 "Add Logstore for Unaligned join",
                 vec![AddLogstoreRule::create()],
@@ -534,7 +538,10 @@ impl PlanRoot {
             ))?;
         }
 
-        if ctx.session_ctx().config().streaming_enable_delta_join() {
+        if ctx
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_enable_delta_join)
+        {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(
@@ -595,11 +602,9 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
-                if !ctx
-                    .session_ctx()
-                    .config()
-                    .streaming_allow_jsonb_in_stream_key()
-                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                if !ctx.session_ctx().running_sql_runtime_parameters(
+                    RuntimeParameters::streaming_allow_jsonb_in_stream_key,
+                ) && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
@@ -1069,15 +1074,17 @@ impl PlanRoot {
             .streaming_config()
             .developer
             .enable_arrangement_backfill;
-        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
+        arrangement_backfill_enabled
+            && session_ctx.running_sql_runtime_parameters(
+                RuntimeParameters::streaming_use_arrangement_backfill,
+            )
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {
         self.plan
             .ctx()
             .session_ctx()
-            .config()
-            .streaming_use_snapshot_backfill()
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_use_snapshot_backfill)
     }
 
     /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema

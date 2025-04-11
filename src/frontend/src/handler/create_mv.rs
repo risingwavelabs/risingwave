@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
@@ -103,7 +104,7 @@ pub fn gen_create_mv_plan_bound(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
-    if session.config().create_compaction_group_for_mv() {
+    if session.running_sql_runtime_parameters(RuntimeParameters::create_compaction_group_for_mv) {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
     }
 
@@ -303,10 +304,9 @@ It only indicates the physical clustering of the data, which may improve the per
         }
 
         if resource_group.is_some()
-            && !context
-                .session_ctx()
-                .config()
-                .streaming_use_arrangement_backfill()
+            && !context.session_ctx().running_sql_runtime_parameters(
+                RuntimeParameters::streaming_use_arrangement_backfill,
+            )
         {
             return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
         }

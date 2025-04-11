@@ -14,6 +14,7 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail, bail_not_implemented, not_implemented};
@@ -1301,7 +1302,10 @@ impl ToBatch for LogicalAgg {
         };
         let agg_plan = if self.group_key().is_empty() {
             BatchSimpleAgg::new(new_logical).into()
-        } else if self.ctx().session_ctx().config().batch_enable_sort_agg()
+        } else if self
+            .ctx()
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::batch_enable_sort_agg)
             && new_logical.input_provides_order_on_group_keys()
         {
             BatchSortAgg::new(new_logical).into()

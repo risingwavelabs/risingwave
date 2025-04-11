@@ -84,6 +84,7 @@ pub async fn handle_explain_analyze_stream_job(
 /// Binding pass, since we don't go through the binder.
 /// TODO(noel): Should this be in binder? But it may make compilation slower and doesn't require any binder logic...
 mod bind {
+    use risingwave_common::session_config::RuntimeParameters;
     use risingwave_sqlparser::ast::AnalyzeTarget;
 
     use crate::Binder;
@@ -106,7 +107,8 @@ mod bind {
                 let db_name = session.database();
                 let (schema_name, name) =
                     Binder::resolve_schema_qualified_name(&db_name, name.clone())?;
-                let search_path = session.config().search_path();
+                let search_path =
+                    session.running_sql_runtime_parameters(RuntimeParameters::search_path);
                 let user_name = &session.user_name();
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 

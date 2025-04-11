@@ -57,6 +57,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 limit: self.gen_limit(has_order_by),
                 offset: None,
                 fetch: None,
+                settings: None,
             },
             schema,
         )
@@ -77,6 +78,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 limit: self.gen_limit(false),
                 offset: None,
                 fetch: None,
+                settings: None,
             },
             schema,
         )
@@ -95,6 +97,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 limit: None,
                 offset: None,
                 fetch: None,
+                settings: None,
             },
             schema[0].clone(),
         )

@@ -254,6 +254,10 @@ pub async fn handle(
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
+    if let Statement::Query(ref query) = stmt {
+        session.set_running_sql_runtime_parameters(&query.settings)?;
+        tracing::debug!(?query.settings, "SETTINGS");
+    }
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
