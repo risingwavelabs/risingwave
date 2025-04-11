@@ -968,11 +968,13 @@ mod tests {
 
         unsafe {
             // comes from risingwave_common::util::deployment::Deployment
+            remove_var("RISINGWAVE_CI");
             set_var("RISINGWAVE_CLOUD", "1");
         }
         assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_err());
         unsafe {
             remove_var("RISINGWAVE_CLOUD");
+            set_var("RISINGWAVE_CI", "1");
         }
     }
 
