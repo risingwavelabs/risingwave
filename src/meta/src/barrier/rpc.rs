@@ -505,7 +505,13 @@ impl ControlStreamManager {
                     (job_id, (definition.clone(), stream_job_fragments))
                 })
         });
-        let tracker = CreateMviewProgressTracker::recover(background_mviews, hummock_version_stats);
+        // FIXME(kwannoel): recover this for background ddl
+        let recovered_backfill_order_map = HashMap::new();
+        let tracker = CreateMviewProgressTracker::recover(
+            background_mviews,
+            hummock_version_stats,
+            recovered_backfill_order_map,
+        );
 
         let node_to_collect = self.inject_barrier(
             database_id,
