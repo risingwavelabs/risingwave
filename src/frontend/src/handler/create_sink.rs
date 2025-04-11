@@ -24,6 +24,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
 };
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
@@ -105,6 +106,17 @@ pub async fn gen_sink_plan(
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
 
     let mut with_options = handler_args.with_options.clone();
+
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret_on_cloud()
+    {
+        // ConnectorProperties::enforce_secret_on_cloud(&with_options)?;
+        todo!()
+    }
 
     resolve_privatelink_in_with_option(&mut with_options)?;
     let (mut resolved_with_options, connection_type, connector_conn_ref) =
