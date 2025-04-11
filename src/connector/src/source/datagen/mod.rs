@@ -24,6 +24,7 @@ use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::*;
 
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::source::SourceProperties;
 
 pub const DATAGEN_CONNECTOR: &str = "datagen";
@@ -56,6 +57,8 @@ pub struct DatagenProperties {
     #[serde(flatten)]
     pub fields: HashMap<String, String>,
 }
+
+impl EnforceSecretOnCloud for DatagenProperties {}
 
 impl SourceProperties for DatagenProperties {
     type Split = DatagenSplit;

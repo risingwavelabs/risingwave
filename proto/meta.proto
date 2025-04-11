@@ -674,6 +674,7 @@ message SystemParams {
   optional uint64 time_travel_retention_ms = 18;
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
+  optional bool enforce_secret_on_cloud = 21;
 }
 
 message GetSystemParamsRequest {}
