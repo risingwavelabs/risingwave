@@ -768,8 +768,8 @@ profile:
   ci-1cn-3fe-in-memory:
     config-path: src/config/ci-mem.toml
     steps:
+      - use: minio
       - use: meta-node
-        enable-in-memory-kv-state-backend: true
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -785,6 +785,7 @@ profile:
         port: 4567
         exporter-port: 2224
         health-check-port: 6788
+      - use: compactor
 
   ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml

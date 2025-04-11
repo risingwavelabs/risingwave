@@ -5,6 +5,10 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+# Make `parallelism` actually `replication`
+unset BUILDKITE_PARALLEL_JOB
+unset BUILDKITE_PARALLEL_JOB_COUNT
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )

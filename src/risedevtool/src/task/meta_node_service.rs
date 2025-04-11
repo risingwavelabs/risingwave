@@ -206,7 +206,7 @@ impl MetaNodeService {
             provide_opendal.as_slice(),
         ) {
             (true, [], [], []) => {
-                cmd.arg("--state-store").arg("in-memory");
+                cmd.arg("--state-store").arg("hummock+memory");
                 (false, false)
             }
             (true, _, _, _) => {
