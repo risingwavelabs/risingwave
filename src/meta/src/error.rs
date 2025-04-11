@@ -81,8 +81,13 @@ pub enum MetaErrorInner {
     #[error("table_fragment not exist: id={0}")]
     FragmentNotFound(u32),
 
-    #[error("{0} with name {1} exists")]
-    Duplicated(&'static str, String),
+    #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or(""))]
+    Duplicated(
+        &'static str,
+        String,
+        // whether the object is under creation
+        bool,
+    ),
 
     #[error("Service unavailable: {0}")]
     Unavailable(#[message] String),
@@ -162,8 +167,12 @@ impl MetaError {
         matches!(self.inner(), MetaErrorInner::Cancelled(..))
     }
 
-    pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
-        MetaErrorInner::Duplicated(relation, name.into()).into()
+    pub fn catalog_duplicated<T: Into<String>>(
+        relation: &'static str,
+        name: T,
+        under_creation: bool,
+    ) -> Self {
+        MetaErrorInner::Duplicated(relation, name.into(), under_creation).into()
     }
 }
 
@@ -174,7 +183,7 @@ impl From<MetaError> for tonic::Status {
         let code = match err.inner() {
             MetaErrorInner::PermissionDenied(_) => Code::PermissionDenied,
             MetaErrorInner::CatalogIdNotFound(_, _) => Code::NotFound,
-            MetaErrorInner::Duplicated(_, _) => Code::AlreadyExists,
+            MetaErrorInner::Duplicated(_, _, _) => Code::AlreadyExists,
             MetaErrorInner::Unavailable(_) => Code::Unavailable,
             MetaErrorInner::Cancelled(_) => Code::Cancelled,
             MetaErrorInner::InvalidParameter(_) => Code::InvalidArgument,
