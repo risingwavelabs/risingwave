@@ -820,6 +820,7 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
             temporary_source_manager: Default::default(),
+            running_sql_runtime_parameters: Default::default(),
         }
     }
 
