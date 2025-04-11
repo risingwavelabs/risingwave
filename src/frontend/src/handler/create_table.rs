@@ -1629,7 +1629,7 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
 
                 if let Some(s) = params.properties.get("hosted_catalog") {
-                    if s.to_ascii_lowercase() == "true" {
+                    if s.eq_ignore_ascii_case("true") {
                         with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
                         with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
                         with_common
