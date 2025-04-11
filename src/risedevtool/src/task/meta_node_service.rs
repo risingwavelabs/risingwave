@@ -116,7 +116,7 @@ impl MetaNodeService {
         match &config.meta_backend {
             MetaBackend::Memory => {
                 cmd.arg("--backend")
-                    .arg("sql")
+                    .arg("mem")
                     .arg("--sql-endpoint")
                     .arg("sqlite::memory:");
             }
