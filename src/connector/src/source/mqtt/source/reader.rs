@@ -14,7 +14,6 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
-use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
@@ -29,11 +28,6 @@ use crate::source::{BoxSourceChunkStream, Column, SourceContextRef, SourceMessag
 
 pub struct MqttSplitReader {
     eventloop: rumqttc::v5::EventLoop,
-    client: rumqttc::v5::AsyncClient,
-    qos: QoS,
-    splits: Vec<MqttSplit>,
-    #[expect(dead_code)]
-    properties: MqttProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
@@ -68,10 +62,6 @@ impl SplitReader for MqttSplitReader {
 
         Ok(Self {
             eventloop,
-            client,
-            qos,
-            splits,
-            properties,
             parser_config,
             source_ctx,
         })
@@ -88,9 +78,6 @@ impl MqttSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let mut eventloop = self.eventloop;
-        let client = self.client;
-        let qos = self.qos;
-        let splits = self.splits;
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
@@ -98,20 +85,10 @@ impl MqttSplitReader {
                     yield vec![SourceMessage::from(msg)];
                 }
                 Ok(_) => (),
-                Err(e) => {
-                    if let ConnectionError::Timeout(_) = e {
-                        continue;
-                    }
-                    tracing::error!("Failed to poll mqtt eventloop: {}", e.as_report());
-                    client
-                        .subscribe_many(
-                            splits
-                                .iter()
-                                .cloned()
-                                .map(|split| Filter::new(split.topic, qos)),
-                        )
-                        .await?;
+                Err(ConnectionError::Timeout(_) | ConnectionError::RequestsDone) => {
+                    continue;
                 }
+                Err(e) => return Err(e.into()),
             }
         }
     }
