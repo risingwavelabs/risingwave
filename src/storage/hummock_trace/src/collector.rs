@@ -200,10 +200,6 @@ impl TraceSpan {
         }
     }
 
-    pub fn new_epoch_span(storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::LocalStorageEpoch, storage_type)
-    }
-
     pub fn new_is_dirty_span(storage_type: StorageType) -> MayTraceSpan {
         Self::new_global_op(Operation::LocalStorageIsDirty, storage_type)
     }

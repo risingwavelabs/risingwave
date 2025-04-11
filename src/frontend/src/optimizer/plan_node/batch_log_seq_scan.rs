@@ -13,37 +13,47 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::LogRowSeqScanNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch};
 
 use super::batch::prelude::*;
-use super::utils::{Distill, childless_record};
+use super::utils::{Distill, childless_record, scan_ranges_as_strs};
 use super::{ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb, generic};
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
+use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::scheduler::SchedulerResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLogSeqScan {
     pub base: PlanBase<Batch>,
     core: generic::LogScan,
+    scan_range: Option<ScanRange>,
 }
 
 impl BatchLogSeqScan {
-    fn new_inner(core: generic::LogScan, dist: Distribution) -> Self {
-        let order = Order::new(core.table_desc.pk.clone());
+    fn new_inner(
+        core: generic::LogScan,
+        dist: Distribution,
+        scan_range: Option<ScanRange>,
+    ) -> Self {
+        let order = core.get_out_column_index_order();
         let base = PlanBase::new_batch(core.ctx(), core.schema(), dist, order);
 
-        Self { base, core }
+        Self {
+            base,
+            core,
+            scan_range,
+        }
     }
 
-    pub fn new(core: generic::LogScan) -> Self {
+    pub fn new(core: generic::LogScan, scan_range: Option<ScanRange>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
-        Self::new_inner(core, Distribution::Single)
+        Self::new_inner(core, Distribution::Single, scan_range)
     }
 
     fn clone_with_dist(&self) -> Self {
@@ -62,6 +72,7 @@ impl BatchLogSeqScan {
                     }
                 }
             },
+            self.scan_range.clone(),
         )
     }
 
@@ -88,9 +99,22 @@ impl Distill for BatchLogSeqScan {
             });
             vec.push(("distribution", dist));
         }
-        vec.push(("old_epoch", Pretty::from(self.core.old_epoch.to_string())));
-        vec.push(("new_epoch", Pretty::from(self.core.new_epoch.to_string())));
+        vec.push((
+            "epoch_range",
+            Pretty::from(format!("{:?}", self.core.epoch_range)),
+        ));
         vec.push(("version_id", Pretty::from(self.core.version_id.to_string())));
+        if let Some(scan_range) = &self.scan_range {
+            let order_names = match verbose {
+                true => self.core.order_names_with_table_prefix(),
+                false => self.core.order_names(),
+            };
+            let range_strs = scan_ranges_as_strs(order_names, &vec![scan_range.clone()]);
+            vec.push((
+                "scan_range",
+                Pretty::Array(range_strs.into_iter().map(Pretty::from).collect()),
+            ));
+        }
 
         childless_record("BatchLogSeqScan", vec)
     }
@@ -116,7 +140,7 @@ impl TryToBatchPb for BatchLogSeqScan {
             old_epoch: Some(BatchQueryEpoch {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
-                        epoch: self.core.old_epoch,
+                        epoch: self.core.epoch_range.0,
                         hummock_version_id: 0,
                     },
                 )),
@@ -124,13 +148,17 @@ impl TryToBatchPb for BatchLogSeqScan {
             new_epoch: Some(BatchQueryEpoch {
                 epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
                     BatchQueryCommittedEpoch {
-                        epoch: self.core.new_epoch,
+                        epoch: self.core.epoch_range.1,
                         hummock_version_id: 0,
                     },
                 )),
             }),
             // It's currently true.
             ordered: !self.order().is_any(),
+            scan_range: self
+                .scan_range
+                .as_ref()
+                .map(|scan_range| scan_range.to_protobuf()),
         }))
     }
 }
@@ -144,7 +172,7 @@ impl ToLocalBatch for BatchLogSeqScan {
         } else {
             Distribution::SomeShard
         };
-        Ok(Self::new_inner(self.core.clone(), dist).into())
+        Ok(Self::new_inner(self.core.clone(), dist, self.scan_range.clone()).into())
     }
 }
 

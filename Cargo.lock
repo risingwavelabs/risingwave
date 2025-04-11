@@ -12712,8 +12712,8 @@ dependencies = [
 
 [[package]]
 name = "rw-diagnose-tools"
-version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/rw-diagnose-tools?rev=725249f#725249f5420ffdcff7796d2e71cdbc03434168f4"
+version = "0.1.1"
+source = "git+https://github.com/risingwavelabs/rw-diagnose-tools?rev=380d1b7b23a77ee0bbb0d2b9d552de58db4490cc#380d1b7b23a77ee0bbb0d2b9d552de58db4490cc"
 dependencies = [
  "anyhow",
  "itertools 0.12.1",
