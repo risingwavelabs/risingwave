@@ -74,6 +74,10 @@ pub struct TestSinkStoreInner {
 
     checkpoint_count: usize,
     err_count: usize,
+    // err_events is used to record the history and sequence of error injections, facilitating the inspection of whether specific corner cases are triggered.
+    // It adds an 'i' when an error injection point is triggered, and adds an 'x' after a normal commit occurs.
+    // For example, if the first error occurs between the prepare and commit, and the second error occurs immediately between the commit and the deletion of the system table, the err_events will contain consecutive "23".
+    err_events: Vec<char>,
 }
 
 #[derive(Clone)]
@@ -83,6 +87,8 @@ pub struct TestSinkStore {
 
 impl TestSinkStore {
     pub fn new() -> Self {
+        let max_record_error_count = 1024 * 1024 / 4;
+        let err_events: Vec<char> = Vec::with_capacity(max_record_error_count);
         Self {
             inner: Arc::new(Mutex::new(TestSinkStoreInner {
                 id_name: HashMap::new(),
@@ -90,6 +96,7 @@ impl TestSinkStore {
                 epochs: Vec::new(),
                 checkpoint_count: 0,
                 err_count: 0,
+                err_events,
             })),
         }
     }
@@ -125,7 +132,6 @@ impl TestSinkStore {
         for inner_map in inner.snapshot_id_to_data.values() {
             total_keys += inner_map.len();
         }
-
         total_keys
     }
 
@@ -181,6 +187,15 @@ impl TestSinkStore {
 
     pub fn err_count(&self) -> usize {
         self.inner().err_count
+    }
+
+    pub fn has_consecutive_error(&self, error_sequence: &str) -> bool {
+        let events_str = self.get_events();
+        events_str.contains(error_sequence)
+    }
+
+    fn get_events(&self) -> String {
+        self.inner().err_events.iter().collect()
     }
 
     pub async fn wait_for_count_and_check_duplicate(&self, count: usize) -> anyhow::Result<()> {
@@ -359,12 +374,24 @@ impl SinkWriter for CoordinatedTestWriter {
 /// other logic remains consistent with the real Iceberg committer.
 pub struct SimulationTestIcebergCommitter {
     store: TestSinkStore,
-    err_rate: Arc<AtomicU32>,
+    // Using different error rates at various points allows for more convenient construction of corner cases.
+    // The `err_rate_vec` is used during the exactly once testing to inject errors at multiple points in the Iceberg commit process, simulating errors occurring at any time.
+    // Specifically, errors will be injected at the following stages:
+    //   0: During the recovery phase.
+    //   1: Before the pre-commit phase.
+    //   2: Between pre-committing and committing to external sink.
+    //   3: Between committing to external sink and marking the data as committed.
+    //   4: Between marking the data as committed and deleting the system table.
+    err_rate_vec: Vec<Arc<AtomicU32>>,
     last_commit_epoch: u64,
     staging_store: StagingDataStore,
     db: DatabaseConnection,
     committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
     sink_id: SinkId,
+    // should_panic is used to construct some corner cases that will lead to repeated errors.
+    // If set to true, it will use the erroneous implementation in certain places, and during testing,
+    // encountering specific corner cases will cause a panic due to the repetition.
+    should_panic: bool,
 }
 
 #[async_trait]
@@ -398,8 +425,9 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
                     });
                 }
 
-                if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-                    println!("Time period 0 -- Error occur during recovery.");
+                if thread_rng().random_ratio(self.err_rate_vec[0].load(Relaxed), u32::MAX) {
+                    println!("Error injection point 0 -- Error occur during recovery.");
+                    self.store.inner().err_events.push('0');
                     self.store.inc_err();
                     return Err(SinkError::Internal(anyhow::anyhow!("fail to recovery")));
                 }
@@ -475,8 +503,7 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
                 } else {
                     println!(
                         "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
-                        committed_epoch,
-                        epoch
+                        committed_epoch, epoch
                     );
                     while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
                         println!("Received next committed epoch: {}", next_committed_epoch);
@@ -511,16 +538,18 @@ impl SimulationTestIcebergCommitter {
 
         let snapshot_id = match snapshot_id {
             Some(previous_snapshot_id) => previous_snapshot_id,
-            None => generate_unique_snapshot_id(epoch),
+            None => generate_unique_snapshot_id(),
         };
 
-        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
-            println!("Time period 1 -- Error occur before pre commit to meta store.");
+        if thread_rng().random_ratio(self.err_rate_vec[1].load(Relaxed), u32::MAX) {
+            println!("Error injection point 1 -- Error occur before pre commit to meta store.");
             self.store.inc_err();
+            self.store.inner().err_events.push('1');
             return Err(SinkError::Internal(anyhow::anyhow!(
                 "fail to pre commit to meta store"
             )));
         }
+
         if is_first_commit {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
@@ -541,11 +570,12 @@ impl SimulationTestIcebergCommitter {
             )
             .await?;
         }
-        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.err_rate_vec[2].load(Relaxed), u32::MAX) {
             println!(
-                "Time period 2 -- Error occur before commit to external sink and after pre commit."
+                "Error injection point 2 -- Error occur before commit to external sink and after pre commit."
             );
             self.store.inc_err();
+            self.store.inner().err_events.push('2');
             return Err(SinkError::Internal(anyhow::anyhow!(
                 "fail to commit to external sink."
             )));
@@ -563,11 +593,12 @@ impl SimulationTestIcebergCommitter {
         );
         println!("Succeeded to commit to mock iceberg table in epoch {epoch}.");
 
-        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.err_rate_vec[3].load(Relaxed), u32::MAX) {
             println!(
-                "Time period 3 -- Error occur after commit to external sink and before mark row deleted."
+                "Error injection point 3 -- Error occur after commit to external sink and before mark row deleted."
             );
             self.store.inc_err();
+            self.store.inner().err_events.push('3');
             return Err(SinkError::Internal(anyhow::anyhow!(
                 "fail to mark row deleted."
             )));
@@ -584,11 +615,12 @@ impl SimulationTestIcebergCommitter {
             self.sink_id, epoch
         );
 
-        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.err_rate_vec[4].load(Relaxed), u32::MAX) {
             println!(
-                "Time period 4 -- Error occur after mark committed before deleting previous item."
+                "Error injection point 4 -- Error occur after mark committed before deleting previous item."
             );
             self.store.inc_err();
+            self.store.inner().err_events.push('4');
             return Err(SinkError::Internal(anyhow::anyhow!(
                 "fail to delete previous item in meta store."
             )));
@@ -596,6 +628,7 @@ impl SimulationTestIcebergCommitter {
 
         self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch)
             .await?;
+        self.store.inner().err_events.push('x');
         Ok(())
     }
 
@@ -606,8 +639,17 @@ impl SimulationTestIcebergCommitter {
         snapshot_id: i64,
     ) -> risingwave_connector::sink::Result<()> {
         println!("Starting mock iceberg re commit in epoch {}.", epoch);
-        self.commit_inner(epoch, metadata, Some(snapshot_id))
-            .await?;
+        if self.should_panic {
+            // This is to simulate a corner case that is difficult to test in Chaos Mesh.
+            // If, during a re-commit, a new snapshot_id is generated instead of using the previously persisted snapshot_id, it can lead to duplicate data when consecutive "23" appears in err_events.
+            let fake_snapshot_id = generate_unique_snapshot_id();
+            self.commit_inner(epoch, metadata, Some(fake_snapshot_id))
+                .await?;
+        } else {
+            self.commit_inner(epoch, metadata, Some(snapshot_id))
+                .await?;
+        }
+
         Ok(())
     }
 }
@@ -769,7 +811,7 @@ pub fn simple_name_of_id(id: i32) -> String {
     format!("name-{}", id)
 }
 
-fn generate_unique_snapshot_id(epoch: u64) -> i64 {
+fn generate_unique_snapshot_id() -> i64 {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
@@ -792,12 +834,17 @@ impl Drop for SimulationTestIcebergExactlyOnceSink {
 }
 
 impl SimulationTestIcebergExactlyOnceSink {
-    pub fn register_new_with_err_rate(err_rate: f64) -> Self {
+    pub fn register_new_with_err_rate(err_rate_list: Vec<f64>, should_panic: bool) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
+        let mut err_rate_vec: Vec<Arc<AtomicU32>> = Vec::new();
 
-        let err_rate = u32::MAX as f64 * err_rate;
-        let err_rate_for_writer = Arc::new(AtomicU32::new(0));
-        let err_rate_for_committer = Arc::new(AtomicU32::new(err_rate as u32));
+        for err_rate in err_rate_list {
+            let scaled_err_rate = (u32::MAX as f64 * err_rate) as u32;
+            let arc_err_rate = Arc::new(AtomicU32::new(scaled_err_rate));
+            err_rate_vec.push(arc_err_rate);
+        }
+
+        let err_rate_for_coordinator = Arc::new(AtomicU32::new(0));
 
         let store = TestSinkStore::new();
 
@@ -806,7 +853,7 @@ impl SimulationTestIcebergExactlyOnceSink {
             register_build_coordinated_sink(
                 {
                     let parallelism_counter = parallelism_counter.clone();
-                    let err_rate = err_rate_for_committer.clone();
+                    let err_rate = err_rate_for_coordinator.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     use risingwave_connector::sink::SinkWriterMetrics;
@@ -837,18 +884,19 @@ impl SimulationTestIcebergExactlyOnceSink {
                     }
                 },
                 {
-                    let err_rate = err_rate_for_committer.clone();
+                    let err_rate = err_rate_for_coordinator.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     move |db, sink_id| {
                         Box::new(SimulationTestIcebergCommitter {
-                            err_rate: err_rate.clone(),
+                            err_rate_vec: err_rate_vec.clone(),
                             store: store.clone(),
                             last_commit_epoch: 0,
                             staging_store: staging_store.clone(),
                             db: db.clone(),
                             committed_epoch_subscriber: None,
                             sink_id: sink_id,
+                            should_panic: should_panic,
                         })
                     }
                 },
@@ -858,7 +906,7 @@ impl SimulationTestIcebergExactlyOnceSink {
             _sink_guard,
             parallelism_counter,
             store,
-            err_rate: err_rate_for_writer.clone(),
+            err_rate: err_rate_for_coordinator.clone(),
         }
     }
 

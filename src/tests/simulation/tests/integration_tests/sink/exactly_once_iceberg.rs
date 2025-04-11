@@ -19,6 +19,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_simulation::cluster::{Cluster, KillOpts};
 use tokio::time::sleep;
 
 use crate::sink::exactly_once_utils::SimulationTestIcebergExactlyOnceSink;
@@ -26,18 +27,32 @@ use crate::sink::utils::{
     CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSource,
     start_sink_test_cluster,
 };
-use risingwave_simulation::cluster::{Cluster, KillOpts};
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
-
 
 #[tokio::test]
 async fn test_exactly_once_sink_basic() -> Result<()> {
+    let err_rate_list = vec![0.1, 0.1, 0.1, 0.1, 0.1];
+    test_exactly_once_sink_inner(err_rate_list, false).await
+}
+
+#[tokio::test]
+#[should_panic]
+async fn test_exactly_once_sink_should_panic() {
+    // If, during a re-commit, a new snapshot_id is generated instead of using the previously persisted snapshot_id, it can lead to duplicate data when consecutive "23" appears in err_events.
+    let err_rate_list = vec![0.0, 0.0, 0.3, 0.3, 0.0];
+    let _ = test_exactly_once_sink_inner(err_rate_list, true).await;
+}
+
+async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>, should_panic: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestIcebergExactlyOnceSink::register_new_with_err_rate(0.1);
-    let test_source = SimulationTestSource::register_new(source_parallelism, 0..10000, 1.0, 20);
+    let test_sink = SimulationTestIcebergExactlyOnceSink::register_new_with_err_rate(
+        err_rate_list,
+        should_panic,
+    );
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
     let mut session = cluster.start_session();
 
     session.run("set streaming_parallelism = 6").await?;
@@ -91,7 +106,14 @@ async fn test_exactly_once_sink_basic() -> Result<()> {
     let [_, is_sink_decouple_str, vnode_count_str] =
         TryInto::<[&str; 3]>::try_into(result.split(" ").collect_vec()).unwrap();
     assert_eq!(is_sink_decouple_str, "t");
-    // assert_eq!(vnode_count_str, "256");
+
+    if should_panic {
+        if !test_sink.store.has_consecutive_error("23") {
+            panic!(
+                "This round of testing did not hit the corner cases that would cause a panic, trigger a panic here to ensure the test passes."
+            )
+        }
+    }
 
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
