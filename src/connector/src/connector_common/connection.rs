@@ -191,6 +191,14 @@ pub struct IcebergConnection {
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
 }
 
 #[async_trait]
@@ -265,6 +273,27 @@ impl Connection for IcebergConnection {
             }
         }
 
+        if self.hosted_catalog.unwrap_or(false) {
+            // If `hosted_catalog` is set, we don't need to test the catalog.
+            // ensure there is not catalog type and catalog uri
+            if self.catalog_type.is_some() {
+                bail!("`catalog.type` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_uri.is_some() {
+                bail!("`catalog.uri` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_name.is_some() {
+                bail!("`catalog.name` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_user.is_some() {
+                bail!("`catalog.jdbc.user` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_password.is_some() {
+                bail!("`catalog.jdbc.password` must not be set when `hosted_catalog` is set");
+            }
+            return Ok(());
+        }
+
         if self.catalog_type.is_none() {
             bail!("`catalog.type` must be set");
         }
@@ -292,6 +321,7 @@ impl Connection for IcebergConnection {
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
+            hosted_catalog: self.hosted_catalog.clone(),
         };
 
         let mut java_map = HashMap::new();
