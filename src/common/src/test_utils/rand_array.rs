@@ -214,6 +214,8 @@ mod tests {
         macro_rules! gen_rand_array {
             ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
             $(
+                // todo!("VECTOR_PLACEHOLDER")
+                if stringify!($data_type) != "Vector"
                 {
                     let array = seed_rand_array::<$array>(10, 1024, 0.5);
                     assert_eq!(10, array.len());
