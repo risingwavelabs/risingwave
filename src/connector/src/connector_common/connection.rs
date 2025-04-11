@@ -43,6 +43,7 @@ use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
+// All XxxConnection structs should implement this trait as well as EnforceSecretOnCloud trait.
 #[async_trait]
 pub trait Connection: Send {
     async fn validate_connection(&self) -> ConnectorResult<()>;
