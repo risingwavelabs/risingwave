@@ -96,7 +96,7 @@ macro_rules! for_all_params {
             { time_travel_retention_ms,                 u64,                            Some(600000_u64),               true,   "The data retention period for time travel.", },
             { adaptive_parallelism_strategy,            risingwave_common::system_param::AdaptiveParallelismStrategy,   Some(Default::default()),       true,   "The strategy for Adaptive Parallelism.", },
             { per_database_isolation,                   bool,                           Some(true),                     true,   "Whether per database isolation is enabled", },
-            { enforce_secret_on_cloud,                  bool,                           Some(true),                     true,   "Whether to enforce secret on cloud.", },
+            { enforce_secret_on_cloud,                  bool,                           Some(false),                    true,   "Whether to enforce secret on cloud.", },
         }
     };
 }
