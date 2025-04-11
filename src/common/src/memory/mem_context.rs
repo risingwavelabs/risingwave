@@ -46,7 +46,7 @@ impl MemCounter for TrAdderAtomic {
     }
 }
 
-impl<const N: usize> MemCounter for LabelGuardedIntGauge<N> {
+impl MemCounter for LabelGuardedIntGauge {
     fn add(&self, bytes: i64) {
         self.deref().add(bytes)
     }

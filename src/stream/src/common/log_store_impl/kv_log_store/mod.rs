@@ -62,30 +62,30 @@ pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqId>);
 
 #[derive(Clone)]
 pub struct KvLogStoreReadMetrics {
-    pub storage_read_count: LabelGuardedIntCounter<5>,
-    pub storage_read_size: LabelGuardedIntCounter<5>,
+    pub storage_read_count: LabelGuardedIntCounter,
+    pub storage_read_size: LabelGuardedIntCounter,
 }
 
 impl KvLogStoreReadMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self {
-            storage_read_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_read_size: LabelGuardedIntCounter::test_int_counter(),
+            storage_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+            storage_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
         }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: LabelGuardedIntCounter<4>,
-    pub storage_write_size: LabelGuardedIntCounter<4>,
-    pub rewind_count: LabelGuardedIntCounter<4>,
-    pub rewind_delay: LabelGuardedHistogram<4>,
-    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
+    pub storage_write_count: LabelGuardedIntCounter,
+    pub storage_write_size: LabelGuardedIntCounter,
+    pub rewind_count: LabelGuardedIntCounter,
+    pub rewind_delay: LabelGuardedHistogram,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -132,18 +132,18 @@ impl KvLogStoreMetrics {
         let persistent_log_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
@@ -151,18 +151,18 @@ impl KvLogStoreMetrics {
         let flushed_buffer_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
@@ -211,14 +211,14 @@ impl KvLogStoreMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
-            storage_write_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            rewind_count: LabelGuardedIntCounter::test_int_counter(),
-            rewind_delay: LabelGuardedHistogram::test_histogram(),
+            storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
+            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
             flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
         }

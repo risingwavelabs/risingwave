@@ -498,10 +498,6 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
-    fn is_dirty(&self) -> bool {
-        self.mem_table.is_dirty()
-    }
-
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         let epoch = options.epoch;
         wait_for_epoch(&self.version_update_notifier_tx, epoch.prev, self.table_id).await?;
@@ -525,7 +521,7 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
-        assert!(!self.is_dirty());
+        assert!(!self.mem_table.is_dirty());
         if let Some(new_level) = &opts.switch_op_consistency_level {
             self.mem_table.op_consistency_level.update(new_level);
             self.op_consistency_level.update(new_level);
@@ -582,7 +578,7 @@ impl LocalStateStore for LocalHummockStorage {
             self.table_id,
         )
         .await?;
-        assert!(self.mem_table.buffer.is_empty());
+        assert!(!self.mem_table.is_dirty());
         let mut read_version = self.read_version.write();
         assert!(
             read_version.staging().is_empty(),

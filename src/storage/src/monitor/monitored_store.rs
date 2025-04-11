@@ -253,10 +253,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         self.inner.flush().instrument_await("store_flush".verbose())
     }
 
-    fn is_dirty(&self) -> bool {
-        self.inner.is_dirty()
-    }
-
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         self.inner.init(options).await
     }
