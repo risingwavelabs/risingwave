@@ -283,9 +283,7 @@ pub async fn handle_describe_plan(
         let not_found_err =
             CatalogError::NotFound("table, source, sink or view", object_name.to_string());
 
-        let stmt = if let Ok(relation) =
-            binder.bind_relation_by_name(object_name.clone(), None, None, false)
-        {
+        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None, false) {
             match relation {
                 Relation::Source(s) => s.catalog.create_sql_ast()?,
                 Relation::BaseTable(t) => t.table_catalog.create_sql_ast()?,
@@ -312,9 +310,7 @@ pub async fn handle_describe_plan(
             return Err(not_found_err.into());
         } else {
             return Err(not_found_err.into());
-        };
-
-        stmt
+        }
     };
 
     let res = generate_plan_string(session.clone(), handler_args.clone(), stmt, options).await?;
