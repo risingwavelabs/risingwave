@@ -137,6 +137,7 @@ batch_output_channel_size = 64
 batch_receiver_channel_size = 1000
 batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+batch_local_execute_buffer_size = 64
 
 [batch.developer.batch_compute_client_config]
 connect_timeout_secs = 5
