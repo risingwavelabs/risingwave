@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
@@ -29,11 +29,11 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
+    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, JobStatus, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap, WorkerId,
     actor, connection, database, fragment, fragment_relation, function, index, object,
-    object_dependency, schema, secret, sink, source, streaming_job, subscription, table,
-    user, user_privilege, view, ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array,
-    JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId,
-    VnodeBitmap, WorkerId,
+    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
+    user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
