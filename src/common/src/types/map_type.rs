@@ -119,6 +119,7 @@ impl MapType {
             | DataType::Jsonb
             | DataType::Serial
             | DataType::Int256
+            | DataType::Vector(_)
             | DataType::Map(_) => false,
         };
         if !ok {
