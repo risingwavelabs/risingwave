@@ -67,6 +67,7 @@ use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Mod
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
     Set,
@@ -1490,11 +1491,10 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                         }
                         (false, false) => {
                             tracing::info!(
-                                "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
+                                "Sink id = {}: there are files that were not successfully committed, rewind log store to sink this batch of data again.",
                                 self.param.sink_id.sink_id()
                             );
-                            self.re_commit(end_epoch, write_results, snapshot_id)
-                                .await?;
+                            break;
                         }
                     }
 
@@ -1553,8 +1553,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                         committed_epoch_subscriber(self.param.sink_id).await?;
                     // The exactly once commit process needs to start after the data corresponding to the current epoch is persisted in the log store.
                     if committed_epoch >= epoch {
-                        self.commit_iceberg_inner(epoch, write_results, None)
-                            .await?;
+                        self.commit_iceberg_inner(epoch, write_results).await?;
                     } else {
                         tracing::info!(
                             "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
@@ -1568,8 +1567,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                             );
                             // If next_epoch meets the condition, execute commit immediately
                             if next_committed_epoch >= epoch {
-                                self.commit_iceberg_inner(epoch, write_results, None)
-                                    .await?;
+                                self.commit_iceberg_inner(epoch, write_results).await?;
                                 break;
                             }
                         }
@@ -1580,8 +1578,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 ),
             }
         } else {
-            self.commit_iceberg_inner(epoch, write_results, None)
-                .await?;
+            self.commit_iceberg_inner(epoch, write_results).await?;
         }
 
         Ok(())
@@ -1590,37 +1587,11 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
 /// Methods Required to Achieve Exactly Once Semantics
 impl IcebergSinkCommitter {
-    async fn re_commit(
-        &mut self,
-        epoch: u64,
-        write_results: Vec<IcebergCommitResult>,
-        snapshot_id: i64,
-    ) -> Result<()> {
-        tracing::info!("Starting iceberg re commit in epoch {epoch}.");
-
-        // Skip if no data to commit
-        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
-            tracing::debug!(?epoch, "no data to commit");
-            return Ok(());
-        }
-        self.commit_iceberg_inner(epoch, write_results, Some(snapshot_id))
-            .await?;
-        Ok(())
-    }
-
     async fn commit_iceberg_inner(
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
-        snapshot_id: Option<i64>,
     ) -> Result<()> {
-        // If the provided `snapshot_id`` is not None, it indicates that this commit is a re commit
-        // occurring during the recovery phase. In this case, we need to use the `snapshot_id`
-        // that was previously persisted in the system table to commit.
-        let is_first_commit = snapshot_id.is_none();
-        if !is_first_commit {
-            tracing::info!("Doing iceberg re commit.");
-        }
         self.last_commit_epoch = epoch;
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
@@ -1657,11 +1628,8 @@ impl IcebergSinkCommitter {
 
         let txn = Transaction::new(&self.table);
         // Only generate new snapshot id when first commit.
-        let snapshot_id = match snapshot_id {
-            Some(previous_snapshot_id) => previous_snapshot_id,
-            None => txn.generate_unique_snapshot_id(),
-        };
-        if self.is_exactly_once && is_first_commit {
+        let snapshot_id = txn.generate_unique_snapshot_id();
+        if self.is_exactly_once {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
             for each_parallelism_write_result in write_results.clone() {
@@ -1758,6 +1726,12 @@ impl IcebergSinkCommitter {
         pre_commit_metadata: Vec<u8>,
         snapshot_id: i64,
     ) -> Result<()> {
+        let mut on_conflict = OnConflict::columns([
+            exactly_once_iceberg_sink::Column::SinkId,
+            exactly_once_iceberg_sink::Column::EndEpoch,
+        ]);
+        on_conflict.update_column(exactly_once_iceberg_sink::Column::SnapshotId);
+
         let m = exactly_once_iceberg_sink::ActiveModel {
             sink_id: Set(self.sink_id as i32),
             end_epoch: Set(end_epoch.try_into().unwrap()),
@@ -1766,7 +1740,11 @@ impl IcebergSinkCommitter {
             committed: Set(false),
             snapshot_id: Set(snapshot_id),
         };
-        match exactly_once_iceberg_sink::Entity::insert(m).exec(&db).await {
+        match exactly_once_iceberg_sink::Entity::insert(m)
+            .on_conflict(on_conflict)
+            .exec(&db)
+            .await
+        {
             Ok(_) => Ok(()),
             Err(e) => {
                 tracing::error!("Error inserting into system table: {:?}", e.as_report());
