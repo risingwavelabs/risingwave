@@ -2274,6 +2274,7 @@ mod test {
                 rest_signing_name: None,
                 rest_signing_region: None,
                 rest_sigv4_enabled: None,
+                hosted_catalog: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

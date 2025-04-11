@@ -321,7 +321,7 @@ impl Connection for IcebergConnection {
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
-            hosted_catalog: self.hosted_catalog.clone(),
+            hosted_catalog: self.hosted_catalog,
         };
 
         let mut java_map = HashMap::new();
