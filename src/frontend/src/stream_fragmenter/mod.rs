@@ -25,6 +25,7 @@ use std::rc::Rc;
 
 use educe::Educe;
 use risingwave_common::catalog::TableId;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode, StreamContext,
@@ -136,15 +137,16 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
 
     // Set parallelism and vnode count.
     {
-        let config = ctx.session_ctx().config();
+        let config = ctx.session_ctx();
 
-        fragment_graph.parallelism =
-            config
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
-        fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
+        fragment_graph.parallelism = config
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_parallelism)
+            .map(|parallelism| Parallelism {
+                parallelism: parallelism.get(),
+            });
+        fragment_graph.max_parallelism = config
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_max_parallelism)
+            as _;
     }
 
     // Set timezone.

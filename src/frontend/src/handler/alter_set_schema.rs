@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::ddl_service::alter_set_schema_request::Object;
 use risingwave_sqlparser::ast::{ObjectName, OperateFunctionArg};
 
@@ -38,7 +39,7 @@ pub async fn handle_alter_set_schema(
     let db_name = &session.database();
     let (schema_name, real_obj_name) =
         Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 

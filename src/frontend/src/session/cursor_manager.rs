@@ -29,7 +29,7 @@ use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::BoxedError;
-use risingwave_common::session_config::QueryMode;
+use risingwave_common::session_config::{QueryMode, RuntimeParameters};
 use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockVersionId;
@@ -544,7 +544,9 @@ impl SubscriptionCursor {
                     init_query_timer,
                 } => {
                     let session_data = StaticSessionData {
-                        timezone: handler_args.session.config().timezone(),
+                        timezone: handler_args
+                            .session
+                            .running_sql_runtime_parameters(RuntimeParameters::timezone),
                     };
                     let from_snapshot = *from_snapshot;
                     let rw_timestamp = *rw_timestamp;
@@ -879,7 +881,10 @@ impl SubscriptionCursor {
                 }
             })
             .collect::<Vec<_>>();
-        let max_split_range_gap = context.session_ctx().config().max_split_range_gap() as u64;
+        let max_split_range_gap = context
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::max_split_range_gap)
+            as u64;
         let pks = table_catalog.pk();
         let pks = pks
             .iter()
@@ -991,14 +996,15 @@ impl SubscriptionCursor {
             out_names,
         );
         let schema = plan_root.schema().clone();
-        let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
-            QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
-            QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
-            QueryMode::Distributed => (
-                plan_root.gen_batch_distributed_plan()?,
-                QueryMode::Distributed,
-            ),
-        };
+        let (batch_log_seq_scan, query_mode) =
+            match session.running_sql_runtime_parameters(RuntimeParameters::query_mode) {
+                QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
+                QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
+                QueryMode::Distributed => (
+                    plan_root.gen_batch_distributed_plan()?,
+                    QueryMode::Distributed,
+                ),
+            };
         Ok(BatchQueryPlanResult {
             plan: batch_log_seq_scan,
             query_mode,

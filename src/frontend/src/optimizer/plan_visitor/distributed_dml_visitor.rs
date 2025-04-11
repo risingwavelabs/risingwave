@@ -14,6 +14,7 @@
 
 use std::rc::Rc;
 
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_connector::source::ConnectorProperties;
 
 use super::{DefaultBehavior, Merge};
@@ -30,8 +31,7 @@ impl DistributedDmlVisitor {
         if plan
             .ctx()
             .session_ctx()
-            .config()
-            .batch_enable_distributed_dml()
+            .running_sql_runtime_parameters(RuntimeParameters::batch_enable_distributed_dml)
         {
             return true;
         }

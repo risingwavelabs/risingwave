@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
@@ -951,8 +952,7 @@ impl LogicalJoin {
             .base
             .ctx()
             .session_ctx()
-            .config()
-            .streaming_force_filter_inside_join();
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_force_filter_inside_join);
 
         let pull_filter = self.join_type() == JoinType::Inner
             && stream_hash_join.eq_join_predicate().has_non_eq()
@@ -1509,7 +1509,7 @@ impl ToBatch for LogicalJoin {
         logical_join.right = logical_join.right.to_batch()?;
 
         let ctx = self.base.ctx();
-        let config = ctx.session_ctx().config();
+        let session = ctx.session_ctx();
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
@@ -1518,7 +1518,7 @@ impl ToBatch for LogicalJoin {
                 ))
                 .into());
             }
-            if config.batch_enable_lookup_join() {
+            if session.running_sql_runtime_parameters(RuntimeParameters::batch_enable_lookup_join) {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),

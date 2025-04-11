@@ -32,6 +32,7 @@ use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -1035,8 +1036,7 @@ impl BatchPlanFragmenter {
             root.ctx().session_ctx().session_id(),
             root.ctx()
                 .session_ctx()
-                .config()
-                .batch_enable_distributed_dml(),
+                .running_sql_runtime_parameters(RuntimeParameters::batch_enable_distributed_dml),
         );
 
         self.visit_node(root, &mut builder, None)?;

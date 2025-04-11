@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_pb::ddl_service::TableJobType;
@@ -44,7 +45,7 @@ fn fetch_schema_info(
     let db_name = session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name.as_str(), table_name.clone())?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

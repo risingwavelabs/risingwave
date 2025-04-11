@@ -19,6 +19,7 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, max_column_id};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -103,7 +104,7 @@ pub fn fetch_source_catalog_with_db_schema_id(
     let db_name = &session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, name.clone())?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

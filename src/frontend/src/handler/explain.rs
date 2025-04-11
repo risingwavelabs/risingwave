@@ -16,6 +16,7 @@ use petgraph::dot::Dot;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{
     ExplainFormat, ExplainOptions, ExplainType, FetchCursorStatement, Statement,
@@ -52,6 +53,7 @@ async fn do_handle_explain(
     let session = handler_args.session.clone();
     if let Statement::Query(ref query) = stmt {
         session.set_running_sql_runtime_parameters(&query.settings)?;
+        tracing::debug!(?query.settings, "SETTINGS");
     }
     {
         let (plan, context) = match stmt {
@@ -224,8 +226,14 @@ async fn do_handle_explain(
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
-                                session.config().batch_parallelism().0,
-                                session.config().timezone().to_owned(),
+                                session
+                                    .running_sql_runtime_parameters(
+                                        RuntimeParameters::batch_parallelism,
+                                    )
+                                    .0,
+                                session
+                                    .running_sql_runtime_parameters(RuntimeParameters::timezone)
+                                    .to_owned(),
                                 plan.clone(),
                             )?);
                             batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {

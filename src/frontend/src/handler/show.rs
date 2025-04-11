@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
-use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
+use risingwave_common::session_config::{RuntimeParameters, SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::{DataType, Fields, Timestamptz};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -137,7 +137,7 @@ fn iter_schema_items<F, T>(
 where
     F: FnMut(&SchemaCatalog) -> Vec<T>,
 {
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
 
     schema_or_search_path(session, schema, &search_path)
         .into_iter()
@@ -721,7 +721,7 @@ pub fn handle_show_create_object(
     let database = session.database();
     let (schema_name, object_name) =
         Binder::resolve_schema_qualified_name(&database, name.clone())?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
     let user_reader = session.env().user_info_reader().read_guard();

@@ -29,6 +29,7 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::types::{
     DataType, Interval, ScalarRefImpl, Timestamptz, write_date_time_tz,
 };
@@ -85,7 +86,7 @@ where
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
-            timezone: session.config().timezone(),
+            timezone: session.running_sql_runtime_parameters(RuntimeParameters::timezone),
         };
         Self {
             chunk_stream,
@@ -307,7 +308,7 @@ pub fn get_table_catalog_by_table_name(
     let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

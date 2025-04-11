@@ -667,7 +667,9 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
-    /// Runtime parameters specific to current running SQL.
+    /// Runtime parameters specific to current running SQL query.
+    /// This field is reset each time a new SQL query is executed.
+    /// If no SETTINGS included in the SQL query, the field will be the same as `config_map`.
     running_sql_runtime_parameters: ArcSwap<RwLock<RuntimeParameters>>,
 
     /// Channel sender for frontend handler to send notices.
@@ -860,6 +862,9 @@ impl SessionImpl {
         Arc::clone(&self.config_map)
     }
 
+    /// Returns the runtime parameters of current session.
+    ///
+    /// In most cases, you should call `running_sql_runtime_parameters` instead, as it may have overwritten certain parameters for the currently running SQL.
     pub fn config(&self) -> RwLockReadGuard<'_, SessionConfig> {
         self.config_map.read()
     }
@@ -943,7 +948,7 @@ impl SessionImpl {
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().search_path();
+            let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &self.user_name();
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -979,7 +984,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, secret_name) = {
             let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().search_path();
+            let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &self.user_name();
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -1000,7 +1005,7 @@ impl SessionImpl {
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().search_path();
+            let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &self.user_name();
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -1060,7 +1065,7 @@ impl SessionImpl {
     ) -> Result<(DatabaseId, SchemaId)> {
         let db_name = &self.database();
 
-        let search_path = self.config().search_path();
+        let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
         let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1086,7 +1091,7 @@ impl SessionImpl {
         connection_name: &str,
     ) -> Result<Arc<ConnectionCatalog>> {
         let db_name = &self.database();
-        let search_path = self.config().search_path();
+        let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
         let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1130,7 +1135,7 @@ impl SessionImpl {
         subscription_name: &str,
     ) -> Result<Arc<SubscriptionCatalog>> {
         let db_name = &self.database();
-        let search_path = self.config().search_path();
+        let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
         let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1177,7 +1182,7 @@ impl SessionImpl {
         secret_name: &str,
     ) -> Result<Arc<SecretCatalog>> {
         let db_name = &self.database();
-        let search_path = self.config().search_path();
+        let search_path = self.running_sql_runtime_parameters(RuntimeParameters::search_path);
         let user_name = &self.user_name();
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1270,7 +1275,7 @@ impl SessionImpl {
     }
 
     pub fn is_barrier_read(&self) -> bool {
-        match self.config().visibility_mode() {
+        match self.running_sql_runtime_parameters(RuntimeParameters::visibility_mode) {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
@@ -1278,10 +1283,12 @@ impl SessionImpl {
     }
 
     pub fn statement_timeout(&self) -> Duration {
-        if self.config().statement_timeout() == 0 {
+        if self.running_sql_runtime_parameters(RuntimeParameters::statement_timeout) == 0 {
             Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
         } else {
-            Duration::from_secs(self.config().statement_timeout() as u64)
+            Duration::from_secs(
+                self.running_sql_runtime_parameters(RuntimeParameters::statement_timeout) as u64,
+            )
         }
     }
 
@@ -1307,7 +1314,7 @@ impl SessionImpl {
     }
 
     pub async fn check_cluster_limits(&self) -> Result<()> {
-        if self.config().bypass_cluster_limits() {
+        if self.running_sql_runtime_parameters(RuntimeParameters::bypass_cluster_limits) {
             return Ok(());
         }
 
@@ -1380,6 +1387,13 @@ DETAILS:
         self.running_sql_runtime_parameters
             .store(Arc::new(RwLock::new(new_runtime_parameters)));
         Ok(())
+    }
+
+    pub fn running_sql_runtime_parameters<F, T>(&self, getter: F) -> T
+    where
+        F: Fn(&RuntimeParameters) -> T,
+    {
+        getter(&self.running_sql_runtime_parameters.load().read())
     }
 }
 
@@ -1728,8 +1742,9 @@ impl Session for SessionImpl {
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
         // In transaction.
         if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
-            let idle_in_transaction_session_timeout =
-                self.config().idle_in_transaction_session_timeout() as u128;
+            let idle_in_transaction_session_timeout = self.running_sql_runtime_parameters(
+                RuntimeParameters::idle_in_transaction_session_timeout,
+            ) as u128;
             // Idle transaction timeout has been enabled.
             if idle_in_transaction_session_timeout != 0 {
                 // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.

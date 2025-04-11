@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::max_column_id;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
@@ -39,7 +40,7 @@ pub async fn handle_alter_source_column(
     let db_name = &session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

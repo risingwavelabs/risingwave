@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::session_config::RuntimeParameters;
+
 use crate::handler::HandlerArgs;
 
 #[derive(Debug, Clone, Default)]
@@ -34,7 +36,9 @@ impl OverwriteOptions {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
-                let rate_limit = args.session.config().source_rate_limit();
+                let rate_limit = args
+                    .session
+                    .running_sql_runtime_parameters(RuntimeParameters::source_rate_limit);
                 if rate_limit < 0 {
                     None
                 } else {
@@ -47,7 +51,9 @@ impl OverwriteOptions {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
-                let rate_limit = args.session.config().backfill_rate_limit();
+                let rate_limit = args
+                    .session
+                    .running_sql_runtime_parameters(RuntimeParameters::backfill_rate_limit);
                 if rate_limit < 0 {
                     None
                 } else {
@@ -60,7 +66,9 @@ impl OverwriteOptions {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
-                let rate_limit = args.session.config().dml_rate_limit();
+                let rate_limit = args
+                    .session
+                    .running_sql_runtime_parameters(RuntimeParameters::dml_rate_limit);
                 if rate_limit < 0 {
                     None
                 } else {
@@ -73,7 +81,9 @@ impl OverwriteOptions {
                 // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
-                let rate_limit = args.session.config().sink_rate_limit();
+                let rate_limit = args
+                    .session
+                    .running_sql_runtime_parameters(RuntimeParameters::sink_rate_limit);
                 if rate_limit < 0 {
                     None
                 } else {

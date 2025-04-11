@@ -23,7 +23,7 @@ use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
-use risingwave_common::session_config::QueryMode;
+use risingwave_common::session_config::{QueryMode, RuntimeParameters};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
@@ -60,7 +60,9 @@ pub async fn handle_query(
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         // Time zone is used by Hummock time travel query.
         risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-            session.config().timezone().to_owned(),
+            session
+                .running_sql_runtime_parameters(RuntimeParameters::timezone)
+                .to_owned(),
             || gen_batch_plan_fragmenter(&session, plan_result),
         )?
     };
@@ -103,7 +105,9 @@ pub async fn handle_execute(
                 let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
                 // Time zone is used by Hummock time travel query.
                 risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-                    session.config().timezone().to_owned(),
+                    session
+                        .running_sql_runtime_parameters(RuntimeParameters::timezone)
+                        .to_owned(),
                     || gen_batch_plan_fragmenter(&session, plan_result),
                 )?
             };
@@ -280,11 +284,13 @@ fn gen_batch_query_plan(
         }
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
-        (false, false) => match session.config().query_mode() {
-            QueryMode::Auto => determine_query_mode(batch_plan.clone()),
-            QueryMode::Local => QueryMode::Local,
-            QueryMode::Distributed => QueryMode::Distributed,
-        },
+        (false, false) => {
+            match session.running_sql_runtime_parameters(RuntimeParameters::query_mode) {
+                QueryMode::Auto => determine_query_mode(batch_plan.clone()),
+                QueryMode::Local => QueryMode::Local,
+                QueryMode::Distributed => QueryMode::Distributed,
+            }
+        }
     };
 
     let physical = match query_mode {
@@ -379,8 +385,12 @@ pub fn gen_batch_plan_fragmenter(
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
-        session.config().batch_parallelism().0,
-        session.config().timezone().to_owned(),
+        session
+            .running_sql_runtime_parameters(RuntimeParameters::batch_parallelism)
+            .0,
+        session
+            .running_sql_runtime_parameters(RuntimeParameters::timezone)
+            .to_owned(),
         plan,
     )?;
 
@@ -483,7 +493,9 @@ async fn execute(
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
         // Implicitly flush the writes.
-        if session.config().implicit_flush() && stmt_type.is_dml() {
+        if session.running_sql_runtime_parameters(RuntimeParameters::implicit_flush)
+            && stmt_type.is_dml()
+        {
             do_flush(&session).await?;
         }
 

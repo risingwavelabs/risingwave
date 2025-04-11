@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -49,16 +50,12 @@ impl StreamSyncLogStore {
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        let pause_duration_ms = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_sync_log_store_pause_duration_ms();
-        let buffer_size = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_sync_log_store_buffer_size();
+        let pause_duration_ms = input.ctx().session_ctx().running_sql_runtime_parameters(
+            RuntimeParameters::streaming_sync_log_store_pause_duration_ms,
+        );
+        let buffer_size = input.ctx().session_ctx().running_sql_runtime_parameters(
+            RuntimeParameters::streaming_sync_log_store_buffer_size,
+        );
         Self {
             base,
             input,

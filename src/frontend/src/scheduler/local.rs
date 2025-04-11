@@ -31,6 +31,7 @@ use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
@@ -145,9 +146,15 @@ impl LocalQueryExecution {
         let user_info_reader = self.front_env.user_info_reader().clone();
         let auth_context = self.session.auth_context().clone();
         let db_name = self.session.database();
-        let search_path = self.session.config().search_path();
-        let time_zone = self.session.config().timezone();
-        let strict_mode = self.session.config().batch_expr_strict_mode();
+        let search_path = self
+            .session
+            .running_sql_runtime_parameters(RuntimeParameters::search_path);
+        let time_zone = self
+            .session
+            .running_sql_runtime_parameters(RuntimeParameters::timezone);
+        let strict_mode = self
+            .session
+            .running_sql_runtime_parameters(RuntimeParameters::batch_expr_strict_mode);
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
 

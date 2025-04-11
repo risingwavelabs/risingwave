@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::session_config::{SearchPath, SessionConfig};
+use risingwave_common::session_config::{RuntimeParameters, SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement};
@@ -343,7 +343,7 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             session_config: session.shared_config(),
-            search_path: session.config().search_path(),
+            search_path: session.running_sql_runtime_parameters(RuntimeParameters::search_path),
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),

@@ -22,6 +22,7 @@ use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, CreateType};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
@@ -346,7 +347,10 @@ impl StreamSink {
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let create_type = if input.ctx().session_ctx().config().background_ddl()
+        let create_type = if input
+            .ctx()
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::background_ddl)
             && plan_can_use_background_ddl(&input)
         {
             CreateType::Background
@@ -394,10 +398,14 @@ impl StreamSink {
                         } else {
                             SinkType::set_default_commit_checkpoint_interval(
                                 &mut sink_desc,
-                                &input.ctx().session_ctx().config().sink_decouple(),
+                                &input.ctx().session_ctx().running_sql_runtime_parameters(
+                                    RuntimeParameters::sink_decouple,
+                                ),
                             )?;
                             SinkType::is_sink_decouple(
-                                &input.ctx().session_ctx().config().sink_decouple(),
+                                &input.ctx().session_ctx().running_sql_runtime_parameters(
+                                    RuntimeParameters::sink_decouple,
+                                ),
                             )
                         }
                     },

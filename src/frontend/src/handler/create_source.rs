@@ -114,6 +114,7 @@ use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SC
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
+use risingwave_common::session_config::RuntimeParameters;
 
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
@@ -184,7 +185,8 @@ impl CreateSourceType {
                 .streaming_config()
                 .developer
                 .enable_shared_source
-            && session.config().streaming_use_shared_source()
+            && session
+                .running_sql_runtime_parameters(RuntimeParameters::streaming_use_shared_source)
         {
             CreateSourceType::SharedNonCdc
         } else {
@@ -757,8 +759,9 @@ pub fn bind_connector_props(
             CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
             handler_args
                 .session
-                .config()
-                .cdc_source_wait_streaming_start_timeout()
+                .running_sql_runtime_parameters(
+                    RuntimeParameters::cdc_source_wait_streaming_start_timeout,
+                )
                 .to_string(),
         );
     }
