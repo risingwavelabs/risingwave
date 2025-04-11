@@ -4985,9 +4985,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.15.3"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3b4e79fe76576b3970ada6437b30bee8cefe28685535290c3188d9b79b981e"
+checksum = "e468296687664fd1b54ad23d2e2c3a67feff95fe0964cd0404a94947d833c926"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5006,11 +5006,12 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.15.3"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e71666dc1f66539cc9a21668fa59d11dbf9e1fd7cb9048d3e2293e28080f5d0"
+checksum = "5881cf843ad7e388d8cf96c3e3850856450e91a0c21290d4b00e11f9a232ab3c"
 dependencies = [
  "ahash 0.8.11",
+ "bincode 1.3.3",
  "bytes",
  "cfg-if",
  "fastrace",
@@ -5020,6 +5021,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
+ "thiserror 2.0.3",
  "tokio",
 ]
 
@@ -5034,9 +5036,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.15.3"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e9332460864db122775ef95b0603562288674daad7a8df0add81adaca7e5e09"
+checksum = "c62526e378ebdd393726a1ad85ccad379d10b49a32186371ec8efcee22349d75"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -5060,16 +5062,15 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.15.3"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfae1b6d15d65c014e72047939fcf937f964582c6561942e736fc5dec1fc8c3c"
+checksum = "5a47f9d6eb383f83f45495b6af7354c07d8e64a2789e14c018f9da0ad3c54eb1"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
  "anyhow",
  "array-util",
  "auto_enums",
- "bincode 1.3.3",
  "bytes",
  "clap",
  "equivalent",
@@ -7585,13 +7586,13 @@ dependencies = [
 
 [[package]]
 name = "mixtrics"
-version = "0.0.4"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "285f6f175bfc4a068c0aa66d1fc48b6f4af0193d9577f8a86fa3a80014be9321"
+checksum = "41434672bd2f5df1b8ed58e0cee0a7a1000bf8dd711cea5a5540afcf41f7d7fb"
 dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.1",
- "prometheus 0.13.4",
+ "prometheus",
 ]
 
 [[package]]
@@ -9515,21 +9516,6 @@ dependencies = [
 
 [[package]]
 name = "prometheus"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
-dependencies = [
- "cfg-if",
- "fnv",
- "lazy_static",
- "memchr",
- "parking_lot 0.12.1",
- "protobuf 2.28.0",
- "thiserror 1.0.63",
-]
-
-[[package]]
-name = "prometheus"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
@@ -9541,7 +9527,7 @@ dependencies = [
  "memchr",
  "parking_lot 0.12.1",
  "procfs",
- "protobuf 3.7.2",
+ "protobuf",
  "thiserror 2.0.3",
 ]
 
@@ -9712,12 +9698,6 @@ checksum = "cc2f1e56baa61e93533aebc21af4d2134b70f66275e0fcdf3cbe43d77ff7e8fc"
 dependencies = [
  "prost 0.13.4",
 ]
-
-[[package]]
-name = "protobuf"
-version = "2.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "protobuf"
@@ -10562,7 +10542,7 @@ dependencies = [
  "panic-message",
  "parking_lot 0.12.1",
  "parquet 54.2.1",
- "prometheus 0.14.0",
+ "prometheus",
  "rand 0.9.0",
  "risingwave_common",
  "risingwave_connector",
@@ -10604,7 +10584,7 @@ dependencies = [
  "madsim-tokio",
  "mysql_async",
  "opendal 0.49.2",
- "prometheus 0.14.0",
+ "prometheus",
  "rand 0.9.0",
  "risingwave_batch",
  "risingwave_common",
@@ -10769,7 +10749,7 @@ dependencies = [
  "postgres-types",
  "pretty_assertions",
  "procfs",
- "prometheus 0.14.0",
+ "prometheus",
  "prost 0.13.4",
  "rand 0.9.0",
  "regex",
@@ -10874,7 +10854,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project-lite",
  "procfs",
- "prometheus 0.14.0",
+ "prometheus",
  "rw_iter_util",
  "rw_resource_util",
  "serde",
@@ -10905,7 +10885,7 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "pin-project-lite",
- "prometheus 0.13.4",
+ "prometheus",
  "rand 0.9.0",
  "risingwave_common",
  "risingwave_common_metrics",
@@ -10939,7 +10919,7 @@ dependencies = [
  "http 1.3.1",
  "madsim-tokio",
  "madsim-tonic",
- "prometheus 0.14.0",
+ "prometheus",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -11016,7 +10996,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "pprof",
- "prometheus 0.14.0",
+ "prometheus",
  "prost 0.13.4",
  "rand 0.9.0",
  "risingwave_batch",
@@ -11120,7 +11100,7 @@ dependencies = [
  "postgres-openssl",
  "pretty_assertions",
  "proc-macro2",
- "prometheus 0.14.0",
+ "prometheus",
  "prost 0.13.4",
  "prost-reflect",
  "prost-types 0.13.4",
@@ -11328,7 +11308,7 @@ dependencies = [
  "num-traits",
  "parse-display",
  "paste",
- "prometheus 0.14.0",
+ "prometheus",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_expr_macro",
@@ -11457,7 +11437,7 @@ dependencies = [
  "postgres-types",
  "pretty-xmlish",
  "pretty_assertions",
- "prometheus 0.14.0",
+ "prometheus",
  "prost 0.13.4",
  "quick-xml 0.37.1",
  "rand 0.9.0",
@@ -11684,7 +11664,7 @@ dependencies = [
  "num-traits",
  "otlp-embedded",
  "parking_lot 0.12.1",
- "prometheus 0.14.0",
+ "prometheus",
  "prometheus-http-query",
  "prost 0.13.4",
  "rand 0.9.0",
@@ -11844,7 +11824,7 @@ dependencies = [
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal 0.49.2",
- "prometheus 0.14.0",
+ "prometheus",
  "reqwest 0.12.4",
  "risingwave_common",
  "risingwave_jni_core",
@@ -12131,7 +12111,7 @@ dependencies = [
  "num-integer",
  "parking_lot 0.12.1",
  "procfs",
- "prometheus 0.14.0",
+ "prometheus",
  "prost 0.13.4",
  "rand 0.9.0",
  "risingwave_backup",
@@ -12202,7 +12182,7 @@ dependencies = [
  "pin-project",
  "prehash",
  "pretty_assertions",
- "prometheus 0.14.0",
+ "prometheus",
  "prost 0.13.4",
  "rand 0.9.0",
  "risingwave_common",
