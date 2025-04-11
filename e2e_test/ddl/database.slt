@@ -75,3 +75,20 @@ default
 
 statement ok
 drop database db_with_keyword_default_resource_group;
+
+statement ok
+alter system set license_key to '';
+
+statement error
+create database test with resource_group = 'test';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  feature ResourceGroup is only available for tier Paid and above, while the current tier is Free
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+
+statement ok
+alter system set license_key to default;

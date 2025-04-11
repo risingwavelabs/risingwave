@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
-use rw_diagnose_tools::await_tree::TreeView;
+use rw_diagnose_tools::await_tree::AnalyzeSummary;
 
 use crate::CtlContext;
 
@@ -73,14 +72,16 @@ pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> 
 }
 
 pub async fn bottleneck_detect(context: &CtlContext, path: Option<String>) -> anyhow::Result<()> {
-    if let Some(path) = path {
-        rw_diagnose_tools::await_tree::bottleneck_detect_from_file(path)
+    let summary = if let Some(path) = path {
+        rw_diagnose_tools::await_tree::bottleneck_detect_from_file(&path)?
     } else {
-        bottleneck_detect_real_time(context).await
-    }
+        bottleneck_detect_real_time(context).await?
+    };
+    println!("{}", summary);
+    Ok(())
 }
 
-async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()> {
+async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<AnalyzeSummary> {
     let meta_client = context.meta_client().await?;
 
     let compute_nodes = meta_client
@@ -91,24 +92,12 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<()>
     // request for json actor traces
     let req = StackTraceRequest::default();
 
-    let mut bottleneck_actors_found = false;
+    let mut summary = AnalyzeSummary::new();
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
         let response = client.stack_trace(req).await?;
-        for (actor_id, trace) in response.actor_traces {
-            let tree: TreeView =
-                serde_json::from_str(&trace).context("Failed to parse JSON actor trace")?;
-            if tree.is_bottleneck() {
-                bottleneck_actors_found = true;
-                println!(">> Actor {}", actor_id);
-                println!("{}", tree);
-            }
-        }
+        let partial_summary = AnalyzeSummary::from_traces(&response.actor_traces)?;
+        summary.merge_other(&partial_summary);
     }
-
-    if !bottleneck_actors_found {
-        println!("No bottleneck actors detected.");
-    }
-
-    Ok(())
+    Ok(summary)
 }
