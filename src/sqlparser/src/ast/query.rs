@@ -41,6 +41,7 @@ pub struct Query {
     /// `ROW` and `ROWS` as well as `FIRST` and `NEXT` are noise words that don't influence the
     /// effect of the clause. They are provided for ANSI compatibility.
     pub fetch: Option<Fetch>,
+    pub settings: Option<Vec<(Ident, SetVariableValue)>>,
 }
 
 impl Query {
@@ -54,6 +55,7 @@ impl Query {
                 limit: None,
                 offset: None,
                 fetch: None,
+                settings: None,
             } if order_by.is_empty() => Some(values),
             _ => None,
         }

@@ -240,6 +240,7 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
         limit: None,
         offset: None,
         fetch: None,
+        settings: None,
     }
 }
 

@@ -363,6 +363,8 @@ pub struct SessionConfig {
     streaming_sync_log_store_buffer_size: usize,
 }
 
+pub type RuntimeParameters = SessionConfig;
+
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
     if val.is_empty() {
         return Ok(());

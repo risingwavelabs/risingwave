@@ -170,6 +170,7 @@ impl Binder {
             limit,
             offset,
             fetch,
+            settings: _,
         }: Query,
     ) -> Result<BoundQuery> {
         let mut with_ties = false;
@@ -431,6 +432,7 @@ impl Binder {
             limit,
             offset,
             fetch,
+            settings: _,
         } = query;
 
         /// the input clause should not be supported.

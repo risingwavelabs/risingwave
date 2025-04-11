@@ -472,6 +472,7 @@ define_keywords!(
     SESSION_USER,
     SET,
     SETS,
+    SETTINGS,
     SHOW,
     SIMILAR,
     SINCE,

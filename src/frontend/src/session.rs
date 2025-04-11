@@ -20,6 +20,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use either::Either;
 use itertools::Itertools;
@@ -51,7 +52,9 @@ use risingwave_common::config::{
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
+use risingwave_common::session_config::{
+    ConfigReporter, RuntimeParameters, SessionConfig, VisibilityMode,
+};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
@@ -75,7 +78,7 @@ use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{Ident, ObjectName, SetVariableValue, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
@@ -664,6 +667,8 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
+    /// Runtime parameters specific to current running SQL.
+    running_sql_runtime_parameters: ArcSwap<RwLock<RuntimeParameters>>,
 
     /// Channel sender for frontend handler to send notices.
     notice_tx: UnboundedSender<String>,
@@ -763,12 +768,14 @@ impl SessionImpl {
     ) -> Self {
         let cursor_metrics = env.cursor_metrics.clone();
         let (notice_tx, notice_rx) = mpsc::unbounded_channel();
-
+        let config_map = Arc::new(RwLock::new(session_config));
+        let running_sql_runtime_parameters = ArcSwap::new(config_map.clone());
         Self {
             env,
             auth_context: Arc::new(RwLock::new(auth_context)),
             user_authenticator,
-            config_map: Arc::new(RwLock::new(session_config)),
+            config_map,
+            running_sql_runtime_parameters,
             id,
             peer_addr,
             txn: Default::default(),
@@ -1351,6 +1358,27 @@ DETAILS:
                 }
             }
         }
+        Ok(())
+    }
+
+    pub fn set_running_sql_runtime_parameters(
+        &self,
+        settings: &Option<Vec<(Ident, SetVariableValue)>>,
+    ) -> Result<()> {
+        let Some(settings) = settings else {
+            // Restore to session config.
+            self.running_sql_runtime_parameters
+                .store(self.shared_config());
+            return Ok(());
+        };
+        // Duplicate config and apply SETTINGS.
+        // SETTINGS is infrequent so the occasional overhead of cloning config should be acceptable.
+        let mut new_runtime_parameters = self.config().clone();
+        for (k, v) in settings {
+            new_runtime_parameters.set(&k.to_string(), v.to_string(), &mut ())?;
+        }
+        self.running_sql_runtime_parameters
+            .store(Arc::new(RwLock::new(new_runtime_parameters)));
         Ok(())
     }
 }

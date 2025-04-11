@@ -4457,6 +4457,11 @@ impl Parser<'_> {
         } else {
             None
         };
+        let settings = if self.parse_keyword(Keyword::SETTINGS) {
+            Some(self.parse_comma_separated(Self::parse_settings)?)
+        } else {
+            None
+        };
 
         Ok(Query {
             with,
@@ -4465,6 +4470,7 @@ impl Parser<'_> {
             limit,
             offset,
             fetch,
+            settings,
         })
     }
 
@@ -5615,6 +5621,22 @@ impl Parser<'_> {
         }
     }
 
+    pub fn parse_settings(&mut self) -> ModalResult<(Ident, SetVariableValue)> {
+        let k = self.parse_identifier()?;
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after SETTINGS");
+        }
+        // SetVariableValue::List is not supported because its comma conflicts with those in SETTINGS.
+        let v = alt((
+            Keyword::DEFAULT.value(SetVariableValue::Default),
+            Self::ensure_parse_value
+                .map(SetVariableValueSingle::Literal)
+                .map(SetVariableValue::from),
+        ))
+        .parse_next(self)?;
+        Ok((k, v))
+    }
+
     /// Parse an OFFSET clause
     pub fn parse_offset(&mut self) -> ModalResult<String> {
         let value = self.parse_number_value()?;
@@ -5833,6 +5855,38 @@ mod tests {
             assert_eq!(
                 parser.parse_expr().unwrap(),
                 Expr::Value(Value::Number("-9223372036854775808".to_owned()))
+            )
+        });
+    }
+
+    #[test]
+    fn test_parse_settings() {
+        let query = "SELECT * FROM t ORDER BY c1 SETTINGS v1 to 1, v2='v',v3=0.5,v4=default";
+        run_parser_method(query, |parser| {
+            let settings = parser.parse_query().unwrap().settings.unwrap();
+            assert_eq!(
+                settings,
+                vec![
+                    (
+                        "v1".into(),
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "1".into()
+                        )))
+                    ),
+                    (
+                        "v2".into(),
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(
+                            Value::SingleQuotedString("v".into())
+                        ))
+                    ),
+                    (
+                        "v3".into(),
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "0.5".into()
+                        )))
+                    ),
+                    ("v4".into(), SetVariableValue::Default),
+                ]
             )
         });
     }
