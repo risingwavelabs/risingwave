@@ -246,7 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_top_n_executor() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge(), u64::MAX);
         {
             let schema = Schema {
                 fields: vec![
@@ -282,7 +282,7 @@ mod tests {
             ];
             let mem_ctx = MemoryContext::new(
                 Some(parent_mem.clone()),
-                LabelGuardedIntGauge::<4>::test_int_gauge(),
+                LabelGuardedIntGauge::test_int_gauge(),
             );
             let top_n_executor = (GroupTopNExecutorBuilder {
                 child: Box::new(mock_executor),
