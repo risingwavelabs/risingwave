@@ -1384,6 +1384,7 @@ DETAILS:
         for (k, v) in settings {
             new_runtime_parameters.set(&k.to_string(), v.to_string(), &mut ())?;
         }
+        tracing::debug!("{:#?}", new_runtime_parameters);
         self.running_sql_runtime_parameters
             .store(Arc::new(RwLock::new(new_runtime_parameters)));
         Ok(())

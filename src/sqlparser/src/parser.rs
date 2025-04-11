@@ -293,7 +293,9 @@ impl Parser<'_> {
                 Keyword::ANALYZE => Ok(self.parse_analyze()?),
                 Keyword::SELECT | Keyword::WITH | Keyword::VALUES => {
                     *self = checkpoint;
-                    Ok(Statement::Query(Box::new(self.parse_query()?)))
+                    let mut query = self.parse_query()?;
+                    query.settings = self.parse_settings()?;
+                    Ok(Statement::Query(Box::new(query)))
                 }
                 Keyword::DECLARE => Ok(self.parse_declare()?),
                 Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
@@ -4457,11 +4459,6 @@ impl Parser<'_> {
         } else {
             None
         };
-        let settings = if self.parse_keyword(Keyword::SETTINGS) {
-            Some(self.parse_comma_separated(Self::parse_settings)?)
-        } else {
-            None
-        };
 
         Ok(Query {
             with,
@@ -4470,8 +4467,17 @@ impl Parser<'_> {
             limit,
             offset,
             fetch,
-            settings,
+            settings: None,
         })
+    }
+
+    pub fn parse_settings(&mut self) -> ModalResult<Option<Vec<(Ident, SetVariableValue)>>> {
+        let settings = if self.parse_keyword(Keyword::SETTINGS) {
+            Some(self.parse_comma_separated(Self::parse_setting_item)?)
+        } else {
+            None
+        };
+        Ok(settings)
     }
 
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
@@ -5621,7 +5627,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_settings(&mut self) -> ModalResult<(Ident, SetVariableValue)> {
+    pub fn parse_setting_item(&mut self) -> ModalResult<(Ident, SetVariableValue)> {
         let k = self.parse_identifier()?;
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
             return self.expected("TO or = after SETTINGS");
@@ -5631,6 +5637,9 @@ impl Parser<'_> {
             Keyword::DEFAULT.value(SetVariableValue::Default),
             Self::ensure_parse_value
                 .map(SetVariableValueSingle::Literal)
+                .map(SetVariableValue::from),
+            Self::parse_identifier
+                .map(SetVariableValueSingle::Ident)
                 .map(SetVariableValue::from),
         ))
         .parse_next(self)?;
@@ -5861,9 +5870,12 @@ mod tests {
 
     #[test]
     fn test_parse_settings() {
-        let query = "SELECT * FROM t ORDER BY c1 SETTINGS v1 to 1, v2='v',v3=0.5,v4=default";
+        let query = "SELECT * FROM t SETTINGS v1 to 1, v2=v,v3=0.5,v4=default";
         run_parser_method(query, |parser| {
-            let settings = parser.parse_query().unwrap().settings.unwrap();
+            let Statement::Query(query) = parser.parse_statement().unwrap() else {
+                panic!("expect Statement::Query");
+            };
+            let settings = query.settings.unwrap();
             assert_eq!(
                 settings,
                 vec![
@@ -5875,9 +5887,7 @@ mod tests {
                     ),
                     (
                         "v2".into(),
-                        SetVariableValue::Single(SetVariableValueSingle::Literal(
-                            Value::SingleQuotedString("v".into())
-                        ))
+                        SetVariableValue::Single(SetVariableValueSingle::Ident("v".into()))
                     ),
                     (
                         "v3".into(),
