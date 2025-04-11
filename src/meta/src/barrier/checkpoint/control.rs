@@ -629,6 +629,7 @@ impl DatabaseCheckpointControl {
         create_mview_tracker: CreateMviewProgressTracker,
         state: BarrierWorkerState,
         committed_epoch: u64,
+        creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     ) -> Self {
         Self {
             database_id,
@@ -636,7 +637,7 @@ impl DatabaseCheckpointControl {
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
-            creating_streaming_job_controls: Default::default(),
+            creating_streaming_job_controls,
             create_mview_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
@@ -765,7 +766,7 @@ impl DatabaseCheckpointControl {
                     .creating_streaming_job_controls
                     .get_mut(&creating_job_id)
                     .expect("should exist")
-                    .collect(prev_epoch, worker_id as _, resp)?;
+                    .collect(resp);
                 if should_merge_to_upstream {
                     periodic_barriers.force_checkpoint_in_next_barrier();
                 }
