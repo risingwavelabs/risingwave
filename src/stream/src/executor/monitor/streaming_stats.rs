@@ -45,7 +45,7 @@ pub struct StreamingMetrics {
     pub level: MetricLevel,
 
     // Executor metrics (disabled by default)
-    pub executor_row_count: RelabeledGuardedIntCounterVec<3>,
+    pub executor_row_count: RelabeledGuardedIntCounterVec,
 
     // Profiling Metrics:
     // Aggregated per operator rather than per actor.
@@ -54,112 +54,112 @@ pub struct StreamingMetrics {
     pub mem_stream_node_output_blocking_duration_ms: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
-    actor_execution_time: LabelGuardedGaugeVec<1>,
-    actor_scheduled_duration: LabelGuardedGaugeVec<1>,
-    actor_scheduled_cnt: LabelGuardedIntGaugeVec<1>,
-    actor_fast_poll_duration: LabelGuardedGaugeVec<1>,
-    actor_fast_poll_cnt: LabelGuardedIntGaugeVec<1>,
-    actor_slow_poll_duration: LabelGuardedGaugeVec<1>,
-    actor_slow_poll_cnt: LabelGuardedIntGaugeVec<1>,
-    actor_poll_duration: LabelGuardedGaugeVec<1>,
-    actor_poll_cnt: LabelGuardedIntGaugeVec<1>,
-    actor_idle_duration: LabelGuardedGaugeVec<1>,
-    actor_idle_cnt: LabelGuardedIntGaugeVec<1>,
+    actor_execution_time: LabelGuardedGaugeVec,
+    actor_scheduled_duration: LabelGuardedGaugeVec,
+    actor_scheduled_cnt: LabelGuardedIntGaugeVec,
+    actor_fast_poll_duration: LabelGuardedGaugeVec,
+    actor_fast_poll_cnt: LabelGuardedIntGaugeVec,
+    actor_slow_poll_duration: LabelGuardedGaugeVec,
+    actor_slow_poll_cnt: LabelGuardedIntGaugeVec,
+    actor_poll_duration: LabelGuardedGaugeVec,
+    actor_poll_cnt: LabelGuardedIntGaugeVec,
+    actor_idle_duration: LabelGuardedGaugeVec,
+    actor_idle_cnt: LabelGuardedIntGaugeVec,
 
     // Streaming actor
-    pub actor_count: LabelGuardedIntGaugeVec<1>,
-    pub actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
-    pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
-    pub actor_current_epoch: RelabeledGuardedIntGaugeVec<2>,
+    pub actor_count: LabelGuardedIntGaugeVec,
+    pub actor_in_record_cnt: RelabeledGuardedIntCounterVec,
+    pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
+    pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
 
     // Source
-    pub source_output_row_count: LabelGuardedIntCounterVec<4>,
-    pub source_split_change_count: LabelGuardedIntCounterVec<4>,
-    pub source_backfill_row_count: LabelGuardedIntCounterVec<4>,
+    pub source_output_row_count: LabelGuardedIntCounterVec,
+    pub source_split_change_count: LabelGuardedIntCounterVec,
+    pub source_backfill_row_count: LabelGuardedIntCounterVec,
 
     // Sink
-    sink_input_row_count: LabelGuardedIntCounterVec<3>,
-    sink_input_bytes: LabelGuardedIntCounterVec<3>,
-    sink_chunk_buffer_size: LabelGuardedIntGaugeVec<3>,
+    sink_input_row_count: LabelGuardedIntCounterVec,
+    sink_input_bytes: LabelGuardedIntCounterVec,
+    sink_chunk_buffer_size: LabelGuardedIntGaugeVec,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
-    pub exchange_frag_recv_size: LabelGuardedIntCounterVec<2>,
+    pub exchange_frag_recv_size: LabelGuardedIntCounterVec,
 
     // Streaming Merge (We break out this metric from `barrier_align_duration` because
     // the alignment happens on different levels)
-    pub merge_barrier_align_duration: RelabeledGuardedHistogramVec<2>,
+    pub merge_barrier_align_duration: RelabeledGuardedHistogramVec,
 
     // Backpressure
-    pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec<3>,
-    actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
+    actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec,
 
     // Streaming Join
-    pub join_lookup_miss_count: LabelGuardedIntCounterVec<4>,
-    pub join_lookup_total_count: LabelGuardedIntCounterVec<4>,
-    pub join_insert_cache_miss_count: LabelGuardedIntCounterVec<4>,
-    pub join_actor_input_waiting_duration_ns: LabelGuardedIntCounterVec<2>,
-    pub join_match_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub join_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    pub join_matched_join_keys: RelabeledGuardedHistogramVec<3>,
+    pub join_lookup_miss_count: LabelGuardedIntCounterVec,
+    pub join_lookup_total_count: LabelGuardedIntCounterVec,
+    pub join_insert_cache_miss_count: LabelGuardedIntCounterVec,
+    pub join_actor_input_waiting_duration_ns: LabelGuardedIntCounterVec,
+    pub join_match_duration_ns: LabelGuardedIntCounterVec,
+    pub join_cached_entry_count: LabelGuardedIntGaugeVec,
+    pub join_matched_join_keys: RelabeledGuardedHistogramVec,
 
     // Streaming Join, Streaming Dynamic Filter and Streaming Union
-    pub barrier_align_duration: RelabeledGuardedIntCounterVec<4>,
+    pub barrier_align_duration: RelabeledGuardedIntCounterVec,
 
     // Streaming Aggregation
-    agg_lookup_miss_count: LabelGuardedIntCounterVec<3>,
-    agg_total_lookup_count: LabelGuardedIntCounterVec<3>,
-    agg_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    agg_chunk_lookup_miss_count: LabelGuardedIntCounterVec<3>,
-    agg_chunk_total_lookup_count: LabelGuardedIntCounterVec<3>,
-    agg_dirty_groups_count: LabelGuardedIntGaugeVec<3>,
-    agg_dirty_groups_heap_size: LabelGuardedIntGaugeVec<3>,
-    agg_distinct_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    agg_distinct_total_cache_count: LabelGuardedIntCounterVec<3>,
-    agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    agg_state_cache_lookup_count: LabelGuardedIntCounterVec<3>,
-    agg_state_cache_miss_count: LabelGuardedIntCounterVec<3>,
+    agg_lookup_miss_count: LabelGuardedIntCounterVec,
+    agg_total_lookup_count: LabelGuardedIntCounterVec,
+    agg_cached_entry_count: LabelGuardedIntGaugeVec,
+    agg_chunk_lookup_miss_count: LabelGuardedIntCounterVec,
+    agg_chunk_total_lookup_count: LabelGuardedIntCounterVec,
+    agg_dirty_groups_count: LabelGuardedIntGaugeVec,
+    agg_dirty_groups_heap_size: LabelGuardedIntGaugeVec,
+    agg_distinct_cache_miss_count: LabelGuardedIntCounterVec,
+    agg_distinct_total_cache_count: LabelGuardedIntCounterVec,
+    agg_distinct_cached_entry_count: LabelGuardedIntGaugeVec,
+    agg_state_cache_lookup_count: LabelGuardedIntCounterVec,
+    agg_state_cache_miss_count: LabelGuardedIntCounterVec,
 
     // Streaming TopN
-    group_top_n_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    group_top_n_total_query_cache_count: LabelGuardedIntCounterVec<3>,
-    group_top_n_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    group_top_n_cache_miss_count: LabelGuardedIntCounterVec,
+    group_top_n_total_query_cache_count: LabelGuardedIntCounterVec,
+    group_top_n_cached_entry_count: LabelGuardedIntGaugeVec,
     // TODO(rc): why not just use the above three?
-    group_top_n_appendonly_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    group_top_n_appendonly_total_query_cache_count: LabelGuardedIntCounterVec<3>,
-    group_top_n_appendonly_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    group_top_n_appendonly_cache_miss_count: LabelGuardedIntCounterVec,
+    group_top_n_appendonly_total_query_cache_count: LabelGuardedIntCounterVec,
+    group_top_n_appendonly_cached_entry_count: LabelGuardedIntGaugeVec,
 
     // Lookup executor
-    lookup_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    lookup_total_query_cache_count: LabelGuardedIntCounterVec<3>,
-    lookup_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    lookup_cache_miss_count: LabelGuardedIntCounterVec,
+    lookup_total_query_cache_count: LabelGuardedIntCounterVec,
+    lookup_cached_entry_count: LabelGuardedIntGaugeVec,
 
     // temporal join
-    temporal_join_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    temporal_join_total_query_cache_count: LabelGuardedIntCounterVec<3>,
-    temporal_join_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    temporal_join_cache_miss_count: LabelGuardedIntCounterVec,
+    temporal_join_total_query_cache_count: LabelGuardedIntCounterVec,
+    temporal_join_cached_entry_count: LabelGuardedIntGaugeVec,
 
     // Backfill
-    backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
-    backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
+    backfill_snapshot_read_row_count: LabelGuardedIntCounterVec,
+    backfill_upstream_output_row_count: LabelGuardedIntCounterVec,
 
     // CDC Backfill
-    cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
-    cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
+    cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounterVec,
+    cdc_backfill_upstream_output_row_count: LabelGuardedIntCounterVec,
 
     // Snapshot Backfill
-    pub(crate) snapshot_backfill_consume_row_count: LabelGuardedIntCounterVec<3>,
+    pub(crate) snapshot_backfill_consume_row_count: LabelGuardedIntCounterVec,
 
     // Over Window
-    over_window_cached_entry_count: LabelGuardedIntGaugeVec<3>,
-    over_window_cache_lookup_count: LabelGuardedIntCounterVec<3>,
-    over_window_cache_miss_count: LabelGuardedIntCounterVec<3>,
-    over_window_range_cache_entry_count: LabelGuardedIntGaugeVec<3>,
-    over_window_range_cache_lookup_count: LabelGuardedIntCounterVec<3>,
-    over_window_range_cache_left_miss_count: LabelGuardedIntCounterVec<3>,
-    over_window_range_cache_right_miss_count: LabelGuardedIntCounterVec<3>,
-    over_window_accessed_entry_count: LabelGuardedIntCounterVec<3>,
-    over_window_compute_count: LabelGuardedIntCounterVec<3>,
-    over_window_same_output_count: LabelGuardedIntCounterVec<3>,
+    over_window_cached_entry_count: LabelGuardedIntGaugeVec,
+    over_window_cache_lookup_count: LabelGuardedIntCounterVec,
+    over_window_cache_miss_count: LabelGuardedIntCounterVec,
+    over_window_range_cache_entry_count: LabelGuardedIntGaugeVec,
+    over_window_range_cache_lookup_count: LabelGuardedIntCounterVec,
+    over_window_range_cache_left_miss_count: LabelGuardedIntCounterVec,
+    over_window_range_cache_right_miss_count: LabelGuardedIntCounterVec,
+    over_window_accessed_entry_count: LabelGuardedIntCounterVec,
+    over_window_compute_count: LabelGuardedIntCounterVec,
+    over_window_same_output_count: LabelGuardedIntCounterVec,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -171,28 +171,28 @@ pub struct StreamingMetrics {
     /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
-    pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
-    pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
-    pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<4>,
-    pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<4>,
-    pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<5>,
-    pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<5>,
-    pub kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<4>,
-    pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
-    pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
-    pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
+    pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec,
+    pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec,
+    pub kv_log_store_rewind_count: LabelGuardedIntCounterVec,
+    pub kv_log_store_rewind_delay: LabelGuardedHistogramVec,
+    pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec,
+    pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec,
+    pub kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec,
+    pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec,
+    pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
+    pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
 
-    pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec<5>,
-    pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec<5>,
-    pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_state: LabelGuardedIntCounterVec<5>,
-    pub sync_kv_log_store_wait_next_poll_ns: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_storage_write_count: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_storage_write_size: LabelGuardedIntCounterVec<4>,
-    pub sync_kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec<4>,
-    pub sync_kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec<4>,
-    pub sync_kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec<4>,
-    pub sync_kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec<4>,
+    pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_state: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_wait_next_poll_ns: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_storage_write_count: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_storage_write_size: LabelGuardedIntCounterVec,
+    pub sync_kv_log_store_buffer_unconsumed_item_count: LabelGuardedIntGaugeVec,
+    pub sync_kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec,
+    pub sync_kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
+    pub sync_kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
 
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
@@ -205,13 +205,13 @@ pub struct StreamingMetrics {
     pub jemalloc_metadata_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
-    pub stream_memory_usage: RelabeledGuardedIntGaugeVec<3>,
+    pub stream_memory_usage: RelabeledGuardedIntGaugeVec,
 
     // Materialized view
-    materialize_cache_hit_count: RelabeledGuardedIntCounterVec<3>,
-    materialize_cache_total_count: RelabeledGuardedIntCounterVec<3>,
-    materialize_input_row_count: RelabeledGuardedIntCounterVec<3>,
-    pub materialize_current_epoch: RelabeledGuardedIntGaugeVec<3>,
+    materialize_cache_hit_count: RelabeledGuardedIntCounterVec,
+    materialize_cache_total_count: RelabeledGuardedIntCounterVec,
+    materialize_input_row_count: RelabeledGuardedIntCounterVec,
+    pub materialize_current_epoch: RelabeledGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -1661,93 +1661,93 @@ impl StreamingMetrics {
 }
 
 pub(crate) struct ActorInputMetrics {
-    pub(crate) actor_in_record_cnt: LabelGuardedIntCounter<3>,
-    pub(crate) actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+    pub(crate) actor_in_record_cnt: LabelGuardedIntCounter,
+    pub(crate) actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 /// Tokio metrics for actors
 pub struct ActorMetrics {
-    pub actor_execution_time: LabelGuardedGauge<1>,
-    pub actor_scheduled_duration: LabelGuardedGauge<1>,
-    pub actor_scheduled_cnt: LabelGuardedIntGauge<1>,
-    pub actor_fast_poll_duration: LabelGuardedGauge<1>,
-    pub actor_fast_poll_cnt: LabelGuardedIntGauge<1>,
-    pub actor_slow_poll_duration: LabelGuardedGauge<1>,
-    pub actor_slow_poll_cnt: LabelGuardedIntGauge<1>,
-    pub actor_poll_duration: LabelGuardedGauge<1>,
-    pub actor_poll_cnt: LabelGuardedIntGauge<1>,
-    pub actor_idle_duration: LabelGuardedGauge<1>,
-    pub actor_idle_cnt: LabelGuardedIntGauge<1>,
+    pub actor_execution_time: LabelGuardedGauge,
+    pub actor_scheduled_duration: LabelGuardedGauge,
+    pub actor_scheduled_cnt: LabelGuardedIntGauge,
+    pub actor_fast_poll_duration: LabelGuardedGauge,
+    pub actor_fast_poll_cnt: LabelGuardedIntGauge,
+    pub actor_slow_poll_duration: LabelGuardedGauge,
+    pub actor_slow_poll_cnt: LabelGuardedIntGauge,
+    pub actor_poll_duration: LabelGuardedGauge,
+    pub actor_poll_cnt: LabelGuardedIntGauge,
+    pub actor_idle_duration: LabelGuardedGauge,
+    pub actor_idle_cnt: LabelGuardedIntGauge,
 }
 
 pub struct SinkExecutorMetrics {
-    pub sink_input_row_count: LabelGuardedIntCounter<3>,
-    pub sink_input_bytes: LabelGuardedIntCounter<3>,
-    pub sink_chunk_buffer_size: LabelGuardedIntGauge<3>,
+    pub sink_input_row_count: LabelGuardedIntCounter,
+    pub sink_input_bytes: LabelGuardedIntCounter,
+    pub sink_chunk_buffer_size: LabelGuardedIntGauge,
 }
 
 pub struct MaterializeMetrics {
-    pub materialize_cache_hit_count: LabelGuardedIntCounter<3>,
-    pub materialize_cache_total_count: LabelGuardedIntCounter<3>,
-    pub materialize_input_row_count: LabelGuardedIntCounter<3>,
-    pub materialize_current_epoch: LabelGuardedIntGauge<3>,
+    pub materialize_cache_hit_count: LabelGuardedIntCounter,
+    pub materialize_cache_total_count: LabelGuardedIntCounter,
+    pub materialize_input_row_count: LabelGuardedIntCounter,
+    pub materialize_current_epoch: LabelGuardedIntGauge,
 }
 
 pub struct GroupTopNMetrics {
-    pub group_top_n_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub group_top_n_total_query_cache_count: LabelGuardedIntCounter<3>,
-    pub group_top_n_cached_entry_count: LabelGuardedIntGauge<3>,
+    pub group_top_n_cache_miss_count: LabelGuardedIntCounter,
+    pub group_top_n_total_query_cache_count: LabelGuardedIntCounter,
+    pub group_top_n_cached_entry_count: LabelGuardedIntGauge,
 }
 
 pub struct LookupExecutorMetrics {
-    pub lookup_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub lookup_total_query_cache_count: LabelGuardedIntCounter<3>,
-    pub lookup_cached_entry_count: LabelGuardedIntGauge<3>,
+    pub lookup_cache_miss_count: LabelGuardedIntCounter,
+    pub lookup_total_query_cache_count: LabelGuardedIntCounter,
+    pub lookup_cached_entry_count: LabelGuardedIntGauge,
 }
 
 pub struct HashAggMetrics {
-    pub agg_lookup_miss_count: LabelGuardedIntCounter<3>,
-    pub agg_total_lookup_count: LabelGuardedIntCounter<3>,
-    pub agg_cached_entry_count: LabelGuardedIntGauge<3>,
-    pub agg_chunk_lookup_miss_count: LabelGuardedIntCounter<3>,
-    pub agg_chunk_total_lookup_count: LabelGuardedIntCounter<3>,
-    pub agg_dirty_groups_count: LabelGuardedIntGauge<3>,
-    pub agg_dirty_groups_heap_size: LabelGuardedIntGauge<3>,
-    pub agg_state_cache_lookup_count: LabelGuardedIntCounter<3>,
-    pub agg_state_cache_miss_count: LabelGuardedIntCounter<3>,
+    pub agg_lookup_miss_count: LabelGuardedIntCounter,
+    pub agg_total_lookup_count: LabelGuardedIntCounter,
+    pub agg_cached_entry_count: LabelGuardedIntGauge,
+    pub agg_chunk_lookup_miss_count: LabelGuardedIntCounter,
+    pub agg_chunk_total_lookup_count: LabelGuardedIntCounter,
+    pub agg_dirty_groups_count: LabelGuardedIntGauge,
+    pub agg_dirty_groups_heap_size: LabelGuardedIntGauge,
+    pub agg_state_cache_lookup_count: LabelGuardedIntCounter,
+    pub agg_state_cache_miss_count: LabelGuardedIntCounter,
 }
 
 pub struct AggDistinctDedupMetrics {
-    pub agg_distinct_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub agg_distinct_total_cache_count: LabelGuardedIntCounter<3>,
-    pub agg_distinct_cached_entry_count: LabelGuardedIntGauge<3>,
+    pub agg_distinct_cache_miss_count: LabelGuardedIntCounter,
+    pub agg_distinct_total_cache_count: LabelGuardedIntCounter,
+    pub agg_distinct_cached_entry_count: LabelGuardedIntGauge,
 }
 
 pub struct TemporalJoinMetrics {
-    pub temporal_join_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub temporal_join_total_query_cache_count: LabelGuardedIntCounter<3>,
-    pub temporal_join_cached_entry_count: LabelGuardedIntGauge<3>,
+    pub temporal_join_cache_miss_count: LabelGuardedIntCounter,
+    pub temporal_join_total_query_cache_count: LabelGuardedIntCounter,
+    pub temporal_join_cached_entry_count: LabelGuardedIntGauge,
 }
 
 pub struct BackfillMetrics {
-    pub backfill_snapshot_read_row_count: LabelGuardedIntCounter<2>,
-    pub backfill_upstream_output_row_count: LabelGuardedIntCounter<2>,
+    pub backfill_snapshot_read_row_count: LabelGuardedIntCounter,
+    pub backfill_upstream_output_row_count: LabelGuardedIntCounter,
 }
 
 pub struct CdcBackfillMetrics {
-    pub cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounter<2>,
-    pub cdc_backfill_upstream_output_row_count: LabelGuardedIntCounter<2>,
+    pub cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounter,
+    pub cdc_backfill_upstream_output_row_count: LabelGuardedIntCounter,
 }
 
 pub struct OverWindowMetrics {
-    pub over_window_cached_entry_count: LabelGuardedIntGauge<3>,
-    pub over_window_cache_lookup_count: LabelGuardedIntCounter<3>,
-    pub over_window_cache_miss_count: LabelGuardedIntCounter<3>,
-    pub over_window_range_cache_entry_count: LabelGuardedIntGauge<3>,
-    pub over_window_range_cache_lookup_count: LabelGuardedIntCounter<3>,
-    pub over_window_range_cache_left_miss_count: LabelGuardedIntCounter<3>,
-    pub over_window_range_cache_right_miss_count: LabelGuardedIntCounter<3>,
-    pub over_window_accessed_entry_count: LabelGuardedIntCounter<3>,
-    pub over_window_compute_count: LabelGuardedIntCounter<3>,
-    pub over_window_same_output_count: LabelGuardedIntCounter<3>,
+    pub over_window_cached_entry_count: LabelGuardedIntGauge,
+    pub over_window_cache_lookup_count: LabelGuardedIntCounter,
+    pub over_window_cache_miss_count: LabelGuardedIntCounter,
+    pub over_window_range_cache_entry_count: LabelGuardedIntGauge,
+    pub over_window_range_cache_lookup_count: LabelGuardedIntCounter,
+    pub over_window_range_cache_left_miss_count: LabelGuardedIntCounter,
+    pub over_window_range_cache_right_miss_count: LabelGuardedIntCounter,
+    pub over_window_accessed_entry_count: LabelGuardedIntCounter,
+    pub over_window_compute_count: LabelGuardedIntCounter,
+    pub over_window_same_output_count: LabelGuardedIntCounter,
 }

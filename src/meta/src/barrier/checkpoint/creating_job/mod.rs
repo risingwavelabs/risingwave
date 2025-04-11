@@ -55,7 +55,7 @@ pub(crate) struct CreatingStreamingJobControl {
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
 
-    upstream_lag: LabelGuardedIntGauge<1>,
+    upstream_lag: LabelGuardedIntGauge,
 }
 
 impl CreatingStreamingJobControl {

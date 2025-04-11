@@ -58,8 +58,8 @@ pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub struct KvLogStoreReadMetrics {
-    pub storage_read_count: LabelGuardedIntCounter<5>,
-    pub storage_read_size: LabelGuardedIntCounter<5>,
+    pub storage_read_count: LabelGuardedIntCounter,
+    pub storage_read_size: LabelGuardedIntCounter,
 }
 
 impl KvLogStoreReadMetrics {
@@ -74,14 +74,14 @@ impl KvLogStoreReadMetrics {
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: LabelGuardedIntCounter<4>,
-    pub storage_write_size: LabelGuardedIntCounter<4>,
-    pub rewind_count: LabelGuardedIntCounter<4>,
-    pub rewind_delay: LabelGuardedHistogram<4>,
-    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
+    pub storage_write_count: LabelGuardedIntCounter,
+    pub storage_write_size: LabelGuardedIntCounter,
+    pub rewind_count: LabelGuardedIntCounter,
+    pub rewind_delay: LabelGuardedHistogram,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -128,18 +128,18 @@ impl KvLogStoreMetrics {
         let persistent_log_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
@@ -147,18 +147,18 @@ impl KvLogStoreMetrics {
         let flushed_buffer_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);

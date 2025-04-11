@@ -33,7 +33,7 @@ use risingwave_common_metrics::{
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
 
-static METRICS: LazyLock<LabelGuardedUintGaugeVec<1>> = LazyLock::new(|| {
+static METRICS: LazyLock<LabelGuardedUintGaugeVec> = LazyLock::new(|| {
     register_guarded_uint_gauge_vec_with_registry!(
         "backfill_rate_limit_bytes",
         "backfill rate limit bytes per second",
@@ -245,7 +245,7 @@ impl RateLimiterTrait for RateLimiter {
 /// A rate limiter that supports multiple rate limit policy, online policy switch and metrics support.
 pub struct MonitoredRateLimiter {
     inner: RateLimiter,
-    metric: LabelGuardedUintGauge<1>,
+    metric: LabelGuardedUintGauge,
     rate_limit: AtomicU64,
 }
 

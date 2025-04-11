@@ -52,7 +52,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl DispatcherWithMetrics {
@@ -86,7 +86,7 @@ struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
-    actor_out_record_cnt: LabelGuardedIntCounter<2>,
+    actor_out_record_cnt: LabelGuardedIntCounter,
 }
 
 impl DispatchExecutorMetrics {
@@ -96,8 +96,8 @@ impl DispatchExecutorMetrics {
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
                 .with_guarded_label_values(&[
-                    &self.actor_id_str,
-                    &self.fragment_id_str,
+                    self.actor_id_str.as_str(),
+                    self.fragment_id_str.as_str(),
                     dispatcher.dispatcher_id_str(),
                 ]),
             dispatcher,

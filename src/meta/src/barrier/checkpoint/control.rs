@@ -566,9 +566,9 @@ impl DatabaseCheckpointControlStatus {
 }
 
 struct DatabaseCheckpointControlMetrics {
-    barrier_latency: LabelGuardedHistogram<1>,
-    in_flight_barrier_nums: LabelGuardedIntGauge<1>,
-    all_barrier_nums: LabelGuardedIntGauge<1>,
+    barrier_latency: LabelGuardedHistogram,
+    in_flight_barrier_nums: LabelGuardedIntGauge,
+    all_barrier_nums: LabelGuardedIntGauge,
 }
 
 impl DatabaseCheckpointControlMetrics {

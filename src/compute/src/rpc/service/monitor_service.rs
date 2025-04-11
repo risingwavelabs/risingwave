@@ -314,12 +314,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
 
         fn collect<T: Collector>(m: &T) -> Vec<Metric> {
-            m.collect()
-                .into_iter()
-                .next()
-                .unwrap()
-                .take_metric()
-                .into_vec()
+            m.collect().into_iter().next().unwrap().take_metric()
         }
 
         // Must ensure the label exists and can be parsed into `T`
@@ -327,9 +322,9 @@ impl MonitorService for MonitorServiceImpl {
             metric
                 .get_label()
                 .iter()
-                .find(|lp| lp.get_name() == label)
+                .find(|lp| lp.name() == label)
                 .unwrap()
-                .get_value()
+                .value()
                 .parse::<T>()
                 .ok()
                 .unwrap()
@@ -343,7 +338,7 @@ impl MonitorService for MonitorServiceImpl {
             .iter()
             .map(|m| {
                 let fragment_id: u32 = get_label(m, "fragment_id");
-                let count = m.get_gauge().get_value() as u32;
+                let count = m.get_gauge().value() as u32;
                 (fragment_id, count)
             })
             .collect();
@@ -362,7 +357,7 @@ impl MonitorService for MonitorServiceImpl {
         let actor_current_epoch = collect(&metrics.actor_current_epoch);
         for m in &actor_current_epoch {
             let fragment_id: u32 = get_label(m, "fragment_id");
-            let epoch = m.get_gauge().get_value() as u64;
+            let epoch = m.get_gauge().value() as u64;
             if let Some(s) = fragment_stats.get_mut(&fragment_id) {
                 s.current_epoch = if s.current_epoch == 0 {
                     epoch
@@ -381,7 +376,7 @@ impl MonitorService for MonitorServiceImpl {
         let mview_current_epoch = collect(&metrics.materialize_current_epoch);
         for m in &mview_current_epoch {
             let table_id: u32 = get_label(m, "table_id");
-            let epoch = m.get_gauge().get_value() as u64;
+            let epoch = m.get_gauge().value() as u64;
             if let Some(s) = relation_stats.get_mut(&table_id) {
                 s.current_epoch = if s.current_epoch == 0 {
                     epoch
@@ -421,7 +416,7 @@ impl MonitorService for MonitorServiceImpl {
             } else {
                 1
             };
-            channel_stat.output_blocking_duration += metric.get_counter().get_value();
+            channel_stat.output_blocking_duration += metric.get_counter().value();
         }
 
         let actor_output_row_count = collect(&metrics.actor_out_record_cnt);
@@ -432,7 +427,7 @@ impl MonitorService for MonitorServiceImpl {
             let key_prefix = format!("{}_", fragment_id);
             let key_range_end = format!("{}`", fragment_id); // '`' is next to `_`
             for (_, s) in channel_stats.range_mut(key_prefix..key_range_end) {
-                s.send_row_count += metric.get_counter().get_value() as u64;
+                s.send_row_count += metric.get_counter().value() as u64;
             }
         }
 
@@ -443,7 +438,7 @@ impl MonitorService for MonitorServiceImpl {
 
             let key = format!("{}_{}", upstream_fragment_id, fragment_id);
             if let Some(s) = channel_stats.get_mut(&key) {
-                s.recv_row_count += metric.get_counter().get_value() as u64;
+                s.recv_row_count += metric.get_counter().value() as u64;
             }
         }
 

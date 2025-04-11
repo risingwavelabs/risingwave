@@ -111,26 +111,26 @@ pub mod metrics {
     #[derive(Clone)]
     pub struct SyncedKvLogStoreMetrics {
         // state of the log store
-        pub unclean_state: LabelGuardedIntCounter<5>,
-        pub clean_state: LabelGuardedIntCounter<5>,
-        pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
+        pub unclean_state: LabelGuardedIntCounter,
+        pub clean_state: LabelGuardedIntCounter,
+        pub wait_next_poll_ns: LabelGuardedIntCounter,
 
         // Write metrics
-        pub storage_write_count: LabelGuardedIntCounter<4>,
-        pub storage_write_size: LabelGuardedIntCounter<4>,
-        pub pause_duration_ns: LabelGuardedIntCounter<4>,
+        pub storage_write_count: LabelGuardedIntCounter,
+        pub storage_write_size: LabelGuardedIntCounter,
+        pub pause_duration_ns: LabelGuardedIntCounter,
 
         // Buffer metrics
-        pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
-        pub buffer_read_count: LabelGuardedIntCounter<5>,
-        pub buffer_read_size: LabelGuardedIntCounter<5>,
+        pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+        pub buffer_read_count: LabelGuardedIntCounter,
+        pub buffer_read_size: LabelGuardedIntCounter,
 
         // Read metrics
-        pub total_read_count: LabelGuardedIntCounter<5>,
-        pub total_read_size: LabelGuardedIntCounter<5>,
+        pub total_read_count: LabelGuardedIntCounter,
+        pub total_read_size: LabelGuardedIntCounter,
         pub persistent_log_read_metrics: KvLogStoreReadMetrics,
         pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
     }

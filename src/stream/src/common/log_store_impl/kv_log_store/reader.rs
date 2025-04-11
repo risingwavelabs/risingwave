@@ -83,8 +83,8 @@ use risingwave_storage::StateStoreIter;
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
     backoff_policy: RewindBackoffPolicy,
-    rewind_count: LabelGuardedIntCounter<4>,
-    rewind_delay: LabelGuardedHistogram<4>,
+    rewind_count: LabelGuardedIntCounter,
+    rewind_delay: LabelGuardedHistogram,
 }
 
 impl RewindDelay {
