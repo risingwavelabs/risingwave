@@ -469,6 +469,7 @@ mod tests {
             (TIME_TRAVEL_RETENTION_MS_KEY, "0"),
             (ADAPTIVE_PARALLELISM_STRATEGY_KEY, "Auto"),
             (PER_DATABASE_ISOLATION_KEY, "true"),
+            (ENFORCE_SECRET_ON_CLOUD_KEY, "false"),
             ("a_deprecated_param", "foo"),
         ];
 
