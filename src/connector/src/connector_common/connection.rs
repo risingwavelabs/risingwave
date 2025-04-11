@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::Context;
 use opendal::Operator;
 use opendal::services::{Gcs, S3};
+use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
@@ -33,6 +34,7 @@ use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
 use crate::deserialize_optional_bool_from_string;
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
@@ -56,6 +58,18 @@ pub struct KafkaConnection {
     pub kafka_private_link_common: KafkaPrivateLinkCommon,
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+}
+
+impl EnforceSecretOnCloud for KafkaConnection {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            KafkaConnectionProps::enforce_one(prop)?;
+            AwsAuthProps::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<()> {
@@ -191,6 +205,15 @@ pub struct IcebergConnection {
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+}
+
+impl EnforceSecretOnCloud for IcebergConnection {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "s3.access.key",
+        "s3.secret.key",
+        "gcs.credential",
+        "catalog.token",
+    };
 }
 
 #[async_trait]
@@ -333,6 +356,12 @@ impl Connection for ConfluentSchemaRegistryConnection {
     }
 }
 
+impl EnforceSecretOnCloud for ConfluentSchemaRegistryConnection {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "schema.registry.password",
+    };
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Hash, Eq)]
 pub struct ElasticsearchConnection(pub BTreeMap<String, String>);
 
@@ -346,4 +375,10 @@ impl Connection for ElasticsearchConnection {
         client.ping().await?;
         Ok(())
     }
+}
+
+impl EnforceSecretOnCloud for ElasticsearchConnection {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "elasticsearch.password",
+    };
 }
