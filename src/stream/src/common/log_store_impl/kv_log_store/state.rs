@@ -88,10 +88,6 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         self.epoch.expect("should have init")
     }
 
-    pub(crate) fn is_dirty(&self) -> bool {
-        self.state_store.is_dirty()
-    }
-
     pub(crate) fn start_writer(&mut self, record_vnode: bool) -> LogStoreStateWriter<'_, S> {
         let written_vnodes = if record_vnode {
             Some(BitmapBuilder::zeroed(self.serde.vnodes().len()))

@@ -61,7 +61,6 @@ pub(crate) enum WorkerId {
 pub trait LocalReplay: LocalReplayRead + ReplayWrite + Send + Sync {
     async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
-    fn is_dirty(&self) -> bool;
     async fn try_flush(&mut self) -> Result<()>;
     async fn flush(&mut self) -> Result<usize>;
 }
@@ -181,7 +180,6 @@ mock! {
     impl LocalReplay for LocalReplayInterface{
         async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
-        fn is_dirty(&self) -> bool;
         async fn flush(&mut self) -> Result<usize>;
         async fn try_flush(&mut self) -> Result<()>;
     }

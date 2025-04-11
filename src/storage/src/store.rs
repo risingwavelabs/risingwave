@@ -394,8 +394,6 @@ pub trait LocalStateStore: StateStoreGet + StaticSendSync {
 
     fn try_flush(&mut self) -> impl StorageFuture<'_, ()>;
 
-    fn is_dirty(&self) -> bool;
-
     /// Initializes the state store with given `epoch` pair.
     /// Typically we will use `epoch.curr` as the initialized epoch,
     /// Since state table will begin as empty.
