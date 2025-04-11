@@ -108,9 +108,9 @@ impl MetricsManager {
                 .body("should not specify both include and exclude".into())
                 .unwrap();
         } else if !include.is_empty() {
-            mf.retain(|fam| include.contains(fam.get_name()));
+            mf.retain(|fam| include.contains(fam.name()));
         } else if !exclude.is_empty() {
-            mf.retain(|fam| !exclude.contains(fam.get_name()));
+            mf.retain(|fam| !exclude.contains(fam.name()));
         }
 
         let encoder = TextEncoder::new();

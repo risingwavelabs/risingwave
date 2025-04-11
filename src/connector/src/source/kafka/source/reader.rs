@@ -247,8 +247,7 @@ impl KafkaSplitReader {
             )
         });
 
-        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge<3>> =
-            HashMap::new();
+        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
