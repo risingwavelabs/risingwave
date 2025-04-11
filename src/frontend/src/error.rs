@@ -262,3 +262,9 @@ impl From<BoxedError> for RwError {
         ErrorCode::Uncategorized(e).into()
     }
 }
+
+impl From<risingwave_sqlparser::parser::ParserError> for ErrorCode {
+    fn from(e: risingwave_sqlparser::parser::ParserError) -> Self {
+        ErrorCode::InvalidInputSyntax(e.to_string())
+    }
+}

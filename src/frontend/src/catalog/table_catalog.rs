@@ -15,7 +15,6 @@
 use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -511,11 +510,7 @@ impl TableCatalog {
     }
 
     fn create_sql_ast_from_persisted(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse definition sql")?
-            .into_iter()
-            .exactly_one()
-            .context("expecting exactly one statement in definition")?)
+        Ok(Parser::parse_exactly_one(&self.definition)?)
     }
 
     /// Get a reference to the table catalog's version.

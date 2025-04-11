@@ -14,6 +14,8 @@
 
 use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
 use risingwave_pb::catalog::PbView;
+use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::Parser;
 
 use super::{DatabaseId, OwnedByUserCatalog, SchemaId, ViewId};
 use crate::WithOptions;
@@ -64,6 +66,13 @@ impl ViewCatalog {
         } else {
             format!("CREATE VIEW {}.{} AS {}", schema, self.name, self.sql)
         }
+    }
+
+    /// Returns the parsed SQL definition when the view was created (`CREATE VIEW` not included).
+    ///
+    /// Returns error if it's invalid.
+    pub fn sql_ast(&self) -> crate::error::Result<Statement> {
+        Ok(Parser::parse_exactly_one(&self.sql)?)
     }
 
     /// Returns true if this view is a system view.

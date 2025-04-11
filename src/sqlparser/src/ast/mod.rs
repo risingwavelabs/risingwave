@@ -1461,6 +1461,8 @@ pub enum Statement {
     Describe {
         /// Table or Source name
         name: ObjectName,
+        /// Whether to describe the plan (`DESCRIBE PLAN (options) <name>`)
+        plan: Option<ExplainOptions>,
     },
     /// SHOW OBJECT COMMAND
     ShowObjects {
@@ -1700,8 +1702,11 @@ impl Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::Describe { name } => {
+            Statement::Describe { name, plan } => {
                 write!(f, "DESCRIBE {}", name)?;
+                if let Some(options) = plan {
+                    write!(f, " PLAN {}", options)?;
+                }
                 Ok(())
             }
             Statement::ShowObjects {
