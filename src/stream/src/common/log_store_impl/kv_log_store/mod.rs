@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
@@ -47,8 +48,10 @@ use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
-// TODO: unify with `risingwave_common::Epoch`
+/// If truncating on barrier, the `seq_id` is `None`.
+pub(crate) type LogStoreVnodeProgress = HashMap<VirtualNode, SeqId>;
 
+// TODO: unify with `risingwave_common::Epoch`
 pub(crate) type Epoch = u64;
 
 pub(crate) type SeqId = i32;

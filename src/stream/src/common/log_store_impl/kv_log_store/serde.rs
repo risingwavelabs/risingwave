@@ -1,3 +1,4 @@
+use std::mem;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -22,7 +23,7 @@ use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -45,8 +46,8 @@ use risingwave_storage::table::{SINGLETON_VNODE, compute_vnode};
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
-    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType,
-    SeqId,
+    Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, LogStoreVnodeProgress,
+    ReaderTruncationOffsetType, RowOpCodeType, SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -112,6 +113,7 @@ enum LogStoreOp {
         new_value: OwnedRow,
     },
     Barrier {
+        vnodes: Arc<Bitmap>,
         is_checkpoint: bool,
     },
 }
@@ -128,7 +130,10 @@ impl From<LogStoreRowOp> for LogStoreOp {
                 }
                 Self::Row { seq_id, op, row }
             }
-            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier { is_checkpoint },
+            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier {
+                is_checkpoint,
+                vnodes: Arc::new(Bitmap::ones(0)),
+            },
         }
     }
 }
@@ -521,9 +526,13 @@ enum StreamState {
     BarrierEmitted { prev_epoch: u64 },
 }
 
+#[expect(dead_code)]
 pub(crate) enum KvLogStoreItem {
     StreamChunk(StreamChunk),
-    Barrier { is_checkpoint: bool },
+    Barrier {
+        vnodes: Arc<Bitmap>,
+        is_checkpoint: bool,
+    },
 }
 
 type PeekableLogStoreItemStream<S> = Peekable<LogStoreItemStream<S>>;
@@ -585,11 +594,22 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     }
 
     #[try_stream(ok = (u64, KvLogStoreItem), error = anyhow::Error)]
-    async fn into_log_store_item_stream(mut self, chunk_size: usize) {
+    async fn into_log_store_item_stream(self, chunk_size: usize) {
+        #[for_await]
+        for next in self.into_vnode_log_store_item_stream(chunk_size) {
+            let (epoch, _progress, item) = next?;
+            yield (epoch, item)
+        }
+    }
+
+    #[try_stream(ok = (Epoch, LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
+    async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
         let mut ops = Vec::with_capacity(chunk_size);
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
+
+        let mut progress = LogStoreVnodeProgress::new();
 
         if !self.init().await? {
             // no data in all stream
@@ -600,7 +620,18 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         pin_mut!(this);
 
         let mut read_info = ReadInfo::new();
-        while let Some((epoch, row_op, row_read_size)) = this.next_op().await? {
+        while let Some(row) = this.next_op().await? {
+            let epoch = row.epoch;
+            let vnode = row.vnode;
+            let row_op = row.op;
+            let row_read_size = row.size;
+            match row_op {
+                LogStoreOp::Row { seq_id, .. } | LogStoreOp::Update { seq_id, .. } => {
+                    progress.insert(vnode, seq_id);
+                }
+                _ => {}
+            }
+
             match row_op {
                 LogStoreOp::Row { op, row, .. } => {
                     read_info.read_one_row(row_read_size);
@@ -610,6 +641,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         read_info.report(&this.metrics);
                         yield (
                             epoch,
+                            take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
@@ -625,6 +657,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         let chunk = data_chunk_builder.consume_all().expect("must not be empty");
                         yield (
                             epoch,
+                            take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
@@ -635,21 +668,33 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         read_info.report(&this.metrics);
                         yield (
                             epoch,
+                            take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
                 }
-                LogStoreOp::Barrier { is_checkpoint } => {
+                LogStoreOp::Barrier {
+                    vnodes,
+                    is_checkpoint,
+                } => {
                     read_info.read_one_row(row_read_size);
                     read_info.report(&this.metrics);
                     if let Some(chunk) = data_chunk_builder.consume_all() {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         yield (
                             epoch,
+                            take(&mut progress),
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
-                    yield (epoch, KvLogStoreItem::Barrier { is_checkpoint })
+                    yield (
+                        epoch,
+                        LogStoreVnodeProgress::new(),
+                        KvLogStoreItem::Barrier {
+                            vnodes,
+                            is_checkpoint,
+                        },
+                    )
                 }
             }
         }
@@ -670,7 +715,6 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
 
-    #[expect(dead_code)]
     #[derive(Debug)]
     pub(super) struct LogStoreRow {
         pub vnode: VirtualNode,
@@ -920,25 +964,29 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         Ok(())
     }
 
-    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreOp, usize)>> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<LogStoreRow>> {
         while let (Some(result), stream) = self
             .row_streams
             .next()
             .await
             .expect("row stream should not be empty when polled")
         {
-            let row = result?;
+            let mut row = result?;
+            let vnode = row.vnode;
+            let mut aligned_vnodes = BitmapBuilder::zeroed(self.serde.vnodes().len());
             let decoded_epoch = row.epoch;
-            let op = row.op;
-            let read_size = row.size;
             self.may_init_epoch(decoded_epoch)?;
-            match op {
+            match &mut row.op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
                     self.row_streams.push(stream.into_future());
-                    return Ok(Some((decoded_epoch, op, read_size)));
+                    return Ok(Some(row));
                 }
-                LogStoreOp::Barrier { is_checkpoint } => {
-                    self.check_is_checkpoint(is_checkpoint)?;
+                LogStoreOp::Barrier {
+                    is_checkpoint,
+                    vnodes,
+                } => {
+                    aligned_vnodes.set(vnode.to_index(), true);
+                    self.check_is_checkpoint(*is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
 
@@ -949,15 +997,15 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
-                        return Ok(Some((
-                            decoded_epoch,
-                            LogStoreOp::Barrier { is_checkpoint },
-                            read_size,
-                        )));
+                        let mut current_aligned_vnodes =
+                            BitmapBuilder::with_capacity(self.serde.vnodes().len());
+                        mem::swap(&mut aligned_vnodes, &mut current_aligned_vnodes);
+                        *vnodes = Arc::new(current_aligned_vnodes.finish());
+                        return Ok(Some(row));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
                             curr_epoch: decoded_epoch,
-                            is_checkpoint,
+                            is_checkpoint: *is_checkpoint,
                         };
                         continue;
                     }
@@ -1046,9 +1094,11 @@ mod tests {
             (
                 LogStoreOp::Barrier {
                     is_checkpoint: expected_is_checkpoint,
+                    ..
                 },
                 LogStoreOp::Barrier {
                     is_checkpoint: actual_is_checkpoint,
+                    ..
                 },
             ) => {
                 assert_eq!(expected_is_checkpoint, actual_is_checkpoint);
@@ -1424,17 +1474,16 @@ mod tests {
 
         pin_mut!(stream);
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
 
-        assert_eq!(
-            (
-                EPOCH0,
-                LogStoreOp::Barrier {
-                    is_checkpoint: true
-                }
-            ),
-            (epoch, op)
-        );
+        assert_eq!(EPOCH0, epoch);
+        let actual = LogStoreOp::Barrier {
+            is_checkpoint: true,
+            vnodes: Arc::new(Bitmap::ones(0)),
+        };
+        assert_value_eq(actual, op);
 
         let mut index = (0..MERGE_SIZE).collect_vec();
         index.shuffle(&mut thread_rng());
@@ -1443,7 +1492,9 @@ mod tests {
             tx1[i].take().unwrap().send(()).unwrap();
             let mut j = 0;
             while j < ops[i].len() {
-                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                let row = stream.next_op().await.unwrap().unwrap();
+                let epoch = row.epoch;
+                let op = row.op;
                 assert_eq!(EPOCH1, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
@@ -1467,17 +1518,16 @@ mod tests {
             assert_eq!(j, ops[i].len());
         }
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
 
-        assert_eq!(
-            (
-                EPOCH1,
-                LogStoreOp::Barrier {
-                    is_checkpoint: false
-                }
-            ),
-            (epoch, op)
-        );
+        assert_eq!(EPOCH1, epoch);
+        let actual = LogStoreOp::Barrier {
+            is_checkpoint: false,
+            vnodes: Arc::new(Bitmap::ones(0)),
+        };
+        assert_value_eq(actual, op);
 
         let mut index = (0..MERGE_SIZE).collect_vec();
         index.shuffle(&mut thread_rng());
@@ -1486,7 +1536,9 @@ mod tests {
             tx2[i].take().unwrap().send(()).unwrap();
             let mut j = 0;
             while j < ops[i].len() {
-                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
+                let row = stream.next_op().await.unwrap().unwrap();
+                let epoch = row.epoch;
+                let op = row.op;
                 assert_eq!(EPOCH2, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
@@ -1510,16 +1562,15 @@ mod tests {
             assert_eq!(j, ops[i].len());
         }
 
-        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
-        assert_eq!(
-            (
-                EPOCH2,
-                LogStoreOp::Barrier {
-                    is_checkpoint: true,
-                }
-            ),
-            (epoch, op)
-        );
+        let row = stream.next_op().await.unwrap().unwrap();
+        let epoch = row.epoch;
+        let op = row.op;
+        assert_eq!(EPOCH2, epoch);
+        let actual = LogStoreOp::Barrier {
+            is_checkpoint: true,
+            vnodes: Arc::new(Bitmap::ones(0)),
+        };
+        assert_value_eq(actual, op);
 
         assert!(stream.next_op().await.unwrap().is_none());
     }
@@ -1566,7 +1617,7 @@ mod tests {
         assert_eq!(EPOCH0, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(is_checkpoint);
             }
         }
@@ -1604,7 +1655,7 @@ mod tests {
         assert_eq!(EPOCH1, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(!is_checkpoint);
             }
         }
@@ -1642,7 +1693,7 @@ mod tests {
         assert_eq!(EPOCH2, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(is_checkpoint);
             }
         }
