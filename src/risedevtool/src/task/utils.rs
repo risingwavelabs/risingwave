@@ -96,6 +96,7 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
 }
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
+// TODO: dead, remove this.
 pub enum HummockInMemoryStrategy {
     /// Enable isolated in-memory hummock. Used by single-node configuration.
     Isolated,
@@ -106,7 +107,7 @@ pub enum HummockInMemoryStrategy {
     Disallowed,
 }
 
-/// Add a hummock storage backend to the parameters. Returns whether this is a shared backend.
+/// Add a hummock storage backend to the parameters. Returns `(is_shared_backend, is_persistent_backend)`.
 pub fn add_hummock_backend(
     id: &str,
     provide_opendal: &[OpendalConfig],

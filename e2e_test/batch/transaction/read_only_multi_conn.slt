@@ -17,7 +17,6 @@ connection txn
 statement ok
 start transaction read only;
 
-skipif in-memory
 connection txn
 query I
 select count(*) from t;
@@ -29,7 +28,6 @@ connection other
 statement ok
 flush;
 
-skipif in-memory
 connection other
 query I
 select count(*) from t;
@@ -45,7 +43,6 @@ statement ok
 flush;
 
 # inserts are visible in the `other` connection,
-skipif in-memory
 connection other
 query I
 select count(*) from t;
@@ -53,7 +50,6 @@ select count(*) from t;
 3
 
 # ...but not in the read-only transaction
-skipif in-memory
 connection txn
 query I
 select count(*) from t;
@@ -65,7 +61,6 @@ statement ok
 flush;
 
 # still invisible even after flush
-skipif in-memory
 connection txn
 query I
 select count(*) from t;
@@ -77,7 +72,6 @@ statement ok
 commit;
 
 # now visible outside the transaction
-skipif in-memory
 connection txn
 query I
 select count(*) from t;
