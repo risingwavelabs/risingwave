@@ -74,6 +74,9 @@ pub fn handle_set(
         string_val = None;
     }
 
+    println!("name {}", name);
+    println!("string vale {:?}", string_val);
+
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
