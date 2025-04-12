@@ -21,7 +21,6 @@ use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP}
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
-use risingwave_sqlparser::keywords::Keyword;
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::error::Result;
@@ -46,7 +45,7 @@ pub fn handle_set(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let mut string_val = set_var_to_param_str(&value);
+    let string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -61,21 +60,6 @@ pub fn handle_set(
             }
         }
     }
-
-    // special handle for streaming parallelism,
-    if name
-        .real_value()
-        .eq_ignore_ascii_case("streaming_parallelism")
-        && string_val
-            .as_ref()
-            .map(|val| val.eq_ignore_ascii_case(Keyword::ADAPTIVE.to_string().as_str()))
-            .unwrap_or(false)
-    {
-        string_val = None;
-    }
-
-    println!("name {}", name);
-    println!("string vale {:?}", string_val);
 
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
