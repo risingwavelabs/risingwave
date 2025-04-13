@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::future::pending;
+use std::mem::replace;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
 use either::Either;
+use futures::stream::FuturesUnordered;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_rpc_client::ComputeClientPool;
+use tokio::select;
 use tokio::sync::mpsc;
 
 use super::permit::Receiver;
@@ -30,6 +35,199 @@ use crate::executor::{
     DispatcherMessageStream, DispatcherMessageStreamItem,
 };
 use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
+
+mod new_input_future {
+    use anyhow::Context;
+    use risingwave_pb::common::ActorInfo;
+
+    use crate::executor::exchange::input::{BarrierReceiver, BoxedInput, new_input};
+    use crate::executor::{DispatcherBarrier, StreamExecutorResult, expect_first_barrier};
+
+    pub(super) type NewInputFuture =
+        impl Future<Output = StreamExecutorResult<(BoxedInput, DispatcherBarrier)>> + 'static;
+
+    impl BarrierReceiver {
+        pub(super) fn new_input_future(&self, upstream_actor: &ActorInfo) -> NewInputFuture {
+            let input = new_input(
+                &self.local_barrier_manager,
+                self.metrics.clone(),
+                self.actor_id,
+                self.fragment_id,
+                upstream_actor,
+                self.upstream_fragment_id,
+            );
+            async move {
+                let mut input = input.context("failed to create upstream receivers")?;
+                let barrier = expect_first_barrier(&mut input).await?;
+                Ok((input, barrier))
+            }
+        }
+    }
+}
+
+use new_input_future::*;
+
+enum BarrierReceiverState {
+    WaitingBarrier,
+    ReceivingNewInputFirstBarrier(
+        Barrier,
+        HashMap<ActorId, BoxedInput>,
+        FuturesUnordered<NewInputFuture>,
+    ),
+    Ready(Barrier, Option<HashMap<ActorId, BoxedInput>>),
+    Err,
+}
+
+pub(crate) struct BarrierReceiver {
+    barrier_rx: mpsc::UnboundedReceiver<Barrier>,
+    actor_id: ActorId,
+    fragment_id: FragmentId,
+    pub(crate) upstream_fragment_id: FragmentId,
+    local_barrier_manager: LocalBarrierManager,
+    metrics: Arc<StreamingMetrics>,
+    state: BarrierReceiverState,
+}
+
+impl BarrierReceiver {
+    pub(crate) fn new(
+        barrier_rx: mpsc::UnboundedReceiver<Barrier>,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        upstream_fragment_id: FragmentId,
+        local_barrier_manager: LocalBarrierManager,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        Self {
+            barrier_rx,
+            actor_id,
+            fragment_id,
+            upstream_fragment_id,
+            local_barrier_manager,
+            metrics,
+            state: BarrierReceiverState::WaitingBarrier,
+        }
+    }
+
+    async fn wait_ready(&mut self) -> StreamExecutorResult<()> {
+        match &mut self.state {
+            BarrierReceiverState::WaitingBarrier => {
+                let Some(barrier) = self.barrier_rx.recv().await else {
+                    self.state = BarrierReceiverState::Err;
+                    return Err(anyhow!("end of barrier stream").into());
+                };
+                if let Some(update) =
+                    barrier.as_update_merge(self.actor_id, self.upstream_fragment_id)
+                {
+                    if update.added_upstream_actors.is_empty() {
+                        self.state = BarrierReceiverState::Ready(barrier, Some(HashMap::new()));
+                        return Ok(());
+                    } else {
+                        let futures = FuturesUnordered::from_iter(
+                            update
+                                .added_upstream_actors
+                                .iter()
+                                .map(|upstream_actor| self.new_input_future(upstream_actor)),
+                        );
+                        self.state = BarrierReceiverState::ReceivingNewInputFirstBarrier(
+                            barrier,
+                            HashMap::new(),
+                            futures,
+                        );
+                    }
+                } else {
+                    self.state = BarrierReceiverState::Ready(barrier, None);
+                    return Ok(());
+                }
+            }
+            BarrierReceiverState::ReceivingNewInputFirstBarrier(_, _, _) => {}
+            BarrierReceiverState::Ready(_, _) => {
+                return Ok(());
+            }
+            BarrierReceiverState::Err => {
+                unreachable!("should not poll after err")
+            }
+        };
+        let BarrierReceiverState::ReceivingNewInputFirstBarrier(
+            barrier,
+            received_inputs,
+            receiving_inputs,
+        ) = &mut self.state
+        else {
+            unreachable!("should be ReceivingNewInputFirstBarrier");
+        };
+        while let Some(result) = receiving_inputs.next().await {
+            let (input, first_barrier) = match result {
+                Ok(item) => item,
+                Err(e) => {
+                    self.state = BarrierReceiverState::Err;
+                    return Err(e);
+                }
+            };
+            assert_equal_dispatcher_barrier(&first_barrier, &*barrier);
+            let downstream_actor_id = input.actor_id();
+            assert!(
+                received_inputs.insert(downstream_actor_id, input).is_none(),
+                "non-duplicated but get {}",
+                downstream_actor_id
+            );
+        }
+        self.state = {
+            let BarrierReceiverState::ReceivingNewInputFirstBarrier(
+                barrier,
+                received_inputs,
+                receiving_inputs,
+            ) = replace(&mut self.state, BarrierReceiverState::Err)
+            else {
+                unreachable!()
+            };
+            assert!(receiving_inputs.is_empty());
+            BarrierReceiverState::Ready(barrier, Some(received_inputs))
+        };
+        Ok(())
+    }
+
+    pub(crate) async fn process_dispatcher_barrier(
+        &mut self,
+        dispatcher_barrier: DispatcherBarrier,
+    ) -> StreamExecutorResult<(Barrier, Option<HashMap<ActorId, BoxedInput>>)> {
+        self.wait_ready().await?;
+        let BarrierReceiverState::Ready(mut recv_barrier, new_inputs) =
+            replace(&mut self.state, BarrierReceiverState::WaitingBarrier)
+        else {
+            unreachable!("should be at Ready when wait_ready returns")
+        };
+        assert_equal_dispatcher_barrier(&recv_barrier, &dispatcher_barrier);
+        recv_barrier.passed_actors.extend(
+            dispatcher_barrier
+                .passed_actors
+                .into_iter()
+                .chain([self.actor_id]),
+        );
+        Ok((recv_barrier, new_inputs))
+    }
+
+    pub(crate) async fn run_future<O>(
+        &mut self,
+        fut: impl Future<Output = O> + Unpin,
+    ) -> StreamExecutorResult<O> {
+        select! {
+            biased;
+            msg = fut => {
+                Ok(msg)
+            }
+            e = async {
+                let result = self.wait_ready().await;
+                if let Err(e) = result {
+                    e
+                } else {
+                    pending().await
+                }
+            } => {
+                Err(e)
+            }
+        }
+    }
+}
 
 /// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
 /// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
@@ -70,35 +268,6 @@ pub(crate) fn assert_equal_dispatcher_barrier<M1, M2>(
 ) {
     assert_eq!(first.epoch, second.epoch);
     assert_eq!(first.kind, second.kind);
-}
-
-pub(crate) fn apply_dispatcher_barrier(
-    recv_barrier: &mut Barrier,
-    dispatcher_barrier: DispatcherBarrier,
-) {
-    assert_equal_dispatcher_barrier(recv_barrier, &dispatcher_barrier);
-    recv_barrier
-        .passed_actors
-        .extend(dispatcher_barrier.passed_actors);
-}
-
-pub(crate) async fn process_dispatcher_msg(
-    dispatcher_msg: DispatcherMessage,
-    barrier_rx: &mut mpsc::UnboundedReceiver<Barrier>,
-) -> StreamExecutorResult<Message> {
-    let msg = match dispatcher_msg {
-        DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
-        DispatcherMessage::Barrier(barrier) => {
-            let mut recv_barrier = barrier_rx
-                .recv()
-                .await
-                .ok_or_else(|| anyhow!("end of barrier recv"))?;
-            apply_dispatcher_barrier(&mut recv_barrier, barrier);
-            Message::Barrier(recv_barrier)
-        }
-        DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
-    };
-    Ok(msg)
 }
 
 impl LocalInput {
