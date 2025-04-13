@@ -139,12 +139,14 @@ pub struct ReleaseContext {
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let meta_store = env.meta_store();
+        let actor_info = ActorInfo::init_from_db(&meta_store.conn).await?;
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
                 dropped_tables: HashMap::new(),
+                actors: actor_info,
             }),
         };
 
@@ -171,7 +173,33 @@ pub struct ActorInfo {
 }
 
 impl ActorInfo {
+    pub async fn init_from_db(db: &DatabaseConnection) -> MetaResult<Self> {
+        let actors: Vec<_> = Actor::find().all(db).await?;
 
+        let actors: HashMap<_, _> = actors
+            .into_iter()
+            .map(|actor| (actor.actor_id, actor))
+            .collect();
+
+        let mut actors_by_fragment_id = HashMap::new();
+        let mut actors_by_worker_id = HashMap::new();
+        for actor in actors.values() {
+            actors_by_fragment_id
+                .entry(actor.fragment_id)
+                .or_insert(vec![])
+                .push(actor.actor_id);
+            actors_by_worker_id
+                .entry(actor.worker_id)
+                .or_insert(vec![])
+                .push(actor.actor_id);
+        }
+
+        Ok(Self {
+            actors,
+            actors_by_fragment_id,
+            actors_by_worker_id,
+        })
+    }
 }
 
 pub struct CatalogControllerInner {
