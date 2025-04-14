@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
-// JDBC/SQL catalog integration docs: https://iceberg.apache.org/docs/1.6.1/jdbc/#configurations
+// JDBC/SQL catalog integration docs: https://iceberg.apache.org/docs/latest/jdbc/#configurations
 // `iceberg_tables definition` in iceberg java sdk https://github.com/apache/iceberg/blob/4850b622c778deb4b234880bfd7643070e0a5458/core/src/main/java/org/apache/iceberg/jdbc/JdbcUtil.java#L402-L421
 // This system table is used to store the iceberg namespace properties' metadata, but currently we don't have any properties to store.
 

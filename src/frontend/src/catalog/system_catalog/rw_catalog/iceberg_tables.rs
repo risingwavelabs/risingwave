@@ -12,25 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
-use risingwave_batch::executor::postgres_row_to_owned_row;
+use anyhow::{Context, anyhow};
+use clap::ValueEnum;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::config::MetaBackend;
 use risingwave_common::types::DataType::Varchar;
 use risingwave_common::types::Fields;
+use risingwave_connector::parser::postgres_row_to_owned_row;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use thiserror_ext::AsReport;
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 
-// JDBC/SQL catalog integration docs: https://iceberg.apache.org/docs/1.6.1/jdbc/#configurations
+// JDBC/SQL catalog integration docs: https://iceberg.apache.org/docs/latest/jdbc/#configurations
 // `iceberg_tables` definition in iceberg java sdk https://github.com/apache/iceberg/blob/4850b622c778deb4b234880bfd7643070e0a5458/core/src/main/java/org/apache/iceberg/jdbc/JdbcUtil.java#L125-L146
 // This system table is used to store the iceberg tables' metadata and only show the tables that the user has access to,
-// so it can be used by other query engine to fetch iceberg catalog and provide a access control layer.
+// so it can be used by other query engine to fetch iceberg catalog and provide an access control layer.
 
 #[derive(Fields)]
 #[primary_key(catalog_name, table_namespace, table_name)]
@@ -45,28 +47,44 @@ struct IcebergTables {
 
 #[system_catalog(table, "rw_catalog.iceberg_tables")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
-    let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
-        bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
-    };
-    let (host, port) = meta_store_endpoint
-        .split_once(":")
-        .ok_or_else(|| anyhow!("Invalid RW_SQL_ENDPOINT"))?;
+    let meta_store_endpoint = reader.meta_client.get_meta_store_endpoint().await?;
 
-    let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
-        bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
+    let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
+        ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
+    })?;
+    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
+    let meta_store_user = meta_store_endpoint.username().to_owned();
+    let meta_store_password = meta_store_endpoint
+        .password()
+        .ok_or_else(|| {
+            ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
+        })?
+        .to_owned();
+    let meta_store_host = meta_store_endpoint
+        .host_str()
+        .ok_or_else(|| {
+            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
+        })?
+        .to_owned();
+    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
+    })?;
+    let meta_store_database = meta_store_endpoint
+        .path()
+        .trim_start_matches('/')
+        .to_owned();
+
+    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+        bail!("failed to parse meta backend: {}", meta_store_backend);
     };
 
-    let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
-        bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
-    };
-
-    let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
-        bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
-    };
+    if !matches!(meta_backend, MetaBackend::Postgres) {
+        bail!("only support `iceberg_tables` in postgres backend");
+    }
 
     let conn_str = format!(
         "host={} port={} user={} password={} dbname={}",
-        host, port, meta_store_user, meta_store_password, meta_store_database
+        meta_store_host, meta_store_port, meta_store_user, meta_store_password, meta_store_database
     );
 
     println!("conn_str: {}", conn_str);
@@ -106,7 +124,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
     let mut res = Vec::new();
     // deserialize the rows
     for row in rows {
-        let owned_row = postgres_row_to_owned_row(row, &schema)?;
+        let owned_row = postgres_row_to_owned_row(row, &schema);
         let record = IcebergTables {
             catalog_name: owned_row[0].clone().unwrap().as_utf8().to_string(),
             table_namespace: owned_row[1].clone().unwrap().as_utf8().to_string(),
@@ -125,7 +143,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
 
         if user.is_super
             || table.owner == user.id
-            || user.check_privilege(
+            || user.has_privilege(
                 &GrantObject::TableId(table.id().table_id()),
                 AclMode::Select,
             )
