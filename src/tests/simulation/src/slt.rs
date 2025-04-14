@@ -19,16 +19,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 use rand::seq::IteratorRandom;
-use rand::{Rng, SeedableRng, rng as thread_rng};
-use rand_chacha::ChaChaRng;
+use rand::{Rng, rng as thread_rng};
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
 };
 
 use crate::client::RisingWave;
-use crate::cluster::{Cluster, KillOpts};
+use crate::cluster::Cluster;
 use crate::parse::extract_sql_command;
 use crate::slt::background_ddl_mode::*;
+use crate::slt::slt_env::{Env, Opts};
 use crate::slt::vnode_mode::*;
 use crate::utils::TimedExt;
 
@@ -184,34 +184,67 @@ mod vnode_mode {
     });
 }
 
-pub struct Opts {
-    pub kill_opts: KillOpts,
-    /// Probability of `background_ddl` being set to true per ddl record.
-    pub background_ddl_rate: f64,
-    /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
-    pub random_vnode_count: bool,
+pub mod slt_env {
+    use rand::SeedableRng;
+    use rand_chacha::ChaChaRng;
+
+    use crate::cluster::KillOpts;
+
+    pub struct Opts {
+        pub kill_opts: KillOpts,
+        /// Probability of `background_ddl` being set to true per ddl record.
+        pub background_ddl_rate: f64,
+        /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
+        pub random_vnode_count: bool,
+    }
+
+    pub(super) struct Env {
+        opts: Opts,
+    }
+
+    impl Env {
+        pub fn new(opts: Opts) -> Self {
+            Self { opts }
+        }
+
+        pub fn get_rng() -> ChaChaRng {
+            let seed = std::env::var("MADSIM_TEST_SEED")
+                .unwrap_or("0".to_owned())
+                .parse::<u64>()
+                .unwrap();
+            ChaChaRng::seed_from_u64(seed)
+        }
+
+        pub fn background_ddl_rate(&self) -> f64 {
+            self.opts.background_ddl_rate
+        }
+
+        pub fn kill(&self) -> bool {
+            self.opts.kill_opts.kill_compute
+                || self.opts.kill_opts.kill_meta
+                || self.opts.kill_opts.kill_frontend
+                || self.opts.kill_opts.kill_compactor
+        }
+
+        pub fn random_vnode_count(&self) -> bool {
+            self.opts.random_vnode_count
+        }
+
+        pub fn kill_opts(&self) -> KillOpts {
+            self.opts.kill_opts
+        }
+
+        pub fn kill_rate(&self) -> f64 {
+            self.opts.kill_opts.kill_rate as f64
+        }
+    }
 }
 
 /// Run the sqllogictest files in `glob`.
-pub async fn run_slt_task(
-    cluster: Arc<Cluster>,
-    glob: &str,
-    Opts {
-        kill_opts,
-        background_ddl_rate,
-        random_vnode_count,
-    }: Opts,
-) {
-    tracing::info!("background_ddl_rate: {}", background_ddl_rate);
-    let seed = std::env::var("MADSIM_TEST_SEED")
-        .unwrap_or("0".to_owned())
-        .parse::<u64>()
-        .unwrap();
-    let mut rng = ChaChaRng::seed_from_u64(seed);
-    let kill = kill_opts.kill_compute
-        || kill_opts.kill_meta
-        || kill_opts.kill_frontend
-        || kill_opts.kill_compactor;
+pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
+    let env = slt_env::Env::new(opts);
+    tracing::info!("background_ddl_rate: {}", env.background_ddl_rate());
+    let mut rng = Env::get_rng();
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         // use a session per file
@@ -227,7 +260,7 @@ pub async fn run_slt_task(
         {
             println!("{} [partition skipped]", path.display());
             continue;
-        } else if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
+        } else if env.kill() && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
             println!("{} [kill ignored]", path.display());
             continue;
         }
@@ -246,7 +279,7 @@ pub async fn run_slt_task(
         let mut manual_background_ddl_enabled = false;
 
         let records = sqllogictest::parse_file(path).expect("failed to parse file");
-        let random_vnode_count = random_vnode_count
+        let random_vnode_count = env.random_vnode_count()
             // Skip using random vnode count if the test case cares about parallelism, including
             // setting parallelism manually or checking the parallelism with system tables.
             && records.iter().all(|record| {
@@ -288,7 +321,7 @@ pub async fn run_slt_task(
             };
 
             // For normal records.
-            if !kill {
+            if !env.kill() {
                 // Set random vnode count if needed.
                 if random_vnode_count
                     && cmd.is_create()
@@ -352,9 +385,9 @@ pub async fn run_slt_task(
                         label: "madsim".to_owned(),
                     }
                 })
-                && background_ddl_rate > 0.0
+                && env.background_ddl_rate() > 0.0
             {
-                let background_ddl_setting = rng.random_bool(background_ddl_rate);
+                let background_ddl_setting = rng.random_bool(env.background_ddl_rate());
                 let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),
@@ -403,11 +436,11 @@ pub async fn run_slt_task(
                 continue;
             }
 
-            let should_kill = thread_rng().random_bool(kill_opts.kill_rate as f64);
+            let should_kill = thread_rng().random_bool(env.kill_rate());
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
-                let opts = kill_opts;
+                let opts = env.kill_opts();
                 Some(tokio::spawn(async move {
                     let t = thread_rng().random_range(Duration::default()..Duration::from_secs(1));
                     tokio::time::sleep(t).await;
