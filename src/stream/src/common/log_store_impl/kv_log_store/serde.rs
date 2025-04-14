@@ -1063,10 +1063,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                                 *current_is_checkpoint = is_checkpoint;
                             }
                             other => {
+                                let mut aligned_vnodes =
+                                    BitmapBuilder::zeroed(self.serde.vnodes().len());
+                                aligned_vnodes.set(vnode.to_index(), true);
                                 *other = StreamState::BarrierAligning {
-                                    aligned_vnodes: BitmapBuilder::zeroed(
-                                        self.serde.vnodes().len(),
-                                    ),
+                                    aligned_vnodes,
                                     curr_epoch: decoded_epoch,
                                     is_checkpoint,
                                 };
