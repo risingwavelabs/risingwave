@@ -28,7 +28,7 @@ use crate::cluster::Cluster;
 use crate::evaluate_skip;
 use crate::parse::extract_sql_command;
 use crate::slt::background_ddl_mode::*;
-use crate::slt::runner::{random_vnode_count, run_no_kill};
+use crate::slt::runner::{random_vnode_count, run_kill_not_allowed, run_no_kill};
 use crate::slt::slt_env::{Env, Opts};
 use crate::slt::vnode_mode::*;
 use crate::utils::TimedExt;
@@ -242,12 +242,15 @@ pub mod slt_env {
 }
 
 mod runner {
+    use std::time::Duration;
+
     use rand::prelude::IteratorRandom;
     use rand::rng as thread_rng;
     use sqllogictest::{Record, StatementExpect, TestError};
 
-    use crate::slt::SqlCmd;
     use crate::slt::slt_env::Env;
+    use crate::slt::{MAX_RETRY, SqlCmd};
+    use crate::utils::TimedExt;
     #[macro_export]
     macro_rules! evaluate_skip {
         ($env:expr, $path:expr) => {
@@ -282,6 +285,7 @@ mod runner {
             })
     }
 
+    /// `kill` is totally disabled.
     pub(super) async fn run_no_kill<D, M, T>(
         tester: &mut sqllogictest::Runner<D, M>,
         random_vnode_count: bool,
@@ -323,6 +327,49 @@ mod runner {
         }
 
         tester.run_async(record).await.map(|_| ())
+    }
+
+    /// Used when `kill` is not allowed for some specific commands
+    pub(super) async fn run_kill_not_allowed<D, M, T>(
+        tester: &mut sqllogictest::Runner<D, M>,
+        record: Record<T>,
+    ) where
+        D: sqllogictest::AsyncDB<ColumnType = T>,
+        M: sqllogictest::MakeConnection<Conn = D>,
+        T: sqllogictest::ColumnType,
+    {
+        for i in 0usize.. {
+            let delay = Duration::from_secs(1 << i);
+            if let Err(err) = tester
+                .run_async(record.clone())
+                .timed(|_res, elapsed| {
+                    tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
+                })
+                .await
+            {
+                let err_string = err.to_string();
+                // cluster could be still under recovering if killed before, retry if
+                // meets `no reader for dml in table with id {}`.
+                let allowed_errs = [
+                    "no reader for dml in table",
+                    "error reading a body from connection: broken pipe",
+                    "failed to inject barrier",
+                    "get error from control stream",
+                    "cluster is under recovering",
+                ];
+                let should_retry = i < MAX_RETRY
+                    && allowed_errs
+                        .iter()
+                        .any(|allowed_err| err_string.contains(allowed_err));
+                if !should_retry {
+                    panic!("{}", err);
+                }
+                tracing::error!("failed to run test: {err}\nretry after {delay:?}");
+            } else {
+                break;
+            }
+            tokio::time::sleep(delay).await;
+        }
     }
 }
 
@@ -431,38 +478,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
             };
 
             if !cmd.allow_kill() {
-                for i in 0usize.. {
-                    let delay = Duration::from_secs(1 << i);
-                    if let Err(err) = tester
-                        .run_async(record.clone())
-                        .timed(|_res, elapsed| {
-                            tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-                        })
-                        .await
-                    {
-                        let err_string = err.to_string();
-                        // cluster could be still under recovering if killed before, retry if
-                        // meets `no reader for dml in table with id {}`.
-                        let allowed_errs = [
-                            "no reader for dml in table",
-                            "error reading a body from connection: broken pipe",
-                            "failed to inject barrier",
-                            "get error from control stream",
-                            "cluster is under recovering",
-                        ];
-                        let should_retry = i < MAX_RETRY
-                            && allowed_errs
-                                .iter()
-                                .any(|allowed_err| err_string.contains(allowed_err));
-                        if !should_retry {
-                            panic!("{}", err);
-                        }
-                        tracing::error!("failed to run test: {err}\nretry after {delay:?}");
-                    } else {
-                        break;
-                    }
-                    tokio::time::sleep(delay).await;
-                }
+                run_kill_not_allowed(&mut tester, record.clone()).await;
                 continue;
             }
 
