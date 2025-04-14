@@ -134,9 +134,12 @@ fn bind_backfill_relation_id_by_name(session: &SessionImpl, name: ObjectName) ->
 fn bind_source_or_table(schema_catalog: &SchemaCatalog, name: &String) -> Result<ObjectId> {
     if let Some(table) = schema_catalog.get_created_table_or_any_internal_table_by_name(name) {
         Ok(table.id().table_id)
-    } else if let Some(source) = schema_catalog.get_source_by_name(name) {
-        Ok(source.id)
     } else {
-        Err(CatalogError::NotFound("table or source", name.to_owned()).into())
+        Err(CatalogError::NotFound("table", name.to_owned()).into())
     }
+    // TODO: support source catalog
+    // else if let Some(source) = schema_catalog.get_source_by_name(name) {
+    //     Ok(source.id)
+    // }
+    // Err(CatalogError::NotFound("table or source", name.to_owned()).into())
 }
