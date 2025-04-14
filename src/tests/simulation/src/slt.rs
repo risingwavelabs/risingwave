@@ -107,8 +107,13 @@ const KILL_IGNORE_FILES: &[&str] = &[
 /// Randomly set DDL statements to use `background_ddl`
 mod background_ddl_mode {
     use anyhow::bail;
+    use rand::Rng;
+    use rand_chacha::ChaChaRng;
+    use sqllogictest::{Condition, Record, StatementExpect};
 
     use crate::client::RisingWave;
+    use crate::slt::SqlCmd;
+    use crate::slt::slt_env::Env;
 
     /// Wait for background mv to finish creating
     pub(super) async fn wait_background_mv_finished(mview_name: &str) -> anyhow::Result<()> {
@@ -134,6 +139,49 @@ mod background_ddl_mode {
             Ok(1) => Ok(()),
             r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
         }
+    }
+
+    // TODO(kwannoel): move rng, `background_ddl` to `Env` struct
+    pub(super) async fn set_background_ddl<D, M, T>(
+        tester: &mut sqllogictest::Runner<D, M>,
+        env: &Env,
+        record: &Record<T>,
+        cmd: &SqlCmd,
+        manual_background_ddl_enabled: bool,
+        rng: &mut ChaChaRng,
+        background_ddl_enabled: &mut bool,
+    ) where
+        D: sqllogictest::AsyncDB<ColumnType = T>,
+        M: sqllogictest::MakeConnection<Conn = D>,
+        T: sqllogictest::ColumnType,
+    {
+        if let Record::Statement {
+            loc,
+            conditions,
+            connection,
+            ..
+        } = &record
+            && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+            && !manual_background_ddl_enabled
+            && conditions.iter().all(|c| {
+                *c != Condition::SkipIf {
+                    label: "madsim".to_owned(),
+                }
+            })
+            && env.background_ddl_rate() > 0.0
+        {
+            let background_ddl_setting = rng.random_bool(env.background_ddl_rate());
+            let set_background_ddl = Record::Statement {
+                loc: loc.clone(),
+                conditions: conditions.clone(),
+                connection: connection.clone(),
+                expected: StatementExpect::Ok,
+                sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
+                retry: None,
+            };
+            tester.run_async(set_background_ddl).await.unwrap();
+            *background_ddl_enabled = background_ddl_setting;
+        };
     }
 }
 
@@ -449,33 +497,16 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
-            if let Record::Statement {
-                loc,
-                conditions,
-                connection,
-                ..
-            } = &record
-                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
-                && !manual_background_ddl_enabled
-                && conditions.iter().all(|c| {
-                    *c != Condition::SkipIf {
-                        label: "madsim".to_owned(),
-                    }
-                })
-                && env.background_ddl_rate() > 0.0
-            {
-                let background_ddl_setting = rng.random_bool(env.background_ddl_rate());
-                let set_background_ddl = Record::Statement {
-                    loc: loc.clone(),
-                    conditions: conditions.clone(),
-                    connection: connection.clone(),
-                    expected: StatementExpect::Ok,
-                    sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
-                    retry: None,
-                };
-                tester.run_async(set_background_ddl).await.unwrap();
-                background_ddl_enabled = background_ddl_setting;
-            };
+            set_background_ddl(
+                &mut tester,
+                &env,
+                &record,
+                &cmd,
+                manual_background_ddl_enabled,
+                &mut rng,
+                &mut background_ddl_enabled,
+            )
+            .await;
 
             if !cmd.allow_kill() {
                 run_kill_not_allowed(&mut tester, record.clone()).await;
