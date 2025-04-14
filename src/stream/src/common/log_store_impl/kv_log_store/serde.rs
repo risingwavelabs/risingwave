@@ -1150,8 +1150,8 @@ mod tests {
     use tokio::sync::oneshot::Sender;
 
     use crate::common::log_store_impl::kv_log_store::serde::{
-        AlignedLogStoreOp, KvLogStoreItem, LogStoreRowOp, LogStoreRowOpStream,
-        LogStoreRowSerde, merge_log_store_item_stream,
+        AlignedLogStoreOp, KvLogStoreItem, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
+        merge_log_store_item_stream,
     };
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         TEST_TABLE_ID, check_rows_eq, gen_test_data, gen_test_log_store_table,
