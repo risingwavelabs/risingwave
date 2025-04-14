@@ -26,6 +26,7 @@ use sqllogictest::{
 
 use crate::client::RisingWave;
 use crate::cluster::Cluster;
+use crate::evaluate_skip;
 use crate::parse::extract_sql_command;
 use crate::slt::background_ddl_mode::*;
 use crate::slt::slt_env::{Env, Opts};
@@ -240,6 +241,25 @@ pub mod slt_env {
     }
 }
 
+mod runner {
+    #[macro_export]
+    macro_rules! evaluate_skip {
+        ($env:expr, $path:expr) => {
+            if let Some(partitioner) = PARTITIONER.as_ref()
+                && !partitioner.matches($path.to_str().unwrap())
+            {
+                println!("[skip partition] {}", $path.display());
+                continue;
+            } else if $env.kill() && KILL_IGNORE_FILES.iter().any(|s| $path.ends_with(s)) {
+                println!("[skip kill] {}", $path.display());
+                continue;
+            } else {
+                println!("[run] {}", $path.display());
+            }
+        };
+    }
+}
+
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
     let env = slt_env::Env::new(opts);
@@ -255,16 +275,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
         let file = file.unwrap();
         let path = file.as_path();
 
-        if let Some(partitioner) = PARTITIONER.as_ref()
-            && !partitioner.matches(path.to_str().unwrap())
-        {
-            println!("{} [partition skipped]", path.display());
-            continue;
-        } else if env.kill() && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
-            println!("{} [kill ignored]", path.display());
-            continue;
-        }
-        println!("{}", path.display());
+        evaluate_skip!(env, path);
 
         // XXX: hack for kafka source test
         let tempfile = (path.ends_with("kafka.slt") || path.ends_with("kafka_batch.slt"))
