@@ -1,3 +1,4 @@
+use std::mem;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -1010,9 +1011,20 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     self.barrier_streams.push(stream);
 
                     if self.row_streams.is_empty() {
-                        self.stream_state = StreamState::BarrierEmitted {
-                            prev_epoch: decoded_epoch,
+                        let old_state = {
+                            let mut state_to_swap = StreamState::BarrierEmitted {
+                                prev_epoch: decoded_epoch,
+                            };
+                            mem::swap(&mut self.stream_state, &mut state_to_swap);
+                            state_to_swap
                         };
+
+                        let mut aligned_vnodes = match old_state {
+                            StreamState::BarrierAligning { aligned_vnodes, .. } => aligned_vnodes,
+                            _ => BitmapBuilder::zeroed(self.serde.vnodes().len()),
+                        };
+                        aligned_vnodes.set(vnode.to_index(), true);
+
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
@@ -1024,11 +1036,26 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             row_meta,
                         }));
                     } else {
-                        self.stream_state = StreamState::BarrierAligning {
-                            aligned_vnodes: BitmapBuilder::zeroed(self.serde.vnodes().len()),
-                            curr_epoch: decoded_epoch,
-                            is_checkpoint,
-                        };
+                        match &mut self.stream_state {
+                            StreamState::BarrierAligning {
+                                aligned_vnodes,
+                                curr_epoch,
+                                is_checkpoint: current_is_checkpoint,
+                            } => {
+                                aligned_vnodes.set(vnode.to_index(), true);
+                                *curr_epoch = decoded_epoch;
+                                *current_is_checkpoint = is_checkpoint;
+                            }
+                            other => {
+                                *other = StreamState::BarrierAligning {
+                                    aligned_vnodes: BitmapBuilder::zeroed(
+                                        self.serde.vnodes().len(),
+                                    ),
+                                    curr_epoch: decoded_epoch,
+                                    is_checkpoint,
+                                };
+                            }
+                        }
                         continue;
                     }
                 }
