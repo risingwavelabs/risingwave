@@ -174,3 +174,6 @@ if [ -n "${BUILDKITE_PARALLEL_JOB:-}" ] && [ -n "${BUILDKITE_PARALLEL_JOB_COUNT:
 else
   NEXTEST_PARTITION_ARG=""
 fi
+
+# Install dev sqllogictest
+cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 1aefcf9279075e27a4aea57329d193d90d0ebd59
