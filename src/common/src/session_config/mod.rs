@@ -162,22 +162,27 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
+    /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
 
+    /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_sink: ConfigParallelism,
 
+    /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
+    /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_source: ConfigParallelism,
 
+    /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_materialized_view: ConfigParallelism,
