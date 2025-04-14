@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use iceberg::spec::Struct;
 use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType, StructType};
@@ -19,11 +20,11 @@ use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
-    ObjectName, Query, TrimWhereField, UnaryOperator,
+    ObjectName, Query, TableFactor, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::Binder;
 use crate::binder::expr::function::is_sys_function_without_args;
+use crate::binder::{Binder, BoundBaseTable};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
 use crate::handler::create_sql_function::SQL_UDF_PATTERN;
@@ -950,6 +951,57 @@ impl Binder {
             // f
             // ```
             AstDataType::Char(_) => self.bind_cast_inner(expr, DataType::Varchar),
+            AstDataType::Custom(qualified_type_name) => {
+                let custom_data_type = bind_data_type(&data_type);
+                match custom_data_type {
+                    Ok(data_type) => self.bind_cast_inner(expr, data_type),
+                    Err(err) => {
+                        // Try to bind the table.
+                        let idents = qualified_type_name
+                            .0
+                            .iter()
+                            .map(|n| n.real_value())
+                            .collect_vec();
+                        let table_name = idents[0].as_str();
+                        use risingwave_sqlparser::ast::Ident;
+                        let ident = Ident::new_unchecked(table_name);
+                        let table_factor = TableFactor::Table {
+                            name: ObjectName(vec![ident]),
+                            alias: None,
+                            as_of: None,
+                        };
+                        let relation = self.bind_table_factor(table_factor);
+                        use crate::binder::relation::Relation;
+                        match relation {
+                            Ok(relation) => match relation {
+                                Relation::BaseTable(table) => {
+                                    let struct_type = DataType::Struct(StructType::new(
+                                        table
+                                            .table_catalog
+                                            .columns
+                                            .iter()
+                                            .filter(|column| !column.is_hidden)
+                                            .map(|column| {
+                                                let name = column.column_desc.name.clone();
+                                                let data_type =
+                                                    column.column_desc.data_type.clone();
+                                                Ok((name, data_type))
+                                            })
+                                            .collect::<Result<Vec<_>>>()?,
+                                    ));
+                                    self.bind_cast_inner(expr, struct_type)
+                                }
+                                _ => {
+                                    return Err(err);
+                                }
+                            },
+                            _ => {
+                                return Err(err);
+                            }
+                        }
+                    }
+                }
+            }
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
     }
