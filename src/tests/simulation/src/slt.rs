@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use rand::seq::IteratorRandom;
 use rand::{Rng, rng as thread_rng};
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
@@ -29,6 +28,7 @@ use crate::cluster::Cluster;
 use crate::evaluate_skip;
 use crate::parse::extract_sql_command;
 use crate::slt::background_ddl_mode::*;
+use crate::slt::runner::{random_vnode_count, run_no_kill};
 use crate::slt::slt_env::{Env, Opts};
 use crate::slt::vnode_mode::*;
 use crate::utils::TimedExt;
@@ -242,6 +242,12 @@ pub mod slt_env {
 }
 
 mod runner {
+    use rand::prelude::IteratorRandom;
+    use rand::rng as thread_rng;
+    use sqllogictest::{Record, StatementExpect, TestError};
+
+    use crate::slt::SqlCmd;
+    use crate::slt::slt_env::Env;
     #[macro_export]
     macro_rules! evaluate_skip {
         ($env:expr, $path:expr) => {
@@ -257,6 +263,66 @@ mod runner {
                 println!("[run] {}", $path.display());
             }
         };
+    }
+
+    pub(super) fn random_vnode_count<T: sqllogictest::ColumnType>(
+        env: &Env,
+        records: &[Record<T>],
+    ) -> bool {
+        env.random_vnode_count()
+            && records.iter().all(|record| {
+                if let Record::Statement { sql, .. } | Record::Query { sql, .. } = record
+                    && sql.to_lowercase().contains("parallelism")
+                {
+                    println!("[RANDOM VNODE COUNT] skip: {}", sql);
+                    false
+                } else {
+                    true
+                }
+            })
+    }
+
+    pub(super) async fn run_no_kill<D, M, T>(
+        tester: &mut sqllogictest::Runner<D, M>,
+        random_vnode_count: bool,
+        cmd: &SqlCmd,
+        record: Record<T>,
+    ) -> Result<(), TestError>
+    where
+        D: sqllogictest::AsyncDB<ColumnType = T>,
+        M: sqllogictest::MakeConnection<Conn = D>,
+        T: sqllogictest::ColumnType,
+    {
+        // Set random vnode count if needed.
+        if random_vnode_count
+            && cmd.is_create()
+            && let Record::Statement {
+                loc,
+                conditions,
+                connection,
+                ..
+            } = &record
+        {
+            let vnode_count = (2..=64) // small
+                .chain(224..=288) // normal
+                .chain(992..=1056) // 1024 affects row id gen behavior
+                .choose(&mut thread_rng())
+                .unwrap();
+            let sql = format!("SET STREAMING_MAX_PARALLELISM = {vnode_count};");
+            println!("[RANDOM VNODE COUNT] set: {vnode_count}");
+            let set_random_vnode_count = Record::Statement {
+                loc: loc.clone(),
+                conditions: conditions.clone(),
+                connection: connection.clone(),
+                sql,
+                expected: StatementExpect::Ok,
+                retry: None,
+            };
+            tester.run_async(set_random_vnode_count).await.unwrap();
+            println!("[RANDOM VNODE COUNT] run: {record}");
+        }
+
+        tester.run_async(record).await.map(|_| ())
     }
 }
 
@@ -290,19 +356,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
         let mut manual_background_ddl_enabled = false;
 
         let records = sqllogictest::parse_file(path).expect("failed to parse file");
-        let random_vnode_count = env.random_vnode_count()
-            // Skip using random vnode count if the test case cares about parallelism, including
-            // setting parallelism manually or checking the parallelism with system tables.
-            && records.iter().all(|record| {
-                if let Record::Statement { sql, .. } | Record::Query { sql, .. } = record
-                    && sql.to_lowercase().contains("parallelism")
-                {
-                    println!("[RANDOM VNODE COUNT] skip: {}", path.display());
-                    false
-                } else {
-                    true
-                }
-            });
+        let random_vnode_count = random_vnode_count(&env, &records);
 
         for record in records {
             // uncomment to print metrics for task counts
@@ -333,42 +387,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
 
             // For normal records.
             if !env.kill() {
-                // Set random vnode count if needed.
-                if random_vnode_count
-                    && cmd.is_create()
-                    && let Record::Statement {
-                        loc,
-                        conditions,
-                        connection,
-                        ..
-                    } = &record
-                {
-                    let vnode_count = (2..=64) // small
-                        .chain(224..=288) // normal
-                        .chain(992..=1056) // 1024 affects row id gen behavior
-                        .choose(&mut thread_rng())
-                        .unwrap();
-                    let sql = format!("SET STREAMING_MAX_PARALLELISM = {vnode_count};");
-                    println!("[RANDOM VNODE COUNT] set: {vnode_count}");
-                    let set_random_vnode_count = Record::Statement {
-                        loc: loc.clone(),
-                        conditions: conditions.clone(),
-                        connection: connection.clone(),
-                        sql,
-                        expected: StatementExpect::Ok,
-                        retry: None,
-                    };
-                    tester.run_async(set_random_vnode_count).await.unwrap();
-                    println!("[RANDOM VNODE COUNT] run: {record}");
-                }
-
-                match tester
-                    .run_async(record.clone())
-                    .timed(|_res, elapsed| {
-                        tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-                    })
-                    .await
-                {
+                match run_no_kill(&mut tester, random_vnode_count, &cmd, record).await {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
                 }
