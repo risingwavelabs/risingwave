@@ -131,6 +131,21 @@ impl CoordinationHandleManager {
         Ok(())
     }
 
+    fn ack_aligned_initial_epoch(&mut self, aligned_initial_epoch: u64) -> anyhow::Result<()> {
+        for (handle_id, handle) in &mut self.writer_handles {
+            handle
+                .ack_aligned_initial_epoch(aligned_initial_epoch)
+                .map_err(|_| {
+                    anyhow!(
+                        "fail to ack_aligned_initial_epoch {:?} for handle {}",
+                        aligned_initial_epoch,
+                        handle_id
+                    )
+                })?;
+        }
+        Ok(())
+    }
+
     fn ack_commit(
         &mut self,
         epoch: u64,
@@ -175,6 +190,19 @@ enum CoordinationHandleManagerEvent {
     UpdateVnodeBitmap,
     Stop,
     CommitRequest { epoch: u64, metadata: SinkMetadata },
+    AlignInitialEpoch(u64),
+}
+
+impl CoordinationHandleManagerEvent {
+    fn name(&self) -> &'static str {
+        match self {
+            CoordinationHandleManagerEvent::NewHandle => "NewHandle",
+            CoordinationHandleManagerEvent::UpdateVnodeBitmap => "UpdateVnodeBitmap",
+            CoordinationHandleManagerEvent::Stop => "Stop",
+            CoordinationHandleManagerEvent::CommitRequest { .. } => "CommitRequest",
+            CoordinationHandleManagerEvent::AlignInitialEpoch(_) => "AlignInitialEpoch",
+        }
+    }
 }
 
 impl CoordinationHandleManager {
@@ -199,6 +227,9 @@ impl CoordinationHandleManager {
                                 epoch: request.epoch,
                                 metadata: request.metadata.ok_or_else(|| anyhow!("empty sink metadata"))?,
                             }
+                        }
+                        coordinate_request::Msg::AlignInitialEpochRequest(epoch) => {
+                            CoordinationHandleManagerEvent::AlignInitialEpoch(epoch)
                         }
                         coordinate_request::Msg::UpdateVnodeRequest(_) => {
                             CoordinationHandleManagerEvent::UpdateVnodeBitmap
@@ -240,9 +271,7 @@ impl CoordinationHandleManager {
                     init_requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
                     continue;
                 }
-                CoordinationHandleManagerEvent::UpdateVnodeBitmap => "UpdateVnodeBitmap",
-                CoordinationHandleManagerEvent::CommitRequest { .. } => "CommitRequest",
-                CoordinationHandleManagerEvent::Stop => "Stop",
+                event => event.name(),
             };
             return Err(anyhow!(
                 "expect new handle during init, but got {}",
@@ -253,6 +282,30 @@ impl CoordinationHandleManager {
             log_store_rewind_start_epoch,
             init_requests.handle_ids.iter().cloned(),
         )?;
+        if log_store_rewind_start_epoch.is_none() {
+            let mut align_requests = AligningRequests::default();
+            while !align_requests.aligned() {
+                let (handle_id, event) = self.next_event().await?;
+                match event {
+                    CoordinationHandleManagerEvent::AlignInitialEpoch(initial_epoch) => {
+                        align_requests.add_new_request(
+                            handle_id,
+                            initial_epoch,
+                            self.vnode_bitmap(handle_id),
+                        )?;
+                    }
+                    other => {
+                        return Err(anyhow!("expect AlignInitialEpoch but got {}", other.name()));
+                    }
+                }
+            }
+            let aligned_initial_epoch = align_requests
+                .requests
+                .into_iter()
+                .max()
+                .expect("non-empty");
+            self.ack_aligned_initial_epoch(aligned_initial_epoch)?;
+        }
         Ok(init_requests.handle_ids)
     }
 
@@ -288,6 +341,13 @@ impl CoordinationHandleManager {
                 CoordinationHandleManagerEvent::CommitRequest { epoch, .. } => {
                     bail!(
                         "receive commit request on epoch {} from handle {} during alter parallelism",
+                        epoch,
+                        handle_id
+                    );
+                }
+                CoordinationHandleManagerEvent::AlignInitialEpoch(epoch) => {
+                    bail!(
+                        "receive AlignInitialEpoch on epoch {} from handle {} during alter parallelism",
                         epoch,
                         handle_id
                     );
@@ -411,6 +471,9 @@ impl CoordinatorWorker {
                 }
                 CoordinationHandleManagerEvent::CommitRequest { epoch, metadata } => {
                     (epoch, metadata)
+                }
+                CoordinationHandleManagerEvent::AlignInitialEpoch(_) => {
+                    bail!("receive AlignInitialEpoch after initialization")
                 }
             };
             if !running_handles.contains(&handle_id) {
