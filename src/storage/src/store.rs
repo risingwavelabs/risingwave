@@ -41,7 +41,7 @@ use risingwave_pb::hummock::PbVnodeWatermark;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
-pub(crate) use crate::vector::{DistanceMeasurement, OnNearestItemFn, Vector};
+pub(crate) use crate::vector::{DistanceMeasurement, OnNearestItem, Vector};
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -434,6 +434,8 @@ pub struct VectorNearestOptions {
     pub top_n: usize,
     pub measure: DistanceMeasurement,
 }
+
+pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + 'static;
 
 pub trait StateStoreReadVector: StaticSendSync {
     fn nearest<O: Send + 'static>(
