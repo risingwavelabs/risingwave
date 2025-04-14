@@ -266,7 +266,7 @@ pub async fn run_slt_task(
                         .iter()
                         .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
                 {
-                    extract_sql_command(sql).expect("could not parse sql")
+                    extract_sql_command(sql).unwrap_or(SqlCmd::Others)
                 }
                 _ => SqlCmd::Others,
             };
