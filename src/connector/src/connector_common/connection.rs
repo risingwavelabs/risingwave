@@ -274,8 +274,7 @@ impl Connection for IcebergConnection {
         }
 
         if self.hosted_catalog.unwrap_or(false) {
-            // If `hosted_catalog` is set, we don't need to test the catalog.
-            // ensure there is not catalog type and catalog uri
+            // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
             if self.catalog_type.is_some() {
                 bail!("`catalog.type` must not be set when `hosted_catalog` is set");
             }
