@@ -275,6 +275,114 @@ impl Compactor {
     }
 }
 
+/// A structure to manage task pulling logic.
+#[derive(Debug, Clone)]
+struct TaskPullManager {
+    max_task_parallelism: u32,
+    max_pull_task_count: u32,
+    running_task_parallelism: Arc<AtomicU32>,
+    pull_task_ack: bool,
+    cpu_threshold: f32,
+    absolute_max_parallelism: u32,
+    sys_info: Arc<Mutex<sysinfo::System>>,
+}
+
+impl TaskPullManager {
+    /// Create a new `TaskPullManager`.
+    fn new(
+        max_task_parallelism: u32,
+        max_pull_task_count: u32,
+        absolute_max_parallelism: u32,
+        cpu_threshold: f32,
+    ) -> Self {
+        assert!(
+            max_task_parallelism > 0,
+            "max_task_parallelism must be greater than 0"
+        );
+        let mut sys = sysinfo::System::new();
+        sys.refresh_cpu_all();
+
+        Self {
+            max_task_parallelism,
+            max_pull_task_count,
+            running_task_parallelism: Arc::new(AtomicU32::new(0)),
+            pull_task_ack: true,
+            cpu_threshold,
+            absolute_max_parallelism,
+            sys_info: Arc::new(Mutex::new(sys)),
+        }
+    }
+
+    fn get_cpu_usage(&self) -> f32 {
+        let mut sys = self.sys_info.lock().unwrap();
+        sys.refresh_cpu_all();
+        sys.global_cpu_usage().min(1.0)
+    }
+
+    /// Calculate the pending pull task count.
+    fn calculate_pending_pull_task_count(&self) -> u32 {
+        if self.pull_task_ack {
+            self.get_max_available_parallelism()
+                .min(self.max_pull_task_count)
+        } else {
+            0
+        }
+    }
+
+    /// Update the pull task acknowledgment status.
+    fn update_pull_task_ack(&mut self, ack: bool) {
+        self.pull_task_ack = ack;
+    }
+
+    /// Check if pulling tasks is allowed.
+    fn can_pull_tasks(&self) -> bool {
+        self.pull_task_ack
+    }
+
+    /// Check if there is enough parallelism for the task.
+    fn has_enough_parallelism(&self, required_parallelism: u32) -> bool {
+        self.get_available_parallelism() >= required_parallelism
+    }
+
+    /// Increase the running task parallelism.
+    fn increase_parallelism(&self, parallelism: u32) {
+        self.running_task_parallelism
+            .fetch_add(parallelism, Ordering::SeqCst);
+    }
+
+    /// Decrease the running task parallelism.
+    fn decrease_parallelism(&self, parallelism: u32) {
+        self.running_task_parallelism
+            .fetch_sub(parallelism, Ordering::SeqCst);
+    }
+
+    /// Get current running task parallelism.
+    fn get_running_parallelism(&self) -> u32 {
+        self.running_task_parallelism.load(Ordering::SeqCst)
+    }
+
+    fn get_available_parallelism(&self) -> u32 {
+        let running_parallelism = self.running_task_parallelism.load(Ordering::SeqCst);
+        self.absolute_max_parallelism
+            .saturating_sub(running_parallelism)
+    }
+
+    fn get_max_available_parallelism(&self) -> u32 {
+        let running_parallelism = self.running_task_parallelism.load(Ordering::SeqCst);
+        let current_cpu_usage = self.get_cpu_usage();
+
+        let max_task_parallelism = if current_cpu_usage > self.cpu_threshold {
+            // CPU usage is high, strictly check max_task_parallelism
+            self.max_task_parallelism
+        } else {
+            // CPU usage is low, allow more parallelism
+            self.absolute_max_parallelism
+        };
+
+        max_task_parallelism.saturating_sub(running_parallelism)
+    }
+}
+
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
@@ -294,7 +402,11 @@ pub fn start_compactor(
     let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
-    let running_task_parallelism = Arc::new(AtomicU32::new(0));
+    let absolute_max_task_parallelism = (compactor_context.compaction_executor.worker_num() as f32
+        * compactor_context
+            .storage_opts
+            .compactor_absolute_max_task_multiplier)
+        .ceil() as u32;
 
     const MAX_PULL_TASK_COUNT: u32 = 4;
     let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
@@ -302,6 +414,13 @@ pub fn start_compactor(
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,
         0.0
+    );
+
+    let mut task_pull_manager = TaskPullManager::new(
+        max_task_parallelism,
+        max_pull_task_count,
+        absolute_max_task_parallelism,
+        compactor_context.storage_opts.compactor_cpu_usage_threshold,
     );
 
     let join_handle = tokio::spawn(async move {
@@ -312,8 +431,7 @@ pub fn start_compactor(
         // This outer loop is to recreate stream.
         'start_stream: loop {
             // reset state
-            // pull_task_ack.store(true, Ordering::SeqCst);
-            let mut pull_task_ack = true;
+            task_pull_manager.update_pull_task_ack(true);
             tokio::select! {
                 // Wait for interval.
                 _ = min_interval.tick() => {},
@@ -357,7 +475,7 @@ pub fn start_compactor(
                     event_loop_iteration_now = Instant::now();
                 }
 
-                let running_task_parallelism = running_task_parallelism.clone();
+                let mut task_pull_manager = task_pull_manager.clone();
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
                     _ = periodic_event_interval.tick() => {
@@ -379,37 +497,32 @@ pub fn start_compactor(
                             continue 'start_stream;
                         }
 
+                        let pending_pull_task_count = task_pull_manager.calculate_pending_pull_task_count();
 
-                        let mut pending_pull_task_count = 0;
-                        if pull_task_ack {
-                            // TODO: Compute parallelism on meta side
-                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
+                        if pending_pull_task_count > 0 {
+                            if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                                event: Some(RequestEvent::PullTask(
+                                    PullTask {
+                                        pull_task_count: pending_pull_task_count,
+                                    }
+                                )),
+                                create_at: SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .expect("Clock may have gone backwards")
+                                    .as_millis() as u64,
+                            }) {
+                                tracing::warn!(error = %e.as_report(), "Failed to pull task");
 
-                            if pending_pull_task_count > 0 {
-                                if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
-                                    event: Some(RequestEvent::PullTask(
-                                        PullTask {
-                                            pull_task_count: pending_pull_task_count,
-                                        }
-                                    )),
-                                    create_at: SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .expect("Clock may have gone backwards")
-                                        .as_millis() as u64,
-                                }) {
-                                    tracing::warn!(error = %e.as_report(), "Failed to pull task");
-
-                                    // re subscribe stream
-                                    continue 'start_stream;
-                                } else {
-                                    pull_task_ack = false;
-                                }
+                                // re subscribe stream
+                                continue 'start_stream;
+                            } else {
+                                task_pull_manager.update_pull_task_ack(false);
                             }
                         }
 
                         tracing::info!(
-                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
-                            pull_task_ack = %pull_task_ack,
+                            running_parallelism_count = %task_pull_manager.get_running_parallelism(),
+                            pull_task_ack = %task_pull_manager.can_pull_tasks(),
                             pending_pull_task_count = %pending_pull_task_count
                         );
 
@@ -482,16 +595,13 @@ pub fn start_compactor(
 
                                 assert_ne!(parallelism, 0, "splits cannot be empty");
 
-                                if (max_task_parallelism
-                                    - running_task_parallelism.load(Ordering::SeqCst))
-                                    < parallelism as u32
-                                {
+                                if !task_pull_manager.has_enough_parallelism(parallelism as u32) {
                                     tracing::warn!(
                                         "Not enough core parallelism to serve the task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
                                         compact_task.task_id,
                                         parallelism,
                                         max_task_parallelism,
-                                        running_task_parallelism.load(Ordering::Relaxed),
+                                        task_pull_manager.get_running_parallelism()
                                     );
                                     let (compact_task, table_stats, object_timestamps) =
                                         compact_done(
@@ -511,8 +621,7 @@ pub fn start_compactor(
                                     continue 'consume_stream;
                                 }
 
-                                running_task_parallelism
-                                    .fetch_add(parallelism as u32, Ordering::SeqCst);
+                                task_pull_manager.increase_parallelism(parallelism as u32);
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
@@ -528,7 +637,7 @@ pub fn start_compactor(
                                     .await;
 
                                     shutdown.lock().unwrap().remove(&task_id);
-                                    running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
+                                    task_pull_manager.decrease_parallelism(parallelism as u32);
 
                                     send_report_task_event(
                                         &compact_task,
@@ -599,7 +708,7 @@ pub fn start_compactor(
 
                             ResponseEvent::PullTaskAck(_pull_task_ack) => {
                                 // set flag
-                                pull_task_ack = true;
+                                task_pull_manager.update_pull_task_ack(true);
                             }
                         }
                     }

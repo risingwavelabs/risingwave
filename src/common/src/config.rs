@@ -865,6 +865,14 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_max_task_multiplier")]
     pub compactor_max_task_multiplier: f32,
 
+    /// Allows the compactor to use more tasks than `max_pull_task_count` if the CPU usage is
+    /// lower than `compactor_cpu_usage_threshold`.
+    #[serde(default = "default::storage::compactor_absolute_max_task_multiplier")]
+    pub compactor_absolute_max_task_multiplier: f32,
+
+    #[serde(default = "default::storage::compactor_cpu_usage_threshold")]
+    pub compactor_cpu_usage_threshold: f32,
+
     /// The percentage of memory available when compactor is deployed separately.
     /// `non_reserved_memory_bytes` = `system_memory_available_bytes` * `compactor_memory_available_proportion`
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
@@ -1834,6 +1842,14 @@ pub mod default {
 
         pub fn compactor_max_task_multiplier() -> f32 {
             3.0000
+        }
+
+        pub fn compactor_absolute_max_task_multiplier() -> f32 {
+            9.0000
+        }
+
+        pub fn compactor_cpu_usage_threshold() -> f32 {
+            0.8
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
