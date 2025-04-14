@@ -585,10 +585,6 @@ where
         &self.value_indices
     }
 
-    fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty() || self.pending_watermark.is_some()
-    }
-
     pub fn is_consistent_op(&self) -> bool {
         matches!(
             self.op_consistency_level,
@@ -758,10 +754,6 @@ where
         &mut self,
         new_vnodes: Arc<Bitmap>,
     ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
-        assert!(
-            !self.inner.is_dirty(),
-            "vnode bitmap should only be updated when state table is clean"
-        );
         let prev_vnodes = self
             .inner
             .local_store
@@ -1090,14 +1082,11 @@ where
             "commit state table"
         );
 
-        let mut table_watermarks = None;
-        if self.is_dirty() {
-            self.local_store
-                .flush()
-                .instrument(tracing::info_span!("state_table_flush"))
-                .await?;
-            table_watermarks = self.commit_pending_watermark();
-        }
+        self.local_store
+            .flush()
+            .instrument(tracing::info_span!("state_table_flush"))
+            .await?;
+        let table_watermarks = self.commit_pending_watermark();
         self.local_store.seal_current_epoch(
             new_epoch.curr,
             SealCurrentEpochOptions {
@@ -1164,18 +1153,18 @@ where
     fn commit_pending_watermark(
         &mut self,
     ) -> Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)> {
-        let watermark = self.pending_watermark.take();
-        watermark.as_ref().inspect(|watermark| {
-            trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
-        });
+        let watermark = self.pending_watermark.take()?;
+        trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
 
-        let watermark_serializer = if self.pk_indices().is_empty() {
-            None
-        } else {
+        assert!(
+            !self.pk_indices().is_empty(),
+            "see pending watermark on empty pk"
+        );
+        let watermark_serializer = {
             match self.clean_watermark_index_in_pk {
-                None => Some(self.pk_serde.index(0)),
+                None => self.pk_serde.index(0),
                 Some(clean_watermark_index_in_pk) => {
-                    Some(self.pk_serde.index(clean_watermark_index_in_pk as usize))
+                    self.pk_serde.index(clean_watermark_index_in_pk as usize)
                 }
             }
         };
@@ -1188,8 +1177,8 @@ where
             },
         };
 
-        let should_clean_watermark = match watermark {
-            Some(ref watermark) => {
+        let should_clean_watermark = {
+            {
                 if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
                     if let Some(key) = self.watermark_cache.lowest_key() {
                         watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
@@ -1207,53 +1196,42 @@ where
                     true
                 }
             }
-            None => false,
         };
 
-        let watermark_suffix = watermark.as_ref().map(|watermark| {
-            serialize_pk(
-                row::once(Some(watermark.clone())),
-                watermark_serializer.as_ref().unwrap(),
-            )
-        });
-
-        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark, WatermarkSerdeType)> =
-            None;
+        let watermark_suffix =
+            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
 
         // Compute Delete Ranges
-        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
+        let seal_watermark = if should_clean_watermark {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
 
-            let order_type = watermark_serializer
-                .as_ref()
-                .unwrap()
-                .get_order_types()
-                .get(0)
-                .unwrap();
+            let order_type = watermark_serializer.get_order_types().get(0).unwrap();
 
             if order_type.is_ascending() {
-                seal_watermark = Some((
+                Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                     watermark_type,
-                ));
+                ))
             } else {
-                seal_watermark = Some((
+                Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                     watermark_type,
-                ));
+                ))
             }
-        }
-        self.committed_watermark = watermark;
+        } else {
+            None
+        };
+        self.committed_watermark = Some(watermark);
 
         // Clear the watermark cache and force a resync.
         // TODO(kwannoel): This can be further optimized:

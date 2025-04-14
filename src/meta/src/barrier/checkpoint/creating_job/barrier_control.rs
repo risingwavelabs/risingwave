@@ -51,11 +51,11 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
 
     // metrics
-    consuming_snapshot_barrier_latency: LabelGuardedHistogram<2>,
-    consuming_log_store_barrier_latency: LabelGuardedHistogram<2>,
+    consuming_snapshot_barrier_latency: LabelGuardedHistogram,
+    consuming_log_store_barrier_latency: LabelGuardedHistogram,
 
-    wait_commit_latency: LabelGuardedHistogram<1>,
-    inflight_barrier_num: LabelGuardedIntGauge<1>,
+    wait_commit_latency: LabelGuardedHistogram,
+    inflight_barrier_num: LabelGuardedIntGauge,
 }
 
 impl CreatingStreamingJobBarrierControl {
@@ -72,10 +72,10 @@ impl CreatingStreamingJobBarrierControl {
 
             consuming_snapshot_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
-                .with_guarded_label_values(&[&table_id_str, "consuming_snapshot"]),
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_snapshot"]),
             consuming_log_store_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
-                .with_guarded_label_values(&[&table_id_str, "consuming_log_store"]),
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_log_store"]),
             wait_commit_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_wait_commit_latency
                 .with_guarded_label_values(&[&table_id_str]),

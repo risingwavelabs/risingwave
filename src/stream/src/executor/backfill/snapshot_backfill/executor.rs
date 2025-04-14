@@ -167,7 +167,11 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 let consume_upstream_row_count = self
                     .metrics
                     .snapshot_backfill_consume_row_count
-                    .with_guarded_label_values(&[&table_id_str, &actor_id_str, "consume_upstream"]);
+                    .with_guarded_label_values(&[
+                        table_id_str.as_str(),
+                        actor_id_str.as_str(),
+                        "consume_upstream",
+                    ]);
 
                 let mut upstream_buffer = UpstreamBuffer::new(
                     &mut self.upstream,
@@ -190,8 +194,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             .metrics
                             .snapshot_backfill_consume_row_count
                             .with_guarded_label_values(&[
-                                &table_id_str,
-                                &actor_id_str,
+                                table_id_str.as_str(),
+                                actor_id_str.as_str(),
                                 "consuming_snapshot",
                             ]);
                         let snapshot_stream = make_consume_snapshot_stream(
@@ -257,8 +261,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         .metrics
                         .snapshot_backfill_consume_row_count
                         .with_guarded_label_values(&[
-                            &table_id_str,
-                            &actor_id_str,
+                            table_id_str.as_str(),
+                            actor_id_str.as_str(),
                             "consuming_log_store",
                         ]);
                     loop {
@@ -538,7 +542,7 @@ struct UpstreamBuffer<'a, S> {
     /// some data in this epoch have been discarded and data in this epoch
     /// must be read from log store
     is_polling_epoch_data: bool,
-    consume_upstream_row_count: LabelGuardedIntCounter<3>,
+    consume_upstream_row_count: LabelGuardedIntCounter,
     _phase: S,
 }
 
@@ -546,7 +550,7 @@ impl<'a> UpstreamBuffer<'a, ConsumingSnapshot> {
     fn new(
         upstream: &'a mut MergeExecutorInput,
         first_upstream_barrier: DispatcherBarrier,
-        consume_upstream_row_count: LabelGuardedIntCounter<3>,
+        consume_upstream_row_count: LabelGuardedIntCounter,
     ) -> Self {
         Self {
             upstream,

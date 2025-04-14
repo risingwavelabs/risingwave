@@ -326,27 +326,27 @@ pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration: LabelGuardedHistogramVec<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounterVec<4>,
+    pub sink_commit_duration: LabelGuardedHistogramVec,
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec,
 
     // Log store writer metrics
-    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<3>,
-    pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_write_rows: LabelGuardedIntCounterVec,
 
     // Log store reader metrics
-    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
-    pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    pub log_store_read_bytes: LabelGuardedIntCounterVec<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_read_rows: LabelGuardedIntCounterVec,
+    pub log_store_read_bytes: LabelGuardedIntCounterVec,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec,
 
     // Iceberg metrics
-    pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
-    pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_write_bytes: LabelGuardedIntCounterVec<3>,
+    pub iceberg_write_qps: LabelGuardedIntCounterVec,
+    pub iceberg_write_latency: LabelGuardedHistogramVec,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
+    pub iceberg_partition_num: LabelGuardedIntGaugeVec,
+    pub iceberg_write_bytes: LabelGuardedIntCounterVec,
 }
 
 impl SinkMetrics {
@@ -513,8 +513,8 @@ pub struct SinkWriterParam {
 
 #[derive(Clone)]
 pub struct SinkWriterMetrics {
-    pub sink_commit_duration: LabelGuardedHistogram<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<4>,
+    pub sink_commit_duration: LabelGuardedHistogram,
+    pub connector_sink_rows_received: LabelGuardedIntCounter,
 }
 
 impl SinkWriterMetrics {
@@ -540,8 +540,8 @@ impl SinkWriterMetrics {
     #[cfg(test)]
     pub fn for_test() -> Self {
         Self {
-            sink_commit_duration: LabelGuardedHistogram::test_histogram(),
-            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            sink_commit_duration: LabelGuardedHistogram::test_histogram::<4>(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter::<4>(),
         }
     }
 }

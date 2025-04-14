@@ -24,7 +24,7 @@ hytra = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
 serde = { version = "1", features = ["derive"] }

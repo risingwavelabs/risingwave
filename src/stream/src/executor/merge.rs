@@ -403,7 +403,7 @@ pub struct SelectReceivers {
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
     /// If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
 }
 
 impl Stream for SelectReceivers {
@@ -501,7 +501,7 @@ impl SelectReceivers {
     fn new(
         actor_id: u32,
         upstreams: Vec<BoxedInput>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
     ) -> Self {
         assert!(!upstreams.is_empty());
         let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
@@ -577,7 +577,7 @@ impl SelectReceivers {
         self.extend_active(new_upstreams);
     }
 
-    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram, 2>> {
+    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
         self.merge_barrier_align_duration.clone()
     }
 }

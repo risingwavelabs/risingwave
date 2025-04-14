@@ -115,6 +115,25 @@ pub struct IcebergCommon {
     /// enable config load.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
+}
+
+impl EnforceSecretOnCloud for IcebergCommon {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "s3.access.key",
+        "s3.secret.key",
+        "gcs.credential",
+        "catalog.credential",
+        "catalog.token",
+        "catalog.oauth2_server_uri",
+    };
 }
 
 impl EnforceSecretOnCloud for IcebergCommon {

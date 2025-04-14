@@ -18,6 +18,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::NonStrictExpression;
 
+use crate::cache::ManagedLruCache;
+use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 
@@ -40,6 +42,7 @@ pub struct MaterializedExprsArgs<S: StateStore> {
     pub exprs: Vec<NonStrictExpression>,
     pub state_table: StateTable<S>,
     pub state_clean_col_idx: Option<usize>,
+    pub watermark_epoch: AtomicU64Ref,
 }
 
 impl<S: StateStore> MaterializedExprsExecutor<S> {
@@ -48,9 +51,13 @@ impl<S: StateStore> MaterializedExprsExecutor<S> {
         Self {
             input: args.input,
             inner: Inner {
-                actor_ctx: args.actor_ctx,
+                actor_ctx: args.actor_ctx.clone(),
                 exprs: args.exprs,
-                state_table: StateTableWrapper::new(args.state_table),
+                state_table: StateTableWrapper::new(
+                    args.state_table,
+                    args.actor_ctx.clone(),
+                    args.watermark_epoch,
+                ),
                 state_table_pk_indices,
                 state_clean_col_idx: args.state_clean_col_idx,
             },
@@ -66,24 +73,61 @@ impl<S: StateStore> Execute for MaterializedExprsExecutor<S> {
 
 struct StateTableWrapper<S: StateStore> {
     inner: StateTable<S>,
-    // TODO(rc): lru cache
+    cache: ManagedLruCache<OwnedRow, Option<OwnedRow>>,
 }
 
 impl<S: StateStore> StateTableWrapper<S> {
-    fn new(table: StateTable<S>) -> Self {
-        Self { inner: table }
+    fn new(
+        table: StateTable<S>,
+        actor_ctx: ActorContextRef,
+        watermark_epoch: AtomicU64Ref,
+    ) -> Self {
+        let metrics_info = MetricsInfo::new(
+            actor_ctx.streaming_metrics.clone(),
+            table.table_id(),
+            actor_ctx.id,
+            "MaterializedExprs",
+        );
+
+        Self {
+            inner: table,
+            cache: ManagedLruCache::unbounded(watermark_epoch, metrics_info),
+        }
     }
 
     fn insert(&mut self, row: impl Row) {
-        self.inner.insert(row);
+        let owned_row = row.into_owned_row();
+        let pk = (&owned_row)
+            .project(self.inner.pk_indices())
+            .into_owned_row();
+
+        // Store the record and update the cache
+        self.inner.insert(&owned_row);
+        self.cache.put(pk, Some(owned_row));
     }
 
     async fn remove_by_pk(&mut self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        let row = self.inner.get_row(pk).await?;
-        if let Some(ref row) = row {
-            self.inner.delete(row);
+        // Try to get from cache first
+        let pk_owned = pk.into_owned_row();
+        if let Some(row) = self.cache.get(&pk_owned) {
+            // Cache hit, delete from cache and state table
+            if let Some(row) = row {
+                let cloned_row = row.clone();
+                self.inner.delete(row);
+                // Mark as deleted in cache
+                self.cache.put(pk_owned, None);
+                Ok(Some(cloned_row))
+            } else {
+                Ok(None)
+            }
+        } else {
+            // Cache miss, get from state table
+            let row = self.inner.get_row(pk_owned).await?;
+            if let Some(ref row) = row {
+                self.inner.delete(row);
+            }
+            Ok(row)
         }
-        Ok(row)
     }
 }
 
@@ -194,7 +238,17 @@ impl<S: StateStore> Inner<S> {
                     let post_commit = self.state_table.inner.commit(barrier.epoch).await?;
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                     yield Message::Barrier(barrier);
-                    post_commit.post_yield_barrier(update_vnode_bitmap).await?;
+
+                    // evict LRU cache
+                    self.state_table.cache.evict();
+
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
+                        if cache_may_stale {
+                            self.state_table.cache.clear();
+                        }
+                    }
                 }
                 Message::Watermark(watermark) => {
                     if let Some(state_clean_col_idx) = self.state_clean_col_idx

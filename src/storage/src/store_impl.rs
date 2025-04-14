@@ -568,14 +568,6 @@ pub mod verify {
             self.actual.seal_current_epoch(next_epoch, opts);
         }
 
-        fn is_dirty(&self) -> bool {
-            let ret = self.actual.is_dirty();
-            if let Some(expected) = &self.expected {
-                assert_eq!(ret, expected.is_dirty());
-            }
-            ret
-        }
-
         async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
             let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
             if let Some(expected) = &mut self.expected {
@@ -1054,8 +1046,6 @@ mod dyn_state_store {
 
         async fn try_flush(&mut self) -> StorageResult<()>;
 
-        fn is_dirty(&self) -> bool;
-
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
@@ -1106,10 +1096,6 @@ mod dyn_state_store {
 
         async fn try_flush(&mut self) -> StorageResult<()> {
             self.try_flush().await
-        }
-
-        fn is_dirty(&self) -> bool {
-            self.is_dirty()
         }
 
         async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
@@ -1179,10 +1165,6 @@ mod dyn_state_store {
 
         fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             (*self.0).try_flush()
-        }
-
-        fn is_dirty(&self) -> bool {
-            (*self.0).is_dirty()
         }
 
         fn init(

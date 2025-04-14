@@ -254,11 +254,11 @@ pub struct BackpressureMonitoredLogReader<R: LogReader> {
     inner: R,
     /// Start time to wait for new future after poll ready
     wait_new_future_start_time: Option<Instant>,
-    wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
+    wait_new_future_duration_ns: LabelGuardedIntCounter,
 }
 
 impl<R: LogReader> BackpressureMonitoredLogReader<R> {
-    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<4>) -> Self {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter) -> Self {
         Self {
             inner,
             wait_new_future_start_time: None,
@@ -311,10 +311,10 @@ pub struct MonitoredLogReader<R: LogReader> {
 }
 
 pub struct LogReaderMetrics {
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_read_rows: LabelGuardedIntCounter<4>,
-    pub log_store_read_bytes: LabelGuardedIntCounter<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
+    pub log_store_read_rows: LabelGuardedIntCounter,
+    pub log_store_read_bytes: LabelGuardedIntCounter,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter,
 }
 
 impl<R: LogReader> MonitoredLogReader<R> {
@@ -620,9 +620,9 @@ pub struct MonitoredLogWriter<W: LogWriter> {
 
 pub struct LogWriterMetrics {
     // Labels: [actor_id, sink_id, sink_name]
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_write_rows: LabelGuardedIntCounter<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
+    pub log_store_write_rows: LabelGuardedIntCounter,
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {

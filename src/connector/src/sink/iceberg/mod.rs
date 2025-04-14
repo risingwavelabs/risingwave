@@ -646,9 +646,9 @@ pub struct IcebergWriterMetrics {
     // They are actually used in `PrometheusWriterBuilder`:
     //     WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone())
     // We keep them here to let the guard cleans the labels from metrics registry when dropped
-    _write_qps: LabelGuardedIntCounter<3>,
-    _write_latency: LabelGuardedHistogram<3>,
-    write_bytes: LabelGuardedIntCounter<3>,
+    _write_qps: LabelGuardedIntCounter,
+    _write_latency: LabelGuardedHistogram,
+    write_bytes: LabelGuardedIntCounter,
 }
 
 impl IcebergSinkWriter {
@@ -2301,6 +2301,7 @@ mod test {
                 rest_signing_name: None,
                 rest_signing_region: None,
                 rest_sigv4_enabled: None,
+                hosted_catalog: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
