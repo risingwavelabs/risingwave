@@ -1,4 +1,3 @@
-use std::mem;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -113,6 +112,23 @@ enum LogStoreOp {
         new_value: OwnedRow,
     },
     Barrier {
+        is_checkpoint: bool,
+    },
+}
+
+#[derive(Debug, PartialEq)]
+enum AlignedLogStoreOp {
+    Row {
+        seq_id: SeqId,
+        op: Op,
+        row: OwnedRow,
+    },
+    Update {
+        seq_id: SeqId,
+        old_value: OwnedRow,
+        new_value: OwnedRow,
+    },
+    Barrier {
         vnodes: Arc<Bitmap>,
         is_checkpoint: bool,
     },
@@ -130,10 +146,7 @@ impl From<LogStoreRowOp> for LogStoreOp {
                 }
                 Self::Row { seq_id, op, row }
             }
-            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier {
-                is_checkpoint,
-                vnodes: Arc::new(Bitmap::ones(0)),
-            },
+            LogStoreRowOp::Barrier { is_checkpoint } => Self::Barrier { is_checkpoint },
         }
     }
 }
@@ -625,14 +638,15 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             let row_op = row.op;
             let row_read_size = row.row_meta.size;
             match row_op {
-                LogStoreOp::Row { seq_id, .. } | LogStoreOp::Update { seq_id, .. } => {
+                AlignedLogStoreOp::Row { seq_id, .. }
+                | AlignedLogStoreOp::Update { seq_id, .. } => {
                     progress.insert(vnode, seq_id);
                 }
                 _ => {}
             }
 
             match row_op {
-                LogStoreOp::Row { op, row, .. } => {
+                AlignedLogStoreOp::Row { op, row, .. } => {
                     read_info.read_one_row(row_read_size);
                     ops.push(op);
                     if let Some(chunk) = data_chunk_builder.append_one_row(row) {
@@ -645,7 +659,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         );
                     }
                 }
-                LogStoreOp::Update {
+                AlignedLogStoreOp::Update {
                     new_value,
                     old_value,
                     ..
@@ -672,7 +686,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         );
                     }
                 }
-                LogStoreOp::Barrier {
+                AlignedLogStoreOp::Barrier {
                     vnodes,
                     is_checkpoint,
                 } => {
@@ -719,6 +733,12 @@ mod stream_de {
         pub vnode: VirtualNode,
         pub epoch: u64,
         pub size: usize,
+    }
+
+    #[derive(Debug)]
+    pub(super) struct AlignedLogStoreRow {
+        pub op: AlignedLogStoreOp,
+        pub row_meta: RowMeta,
     }
 
     #[derive(Debug)]
@@ -950,30 +970,43 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         Ok(())
     }
 
-    async fn next_op(&mut self) -> LogStoreResult<Option<LogStoreRow>> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<AlignedLogStoreRow>> {
         while let (Some(result), stream) = self
             .row_streams
             .next()
             .await
             .expect("row stream should not be empty when polled")
         {
-            let mut row = result?;
+            let row = result?;
             let row_meta = row.row_meta;
             let vnode = row_meta.vnode;
             let mut aligned_vnodes = BitmapBuilder::zeroed(self.serde.vnodes().len());
             let decoded_epoch = row_meta.epoch;
             self.may_init_epoch(decoded_epoch)?;
-            match &mut row.op {
-                LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
+            match row.op {
+                LogStoreOp::Row { seq_id, op, row } => {
                     self.row_streams.push(stream.into_future());
+                    let op = AlignedLogStoreOp::Row { seq_id, op, row };
+                    let row = AlignedLogStoreRow { op, row_meta };
                     return Ok(Some(row));
                 }
-                LogStoreOp::Barrier {
-                    is_checkpoint,
-                    vnodes,
+                LogStoreOp::Update {
+                    seq_id,
+                    old_value,
+                    new_value,
                 } => {
+                    self.row_streams.push(stream.into_future());
+                    let op = AlignedLogStoreOp::Update {
+                        seq_id,
+                        old_value,
+                        new_value,
+                    };
+                    let row = AlignedLogStoreRow { op, row_meta };
+                    return Ok(Some(row));
+                }
+                LogStoreOp::Barrier { is_checkpoint } => {
                     aligned_vnodes.set(vnode.to_index(), true);
-                    self.check_is_checkpoint(*is_checkpoint)?;
+                    self.check_is_checkpoint(is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
 
@@ -984,15 +1017,17 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
-                        let mut current_aligned_vnodes =
-                            BitmapBuilder::with_capacity(self.serde.vnodes().len());
-                        mem::swap(&mut aligned_vnodes, &mut current_aligned_vnodes);
-                        *vnodes = Arc::new(current_aligned_vnodes.finish());
-                        return Ok(Some(row));
+                        return Ok(Some(AlignedLogStoreRow {
+                            op: AlignedLogStoreOp::Barrier {
+                                vnodes: Arc::new(aligned_vnodes.finish()),
+                                is_checkpoint,
+                            },
+                            row_meta,
+                        }));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
                             curr_epoch: decoded_epoch,
-                            is_checkpoint: *is_checkpoint,
+                            is_checkpoint,
                         };
                         continue;
                     }
