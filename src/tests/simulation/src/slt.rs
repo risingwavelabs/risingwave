@@ -25,13 +25,13 @@ use sqllogictest::{
 
 use crate::client::RisingWave;
 use crate::cluster::Cluster;
-use crate::evaluate_skip;
 use crate::parse::extract_sql_command;
 use crate::slt::background_ddl_mode::*;
 use crate::slt::runner::{random_vnode_count, run_kill_not_allowed, run_no_kill};
 use crate::slt::slt_env::{Env, Opts};
 use crate::slt::vnode_mode::*;
 use crate::utils::TimedExt;
+use crate::{evaluate_skip, wait_or_retry_background_ddl};
 
 // retry a maximum times until it succeed
 const MAX_RETRY: usize = 10;
@@ -181,6 +181,37 @@ mod background_ddl_mode {
             };
             tester.run_async(set_background_ddl).await.unwrap();
             *background_ddl_enabled = background_ddl_setting;
+        };
+    }
+
+    // NOTE(kwannoel): only applicable to mvs currently
+    #[macro_export]
+    macro_rules! wait_or_retry_background_ddl {
+        ($record:expr, $name:expr, $iteration:expr) => {
+            let record = $record;
+            let i = $iteration;
+            tracing::debug!(iteration = i, "Retry for background ddl");
+            match wait_background_mv_finished($name).await {
+                Ok(_) => {
+                    tracing::debug!(
+                        iteration = i,
+                        "Record with background_ddl {:?} finished",
+                        record
+                    );
+                    break;
+                }
+                Err(err) => {
+                    tracing::error!(
+                        iteration = i,
+                        ?err,
+                        "failed to wait for background mv to finish creating"
+                    );
+                    if i >= MAX_RETRY {
+                        panic!("failed to run test after retry {i} times, error={err:#?}");
+                    }
+                    continue;
+                }
+            }
         };
     }
 }
@@ -556,30 +587,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
                                 }
                             )
                         {
-                            tracing::debug!(iteration = i, "Retry for background ddl");
-                            match wait_background_mv_finished(name).await {
-                                Ok(_) => {
-                                    tracing::debug!(
-                                        iteration = i,
-                                        "Record with background_ddl {:?} finished",
-                                        record
-                                    );
-                                    break;
-                                }
-                                Err(err) => {
-                                    tracing::error!(
-                                        iteration = i,
-                                        ?err,
-                                        "failed to wait for background mv to finish creating"
-                                    );
-                                    if i >= MAX_RETRY {
-                                        panic!(
-                                            "failed to run test after retry {i} times, error={err:#?}"
-                                        );
-                                    }
-                                    continue;
-                                }
-                            }
+                            wait_or_retry_background_ddl!(&record, name, i);
                         }
                         break;
                     }
@@ -622,30 +630,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
                                     && e.to_string().contains("table is in creating procedure")
                                     && background_ddl_enabled =>
                             {
-                                tracing::debug!(iteration = i, name, "Retry for background ddl");
-                                match wait_background_mv_finished(name).await {
-                                    Ok(_) => {
-                                        tracing::debug!(
-                                            iteration = i,
-                                            "Record with background_ddl {:?} finished",
-                                            record
-                                        );
-                                        break;
-                                    }
-                                    Err(err) => {
-                                        tracing::error!(
-                                            iteration = i,
-                                            ?err,
-                                            "failed to wait for background mv to finish creating"
-                                        );
-                                        if i >= MAX_RETRY {
-                                            panic!(
-                                                "failed to run test after retry {i} times, error={err:#?}"
-                                            );
-                                        }
-                                        continue;
-                                    }
-                                }
+                                wait_or_retry_background_ddl!(&record, name, i);
                             }
                             _ => tracing::error!(
                                 iteration = i,
