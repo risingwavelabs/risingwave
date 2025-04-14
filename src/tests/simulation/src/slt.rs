@@ -30,6 +30,7 @@ use sqllogictest::{
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::parse::extract_sql_command;
+use crate::slt::background_ddl_mode::*;
 use crate::utils::TimedExt;
 
 // retry a maximum times until it succeed
@@ -103,29 +104,36 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/cursor_multi_conn.slt",
 ];
 
-/// Wait for background mv to finish creating
-async fn wait_background_mv_finished(mview_name: &str) -> Result<()> {
-    let Ok(rw) = RisingWave::connect("frontend".into(), "dev".into()).await else {
-        bail!("failed to connect to frontend for {mview_name}");
-    };
-    let client = rw.pg_client();
-    if client.simple_query("WAIT;").await.is_err() {
-        bail!("failed to wait for background mv to finish creating for {mview_name}");
-    }
+/// Randomly set DDL statements to use `background_ddl`
+mod background_ddl_mode {
+    use anyhow::bail;
 
-    let Ok(result) = client
-        .query(
-            "select count(*) from pg_matviews where matviewname=$1;",
-            &[&mview_name],
-        )
-        .await
-    else {
-        bail!("failed to query pg_matviews for {mview_name}");
-    };
+    use crate::client::RisingWave;
 
-    match result[0].try_get::<_, i64>(0) {
-        Ok(1) => Ok(()),
-        r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
+    /// Wait for background mv to finish creating
+    pub(super) async fn wait_background_mv_finished(mview_name: &str) -> anyhow::Result<()> {
+        let Ok(rw) = RisingWave::connect("frontend".into(), "dev".into()).await else {
+            bail!("failed to connect to frontend for {mview_name}");
+        };
+        let client = rw.pg_client();
+        if client.simple_query("WAIT;").await.is_err() {
+            bail!("failed to wait for background mv to finish creating for {mview_name}");
+        }
+
+        let Ok(result) = client
+            .query(
+                "select count(*) from pg_matviews where matviewname=$1;",
+                &[&mview_name],
+            )
+            .await
+        else {
+            bail!("failed to query pg_matviews for {mview_name}");
+        };
+
+        match result[0].try_get::<_, i64>(0) {
+            Ok(1) => Ok(()),
+            r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
+        }
     }
 }
 
