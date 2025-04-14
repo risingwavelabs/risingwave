@@ -285,6 +285,17 @@ pub struct BigQuerySink {
     is_append_only: bool,
 }
 
+impl EnforceSecretOnCloud for BigQuerySink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            BigQueryConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl BigQuerySink {
     pub fn new(
         config: BigQueryConfig,

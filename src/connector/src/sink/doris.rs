@@ -36,6 +36,7 @@ use super::doris_starrocks_connector::{
 use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
@@ -58,6 +59,12 @@ pub struct DorisCommon {
     pub partial_update: Option<String>,
 }
 
+impl EnforceSecretOnCloud for DorisCommon {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf::phf_set! {
+        "doris.password",
+    };
+}
+
 impl DorisCommon {
     pub(crate) fn build_get_client(&self) -> DorisSchemaClient {
         DorisSchemaClient::new(
@@ -78,6 +85,13 @@ pub struct DorisConfig {
 
     pub r#type: String, // accept "append-only" or "upsert"
 }
+
+impl EnforceSecretOnCloud for DorisConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        DorisCommon::enforce_one(prop)
+    }
+}
+
 impl DorisConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
@@ -101,6 +115,17 @@ pub struct DorisSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecretOnCloud for DorisSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            DorisConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl DorisSink {

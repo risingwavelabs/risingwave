@@ -29,6 +29,7 @@ pub mod google_pubsub;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+use risingwave_common::bail;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
@@ -93,7 +94,8 @@ pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
-use crate::error::ConnectorError;
+use crate::WithPropertiesExt;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::file_sink::fs::FsSink;
@@ -122,7 +124,6 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
                 { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
-                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
@@ -303,6 +304,21 @@ impl SinkParam {
             sink_from_name: sink_catalog.sink_from_name,
         })
     }
+}
+
+pub fn enforce_secret_on_cloud_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()> {
+    use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+
+    let connector = props
+        .get_connector()
+        .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+    let key_iter = props.key_iter();
+    match_sink_name_str!(
+        connector.as_str(),
+        PropType,
+        PropType::enforce_secret_on_cloud(key_iter),
+        |other| bail!("connector '{}' is not supported", other)
+    )
 }
 
 pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =

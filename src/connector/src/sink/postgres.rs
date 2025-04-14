@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
@@ -31,6 +32,7 @@ use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
 use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
@@ -57,6 +59,12 @@ pub struct PostgresConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+impl EnforceSecretOnCloud for PostgresConfig {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf_set! {
+        "password", "ssl.root.cert"
+    };
 }
 
 fn default_max_batch_rows() -> usize {
@@ -105,6 +113,17 @@ impl PostgresSink {
             pk_indices,
             is_append_only,
         })
+    }
+}
+
+impl EnforceSecretOnCloud for PostgresSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            PostgresConfig::enforce_one(prop)?;
+        }
+        Ok(())
     }
 }
 

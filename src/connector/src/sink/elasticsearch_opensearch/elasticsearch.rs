@@ -19,6 +19,7 @@ use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt}
 use super::super::{DummySinkCommitCoordinator, Sink, SinkError, SinkParam, SinkWriterParam};
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
 use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::sink::Result;
 
 pub const ES_SINK: &str = "elasticsearch";
@@ -29,6 +30,17 @@ pub struct ElasticSearchSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecretOnCloud for ElasticSearchSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]

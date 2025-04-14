@@ -331,6 +331,10 @@ pub struct ClickHouseConfig {
 }
 
 impl EnforceSecretOnCloud for ClickHouseConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        ClickHouseCommon::enforce_one(prop)
+    }
+
     fn enforce_secret_on_cloud<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
@@ -347,6 +351,17 @@ pub struct ClickHouseSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecretOnCloud for ClickHouseSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ClickHouseConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl ClickHouseConfig {

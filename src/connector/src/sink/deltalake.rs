@@ -49,6 +49,7 @@ use super::{
     SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
 };
 use crate::connector_common::AwsAuthProps;
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -68,6 +69,12 @@ pub struct DeltaLakeCommon {
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
+}
+
+impl EnforceSecretOnCloud for DeltaLakeCommon {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        AwsAuthProps::enforce_one(prop)
+    }
 }
 
 impl DeltaLakeCommon {
@@ -171,6 +178,12 @@ pub struct DeltaLakeConfig {
     pub r#type: String,
 }
 
+impl EnforceSecretOnCloud for DeltaLakeConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        DeltaLakeCommon::enforce_one(prop)
+    }
+}
+
 impl DeltaLakeConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<DeltaLakeConfig>(
@@ -185,6 +198,17 @@ impl DeltaLakeConfig {
 pub struct DeltaLakeSink {
     pub config: DeltaLakeConfig,
     param: SinkParam,
+}
+
+impl EnforceSecretOnCloud for DeltaLakeSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            DeltaLakeCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl DeltaLakeSink {

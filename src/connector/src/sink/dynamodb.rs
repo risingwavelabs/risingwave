@@ -37,6 +37,7 @@ use super::writer::{
 };
 use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::AwsAuthProps;
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
@@ -70,6 +71,12 @@ pub struct DynamoDbConfig {
     pub max_future_send_nums: usize,
 }
 
+impl EnforceSecretOnCloud for DynamoDbConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        AwsAuthProps::enforce_one(prop)
+    }
+}
+
 fn default_max_batch_item_nums() -> usize {
     25
 }
@@ -101,6 +108,17 @@ pub struct DynamoDbSink {
     pub config: DynamoDbConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+}
+
+impl EnforceSecretOnCloud for DynamoDbSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            DynamoDbConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl Sink for DynamoDbSink {

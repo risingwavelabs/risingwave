@@ -34,7 +34,7 @@
 #![feature(assert_matches)]
 #![feature(never_type)]
 #![register_tool(rw)]
-#![recursion_limit = "256"]
+#![recursion_limit = "1024"]
 #![feature(min_specialization)]
 
 use std::time::Duration;

@@ -903,6 +903,12 @@ pub struct MongodbCommon {
     pub collection_name: String,
 }
 
+impl EnforceSecretOnCloud for MongodbCommon {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "mongodb.url"
+    };
+}
+
 impl MongodbCommon {
     pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
         let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;

@@ -570,7 +570,7 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enforce_secret_on_cloud(
+    pub fn enforce_secret_on_cloud_source(
         with_properties: &impl WithPropertiesExt,
     ) -> crate::error::ConnectorResult<()> {
         let connector = with_properties
@@ -964,14 +964,14 @@ mod tests {
         ));
 
         let props_with_secret = WithOptionsSecResolved::without_secrets(props.clone());
-        assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_ok());
+        assert!(ConnectorProperties::enforce_secret_on_cloud_source(&props_with_secret).is_ok());
 
         unsafe {
             // comes from risingwave_common::util::deployment::Deployment
             remove_var("RISINGWAVE_CI");
             set_var("RISINGWAVE_CLOUD", "1");
         }
-        assert!(ConnectorProperties::enforce_secret_on_cloud(&props_with_secret).is_err());
+        assert!(ConnectorProperties::enforce_secret_on_cloud_source(&props_with_secret).is_err());
         unsafe {
             remove_var("RISINGWAVE_CLOUD");
             set_var("RISINGWAVE_CI", "1");

@@ -114,7 +114,6 @@ pub async fn gen_sink_plan(
         .load()
         .enforce_secret_on_cloud()
     {
-        // ConnectorProperties::enforce_secret_on_cloud(&with_options)?;
         todo!()
     }
 

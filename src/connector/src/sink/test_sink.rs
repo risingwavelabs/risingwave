@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use parking_lot::Mutex;
 use sea_orm::DatabaseConnection;
 
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 
@@ -33,6 +34,8 @@ pub const TEST_SINK_NAME: &str = "test";
 pub struct TestSink {
     param: SinkParam,
 }
+
+impl EnforceSecretOnCloud for TestSink {}
 
 impl TryFrom<SinkParam> for TestSink {
     type Error = SinkError;

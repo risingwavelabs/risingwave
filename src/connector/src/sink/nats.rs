@@ -33,6 +33,7 @@ use super::encoder::{
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -57,6 +58,17 @@ pub struct NatsSink {
     pub config: NatsConfig,
     schema: Schema,
     is_append_only: bool,
+}
+
+impl EnforceSecretOnCloud for NatsSink {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            NatsCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 // sink write
