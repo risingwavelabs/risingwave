@@ -593,13 +593,12 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         }
     }
 
-    #[try_stream(ok = (u64, KvLogStoreItem), error = anyhow::Error)]
-    async fn into_log_store_item_stream(self, chunk_size: usize) {
-        #[for_await]
-        for next in self.into_vnode_log_store_item_stream(chunk_size) {
-            let (epoch, _progress, item) = next?;
-            yield (epoch, item)
-        }
+    fn into_log_store_item_stream(
+        self,
+        chunk_size: usize,
+    ) -> impl Stream<Item = anyhow::Result<(u64, KvLogStoreItem)>> {
+        self.into_vnode_log_store_item_stream(chunk_size)
+            .map_ok(|(epoch, _progress, item)| (epoch, item))
     }
 
     #[try_stream(ok = (Epoch, LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
