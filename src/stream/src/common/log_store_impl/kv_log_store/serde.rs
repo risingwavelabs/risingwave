@@ -532,6 +532,7 @@ enum StreamState {
     /// Some parallelism has reached the barrier, and is waiting for other parallelism to reach the
     /// barrier.
     BarrierAligning {
+        aligned_vnodes: BitmapBuilder,
         curr_epoch: u64,
         is_checkpoint: bool,
     },
@@ -980,7 +981,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             let row = result?;
             let row_meta = row.row_meta;
             let vnode = row_meta.vnode;
-            let mut aligned_vnodes = BitmapBuilder::zeroed(self.serde.vnodes().len());
             let decoded_epoch = row_meta.epoch;
             self.may_init_epoch(decoded_epoch)?;
             match row.op {
@@ -1005,7 +1005,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     return Ok(Some(row));
                 }
                 LogStoreOp::Barrier { is_checkpoint } => {
-                    aligned_vnodes.set(vnode.to_index(), true);
                     self.check_is_checkpoint(is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
@@ -1026,6 +1025,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         }));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
+                            aligned_vnodes: BitmapBuilder::zeroed(self.serde.vnodes().len()),
                             curr_epoch: decoded_epoch,
                             is_checkpoint,
                         };
