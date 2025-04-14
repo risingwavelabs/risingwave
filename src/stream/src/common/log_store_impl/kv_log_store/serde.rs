@@ -535,6 +535,7 @@ enum StreamState {
     /// barrier.
     BarrierAligning {
         aligned_vnodes: BitmapBuilder,
+        read_size: usize,
         curr_epoch: u64,
         is_checkpoint: bool,
     },
@@ -1034,18 +1035,23 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             },
                         );
 
-                        let mut aligned_vnodes = match old_state {
-                            StreamState::BarrierAligning { aligned_vnodes, .. } => aligned_vnodes,
-                            _ => BitmapBuilder::zeroed(self.serde.vnodes().len()),
+                        let (mut aligned_vnodes, mut read_size) = match old_state {
+                            StreamState::BarrierAligning {
+                                aligned_vnodes,
+                                read_size,
+                                ..
+                            } => (aligned_vnodes, read_size),
+                            _ => (BitmapBuilder::zeroed(self.serde.vnodes().len()), 0),
                         };
                         aligned_vnodes.set(vnode.to_index(), true);
+                        read_size += size;
 
                         while let Some(stream) = self.barrier_streams.pop() {
                             self.row_streams.push(stream.into_future());
                         }
                         return Ok(Some(AlignedLogStoreRow {
                             epoch: decoded_epoch,
-                            size,
+                            size: read_size,
                             op: AlignedLogStoreOp::Barrier {
                                 vnodes: Arc::new(aligned_vnodes.finish()),
                                 is_checkpoint,
@@ -1055,10 +1061,12 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                         match &mut self.stream_state {
                             StreamState::BarrierAligning {
                                 aligned_vnodes,
+                                read_size,
                                 curr_epoch,
                                 is_checkpoint: current_is_checkpoint,
                             } => {
                                 aligned_vnodes.set(vnode.to_index(), true);
+                                *read_size += size;
                                 *curr_epoch = decoded_epoch;
                                 *current_is_checkpoint = is_checkpoint;
                             }
@@ -1068,6 +1076,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                                 aligned_vnodes.set(vnode.to_index(), true);
                                 *other = StreamState::BarrierAligning {
                                     aligned_vnodes,
+                                    read_size: size,
                                     curr_epoch: decoded_epoch,
                                     is_checkpoint,
                                 };
