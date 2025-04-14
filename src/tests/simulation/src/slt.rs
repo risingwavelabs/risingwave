@@ -20,7 +20,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use itertools::Itertools;
 use rand::seq::IteratorRandom;
 use rand::{Rng, SeedableRng, rng as thread_rng};
 use rand_chacha::ChaChaRng;
@@ -30,25 +29,14 @@ use sqllogictest::{
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
+use crate::parse::extract_sql_command;
 use crate::utils::TimedExt;
 
 // retry a maximum times until it succeed
 const MAX_RETRY: usize = 10;
 
-fn is_create_table_as(sql: &str) -> bool {
-    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
-
-    parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
-}
-
-fn is_sink_into_table(sql: &str) -> bool {
-    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
-
-    parts.len() >= 4 && parts[0] == "create" && parts[1] == "sink" && parts[3] == "into"
-}
-
 #[derive(Debug, PartialEq, Eq)]
-enum SqlCmd {
+pub enum SqlCmd {
     /// Other create statements.
     Create {
         is_create_table_as: bool,
@@ -68,7 +56,6 @@ enum SqlCmd {
     Drop,
     Dml,
     Flush,
-    Alter,
     Others,
 }
 
@@ -98,67 +85,6 @@ impl SqlCmd {
                 | SqlCmd::CreateSink { .. }
                 | SqlCmd::CreateMaterializedView { .. }
         )
-    }
-}
-
-fn extract_sql_command(sql: &str) -> SqlCmd {
-    let sql = sql.to_lowercase();
-    let tokens = sql.split_whitespace();
-    let mut tokens = tokens.multipeek();
-    let first_token = tokens.next().unwrap_or("");
-
-    match first_token {
-        // NOTE(kwannoel):
-        // It's entirely possible for a malformed command to be parsed as `SqlCmd::Create`.
-        // BUT an error should be expected for such a test.
-        // So we don't need to handle this case.
-        // Eventually if there are too many edge cases, we can opt to use our parser.
-        "create" => {
-            let result: Option<SqlCmd> = try {
-                match tokens.next()? {
-                    "materialized" => {
-                        // view
-                        tokens.next()?;
-
-                        // if not exists | name
-                        let next = *tokens.peek()?;
-                        if "if" == next
-                            && let Some("not") = tokens.peek().cloned()
-                            && let Some("exists") = tokens.peek().cloned()
-                        {
-                            tokens.next();
-                            tokens.next();
-                            tokens.next();
-                            let name = tokens.next()?.to_owned();
-                            SqlCmd::CreateMaterializedView { name }
-                        } else {
-                            let name = next.to_owned();
-                            SqlCmd::CreateMaterializedView { name }
-                        }
-                    }
-                    "sink" => SqlCmd::CreateSink {
-                        is_sink_into_table: is_sink_into_table(&sql),
-                    },
-                    _ => SqlCmd::Create {
-                        is_create_table_as: is_create_table_as(&sql),
-                    },
-                }
-            };
-            result.unwrap_or(SqlCmd::Others)
-        }
-        "set" => {
-            if sql.contains("background_ddl") {
-                let enable = sql.contains("true");
-                SqlCmd::SetBackgroundDdl { enable }
-            } else {
-                SqlCmd::Others
-            }
-        }
-        "drop" => SqlCmd::Drop,
-        "insert" | "update" | "delete" => SqlCmd::Dml,
-        "flush" => SqlCmd::Flush,
-        "alter" => SqlCmd::Alter,
-        _ => SqlCmd::Others,
     }
 }
 
@@ -340,7 +266,7 @@ pub async fn run_slt_task(
                         .iter()
                         .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
                 {
-                    extract_sql_command(sql)
+                    extract_sql_command(sql).expect("could not parse sql")
                 }
                 _ => SqlCmd::Others,
             };
