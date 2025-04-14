@@ -1,4 +1,3 @@
-use std::mem;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -120,11 +119,13 @@ enum LogStoreOp {
 #[derive(Debug, PartialEq)]
 enum AlignedLogStoreOp {
     Row {
+        vnode: VirtualNode,
         seq_id: SeqId,
         op: Op,
         row: OwnedRow,
     },
     Update {
+        vnode: VirtualNode,
         seq_id: SeqId,
         old_value: OwnedRow,
         new_value: OwnedRow,
@@ -635,13 +636,12 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 
         let mut read_info = ReadInfo::new();
         while let Some(row) = this.next_op().await? {
-            let epoch = row.row_meta.epoch;
-            let vnode = row.row_meta.vnode;
+            let epoch = row.epoch;
             let row_op = row.op;
-            let row_read_size = row.row_meta.size;
+            let row_read_size = row.size;
             match row_op {
-                AlignedLogStoreOp::Row { seq_id, .. }
-                | AlignedLogStoreOp::Update { seq_id, .. } => {
+                AlignedLogStoreOp::Row { vnode, seq_id, .. }
+                | AlignedLogStoreOp::Update { vnode, seq_id, .. } => {
                     progress.insert(vnode, seq_id);
                 }
                 _ => {}
@@ -740,7 +740,8 @@ mod stream_de {
     #[derive(Debug)]
     pub(super) struct AlignedLogStoreRow {
         pub op: AlignedLogStoreOp,
-        pub row_meta: RowMeta,
+        pub epoch: Epoch,
+        pub size: usize,
     }
 
     #[derive(Debug)]
@@ -983,12 +984,22 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             let row_meta = row.row_meta;
             let vnode = row_meta.vnode;
             let decoded_epoch = row_meta.epoch;
+            let size = row_meta.size;
             self.may_init_epoch(decoded_epoch)?;
             match row.op {
                 LogStoreOp::Row { seq_id, op, row } => {
                     self.row_streams.push(stream.into_future());
-                    let op = AlignedLogStoreOp::Row { seq_id, op, row };
-                    let row = AlignedLogStoreRow { op, row_meta };
+                    let op = AlignedLogStoreOp::Row {
+                        vnode,
+                        seq_id,
+                        op,
+                        row,
+                    };
+                    let row = AlignedLogStoreRow {
+                        op,
+                        size,
+                        epoch: decoded_epoch,
+                    };
                     return Ok(Some(row));
                 }
                 LogStoreOp::Update {
@@ -998,11 +1009,16 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                 } => {
                     self.row_streams.push(stream.into_future());
                     let op = AlignedLogStoreOp::Update {
+                        vnode,
                         seq_id,
                         old_value,
                         new_value,
                     };
-                    let row = AlignedLogStoreRow { op, row_meta };
+                    let row = AlignedLogStoreRow {
+                        op,
+                        size,
+                        epoch: decoded_epoch,
+                    };
                     return Ok(Some(row));
                 }
                 LogStoreOp::Barrier { is_checkpoint } => {
@@ -1011,13 +1027,12 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     self.barrier_streams.push(stream);
 
                     if self.row_streams.is_empty() {
-                        let old_state = {
-                            let mut state_to_swap = StreamState::BarrierEmitted {
+                        let old_state = replace(
+                            &mut self.stream_state,
+                            StreamState::BarrierEmitted {
                                 prev_epoch: decoded_epoch,
-                            };
-                            mem::swap(&mut self.stream_state, &mut state_to_swap);
-                            state_to_swap
-                        };
+                            },
+                        );
 
                         let mut aligned_vnodes = match old_state {
                             StreamState::BarrierAligning { aligned_vnodes, .. } => aligned_vnodes,
@@ -1029,11 +1044,12 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             self.row_streams.push(stream.into_future());
                         }
                         return Ok(Some(AlignedLogStoreRow {
+                            epoch: decoded_epoch,
+                            size,
                             op: AlignedLogStoreOp::Barrier {
                                 vnodes: Arc::new(aligned_vnodes.finish()),
                                 is_checkpoint,
                             },
-                            row_meta,
                         }));
                     } else {
                         match &mut self.stream_state {
