@@ -565,7 +565,7 @@ where
                         .one(db)
                         .await?
                         .unwrap();
-                    source_info.is_some() && source_info.unwrap().to_protobuf().is_shared()
+                    source_info.map_or(false, |info| info.to_protobuf().is_shared())
                 } else {
                     true
                 };
