@@ -422,7 +422,7 @@ pub async fn handle_create_sink(
     if let Some(table_catalog) = target_table_catalog {
         use crate::handler::alter_table_column::hijack_merger_for_target_table;
 
-        let (mut graph, mut table, source) =
+        let (mut graph, mut table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
         sink.original_target_columns = table
@@ -456,7 +456,7 @@ pub async fn handle_create_sink(
                 replace_job_plan::ReplaceTable {
                     table: Some(table),
                     source,
-                    job_type: TableJobType::General as _,
+                    job_type: target_job_type as _,
                 },
             )),
             fragment_graph: Some(graph),
@@ -509,7 +509,7 @@ pub fn fetch_incoming_sinks(
 pub(crate) async fn reparse_table_for_sink(
     session: &Arc<SessionImpl>,
     table_catalog: &Arc<TableCatalog>,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
+) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { name, .. } = &definition else {
@@ -521,7 +521,7 @@ pub(crate) async fn reparse_table_for_sink(
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
 
-    let (graph, table, source, _) = generate_stream_graph_for_replace_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,
@@ -532,7 +532,7 @@ pub(crate) async fn reparse_table_for_sink(
     )
     .await?;
 
-    Ok((graph, table, source))
+    Ok((graph, table, source, job_type))
 }
 
 pub(crate) fn insert_merger_to_union_with_project(

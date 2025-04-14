@@ -111,26 +111,26 @@ pub mod metrics {
     #[derive(Clone)]
     pub struct SyncedKvLogStoreMetrics {
         // state of the log store
-        pub unclean_state: LabelGuardedIntCounter<5>,
-        pub clean_state: LabelGuardedIntCounter<5>,
-        pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
+        pub unclean_state: LabelGuardedIntCounter,
+        pub clean_state: LabelGuardedIntCounter,
+        pub wait_next_poll_ns: LabelGuardedIntCounter,
 
         // Write metrics
-        pub storage_write_count: LabelGuardedIntCounter<4>,
-        pub storage_write_size: LabelGuardedIntCounter<4>,
-        pub pause_duration_ns: LabelGuardedIntCounter<4>,
+        pub storage_write_count: LabelGuardedIntCounter,
+        pub storage_write_size: LabelGuardedIntCounter,
+        pub pause_duration_ns: LabelGuardedIntCounter,
 
         // Buffer metrics
-        pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
-        pub buffer_read_count: LabelGuardedIntCounter<5>,
-        pub buffer_read_size: LabelGuardedIntCounter<5>,
+        pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+        pub buffer_read_count: LabelGuardedIntCounter,
+        pub buffer_read_size: LabelGuardedIntCounter,
 
         // Read metrics
-        pub total_read_count: LabelGuardedIntCounter<5>,
-        pub total_read_size: LabelGuardedIntCounter<5>,
+        pub total_read_count: LabelGuardedIntCounter,
+        pub total_read_size: LabelGuardedIntCounter,
         pub persistent_log_read_metrics: KvLogStoreReadMetrics,
         pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
     }
@@ -281,20 +281,20 @@ pub mod metrics {
         #[cfg(test)]
         pub(crate) fn for_test() -> Self {
             SyncedKvLogStoreMetrics {
-                unclean_state: LabelGuardedIntCounter::test_int_counter(),
-                clean_state: LabelGuardedIntCounter::test_int_counter(),
-                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
-                storage_write_count: LabelGuardedIntCounter::test_int_counter(),
-                storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-                pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
-                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_read_count: LabelGuardedIntCounter::test_int_counter(),
-                buffer_read_size: LabelGuardedIntCounter::test_int_counter(),
-                total_read_count: LabelGuardedIntCounter::test_int_counter(),
-                total_read_size: LabelGuardedIntCounter::test_int_counter(),
+                unclean_state: LabelGuardedIntCounter::test_int_counter::<5>(),
+                clean_state: LabelGuardedIntCounter::test_int_counter::<5>(),
+                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter::<4>(),
+                storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+                storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
+                pause_duration_ns: LabelGuardedIntCounter::test_int_counter::<4>(),
+                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+                buffer_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
+                total_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+                total_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
                 persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
                 flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
             }

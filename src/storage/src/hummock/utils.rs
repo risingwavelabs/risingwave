@@ -397,7 +397,6 @@ pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -406,7 +405,6 @@ pub(crate) async fn do_insert_sanity_check(
     }
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
@@ -428,7 +426,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -441,7 +438,6 @@ pub(crate) async fn do_delete_sanity_check(
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
@@ -473,7 +469,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -486,7 +481,6 @@ pub(crate) async fn do_update_sanity_check(
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };

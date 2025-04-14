@@ -28,7 +28,7 @@ use crate::source::kafka::stats::RdKafkaStats;
 
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
-    pub high_watermark: LabelGuardedIntGaugeVec<2>,
+    pub high_watermark: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -59,19 +59,19 @@ impl Default for EnumeratorMetrics {
 
 #[derive(Debug, Clone)]
 pub struct SourceMetrics {
-    pub partition_input_count: LabelGuardedIntCounterVec<5>,
+    pub partition_input_count: LabelGuardedIntCounterVec,
 
     // **Note**: for normal messages, the metric is the message's payload size.
     // For messages from load generator, the metric is the size of stream chunk.
-    pub partition_input_bytes: LabelGuardedIntCounterVec<5>,
+    pub partition_input_bytes: LabelGuardedIntCounterVec,
     /// Report latest message id
-    pub latest_message_id: LabelGuardedIntGaugeVec<3>,
+    pub latest_message_id: LabelGuardedIntGaugeVec,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
-    pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec<1>,
+    pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec,
 
-    pub parquet_source_skip_row_count: LabelGuardedIntCounterVec<4>,
-    pub file_source_input_row_count: LabelGuardedIntCounterVec<4>,
+    pub parquet_source_skip_row_count: LabelGuardedIntCounterVec,
+    pub file_source_input_row_count: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =

@@ -2756,11 +2756,11 @@ mod tests {
             let mem_ctx = if test_spill {
                 MemoryContext::new_with_mem_limit(
                     parent_mem_ctx,
-                    LabelGuardedIntGauge::<4>::test_int_gauge(),
+                    LabelGuardedIntGauge::test_int_gauge::<4>(),
                     0,
                 )
             } else {
-                MemoryContext::new(parent_mem_ctx, LabelGuardedIntGauge::<4>::test_int_gauge())
+                MemoryContext::new(parent_mem_ctx, LabelGuardedIntGauge::test_int_gauge::<4>())
             };
             Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
@@ -2825,7 +2825,7 @@ mod tests {
             test_spill: bool,
         ) {
             let parent_mem_context =
-                MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
+                MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), u64::MAX);
 
             {
                 let join_executor = self.create_join_executor_with_chunk_size_and_executors(
