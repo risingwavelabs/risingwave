@@ -437,9 +437,9 @@ impl LogStoreRowSerde {
         );
         pin_mut!(stream);
         while let Some(row) = stream.try_next().await? {
-            let epoch = row.epoch;
+            let epoch = row.row_meta.epoch;
             let op = row.op;
-            let row_size = row.size;
+            let row_size = row.row_meta.size;
             match (epoch, op) {
                 (epoch, LogStoreOp::Row { op, row, .. }) => {
                     if epoch != expected_epoch {
@@ -620,10 +620,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 
         let mut read_info = ReadInfo::new();
         while let Some(row) = this.next_op().await? {
-            let epoch = row.epoch;
-            let vnode = row.vnode;
+            let epoch = row.row_meta.epoch;
+            let vnode = row.row_meta.vnode;
             let row_op = row.op;
-            let row_read_size = row.size;
+            let row_read_size = row.row_meta.size;
             match row_op {
                 LogStoreOp::Row { seq_id, .. } | LogStoreOp::Update { seq_id, .. } => {
                     progress.insert(vnode, seq_id);
@@ -714,20 +714,23 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 mod stream_de {
     use super::*;
 
-    #[derive(Debug)]
-    pub(super) struct LogStoreRow {
+    #[derive(Clone, Copy, Debug)]
+    pub(super) struct RowMeta {
         pub vnode: VirtualNode,
         pub epoch: u64,
-        pub op: LogStoreOp,
         pub size: usize,
     }
 
     #[derive(Debug)]
+    pub(super) struct LogStoreRow {
+        pub op: LogStoreOp,
+        pub row_meta: RowMeta,
+    }
+
+    #[derive(Debug)]
     pub(super) struct RawLogStoreRow {
-        pub vnode: VirtualNode,
-        pub epoch: u64,
         pub op: LogStoreRowOp,
-        pub size: usize,
+        pub row_meta: RowMeta,
     }
 
     pub(super) type LogStoreItemStream<S: StateStoreReadIter> =
@@ -742,12 +745,8 @@ mod stream_de {
             iter.into_stream(move |(key, value)| -> StorageResult<RawLogStoreRow> {
                 let size = key.user_key.table_key.len() + value.len();
                 let (epoch, op) = serde.deserialize(value)?;
-                Ok(RawLogStoreRow {
-                    vnode,
-                    epoch,
-                    op,
-                    size,
-                })
+                let row_meta = RowMeta { vnode, epoch, size };
+                Ok(RawLogStoreRow { op, row_meta })
             })
             .map_err(Into::into),
         )
@@ -759,13 +758,7 @@ mod stream_de {
     #[try_stream(ok = LogStoreRow, error = anyhow::Error)]
     async fn may_merge_update(stream: impl Stream<Item = LogStoreResult<RawLogStoreRow>> + Send) {
         pin_mut!(stream);
-        while let Some(RawLogStoreRow {
-            vnode,
-            epoch,
-            op,
-            size: row_size,
-        }) = stream.try_next().await?
-        {
+        while let Some(RawLogStoreRow { row_meta, op }) = stream.try_next().await? {
             if let LogStoreRowOp::Row {
                 seq_id,
                 op: Op::UpdateDelete,
@@ -774,31 +767,33 @@ mod stream_de {
             {
                 let next_item = stream.try_next().await?;
                 if let Some(row) = next_item {
-                    let next_item_epoch = row.epoch;
                     let next_op = row.op;
-                    let next_row_size = row.size;
+                    let next_row_meta = row.row_meta;
                     if let LogStoreRowOp::Row {
                         seq_id: next_seq_id,
                         op: Op::UpdateInsert,
                         row: new_value,
                     } = next_op
                     {
-                        if epoch != next_item_epoch {
+                        if row_meta.epoch != next_row_meta.epoch {
                             return Err(anyhow!(
                                 "UpdateDelete epoch {} different UpdateInsert epoch {}",
-                                epoch,
-                                next_item_epoch
+                                row_meta.epoch,
+                                next_row_meta.epoch
                             ));
                         }
+                        let merged_row_meta = RowMeta {
+                            vnode: row_meta.vnode,
+                            epoch: row_meta.epoch,
+                            size: (row_meta.size + next_row_meta.size),
+                        };
                         yield LogStoreRow {
-                            vnode,
-                            epoch,
                             op: LogStoreOp::Update {
                                 seq_id: next_seq_id,
                                 new_value,
                                 old_value,
                             },
-                            size: (row_size + next_row_size),
+                            row_meta: merged_row_meta,
                         };
                     } else {
                         if cfg!(debug_assertions) {
@@ -811,46 +806,38 @@ mod stream_de {
                             warn!("do not get UpdateInsert after UpdateDelete");
                         }
                         yield LogStoreRow {
-                            vnode,
-                            epoch,
                             op: LogStoreOp::Row {
                                 seq_id,
                                 op: Op::UpdateDelete,
                                 row: old_value,
                             },
-                            size: row_size,
+                            row_meta,
                         };
                         yield LogStoreRow {
-                            vnode,
-                            epoch,
                             op: LogStoreOp::from(next_op),
-                            size: row_size,
+                            row_meta: next_row_meta,
                         };
                     }
                 } else {
                     if cfg!(debug_assertions) {
-                        unreachable!("should should be end of stream after UpdateDelete");
+                        unreachable!("should be end of stream after UpdateDelete");
                     } else {
                         // in release mode just warn
                         warn!("reach end of stream after UpdateDelete");
                     }
                     yield LogStoreRow {
-                        vnode,
-                        epoch,
                         op: LogStoreOp::Row {
                             seq_id,
                             op: Op::UpdateDelete,
                             row: old_value,
                         },
-                        size: row_size,
+                        row_meta,
                     };
                 }
             } else {
                 yield LogStoreRow {
-                    vnode,
-                    epoch,
                     op: LogStoreOp::from(op),
-                    size: row_size,
+                    row_meta,
                 };
             }
         }
@@ -878,7 +865,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         for mut stream in self.barrier_streams.drain(..) {
             match Pin::new(&mut stream).peek().await {
                 Some(Ok(row)) => {
-                    self.not_started_streams.push((row.epoch, stream));
+                    self.not_started_streams.push((row.row_meta.epoch, stream));
                 }
                 Some(Err(_)) => match Pin::new(&mut stream).next().await {
                     Some(Err(e)) => {
@@ -971,9 +958,10 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             .expect("row stream should not be empty when polled")
         {
             let mut row = result?;
-            let vnode = row.vnode;
+            let row_meta = row.row_meta;
+            let vnode = row_meta.vnode;
             let mut aligned_vnodes = BitmapBuilder::zeroed(self.serde.vnodes().len());
-            let decoded_epoch = row.epoch;
+            let decoded_epoch = row_meta.epoch;
             self.may_init_epoch(decoded_epoch)?;
             match &mut row.op {
                 LogStoreOp::Row { .. } | LogStoreOp::Update { .. } => {
