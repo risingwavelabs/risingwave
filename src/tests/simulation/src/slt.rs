@@ -606,57 +606,60 @@ mod tests {
     }
 
     #[test]
-    fn test_is_create_table_as() {
-        assert!(is_create_table_as("     create     table xx  as select 1;"));
-        assert!(!is_create_table_as(
-            "     create table xx not  as select 1;"
-        ));
-        assert!(!is_create_table_as("     create view xx as select 1;"));
-    }
-
-    #[test]
     fn test_extract_sql_command() {
         check(
             extract_sql_command("create  table  t as select 1;"),
             expect![[r#"
-                Create {
-                    is_create_table_as: true,
-                }"#]],
+                Ok(
+                    Create {
+                        is_create_table_as: true,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("  create table  t (a int);"),
             expect![[r#"
-                Create {
-                    is_create_table_as: false,
-                }"#]],
+                Ok(
+                    Create {
+                        is_create_table_as: false,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command(" create materialized   view  m_1 as select 1;"),
             expect![[r#"
-                CreateMaterializedView {
-                    name: "m_1",
-                }"#]],
+                Ok(
+                    CreateMaterializedView {
+                        name: "m_1",
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("set background_ddl= true;"),
             expect![[r#"
-                SetBackgroundDdl {
-                    enable: true,
-                }"#]],
+                Ok(
+                    SetBackgroundDdl {
+                        enable: true,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("SET BACKGROUND_DDL=true;"),
             expect![[r#"
-                SetBackgroundDdl {
-                    enable: true,
-                }"#]],
+                Ok(
+                    SetBackgroundDdl {
+                        enable: true,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("CREATE MATERIALIZED VIEW if not exists m_1 as select 1;"),
             expect![[r#"
-                CreateMaterializedView {
-                    name: "m_1",
-                }"#]],
+                Ok(
+                    CreateMaterializedView {
+                        name: "m_1",
+                    },
+                )"#]],
         )
     }
 }
