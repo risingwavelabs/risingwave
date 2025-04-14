@@ -13,13 +13,11 @@
 // limitations under the License.
 
 use std::cmp::min;
-use std::env;
-use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::path::Path;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use rand::seq::IteratorRandom;
 use rand::{Rng, SeedableRng, rng as thread_rng};
 use rand_chacha::ChaChaRng;
@@ -31,6 +29,7 @@ use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::parse::extract_sql_command;
 use crate::slt::background_ddl_mode::*;
+use crate::slt::vnode_mode::*;
 use crate::utils::TimedExt;
 
 // retry a maximum times until it succeed
@@ -137,44 +136,53 @@ mod background_ddl_mode {
     }
 }
 
-// Copied from sqllogictest-bin.
-#[derive(Clone)]
-struct HashPartitioner {
-    count: u64,
-    id: u64,
-}
+mod vnode_mode {
+    use std::env;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::sync::LazyLock;
 
-impl HashPartitioner {
-    fn new(count: u64, id: u64) -> Result<Self> {
-        if count == 0 {
-            bail!("partition count must be greater than zero");
-        }
-        if id >= count {
-            bail!("partition id (zero-based) must be less than count");
-        }
-        Ok(Self { count, id })
+    use anyhow::bail;
+    use sqllogictest::Partitioner;
+
+    // Copied from sqllogictest-bin.
+    #[derive(Clone)]
+    pub(super) struct HashPartitioner {
+        count: u64,
+        id: u64,
     }
-}
 
-impl Partitioner for HashPartitioner {
-    fn matches(&self, file_name: &str) -> bool {
-        let mut hasher = DefaultHasher::new();
-        file_name.hash(&mut hasher);
-        hasher.finish() % self.count == self.id
+    impl HashPartitioner {
+        pub(super) fn new(count: u64, id: u64) -> anyhow::Result<Self> {
+            if count == 0 {
+                bail!("partition count must be greater than zero");
+            }
+            if id >= count {
+                bail!("partition id (zero-based) must be less than count");
+            }
+            Ok(Self { count, id })
+        }
     }
-}
 
-static PARTITIONER: LazyLock<Option<HashPartitioner>> = LazyLock::new(|| {
-    let count = env::var("BUILDKITE_PARALLEL_JOB_COUNT")
-        .ok()?
-        .parse::<u64>()
-        .unwrap();
-    let id = env::var("BUILDKITE_PARALLEL_JOB")
-        .ok()?
-        .parse::<u64>()
-        .unwrap();
-    Some(HashPartitioner::new(count, id).unwrap())
-});
+    impl Partitioner for HashPartitioner {
+        fn matches(&self, file_name: &str) -> bool {
+            let mut hasher = DefaultHasher::new();
+            file_name.hash(&mut hasher);
+            hasher.finish() % self.count == self.id
+        }
+    }
+
+    pub(super) static PARTITIONER: LazyLock<Option<HashPartitioner>> = LazyLock::new(|| {
+        let count = env::var("BUILDKITE_PARALLEL_JOB_COUNT")
+            .ok()?
+            .parse::<u64>()
+            .unwrap();
+        let id = env::var("BUILDKITE_PARALLEL_JOB")
+            .ok()?
+            .parse::<u64>()
+            .unwrap();
+        Some(HashPartitioner::new(count, id).unwrap())
+    });
+}
 
 pub struct Opts {
     pub kill_opts: KillOpts,
