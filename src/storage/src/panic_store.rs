@@ -156,7 +156,7 @@ impl StateStoreReadVector for PanicStateStore {
         &self,
         _vec: Vector,
         _options: VectorNearestOptions,
-        _on_nearest_item_fn: impl OnNearestItem<O>,
+        _on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> StorageResult<Vec<O>> {
         panic!()
     }
