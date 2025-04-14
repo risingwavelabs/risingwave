@@ -249,13 +249,9 @@ pub struct BigQueryConfig {
 }
 
 impl EnforceSecretOnCloud for BigQueryConfig {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> crate::error::ConnectorResult<()> {
-        for prop in prop_iter {
-            BigQueryCommon::enforce_one(prop)?;
-            AwsAuthProps::enforce_one(prop)?;
-        }
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        BigQueryCommon::enforce_one(prop)?;
+        AwsAuthProps::enforce_one(prop)?;
         Ok(())
     }
 }
