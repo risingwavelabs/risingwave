@@ -136,17 +136,6 @@ impl EnforceSecretOnCloud for IcebergCommon {
     };
 }
 
-impl EnforceSecretOnCloud for IcebergCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
-        "s3.access.key",
-        "s3.secret.key",
-        "gcs.credential",
-        "catalog.credential",
-        "catalog.token",
-        "catalog.oauth2_server_uri",
-    };
-}
-
 impl IcebergCommon {
     pub fn catalog_type(&self) -> &str {
         self.catalog_type.as_deref().unwrap_or("storage")

@@ -225,15 +225,6 @@ impl EnforceSecretOnCloud for IcebergConnection {
     };
 }
 
-impl EnforceSecretOnCloud for IcebergConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
-        "s3.access.key",
-        "s3.secret.key",
-        "gcs.credential",
-        "catalog.token",
-    };
-}
-
 #[async_trait]
 impl Connection for IcebergConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
