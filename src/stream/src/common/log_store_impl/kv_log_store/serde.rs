@@ -1097,8 +1097,8 @@ mod tests {
     use tokio::sync::oneshot::Sender;
 
     use crate::common::log_store_impl::kv_log_store::serde::{
-        KvLogStoreItem, LogStoreOp, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
-        merge_log_store_item_stream,
+        AlignedLogStoreOp, KvLogStoreItem, LogStoreOp, LogStoreRowOp, LogStoreRowOpStream,
+        LogStoreRowSerde, merge_log_store_item_stream,
     };
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         TEST_TABLE_ID, check_rows_eq, gen_test_data, gen_test_log_store_table,
@@ -1111,7 +1111,7 @@ mod tests {
     const EPOCH1: u64 = test_epoch(2);
     const EPOCH2: u64 = test_epoch(3);
 
-    fn assert_value_eq(expected: LogStoreOp, actual: LogStoreOp) {
+    fn assert_value_eq(expected: AlignedLogStoreOp, actual: AlignedLogStoreOp) {
         match (expected, actual) {
             (
                 LogStoreOp::Barrier {
@@ -1497,11 +1497,11 @@ mod tests {
         pin_mut!(stream);
 
         let row = stream.next_op().await.unwrap().unwrap();
-        let epoch = row.epoch;
+        let epoch = row.row_meta.epoch;
         let op = row.op;
 
         assert_eq!(EPOCH0, epoch);
-        let actual = LogStoreOp::Barrier {
+        let actual = AlignedLogStoreOp::Barrier {
             is_checkpoint: true,
             vnodes: Arc::new(Bitmap::ones(0)),
         };
@@ -1515,12 +1515,12 @@ mod tests {
             let mut j = 0;
             while j < ops[i].len() {
                 let row = stream.next_op().await.unwrap().unwrap();
-                let epoch = row.epoch;
+                let epoch = row.row_meta.epoch;
                 let op = row.op;
                 assert_eq!(EPOCH1, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
-                    let expected_op = LogStoreOp::Update {
+                    let expected_op = AlignedLogStoreOp::Update {
                         seq_id: 0,
                         old_value: rows[i][j].clone(),
                         new_value: rows[i][j + 1].clone(),
@@ -1528,7 +1528,7 @@ mod tests {
                     assert_value_eq(expected_op, op);
                     j += 2;
                 } else {
-                    let expected_op = LogStoreOp::Row {
+                    let expected_op = AlignedLogStoreOp::Row {
                         seq_id: 0,
                         op: ops[i][j],
                         row: rows[i][j].clone(),
@@ -1541,11 +1541,11 @@ mod tests {
         }
 
         let row = stream.next_op().await.unwrap().unwrap();
-        let epoch = row.epoch;
+        let epoch = row.row_meta.epoch;
         let op = row.op;
 
         assert_eq!(EPOCH1, epoch);
-        let actual = LogStoreOp::Barrier {
+        let actual = AlignedLogStoreOp::Barrier {
             is_checkpoint: false,
             vnodes: Arc::new(Bitmap::ones(0)),
         };
@@ -1559,12 +1559,12 @@ mod tests {
             let mut j = 0;
             while j < ops[i].len() {
                 let row = stream.next_op().await.unwrap().unwrap();
-                let epoch = row.epoch;
+                let epoch = row.row_meta.epoch;
                 let op = row.op;
                 assert_eq!(EPOCH2, epoch);
                 if let Op::UpdateDelete = ops[i][j] {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
-                    let expected_op = LogStoreOp::Update {
+                    let expected_op = AlignedLogStoreOp::Update {
                         seq_id: 0,
                         old_value: rows[i][j].clone(),
                         new_value: rows[i][j + 1].clone(),
@@ -1572,7 +1572,7 @@ mod tests {
                     assert_value_eq(expected_op, op);
                     j += 2;
                 } else {
-                    let expected_op = LogStoreOp::Row {
+                    let expected_op = AlignedLogStoreOp::Row {
                         seq_id: 0,
                         op: ops[i][j],
                         row: rows[i][j].clone(),
@@ -1585,10 +1585,10 @@ mod tests {
         }
 
         let row = stream.next_op().await.unwrap().unwrap();
-        let epoch = row.epoch;
+        let epoch = row.row_meta.epoch;
         let op = row.op;
         assert_eq!(EPOCH2, epoch);
-        let actual = LogStoreOp::Barrier {
+        let actual = AlignedLogStoreOp::Barrier {
             is_checkpoint: true,
             vnodes: Arc::new(Bitmap::ones(0)),
         };
