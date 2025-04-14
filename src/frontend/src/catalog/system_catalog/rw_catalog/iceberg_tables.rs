@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,7 +87,6 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
         meta_store_host, meta_store_port, meta_store_user, meta_store_password, meta_store_database
     );
 
-    println!("conn_str: {}", conn_str);
     let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls)
         .await
         .map_err(|e| anyhow!(e))?;
