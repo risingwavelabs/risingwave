@@ -223,10 +223,6 @@ impl LocalReplay for LocalReplayImpl {
         self.0.flush().await.map_err(|_| TraceError::FlushFailed)
     }
 
-    fn is_dirty(&self) -> bool {
-        self.0.is_dirty()
-    }
-
     async fn try_flush(&mut self) -> Result<()> {
         self.0
             .try_flush()

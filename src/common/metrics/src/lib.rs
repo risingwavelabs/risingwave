@@ -148,8 +148,8 @@ pub fn get_label<T: std::str::FromStr>(metric: &Metric, label: &str) -> Option<T
     metric
         .get_label()
         .iter()
-        .find(|lp| lp.get_name() == label)
-        .and_then(|lp| lp.get_value().parse::<T>().ok())
+        .find(|lp| lp.name() == label)
+        .and_then(|lp| lp.value().parse::<T>().ok())
 }
 
 // Must ensure the label exists and can be parsed into `T`
