@@ -247,7 +247,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             if let Err(e) =
                 risingwave_common::license::Feature::DatabaseFailureIsolation.check_available()
             {
-                warn!(%e, "DatabaseFailureIsolation disabled by license");
+                warn!(error = %e.as_report(), "DatabaseFailureIsolation disabled by license");
                 false
             } else {
                 true
