@@ -225,6 +225,16 @@ impl Binder {
     ) -> Result<()> {
         match self.bind_for {
             BindFor::Stream | BindFor::Batch => {
+                // reject sources for cross-db access
+                if matches!(self.bind_for, BindFor::Stream)
+                    && self.database_id != database_id
+                    && matches!(object, PbObject::SourceId(_))
+                {
+                    return Err(PermissionDenied(
+                        "SOURCE is not allowed for cross-db access".to_owned(),
+                    )
+                    .into());
+                }
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
                     if user.is_super || user.id == owner {
                         return Ok(());
