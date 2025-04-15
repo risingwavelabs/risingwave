@@ -241,8 +241,9 @@ impl Ord for VectorRef<'_> {
 }
 
 impl ToText for VectorRef<'_> {
-    fn write<W: std::fmt::Write>(&self, _f: &mut W) -> std::fmt::Result {
-        todo!("VECTOR_PLACEHOLDER")
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        // TODO: use the correct type; `Vector(0)` is invalid
+        self.write_with_type(&DataType::Vector(0), f)
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, _ty: &DataType, f: &mut W) -> std::fmt::Result {
