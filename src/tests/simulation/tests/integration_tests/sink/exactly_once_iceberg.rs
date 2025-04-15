@@ -123,7 +123,7 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>, should_panic: boo
         test_source.create_stream_count.load(Relaxed)
     );
     println!(
-        "totol id nums in external sink is {:?}, test_source.id_list len is {:?}",
+        "total id nums in external sink is {:?}, test_source.id_list len is {:?}",
         test_sink.store.count_total_keys(),
         test_source.id_list.len()
     );
