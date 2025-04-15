@@ -30,7 +30,11 @@ if [ "$1" == "slt" ]; then
     # Load environment variables from risedev-env if it exists
     RC_ENV_FILE=".risingwave/config/risedev-env"
     if [ -f "${RC_ENV_FILE}" ]; then
+        echo "Loading environment variables from ${RC_ENV_FILE}"
+        # Export all variables from RC_ENV_FILE
+        set -a  # automatically export all variables
         source "${RC_ENV_FILE}"
+        set +a  # disable auto-export
     else
         echo "${RC_ENV_FILE} not found, have you launched the cluster with risedev?"
         exit 1
