@@ -13,26 +13,22 @@
 // limitations under the License.
 
 use phf::{Set, phf_set};
-use risingwave_common::util::deployment::Deployment;
 
 use crate::error::ConnectorResult as Result;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{key} is enforced to be a SECRET on RisingWave Cloud, please use `CREATE SECRET` first")]
-pub struct EnforceSecretOnCloudError {
+pub struct EnforceSecretError {
     key: String,
 }
 
-pub trait EnforceSecretOnCloud {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {};
+pub trait EnforceSecret {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {};
 
-    fn enforce_secret_on_cloud<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<()> {
-        if !Deployment::is_cloud_hosted() {
-            return Ok(());
-        }
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<()> {
         for prop in prop_iter {
-            if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
-                return Err(EnforceSecretOnCloudError {
+            if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+                return Err(EnforceSecretError {
                     key: prop.to_owned(),
                 }
                 .into());
@@ -42,11 +38,8 @@ pub trait EnforceSecretOnCloud {
     }
 
     fn enforce_one(prop: &str) -> Result<()> {
-        if !Deployment::is_cloud_hosted() {
-            return Ok(());
-        }
-        if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
-            return Err(EnforceSecretOnCloudError {
+        if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+            return Err(EnforceSecretError {
                 key: prop.to_owned(),
             }
             .into());

@@ -25,7 +25,7 @@ pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::connector_common::KinesisCommon;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
 use crate::source::SourceProperties;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
@@ -59,10 +59,8 @@ impl SourceProperties for KinesisProperties {
     const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
 }
 
-impl EnforceSecretOnCloud for KinesisProperties {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> Result<(), ConnectorError> {
+impl EnforceSecret for KinesisProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
         for prop in prop_iter {
             KinesisCommon::enforce_one(prop)?;
         }
