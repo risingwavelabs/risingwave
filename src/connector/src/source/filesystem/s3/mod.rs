@@ -16,7 +16,7 @@ pub mod enumerator;
 use phf::{Set, phf_set};
 use serde::Deserialize;
 
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
 use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::util::dummy::{
@@ -45,8 +45,8 @@ pub struct S3PropertiesCommon {
     pub compression_format: CompressionFormat,
 }
 
-impl EnforceSecretOnCloud for S3PropertiesCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for S3PropertiesCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "s3.credentials.access",
         "s3.credentials.secret",
     };
