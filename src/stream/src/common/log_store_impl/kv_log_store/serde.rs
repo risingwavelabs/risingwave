@@ -1067,8 +1067,20 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             } => {
                                 aligned_vnodes.set(vnode.to_index(), true);
                                 *read_size += size;
-                                *curr_epoch = decoded_epoch;
-                                *current_is_checkpoint = is_checkpoint;
+                                if curr_epoch != &decoded_epoch {
+                                    return Err(anyhow!(
+                                        "current epoch {} does not match with decoded epoch {}",
+                                        curr_epoch,
+                                        decoded_epoch
+                                    ));
+                                }
+                                if current_is_checkpoint != &is_checkpoint {
+                                    return Err(anyhow!(
+                                        "current is_checkpoint {} does not match with decoded is_checkpoint {}",
+                                        current_is_checkpoint,
+                                        is_checkpoint
+                                    ));
+                                }
                             }
                             other => {
                                 let mut aligned_vnodes =
