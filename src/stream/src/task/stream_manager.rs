@@ -306,7 +306,7 @@ impl StreamActorManager {
         }
     }
 
-    fn create_snapshot_backfill_input(
+    async fn create_snapshot_backfill_input(
         &self,
         upstream_node: &StreamNode,
         actor_context: &ActorContextRef,
@@ -330,6 +330,7 @@ impl StreamActorManager {
             upstream_merge,
             chunk_size,
         )
+        .await
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -345,12 +346,14 @@ impl StreamActorManager {
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = env.config().developer.chunk_size;
-        let upstream = self.create_snapshot_backfill_input(
-            upstream_node,
-            actor_context,
-            local_barrier_manager,
-            chunk_size,
-        )?;
+        let upstream = self
+            .create_snapshot_backfill_input(
+                upstream_node,
+                actor_context,
+                local_barrier_manager,
+                chunk_size,
+            )
+            .await?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
 

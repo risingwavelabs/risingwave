@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
+use futures::future::try_join_all;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use prometheus::Histogram;
 use risingwave_common::array::StreamChunkBuilder;
@@ -304,10 +305,8 @@ impl MergeExecutor {
 
                         if !update.added_upstream_actors.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = update
-                                .added_upstream_actors
-                                .iter()
-                                .map(|upstream_actor| {
+                            let new_upstreams: Vec<_> = try_join_all(
+                                update.added_upstream_actors.iter().map(|upstream_actor| {
                                     new_input(
                                         &self.local_barrier_manager,
                                         self.metrics.clone(),
@@ -316,9 +315,10 @@ impl MergeExecutor {
                                         upstream_actor,
                                         new_upstream_fragment_id,
                                     )
-                                })
-                                .try_collect()
-                                .context("failed to create upstream receivers")?;
+                                }),
+                            )
+                            .await
+                            .context("failed to create upstream receivers")?;
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
@@ -674,6 +674,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use futures::FutureExt;
+    use futures::future::try_join_all;
     use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -920,9 +921,8 @@ mod tests {
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
-        let inputs: Vec<_> = [untouched, old]
-            .into_iter()
-            .map(|upstream_actor_id| {
+        let inputs: Vec<_> =
+            try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
                 new_input(
                     &barrier_test_env.local_barrier_manager,
                     metrics.clone(),
@@ -931,8 +931,9 @@ mod tests {
                     &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
                 )
-            })
-            .try_collect()
+                .await
+            }))
+            .await
             .unwrap();
 
         let merge_updates = maplit::hashmap! {
@@ -1152,6 +1153,8 @@ mod tests {
                 BATCHED_PERMITS,
                 "for_test".into(),
             )
+            .await
+            .unwrap()
         };
 
         test_env.inject_barrier(&exchange_client_test_barrier(), [remote_input.actor_id()]);

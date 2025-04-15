@@ -122,18 +122,9 @@ impl DispatchExecutorInner {
         &mut self,
         downstream_actors: &[ActorId],
     ) -> StreamResult<Vec<Output>> {
-        fn resolve_output(
-            downstream_actor: ActorId,
-            request: NewOutputRequest,
-            context: &SharedContext,
-        ) -> Output {
+        fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
             let tx = match request {
-                NewOutputRequest::Local(tx) => tx,
-                NewOutputRequest::Remote(result_sender) => {
-                    let (tx, rx) = context.new_channel();
-                    let _ = result_sender.send(Ok(rx));
-                    tx
-                }
+                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
             };
             Output::new(downstream_actor, tx)
         }
@@ -141,7 +132,7 @@ impl DispatchExecutorInner {
         for downstream_actor in downstream_actors {
             let output =
                 if let Some(request) = self.pending_new_output_requests.remove(downstream_actor) {
-                    resolve_output(*downstream_actor, request, &self.context)
+                    resolve_output(*downstream_actor, request)
                 } else {
                     loop {
                         let (requested_actor, request) = self
@@ -150,7 +141,7 @@ impl DispatchExecutorInner {
                             .await
                             .ok_or_else(|| anyhow!("end of new output request"))?;
                         if requested_actor == *downstream_actor {
-                            break resolve_output(requested_actor, request, &self.context);
+                            break resolve_output(requested_actor, request);
                         } else {
                             assert!(
                                 self.pending_new_output_requests

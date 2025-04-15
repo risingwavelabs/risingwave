@@ -546,10 +546,10 @@ impl LocalBarrierWorker {
                             }
                             DatabaseStatus::Running(database) => {
                                 let (upstream_actor_id, actor_id) = ids;
-                                database.new_actor_output_request(
+                                database.new_actor_remote_output_request(
                                     actor_id,
                                     upstream_actor_id,
-                                    NewOutputRequest::Remote(result_sender),
+                                    result_sender,
                                 );
                                 return;
                             }
@@ -922,10 +922,10 @@ impl LocalBarrierWorker {
                     );
                     for ((upstream_actor_id, actor_id), result_sender) in pending_requests.drain(..)
                     {
-                        database.new_actor_output_request(
+                        database.new_actor_remote_output_request(
                             actor_id,
                             upstream_actor_id,
-                            NewOutputRequest::Remote(result_sender),
+                            result_sender,
                         );
                     }
                     *status = DatabaseStatus::Running(database);
@@ -1121,7 +1121,7 @@ impl<T> EventSender<T> {
 
 pub(crate) enum NewOutputRequest {
     Local(permit::Sender),
-    Remote(oneshot::Sender<StreamResult<permit::Receiver>>),
+    Remote(permit::Sender),
 }
 
 impl LocalBarrierManager {
