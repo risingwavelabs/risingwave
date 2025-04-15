@@ -691,12 +691,12 @@ pub(crate) fn compact_done(
     context
         .compactor_metrics
         .compact_write_bytes
-        .with_label_values(&[&group_label, level_label.as_str()])
+        .with_label_values(&[&group_label, &level_label])
         .inc_by(compaction_write_bytes);
     context
         .compactor_metrics
         .compact_write_sstn
-        .with_label_values(&[&group_label, level_label.as_str()])
+        .with_label_values(&[&group_label, &level_label])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
     (compact_task, table_stats_map, object_timestamps)

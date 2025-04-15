@@ -39,7 +39,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::{InflightDatabaseInfo, InflightStreamingJobInfo};
+use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
@@ -75,9 +75,10 @@ impl CheckpointControl {
         failed_databases: HashSet<DatabaseId>,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
+        env: MetaSrvEnv,
     ) -> Self {
         Self {
-            env: control_stream_manager.env.clone(),
+            env,
             databases: databases
                 .into_iter()
                 .map(|(database_id, control)| {
@@ -439,8 +440,7 @@ impl CheckpointControl {
         Item = (
             DatabaseId,
             &InflightSubscriptionInfo,
-            &InflightDatabaseInfo,
-            impl Iterator<Item = &InflightStreamingJobInfo> + '_,
+            impl Iterator<Item = TableId> + '_,
         ),
     > + '_ {
         self.databases.iter().flat_map(|(database_id, database)| {
@@ -450,10 +450,9 @@ impl CheckpointControl {
                     (
                         *database_id,
                         &database_state.inflight_subscription_info,
-                        &database_state.inflight_graph_info,
                         creating_jobs
                             .values()
-                            .filter_map(|job| job.inflight_graph_info()),
+                            .filter_map(|job| job.is_consuming().then_some(job.job_id)),
                     )
                 })
         })
@@ -566,9 +565,9 @@ impl DatabaseCheckpointControlStatus {
 }
 
 struct DatabaseCheckpointControlMetrics {
-    barrier_latency: LabelGuardedHistogram<1>,
-    in_flight_barrier_nums: LabelGuardedIntGauge<1>,
-    all_barrier_nums: LabelGuardedIntGauge<1>,
+    barrier_latency: LabelGuardedHistogram,
+    in_flight_barrier_nums: LabelGuardedIntGauge,
+    all_barrier_nums: LabelGuardedIntGauge,
 }
 
 impl DatabaseCheckpointControlMetrics {
@@ -1073,7 +1072,10 @@ impl DatabaseCheckpointControl {
             return Ok(());
         };
 
-        let mut edges = self.state.inflight_graph_info.build_edge(command.as_ref());
+        let mut edges = self
+            .state
+            .inflight_graph_info
+            .build_edge(command.as_ref(), &*control_stream_manager);
 
         // Insert newly added creating job
         if let Some(Command::CreateStreamingJob {

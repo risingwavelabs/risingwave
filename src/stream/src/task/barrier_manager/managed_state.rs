@@ -590,12 +590,6 @@ impl DatabaseManagedBarrierState {
         initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
         let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env, term_id));
-        shared_context.add_actors(
-            initial_partial_graphs
-                .iter()
-                .flat_map(|graph| graph.actor_infos.iter())
-                .cloned(),
-        );
         let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
             LocalBarrierManager::new(shared_context);
         Self {

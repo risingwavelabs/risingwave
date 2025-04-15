@@ -98,7 +98,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
-    source_split_change_count: LabelGuardedIntCounter<4>,
+    source_split_change_count: LabelGuardedIntCounter,
 
     // /// Receiver of barrier channel.
     // barrier_receiver: Option<UnboundedReceiver<Barrier>>,

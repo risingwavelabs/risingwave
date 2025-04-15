@@ -14,6 +14,7 @@
 
 mod non_zero64;
 mod over_window;
+pub mod parallelism;
 mod query_mode;
 mod search_path;
 pub mod sink_decouple;
@@ -31,6 +32,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::hash::VirtualNode;
+use crate::session_config::parallelism::ConfigParallelism;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -157,8 +159,33 @@ pub struct SessionConfig {
     /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
     /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = ConfigNonZeroU64::default())]
-    streaming_parallelism: ConfigNonZeroU64,
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism: ConfigParallelism,
+
+    /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_table: ConfigParallelism,
+
+    /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_sink: ConfigParallelism,
+
+    /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_index: ConfigParallelism,
+
+    /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_source: ConfigParallelism,
+
+    /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.
     #[parameter(default = false, alias = "rw_streaming_enable_delta_join")]

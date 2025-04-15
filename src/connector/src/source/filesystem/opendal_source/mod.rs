@@ -27,11 +27,14 @@ use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
+use phf::{Set, phf_set};
+
 use self::opendal_reader::OpendalReader;
 use super::OpendalFsSplit;
 use super::file_common::CompressionFormat;
 pub use super::s3::S3PropertiesCommon;
-use crate::error::ConnectorResult;
+use crate::enforce_secret::EnforceSecret;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::{SourceProperties, UnknownFields};
 
 pub const AZBLOB_CONNECTOR: &str = "azblob";
@@ -51,6 +54,7 @@ pub struct FsSourceCommon {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub refresh_interval_sec: Option<u64>,
 }
+
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
@@ -75,6 +79,13 @@ pub struct GcsProperties {
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecret for GcsProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "gcs.credential",
+        "gcs.service_account"
+    };
 }
 
 impl UnknownFields for GcsProperties {
@@ -146,6 +157,12 @@ pub struct OpendalS3Properties {
     pub unknown_fields: HashMap<String, String>,
 }
 
+impl EnforceSecret for OpendalS3Properties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        S3PropertiesCommon::enforce_secret(prop_iter)
+    }
+}
+
 impl UnknownFields for OpendalS3Properties {
     fn unknown_fields(&self) -> HashMap<String, String> {
         self.unknown_fields.clone()
@@ -177,6 +194,12 @@ pub struct PosixFsProperties {
     pub unknown_fields: HashMap<String, String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecret for PosixFsProperties {
+    fn enforce_secret<'a>(_prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        Ok(())
+    }
 }
 
 impl UnknownFields for PosixFsProperties {
@@ -216,6 +239,13 @@ pub struct AzblobProperties {
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecret for AzblobProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "azblob.credentials.account_key",
+        "azblob.credentials.account_name",
+    };
 }
 
 impl UnknownFields for AzblobProperties {

@@ -24,6 +24,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
+use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::model::{ActorId, FragmentId, SubscriptionId};
@@ -274,7 +275,11 @@ impl InflightDatabaseInfo {
         }
     }
 
-    pub(super) fn build_edge(&self, command: Option<&Command>) -> Option<FragmentEdgeBuildResult> {
+    pub(super) fn build_edge(
+        &self,
+        command: Option<&Command>,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Option<FragmentEdgeBuildResult> {
         let (info, replace_job) = match command {
             None => {
                 return None;
@@ -340,6 +345,7 @@ impl InflightDatabaseInfo {
             existing_fragment_ids
                 .map(|fragment_id| self.fragment(fragment_id))
                 .chain(new_fragment_infos.iter().map(|(_, info)| info)),
+            control_stream_manager,
         );
         if let Some(info) = info {
             builder.add_relations(&info.upstream_fragment_downstreams);

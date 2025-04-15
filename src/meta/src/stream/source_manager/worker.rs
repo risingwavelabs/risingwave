@@ -46,7 +46,7 @@ pub struct ConnectorSourceWorker {
     metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
     fail_cnt: u32,
-    source_is_up: LabelGuardedIntGauge<2>,
+    source_is_up: LabelGuardedIntGauge,
 
     debug_splits: Option<Vec<SplitImpl>>,
 }

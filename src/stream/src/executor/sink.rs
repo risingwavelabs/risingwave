@@ -394,7 +394,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
-        sink_chunk_buffer_size_metrics: LabelGuardedIntGauge<3>,
+        sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
         compact_chunk: bool,
     ) {
         // need to buffer chunks during one barrier
