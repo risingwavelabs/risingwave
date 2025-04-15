@@ -35,6 +35,10 @@ function dump_diagnose_info() {
 }
 trap dump_diagnose_info EXIT
 
+trap "echo Received SIGINT" SIGINT
+trap "echo Received SIGTERM" SIGTERM
+trap "echo Received SIGQUIT" SIGQUIT
+
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
 fi
@@ -176,4 +180,4 @@ else
 fi
 
 # Install dev sqllogictest
-cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 1aefcf9279075e27a4aea57329d193d90d0ebd59
+cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 5d6655eaf08dd4509fa99985e96f901a072acca2 --profile dev
