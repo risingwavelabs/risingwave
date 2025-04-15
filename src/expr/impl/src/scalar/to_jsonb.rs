@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use jsonbb::Builder;
 use risingwave_common::types::{
     DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, VectorRef,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
@@ -204,6 +204,13 @@ impl ToJsonb for Timestamptz {
 }
 
 impl ToJsonb for Serial {
+    fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
+        builder.display(ToTextDisplay(self));
+        Ok(())
+    }
+}
+
+impl ToJsonb for VectorRef<'_> {
     fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
         builder.display(ToTextDisplay(self));
         Ok(())
