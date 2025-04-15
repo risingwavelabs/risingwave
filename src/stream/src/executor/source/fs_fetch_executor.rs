@@ -409,8 +409,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 yield Message::Chunk(chunk);
                             }
                             None => {
-                                splits_on_fetch -= 1;
-                                state_store_handler.delete(&reading_file).await?;
+                                if !reading_file.is_empty() {
+                                    splits_on_fetch -= 1;
+                                    state_store_handler.delete(&reading_file).await?;
+                                }
                             }
                         },
                     }
