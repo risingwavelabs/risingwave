@@ -476,7 +476,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     Some(TruncateOffset::Chunk { epoch, chunk_id });
                                 LogStoreReadItem::StreamChunk { chunk, chunk_id }
                             }
-                            KvLogStoreItem::Barrier { is_checkpoint } => {
+                            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
                                 LogStoreReadItem::Barrier {
                                     is_checkpoint,
