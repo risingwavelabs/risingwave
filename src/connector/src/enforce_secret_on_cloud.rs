@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use phf::{Set, phf_set};
-use risingwave_common::util::deployment::Deployment;
 
 use crate::error::ConnectorResult as Result;
 
