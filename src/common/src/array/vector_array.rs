@@ -102,7 +102,10 @@ impl Array for VectorArray {
     }
 
     fn to_protobuf(&self) -> PbArray {
-        todo!("VECTOR_PLACEHOLDER")
+        let mut pb_array = self.inner.to_protobuf();
+        pb_array.set_array_type(risingwave_pb::data::PbArrayType::Vector);
+        pb_array.list_array_data.as_mut().unwrap().elem_size = Some(self.elem_size as _);
+        pb_array
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -119,6 +122,21 @@ impl Array for VectorArray {
 
     fn data_type(&self) -> DataType {
         DataType::Vector(self.elem_size)
+    }
+}
+
+impl VectorArray {
+    pub fn from_protobuf(
+        pb_array: &risingwave_pb::data::PbArray,
+    ) -> super::ArrayResult<super::ArrayImpl> {
+        let inner = ListArray::from_protobuf(pb_array)?.into_list();
+        let elem_size = pb_array
+            .list_array_data
+            .as_ref()
+            .unwrap()
+            .elem_size
+            .unwrap() as _;
+        Ok(Self { inner, elem_size }.into())
     }
 }
 
