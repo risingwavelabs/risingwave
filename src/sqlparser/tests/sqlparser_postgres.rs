@@ -1062,7 +1062,8 @@ fn parse_array() {
             order_by: vec![],
             limit: None,
             offset: None,
-            fetch: None
+            fetch: None,
+            settings: None,
         }))
     );
 
@@ -1101,7 +1102,8 @@ fn parse_array() {
             order_by: vec![],
             limit: None,
             offset: None,
-            fetch: None
+            fetch: None,
+            settings: None,
         }))
     );
 
@@ -1146,7 +1148,8 @@ fn parse_array() {
             order_by: vec![],
             limit: None,
             offset: None,
-            fetch: None
+            fetch: None,
+            settings: None,
         }))
     );
 

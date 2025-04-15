@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::is_system_schema;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::ddl_service::alter_name_request;
 use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::ObjectName;
@@ -36,7 +37,7 @@ pub async fn handle_rename_table(
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
     let new_table_name = Binder::resolve_table_name(new_table_name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -83,7 +84,7 @@ pub async fn handle_rename_index(
     let (schema_name, real_index_name) =
         Binder::resolve_schema_qualified_name(db_name, index_name.clone())?;
     let new_index_name = Binder::resolve_index_name(new_index_name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -117,7 +118,7 @@ pub async fn handle_rename_view(
     let (schema_name, real_view_name) =
         Binder::resolve_schema_qualified_name(db_name, view_name.clone())?;
     let new_view_name = Binder::resolve_view_name(new_view_name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -147,7 +148,7 @@ pub async fn handle_rename_sink(
     let (schema_name, real_sink_name) =
         Binder::resolve_schema_qualified_name(db_name, sink_name.clone())?;
     let new_sink_name = Binder::resolve_sink_name(new_sink_name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -180,7 +181,7 @@ pub async fn handle_rename_subscription(
     let (schema_name, real_subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, subscription_name.clone())?;
     let new_subscription_name = Binder::resolve_subscription_name(new_subscription_name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -214,7 +215,7 @@ pub async fn handle_rename_source(
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
     let new_source_name = Binder::resolve_source_name(new_source_name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

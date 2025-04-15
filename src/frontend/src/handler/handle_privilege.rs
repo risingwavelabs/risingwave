@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
@@ -64,7 +65,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Mviews(tables) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in tables {
@@ -88,7 +90,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Tables(tables) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in tables {
@@ -125,7 +128,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Sources(sources) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in sources {
@@ -139,7 +143,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Sinks(sinks) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in sinks {
@@ -153,7 +158,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Views(views) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in views {
@@ -167,7 +173,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Connections(conns) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in conns {
@@ -181,7 +188,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Subscriptions(subscriptions) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in subscriptions {
@@ -194,7 +202,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Functions(func_descs) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for func_desc in func_descs {
@@ -238,7 +247,8 @@ fn make_prost_privilege(
         }
         GrantObjects::Secrets(secrets) => {
             let db_name = &session.database();
-            let search_path = session.config().search_path();
+            let search_path =
+                session.running_sql_runtime_parameters(RuntimeParameters::search_path);
             let user_name = &session.user_name();
 
             for name in secrets {

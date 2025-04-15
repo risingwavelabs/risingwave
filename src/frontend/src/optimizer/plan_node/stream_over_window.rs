@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -126,8 +127,7 @@ impl StreamNode for StreamOverWindow {
             .base
             .ctx()
             .session_ctx()
-            .config()
-            .streaming_over_window_cache_policy();
+            .running_sql_runtime_parameters(RuntimeParameters::streaming_over_window_cache_policy);
 
         PbNodeBody::OverWindow(Box::new(OverWindowNode {
             calls,

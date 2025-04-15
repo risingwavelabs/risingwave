@@ -23,6 +23,7 @@ use risingwave_common::catalog::{
     TableId,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::PbWebhookSourceInfo;
@@ -93,7 +94,10 @@ impl StreamMaterialize {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
         let create_type = if matches!(table_type, TableType::MaterializedView)
-            && input.ctx().session_ctx().config().background_ddl()
+            && input
+                .ctx()
+                .session_ctx()
+                .running_sql_runtime_parameters(RuntimeParameters::background_ddl)
             && plan_can_use_background_ddl(&input)
         {
             CreateType::Background

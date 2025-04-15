@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_pb::ddl_service::alter_swap_rename_request;
 use risingwave_pb::ddl_service::alter_swap_rename_request::ObjectNameSwapPair;
 use risingwave_sqlparser::ast::ObjectName;
@@ -56,7 +57,7 @@ pub async fn handle_swap_rename(
     let db_name = &session.database();
     let (src_schema_name, src_obj_name) =
         Binder::resolve_schema_qualified_name(db_name, source_object)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
     let src_schema_path = SchemaPath::new(src_schema_name.as_deref(), &search_path, user_name);
     let (target_schema_name, target_obj_name) =

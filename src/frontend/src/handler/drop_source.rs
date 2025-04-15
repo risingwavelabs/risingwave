@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -30,7 +31,7 @@ pub async fn handle_drop_source(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
-    let search_path = session.config().search_path();
+    let search_path = session.running_sql_runtime_parameters(RuntimeParameters::search_path);
     let user_name = &session.user_name();
 
     // Check if temporary source exists, if yes, drop it.

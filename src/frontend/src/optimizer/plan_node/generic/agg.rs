@@ -18,6 +18,7 @@ use std::{fmt, vec};
 use itertools::{Either, Itertools};
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::session_config::RuntimeParameters;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
@@ -95,7 +96,9 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     fn two_phase_agg_forced(&self) -> bool {
-        self.ctx().session_ctx().config().force_two_phase_agg()
+        self.ctx()
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::force_two_phase_agg)
     }
 
     pub fn two_phase_agg_enabled(&self) -> bool {
@@ -180,7 +183,10 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
-        let enable_two_phase = input.ctx().session_ctx().config().enable_two_phase_agg();
+        let enable_two_phase = input
+            .ctx()
+            .session_ctx()
+            .running_sql_runtime_parameters(RuntimeParameters::enable_two_phase_agg);
         Self {
             agg_calls,
             group_key,

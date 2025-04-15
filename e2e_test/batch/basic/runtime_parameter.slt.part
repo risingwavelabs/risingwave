@@ -1,0 +1,37 @@
+statement ok
+CREATE SCHEMA schema_2;
+
+statement ok
+CREATE TABLE schema_2.t (c int);
+
+query error
+EXPLAIN SELECT * FROM t;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table or source not found: t
+
+
+query error
+SELECT * FROM t;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table or source not found: t
+
+
+statement ok
+EXPLAIN SELECT * FROM t SETTINGS search_path=schema_2 ,query_mode=auto;
+
+statement ok
+SELECT * FROM t SETTINGS search_path=schema_2, query_mode=local;
+
+statement ok
+DROP TABLE schema_2.t;
+
+statement ok
+DROP SCHEMA schema_2;
