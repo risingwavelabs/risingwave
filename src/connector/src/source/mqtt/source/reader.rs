@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
+use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
@@ -28,6 +29,14 @@ use crate::source::{BoxSourceChunkStream, Column, SourceContextRef, SourceMessag
 
 pub struct MqttSplitReader {
     eventloop: rumqttc::v5::EventLoop,
+    #[expect(dead_code)]
+    client: rumqttc::v5::AsyncClient,
+    #[expect(dead_code)]
+    qos: QoS,
+    #[expect(dead_code)]
+    splits: Vec<MqttSplit>,
+    #[expect(dead_code)]
+    properties: MqttProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
@@ -62,6 +71,10 @@ impl SplitReader for MqttSplitReader {
 
         Ok(Self {
             eventloop,
+            client,
+            qos,
+            splits,
+            properties,
             parser_config,
             source_ctx,
         })
