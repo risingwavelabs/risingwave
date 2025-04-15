@@ -17,12 +17,15 @@ use std::fmt::Debug;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 
-use super::{Array, ArrayBuilder};
+use super::{Array, ArrayBuilder, ListArray, ListArrayBuilder, ListRef, ListValue};
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ScalarRef, ToText};
 
 #[derive(Debug, Clone, EstimateSize)]
-pub struct VectorArrayBuilder {}
+pub struct VectorArrayBuilder {
+    inner: ListArrayBuilder,
+    elem_size: usize,
+}
 
 impl ArrayBuilder for VectorArrayBuilder {
     type ArrayType = VectorArray;
@@ -37,37 +40,49 @@ impl ArrayBuilder for VectorArrayBuilder {
         todo!("VECTOR_PLACEHOLDER")
     }
 
-    fn with_type(_capacity: usize, _ty: DataType) -> Self {
-        todo!("VECTOR_PLACEHOLDER")
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        let DataType::Vector(elem_size) = ty else {
+            panic!("VectorArrayBuilder only supports Vector type");
+        };
+        Self {
+            inner: ListArrayBuilder::with_type(capacity, DataType::List(DataType::Float32.into())),
+            elem_size,
+        }
     }
 
-    fn append_n(&mut self, _n: usize, _value: Option<VectorRef<'_>>) {
-        todo!("VECTOR_PLACEHOLDER")
+    fn append_n(&mut self, n: usize, value: Option<VectorRef<'_>>) {
+        self.inner.append_n(n, value.map(|v| v.inner))
     }
 
-    fn append_array(&mut self, _other: &VectorArray) {
-        todo!("VECTOR_PLACEHOLDER")
+    fn append_array(&mut self, other: &VectorArray) {
+        self.inner.append_array(&other.inner)
     }
 
     fn pop(&mut self) -> Option<()> {
-        todo!("VECTOR_PLACEHOLDER")
+        self.inner.pop()
     }
 
     fn len(&self) -> usize {
-        todo!("VECTOR_PLACEHOLDER")
+        self.inner.len()
     }
 
     fn finish(self) -> VectorArray {
-        todo!("VECTOR_PLACEHOLDER")
+        VectorArray {
+            inner: self.inner.finish(),
+            elem_size: self.elem_size,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct VectorArray {}
+pub struct VectorArray {
+    inner: ListArray,
+    elem_size: usize,
+}
 
 impl EstimateSize for VectorArray {
     fn estimated_heap_size(&self) -> usize {
-        todo!("VECTOR_PLACEHOLDER")
+        self.inner.estimated_heap_size()
     }
 }
 
@@ -76,12 +91,14 @@ impl Array for VectorArray {
     type OwnedItem = VectorVal;
     type RefItem<'a> = VectorRef<'a>;
 
-    unsafe fn raw_value_at_unchecked(&self, _idx: usize) -> Self::RefItem<'_> {
-        todo!("VECTOR_PLACEHOLDER")
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        VectorRef {
+            inner: unsafe { self.inner.raw_value_at_unchecked(idx) },
+        }
     }
 
     fn len(&self) -> usize {
-        todo!("VECTOR_PLACEHOLDER")
+        self.inner.len()
     }
 
     fn to_protobuf(&self) -> PbArray {
@@ -89,24 +106,26 @@ impl Array for VectorArray {
     }
 
     fn null_bitmap(&self) -> &Bitmap {
-        todo!("VECTOR_PLACEHOLDER")
+        self.inner.null_bitmap()
     }
 
     fn into_null_bitmap(self) -> Bitmap {
-        todo!("VECTOR_PLACEHOLDER")
+        self.inner.into_null_bitmap()
     }
 
-    fn set_bitmap(&mut self, _bitmap: Bitmap) {
-        todo!("VECTOR_PLACEHOLDER")
+    fn set_bitmap(&mut self, bitmap: Bitmap) {
+        self.inner.set_bitmap(bitmap)
     }
 
     fn data_type(&self) -> DataType {
-        todo!("VECTOR_PLACEHOLDER")
+        DataType::Vector(self.elem_size)
     }
 }
 
 #[derive(Clone, EstimateSize)]
-pub struct VectorVal {}
+pub struct VectorVal {
+    inner: ListValue,
+}
 
 impl Debug for VectorVal {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -135,13 +154,15 @@ impl Scalar for VectorVal {
     type ScalarRefType<'a> = VectorRef<'a>;
 
     fn as_scalar_ref(&self) -> VectorRef<'_> {
-        todo!("VECTOR_PLACEHOLDER")
+        VectorRef {
+            inner: self.inner.as_scalar_ref(),
+        }
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct VectorRef<'a> {
-    _marker: std::marker::PhantomData<&'a ()>,
+    inner: ListRef<'a>,
 }
 
 impl Debug for VectorRef<'_> {
@@ -181,10 +202,12 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
     type ScalarType = VectorVal;
 
     fn to_owned_scalar(&self) -> VectorVal {
-        todo!("VECTOR_PLACEHOLDER")
+        VectorVal {
+            inner: self.inner.to_owned_scalar(),
+        }
     }
 
-    fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
-        todo!("VECTOR_PLACEHOLDER")
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.hash_scalar(state)
     }
 }
