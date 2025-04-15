@@ -86,6 +86,11 @@ cluster_start
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
+if [ "$profile" != "ci-dev" ]; then
+    echo "--- Run release mode only tests"
+    risedev slt -p 4566 -d dev './e2e_test/release_mode_only/*.slt'
+fi
+
 echo "--- Kill cluster"
 cluster_stop
 
