@@ -893,6 +893,7 @@ mod tests {
                     limit: None,
                     offset: None,
                     fetch: None,
+                    settings: None,
                 },
             )"#]];
         parse_expected.assert_eq(&format!("{:#?}", stmt));

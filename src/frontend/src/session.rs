@@ -78,7 +78,7 @@ use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{Ident, ObjectName, SetVariableValue, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
@@ -1369,14 +1369,19 @@ DETAILS:
         Ok(())
     }
 
-    pub fn set_running_sql_runtime_parameters(
-        &self,
-        settings: &Option<Vec<(Ident, SetVariableValue)>>,
-    ) -> Result<()> {
+    /// Sets runtime parameters for the currently running SQL statement.
+    /// If the statement does not include any SETTINGS, the runtime parameters will default to those of the session.
+    pub fn set_running_sql_runtime_parameters(&self, stmt: &Statement) -> Result<()> {
+        // Restore to session config.
+        self.running_sql_runtime_parameters
+            .store(self.shared_config());
+        // Currently only Query can include SETTINGS.
+        let settings = if let Statement::Query(query) = stmt {
+            &query.settings
+        } else {
+            return Ok(());
+        };
         let Some(settings) = settings else {
-            // Restore to session config.
-            self.running_sql_runtime_parameters
-                .store(self.shared_config());
             return Ok(());
         };
         // Duplicate config and apply SETTINGS.

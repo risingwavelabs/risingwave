@@ -51,10 +51,7 @@ async fn do_handle_explain(
     let mut batch_plan_fragmenter_fmt = ExplainFormat::Json;
 
     let session = handler_args.session.clone();
-    if let Statement::Query(ref query) = stmt {
-        session.set_running_sql_runtime_parameters(&query.settings)?;
-        tracing::debug!(?query.settings, "SETTINGS");
-    }
+    session.set_running_sql_runtime_parameters(&stmt)?;
     {
         let (plan, context) = match stmt {
             // `CREATE TABLE` takes the ownership of the `OptimizerContext` to avoid `Rc` across
