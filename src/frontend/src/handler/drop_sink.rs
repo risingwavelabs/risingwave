@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::session_config::RuntimeParameters;
-use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
+use risingwave_pb::ddl_service::{ReplaceJobPlan, replace_job_plan};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -71,7 +71,7 @@ pub async fn handle_drop_sink(
             table.clone()
         };
 
-        let (mut graph, mut table, source) =
+        let (mut graph, mut table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
         assert!(!table_catalog.incoming_sinks.is_empty());
@@ -100,7 +100,7 @@ pub async fn handle_drop_sink(
                 replace_job_plan::ReplaceTable {
                     table: Some(table),
                     source,
-                    job_type: TableJobType::General as _,
+                    job_type: target_job_type as _,
                 },
             )),
             fragment_graph: Some(graph),

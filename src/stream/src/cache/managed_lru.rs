@@ -224,14 +224,14 @@ impl<V: EstimateSize> DerefMut for MutGuard<'_, V> {
 }
 
 struct HeapSizeReporter {
-    metrics: LabelGuardedIntGauge<3>,
+    metrics: LabelGuardedIntGauge,
     heap_size: usize,
     last_reported: usize,
 }
 
 impl HeapSizeReporter {
     fn new(
-        heap_size_metrics: LabelGuardedIntGauge<3>,
+        heap_size_metrics: LabelGuardedIntGauge,
         heap_size: usize,
         last_reported: usize,
     ) -> Self {

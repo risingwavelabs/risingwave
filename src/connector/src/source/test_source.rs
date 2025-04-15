@@ -22,6 +22,7 @@ use risingwave_common::types::JsonbVal;
 use serde_derive::{Deserialize, Serialize};
 use with_options::WithOptions;
 
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::{
@@ -105,7 +106,7 @@ impl Drop for TestSourceRegistryGuard {
     }
 }
 
-pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
+pub fn register_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
     assert!(
         get_registry()
             .box_source
@@ -122,6 +123,8 @@ pub const TEST_CONNECTOR: &str = "test";
 pub struct TestSourceProperties {
     properties: BTreeMap<String, String>,
 }
+
+impl EnforceSecretOnCloud for TestSourceProperties {}
 
 impl TryFromBTreeMap for TestSourceProperties {
     fn try_from_btreemap(

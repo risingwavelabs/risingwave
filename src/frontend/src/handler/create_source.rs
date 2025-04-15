@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithPropertiesExt;
@@ -832,6 +833,7 @@ pub async fn bind_create_source_or_table_with_connector(
         )
         .into());
     }
+
     if is_create_source {
         match format_encode.format {
             Format::Upsert
@@ -904,6 +906,18 @@ pub async fn bind_create_source_or_table_with_connector(
     // resolve privatelink connection for Kafka
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
+
+    // check the system parameter `enforce_secret_on_cloud`
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret_on_cloud()
+    {
+        // check enforce using secret for some props on cloud
+        ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
+    }
 
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(

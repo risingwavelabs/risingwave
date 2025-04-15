@@ -51,7 +51,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-bigquery = { version = "0.14.0", features = ["auth"] }
+google-cloud-bigquery = { version = "0.15.0", features = ["auth"] }
 google-cloud-gax = "0.19.2"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.30"
@@ -85,10 +85,11 @@ parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
+phf = { version = "0.11", features = ["macros"] }
 postgres-openssl = "0.5.0"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.14", features = ["serde"] }
+prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",

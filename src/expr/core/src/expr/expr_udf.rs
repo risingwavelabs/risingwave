@@ -235,43 +235,43 @@ impl Build for UserDefinedFunction {
 #[derive(Debug, Clone)]
 struct MetricsVec {
     /// Number of successful UDF calls.
-    success_count: LabelGuardedIntCounterVec<4>,
+    success_count: LabelGuardedIntCounterVec,
     /// Number of failed UDF calls.
-    failure_count: LabelGuardedIntCounterVec<4>,
+    failure_count: LabelGuardedIntCounterVec,
     /// Total number of retried UDF calls.
-    retry_count: LabelGuardedIntCounterVec<4>,
+    retry_count: LabelGuardedIntCounterVec,
     /// Input chunk rows of UDF calls.
-    input_chunk_rows: LabelGuardedHistogramVec<4>,
+    input_chunk_rows: LabelGuardedHistogramVec,
     /// The latency of UDF calls in seconds.
-    latency: LabelGuardedHistogramVec<4>,
+    latency: LabelGuardedHistogramVec,
     /// Total number of input rows of UDF calls.
-    input_rows: LabelGuardedIntCounterVec<4>,
+    input_rows: LabelGuardedIntCounterVec,
     /// Total number of input bytes of UDF calls.
-    input_bytes: LabelGuardedIntCounterVec<4>,
+    input_bytes: LabelGuardedIntCounterVec,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: LabelGuardedIntGaugeVec<5>,
+    memory_usage_bytes: LabelGuardedIntGaugeVec,
 }
 
 /// Monitor metrics for UDF.
 #[derive(Debug, Clone)]
 struct Metrics {
     /// Number of successful UDF calls.
-    success_count: LabelGuardedIntCounter<4>,
+    success_count: LabelGuardedIntCounter,
     /// Number of failed UDF calls.
-    failure_count: LabelGuardedIntCounter<4>,
+    failure_count: LabelGuardedIntCounter,
     /// Total number of retried UDF calls.
     #[allow(dead_code)]
-    retry_count: LabelGuardedIntCounter<4>,
+    retry_count: LabelGuardedIntCounter,
     /// Input chunk rows of UDF calls.
-    input_chunk_rows: LabelGuardedHistogram<4>,
+    input_chunk_rows: LabelGuardedHistogram,
     /// The latency of UDF calls in seconds.
-    latency: LabelGuardedHistogram<4>,
+    latency: LabelGuardedHistogram,
     /// Total number of input rows of UDF calls.
-    input_rows: LabelGuardedIntCounter<4>,
+    input_rows: LabelGuardedIntCounter,
     /// Total number of input bytes of UDF calls.
-    input_bytes: LabelGuardedIntCounter<4>,
+    input_bytes: LabelGuardedIntCounter,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: LabelGuardedIntGauge<5>,
+    memory_usage_bytes: LabelGuardedIntGauge,
 }
 
 /// Global UDF metrics.
