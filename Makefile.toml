@@ -1511,7 +1511,7 @@ if [[ -z "${NODE_NAME}" ]]; then
   exit 1
 fi
 
-COMMAND_FILE=".risingwave/config/node_commands.yaml"
+COMMAND_FILE="${PREFIX_CONFIG}/risedev_commands.yaml"
 
 if [[ ! -f "${COMMAND_FILE}" ]]; then
   echo "Error: Command file ${COMMAND_FILE} not found. Did you start the cluster with './risedev d'?"
