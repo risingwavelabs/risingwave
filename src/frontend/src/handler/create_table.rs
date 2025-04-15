@@ -82,7 +82,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -1373,7 +1373,7 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
         (graph, source, table, job_type)
     };
@@ -1891,7 +1891,7 @@ pub async fn generate_stream_graph_for_replace_table(
         ))?
     }
 
-    let graph = build_graph(plan)?;
+    let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
     // Fill the original table ID.
     let mut table = Table {
