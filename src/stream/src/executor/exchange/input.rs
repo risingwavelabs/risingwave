@@ -179,7 +179,7 @@ impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
     #[expect(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         client_pool: ComputeClientPool,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -188,79 +188,9 @@ impl RemoteInput {
         metrics: Arc<StreamingMetrics>,
         batched_permits: usize,
         term_id: String,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
-        Self {
-            actor_id,
-            inner: remote_input::run(
-                client_pool,
-                upstream_addr,
-                up_down_ids,
-                up_down_frag,
-                database_id,
-                metrics,
-                batched_permits,
-                term_id,
-            ),
-        }
-    }
-}
-
-mod remote_input {
-    use std::sync::Arc;
-
-    use anyhow::Context;
-    use await_tree::InstrumentAwait;
-    use either::Either;
-    use risingwave_common::catalog::DatabaseId;
-    use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::task_service::{GetStreamResponse, permits};
-    use risingwave_rpc_client::ComputeClientPool;
-
-    use crate::executor::exchange::error::ExchangeChannelClosed;
-    use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::prelude::{StreamExt, pin_mut, try_stream};
-    use crate::executor::{DispatcherMessage, StreamExecutorError};
-    use crate::task::{UpDownActorIds, UpDownFragmentIds};
-
-    pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
-
-    #[expect(clippy::too_many_arguments)]
-    pub(super) fn run(
-        client_pool: ComputeClientPool,
-        upstream_addr: HostAddr,
-        up_down_ids: UpDownActorIds,
-        up_down_frag: UpDownFragmentIds,
-        database_id: DatabaseId,
-        metrics: Arc<StreamingMetrics>,
-        batched_permits_limit: usize,
-        term_id: String,
-    ) -> RemoteInputStreamInner {
-        run_inner(
-            client_pool,
-            upstream_addr,
-            up_down_ids,
-            up_down_frag,
-            database_id,
-            metrics,
-            batched_permits_limit,
-            term_id,
-        )
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
-    async fn run_inner(
-        client_pool: ComputeClientPool,
-        upstream_addr: HostAddr,
-        up_down_ids: UpDownActorIds,
-        up_down_frag: UpDownFragmentIds,
-        database_id: DatabaseId,
-        metrics: Arc<StreamingMetrics>,
-        batched_permits_limit: usize,
-        term_id: String,
-    ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
             .get_stream(
@@ -273,6 +203,65 @@ mod remote_input {
             )
             .await?;
 
+        Ok(Self {
+            actor_id,
+            inner: remote_input::run(
+                stream,
+                permits_tx,
+                up_down_ids,
+                up_down_frag,
+                metrics,
+                batched_permits,
+            ),
+        })
+    }
+}
+
+mod remote_input {
+    use std::sync::Arc;
+
+    use anyhow::Context;
+    use await_tree::InstrumentAwait;
+    use either::Either;
+    use risingwave_pb::task_service::{GetStreamResponse, permits};
+    use tokio::sync::mpsc;
+    use tonic::Streaming;
+
+    use crate::executor::exchange::error::ExchangeChannelClosed;
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::prelude::{StreamExt, pin_mut, try_stream};
+    use crate::executor::{DispatcherMessage, StreamExecutorError};
+    use crate::task::{UpDownActorIds, UpDownFragmentIds};
+
+    pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
+
+    pub(super) fn run(
+        stream: Streaming<GetStreamResponse>,
+        permits_tx: mpsc::UnboundedSender<permits::Value>,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+        batched_permits_limit: usize,
+    ) -> RemoteInputStreamInner {
+        run_inner(
+            stream,
+            permits_tx,
+            up_down_ids,
+            up_down_frag,
+            metrics,
+            batched_permits_limit,
+        )
+    }
+
+    #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
+    async fn run_inner(
+        stream: Streaming<GetStreamResponse>,
+        permits_tx: mpsc::UnboundedSender<permits::Value>,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+        batched_permits_limit: usize,
+    ) {
         let up_actor_id = up_down_ids.0.to_string();
         let up_fragment_id = up_down_frag.0.to_string();
         let down_fragment_id = up_down_frag.1.to_string();
@@ -355,14 +344,14 @@ impl Input for RemoteInput {
 
 /// Create a [`LocalInput`] or [`RemoteInput`] instance with given info. Used by merge executors and
 /// receiver executors.
-pub(crate) fn new_input(
+pub(crate) async fn new_input(
     local_barrier_manager: &LocalBarrierManager,
     metrics: Arc<StreamingMetrics>,
     actor_id: ActorId,
     fragment_id: FragmentId,
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
-) -> StreamResult<BoxedInput> {
+) -> StreamExecutorResult<BoxedInput> {
     let context = &local_barrier_manager.shared_context;
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
@@ -384,6 +373,7 @@ pub(crate) fn new_input(
             context.config.developer.exchange_batched_permits,
             context.term_id(),
         )
+        .await?
         .boxed_input()
     };
 

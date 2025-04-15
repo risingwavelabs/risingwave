@@ -83,7 +83,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     DatabaseInitialPartialGraph, InitialPartialGraph,
 };
 
-use crate::executor::exchange::permit::Receiver;
+use crate::executor::exchange::permit;
 use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
 
@@ -381,7 +381,12 @@ pub(crate) struct ResetDatabaseOutput {
 }
 
 pub(crate) enum DatabaseStatus {
-    ReceivedExchangeRequest(Vec<(UpDownActorIds, oneshot::Sender<StreamResult<Receiver>>)>),
+    ReceivedExchangeRequest(
+        Vec<(
+            UpDownActorIds,
+            oneshot::Sender<StreamResult<permit::Receiver>>,
+        )>,
+    ),
     Running(DatabaseManagedBarrierState),
     Suspended(SuspendedDatabaseState),
     Resetting(ResettingDatabaseState),
@@ -863,6 +868,17 @@ impl DatabaseManagedBarrierState {
         }
 
         Ok(())
+    }
+
+    pub(super) fn new_actor_remote_output_request(
+        &mut self,
+        actor_id: ActorId,
+        upstream_actor_id: ActorId,
+        result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
+    ) {
+        let (tx, rx) = self.local_barrier_manager.shared_context.new_channel();
+        self.new_actor_output_request(actor_id, upstream_actor_id, NewOutputRequest::Remote(tx));
+        let _ = result_sender.send(Ok(rx));
     }
 
     pub(super) fn new_actor_output_request(

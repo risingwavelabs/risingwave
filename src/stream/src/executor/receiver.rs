@@ -169,6 +169,7 @@ impl Execute for ReceiverExecutor {
                                 upstream_actor,
                                 new_upstream_fragment_id,
                             )
+                            .await
                             .context("failed to create upstream input")?;
 
                             // Poll the first barrier from the new upstream. It must be the same as
@@ -261,6 +262,7 @@ mod tests {
             &helper_make_local_actor(old),
             upstream_fragment_id,
         )
+        .await
         .unwrap();
 
         let receiver = ReceiverExecutor::new(
