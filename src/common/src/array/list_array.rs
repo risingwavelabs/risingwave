@@ -203,6 +203,7 @@ impl Array for ListArray {
                 offsets: self.offsets.to_vec(),
                 value: Some(Box::new(value)),
                 value_type: Some(self.value.data_type().to_protobuf()),
+                elem_size: None,
             })),
             null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
@@ -254,7 +255,8 @@ impl ListArray {
         );
         debug_assert!(
             (array.array_type == PbArrayType::List as i32)
-                || (array.array_type == PbArrayType::Map as i32),
+                || (array.array_type == PbArrayType::Map as i32)
+                || (array.array_type == PbArrayType::Vector as i32),
             "invalid array type for list: {}",
             array.array_type
         );
