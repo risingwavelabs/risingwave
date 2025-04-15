@@ -37,7 +37,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::ordinal;
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -327,7 +327,7 @@ It only indicates the physical clustering of the data, which may improve the per
                 )
                 .collect();
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::MaterializedView))?;
 
         (table, graph, dependencies, resource_group)
     };
