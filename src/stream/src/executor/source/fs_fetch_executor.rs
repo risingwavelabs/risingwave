@@ -259,7 +259,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.rate_limit_rps,
         )
         .await?;
-        let mut reading_file: Arc<str> = "".into();
+        let mut reading_file: Option<Arc<str>> = None;
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -339,7 +339,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         .rows()
                                         .map(|row| {
                                             let filename = row.datum_at(0).unwrap().into_utf8();
-                                            reading_file = filename.into();
+                                            reading_file = Some(filename.into());
                                             let size = row.datum_at(2).unwrap().into_int64();
                                             OpendalFsSplit::<Src>::new(
                                                 filename.to_owned(),
@@ -381,7 +381,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
                                 if let Some((split_id, _offset)) = mapping.into_iter().next() {
-                                    reading_file = split_id.clone();
+                                    reading_file = Some(split_id.clone());
                                     let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
@@ -409,9 +409,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 yield Message::Chunk(chunk);
                             }
                             None => {
-                                if !reading_file.is_empty() {
+                                if let Some(ref delete_file_name) = reading_file {
                                     splits_on_fetch -= 1;
-                                    state_store_handler.delete(&reading_file).await?;
+                                    state_store_handler.delete(delete_file_name).await?;
                                 }
                             }
                         },
