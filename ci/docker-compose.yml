@@ -137,7 +137,6 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
     volumes:
       - ..:/risingwave
-    stop_signal: SIGINT
     stop_grace_period: 30s
     init: true
     environment:
@@ -151,7 +150,6 @@ services:
       - db
     volumes:
       - ..:/risingwave
-    stop_signal: SIGINT
     stop_grace_period: 30s
     init: true
     environment:
