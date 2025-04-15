@@ -350,8 +350,7 @@ pub struct SimulationTestSink {
 impl SimulationTestSink {
     pub fn register_new(is_coordinated_sink: bool) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
-        let err_rate1 = u32::MAX as f64 * 0.1;
-        let err_rate = Arc::new(AtomicU32::new(err_rate1 as u32));
+        let err_rate = Arc::new(AtomicU32::new(0));
         let store = TestSinkStore::new();
 
         let _sink_guard = if is_coordinated_sink {
