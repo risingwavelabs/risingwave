@@ -178,6 +178,40 @@ impl Scalar for VectorVal {
     }
 }
 
+impl VectorVal {
+    pub fn from_text(text: &str, size: usize) -> Result<Self, String> {
+        let text = text.trim();
+        let text = text
+            .strip_prefix('[')
+            .ok_or_else(|| "vector must start with [".to_owned())?
+            .strip_suffix(']')
+            .ok_or_else(|| "vector must end with ]".to_owned())?;
+        let inner = text
+            .split(',')
+            .map(|s| {
+                s.trim()
+                    .parse::<f32>()
+                    .map_err(|_| format!("invalid f32: {s}"))
+                    .and_then(|f| {
+                        if f.is_finite() {
+                            Ok(crate::types::F32::from(f))
+                        } else {
+                            Err(format!("{f} not allowed in vector"))
+                        }
+                    })
+            })
+            .collect::<Result<ListValue, _>>()?;
+        if inner.len() != size {
+            return Err(format!("expected {} dimensions, not {}", size, inner.len()));
+        }
+        Ok(Self { inner })
+    }
+
+    pub fn from_inner(inner: ListValue) -> Self {
+        Self { inner }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct VectorRef<'a> {
     inner: ListRef<'a>,
@@ -211,8 +245,15 @@ impl ToText for VectorRef<'_> {
         todo!("VECTOR_PLACEHOLDER")
     }
 
-    fn write_with_type<W: std::fmt::Write>(&self, _ty: &DataType, _f: &mut W) -> std::fmt::Result {
-        todo!("VECTOR_PLACEHOLDER")
+    fn write_with_type<W: std::fmt::Write>(&self, _ty: &DataType, f: &mut W) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (i, item) in self.inner.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            item.write_with_type(&DataType::Float32, f)?;
+        }
+        write!(f, "]")
     }
 }
 
@@ -227,5 +268,11 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
         self.inner.hash_scalar(state)
+    }
+}
+
+impl<'a> VectorRef<'a> {
+    pub fn into_inner(self) -> ListRef<'a> {
+        self.inner
     }
 }
