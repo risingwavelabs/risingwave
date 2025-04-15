@@ -232,6 +232,7 @@ impl Binder {
             BindFor::Stream | BindFor::Batch => {
                 // reject sources for cross-db access
                 if matches!(self.bind_for, BindFor::Stream)
+                    && self.database_id != database_id
                     && matches!(object, PbObject::SourceId(_))
                 {
                     return Err(PermissionDenied(
