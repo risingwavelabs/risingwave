@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::Context;
 use opendal::Operator;
 use opendal::services::{Gcs, S3};
+use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
@@ -33,6 +34,7 @@ use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
 use crate::deserialize_optional_bool_from_string;
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
@@ -41,6 +43,7 @@ use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
+// All XxxConnection structs should implement this trait as well as EnforceSecretOnCloud trait.
 #[async_trait]
 pub trait Connection: Send {
     async fn validate_connection(&self) -> ConnectorResult<()>;
@@ -56,6 +59,18 @@ pub struct KafkaConnection {
     pub kafka_private_link_common: KafkaPrivateLinkCommon,
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+}
+
+impl EnforceSecretOnCloud for KafkaConnection {
+    fn enforce_secret_on_cloud<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            KafkaConnectionProps::enforce_one(prop)?;
+            AwsAuthProps::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<()> {
@@ -191,6 +206,23 @@ pub struct IcebergConnection {
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
+}
+
+impl EnforceSecretOnCloud for IcebergConnection {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "s3.access.key",
+        "s3.secret.key",
+        "gcs.credential",
+        "catalog.token",
+    };
 }
 
 #[async_trait]
@@ -265,6 +297,26 @@ impl Connection for IcebergConnection {
             }
         }
 
+        if self.hosted_catalog.unwrap_or(false) {
+            // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
+            if self.catalog_type.is_some() {
+                bail!("`catalog.type` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_uri.is_some() {
+                bail!("`catalog.uri` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_name.is_some() {
+                bail!("`catalog.name` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_user.is_some() {
+                bail!("`catalog.jdbc.user` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_password.is_some() {
+                bail!("`catalog.jdbc.password` must not be set when `hosted_catalog` is set");
+            }
+            return Ok(());
+        }
+
         if self.catalog_type.is_none() {
             bail!("`catalog.type` must be set");
         }
@@ -292,6 +344,7 @@ impl Connection for IcebergConnection {
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
+            hosted_catalog: self.hosted_catalog,
         };
 
         let mut java_map = HashMap::new();
@@ -333,6 +386,12 @@ impl Connection for ConfluentSchemaRegistryConnection {
     }
 }
 
+impl EnforceSecretOnCloud for ConfluentSchemaRegistryConnection {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "schema.registry.password",
+    };
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Hash, Eq)]
 pub struct ElasticsearchConnection(pub BTreeMap<String, String>);
 
@@ -346,4 +405,10 @@ impl Connection for ElasticsearchConnection {
         client.ping().await?;
         Ok(())
     }
+}
+
+impl EnforceSecretOnCloud for ElasticsearchConnection {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "elasticsearch.password",
+    };
 }

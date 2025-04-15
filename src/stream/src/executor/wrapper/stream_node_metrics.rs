@@ -39,6 +39,6 @@ pub async fn stream_node_metrics(
         }
         let blocking_duration = Instant::now();
         yield message;
-        stats.inc_blocking_duration_ms(blocking_duration.elapsed().as_millis() as u64);
+        stats.inc_blocking_duration_ns(blocking_duration.elapsed().as_nanos() as u64);
     }
 }

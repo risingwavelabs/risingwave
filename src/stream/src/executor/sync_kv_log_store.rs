@@ -93,7 +93,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqIdType,
+    FIRST_SEQ_ID, FlushInfo, ReaderTruncationOffsetType, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -111,26 +111,26 @@ pub mod metrics {
     #[derive(Clone)]
     pub struct SyncedKvLogStoreMetrics {
         // state of the log store
-        pub unclean_state: LabelGuardedIntCounter<5>,
-        pub clean_state: LabelGuardedIntCounter<5>,
-        pub wait_next_poll_ns: LabelGuardedIntCounter<4>,
+        pub unclean_state: LabelGuardedIntCounter,
+        pub clean_state: LabelGuardedIntCounter,
+        pub wait_next_poll_ns: LabelGuardedIntCounter,
 
         // Write metrics
-        pub storage_write_count: LabelGuardedIntCounter<4>,
-        pub storage_write_size: LabelGuardedIntCounter<4>,
-        pub pause_duration_ns: LabelGuardedIntCounter<4>,
+        pub storage_write_count: LabelGuardedIntCounter,
+        pub storage_write_size: LabelGuardedIntCounter,
+        pub pause_duration_ns: LabelGuardedIntCounter,
 
         // Buffer metrics
-        pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
-        pub buffer_read_count: LabelGuardedIntCounter<5>,
-        pub buffer_read_size: LabelGuardedIntCounter<5>,
+        pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
+        pub buffer_read_count: LabelGuardedIntCounter,
+        pub buffer_read_size: LabelGuardedIntCounter,
 
         // Read metrics
-        pub total_read_count: LabelGuardedIntCounter<5>,
-        pub total_read_size: LabelGuardedIntCounter<5>,
+        pub total_read_count: LabelGuardedIntCounter,
+        pub total_read_size: LabelGuardedIntCounter,
         pub persistent_log_read_metrics: KvLogStoreReadMetrics,
         pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
     }
@@ -281,20 +281,20 @@ pub mod metrics {
         #[cfg(test)]
         pub(crate) fn for_test() -> Self {
             SyncedKvLogStoreMetrics {
-                unclean_state: LabelGuardedIntCounter::test_int_counter(),
-                clean_state: LabelGuardedIntCounter::test_int_counter(),
-                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter(),
-                storage_write_count: LabelGuardedIntCounter::test_int_counter(),
-                storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-                pause_duration_ns: LabelGuardedIntCounter::test_int_counter(),
-                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
-                buffer_read_count: LabelGuardedIntCounter::test_int_counter(),
-                buffer_read_size: LabelGuardedIntCounter::test_int_counter(),
-                total_read_count: LabelGuardedIntCounter::test_int_counter(),
-                total_read_size: LabelGuardedIntCounter::test_int_counter(),
+                unclean_state: LabelGuardedIntCounter::test_int_counter::<5>(),
+                clean_state: LabelGuardedIntCounter::test_int_counter::<5>(),
+                wait_next_poll_ns: LabelGuardedIntCounter::test_int_counter::<4>(),
+                storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+                storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
+                pause_duration_ns: LabelGuardedIntCounter::test_int_counter::<4>(),
+                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+                buffer_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
+                total_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+                total_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
                 persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
                 flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
             }
@@ -352,8 +352,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
 struct FlushedChunkInfo {
     epoch: u64,
-    start_seq_id: SeqIdType,
-    end_seq_id: SeqIdType,
+    start_seq_id: SeqId,
+    end_seq_id: SeqId,
     flush_info: FlushInfo,
     vnode_bitmap: Bitmap,
 }
@@ -381,8 +381,8 @@ enum WriteFuture<S: LocalStateStore> {
     },
     FlushingChunk {
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         future: Pin<Box<LogStoreStateWriteChunkFuture<S>>>,
         stream: BoxedMessageStream,
     },
@@ -400,8 +400,8 @@ impl<S: LocalStateStore> WriteFuture<S> {
         write_state: LogStoreWriteState<S>,
         chunk: StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> Self {
         tracing::trace!(
             start_seq_id,
@@ -665,7 +665,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     }
                                     Message::Chunk(chunk) => {
                                         let start_seq_id = seq_id;
-                                        let new_seq_id = seq_id + chunk.cardinality() as SeqIdType;
+                                        let new_seq_id = seq_id + chunk.cardinality() as SeqId;
                                         let end_seq_id = new_seq_id - 1;
                                         let epoch = write_state.epoch().curr;
                                         tracing::trace!(
@@ -956,8 +956,8 @@ impl SyncedLogStoreBuffer {
 
     fn add_or_flush_chunk(
         &mut self,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         chunk: StreamChunk,
         epoch: u64,
     ) -> Option<StreamChunk> {
@@ -985,8 +985,8 @@ impl SyncedLogStoreBuffer {
     /// This doesn't contain any data, but it contains the metadata to read the flushed chunk.
     fn add_flushed_item_to_buffer(
         &mut self,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         new_vnode_bitmap: Bitmap,
         epoch: u64,
     ) {
@@ -1041,8 +1041,8 @@ impl SyncedLogStoreBuffer {
     fn add_chunk_to_buffer(
         &mut self,
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         epoch: u64,
     ) {
         let chunk_id = self.next_chunk_id;

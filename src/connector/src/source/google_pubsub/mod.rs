@@ -22,12 +22,15 @@ use serde::Deserialize;
 pub mod enumerator;
 pub mod source;
 pub mod split;
+
 pub use enumerator::*;
+use phf::{Set, phf_set};
 use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
+use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
 use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 
@@ -89,6 +92,12 @@ pub struct PubsubProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecretOnCloud for PubsubProperties {
+    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+        "pubsub.credentials",
+    };
 }
 
 impl SourceProperties for PubsubProperties {

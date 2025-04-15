@@ -221,7 +221,7 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
-time_travel_version_cache_capacity = 2
+time_travel_version_cache_capacity = 10
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
@@ -323,6 +323,7 @@ license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
 per_database_isolation = true
+enforce_secret_on_cloud = false
 
 [udf]
 enable_embedded_python_udf = false

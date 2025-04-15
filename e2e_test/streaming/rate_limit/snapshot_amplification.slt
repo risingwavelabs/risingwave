@@ -31,7 +31,6 @@ statement ok
 SET BACKGROUND_DDL=false;
 
 # Let sink amplify...
-skipif in-memory
 sleep 1s
 
 # The following sequence of FLUSH should be fast, since barrier should be able to bypass sink.

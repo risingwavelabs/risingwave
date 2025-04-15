@@ -71,13 +71,13 @@ pub fn get_or_create_local_table_stat<'a>(
         LocalTableMetrics {
             total_key_count: metrics
                 .version_stats
-                .with_label_values(&[&table_label, "total_key_count"]),
+                .with_label_values(&[table_label.as_str(), "total_key_count"]),
             total_key_size: metrics
                 .version_stats
-                .with_label_values(&[&table_label, "total_key_size"]),
+                .with_label_values(&[table_label.as_str(), "total_key_size"]),
             total_value_size: metrics
                 .version_stats
-                .with_label_values(&[&table_label, "total_value_size"]),
+                .with_label_values(&[table_label.as_str(), "total_value_size"]),
             write_throughput: metrics
                 .table_write_throughput
                 .with_label_values(&[&table_label]),
@@ -125,7 +125,7 @@ pub fn trigger_mv_stat(
 
         metrics
             .materialized_view_stats
-            .with_label_values(&[&mv_id.to_string(), "materialized_view_total_size"])
+            .with_label_values(&[mv_id.to_string().as_str(), "materialized_view_total_size"])
             .set(total_size);
     }
 }

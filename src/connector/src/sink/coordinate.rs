@@ -85,7 +85,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
         {
             if log_store_rewind_start_epoch >= *first_epoch {
                 bail!(
-                    "log_store_rewind_start_epoch {} not matched with first_epoch {}",
+                    "log_store_rewind_start_epoch {} not later than first_epoch {}",
                     log_store_rewind_start_epoch,
                     first_epoch
                 );

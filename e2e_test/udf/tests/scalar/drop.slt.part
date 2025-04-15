@@ -1,0 +1,29 @@
+statement ok
+drop function key_values;
+
+statement ok
+drop function series;
+
+statement ok
+drop function return_all;
+
+statement ok
+drop function key_value;
+
+statement ok
+drop function sum_array;
+
+statement ok
+drop function jsonb_access;
+
+statement ok
+drop function datetime;
+
+statement ok
+drop function decimal_add;
+
+statement ok
+drop function gcd;
+
+statement ok
+drop function int_42;

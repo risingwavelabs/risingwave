@@ -34,8 +34,8 @@ impl ProfileMetricsImpl {
                 stream_node_output_row_count: stats
                     .mem_stream_node_output_row_count
                     .new_count(executor_id),
-                stream_node_output_blocking_duration_ms: stats
-                    .mem_stream_node_output_blocking_duration_ms
+                stream_node_output_blocking_duration_ns: stats
+                    .mem_stream_node_output_blocking_duration_ns
                     .new_count(executor_id),
             })
         } else {
@@ -46,12 +46,12 @@ impl ProfileMetricsImpl {
 
 pub struct ProfileMetrics {
     pub stream_node_output_row_count: GuardedCount,
-    pub stream_node_output_blocking_duration_ms: GuardedCount,
+    pub stream_node_output_blocking_duration_ns: GuardedCount,
 }
 
 pub trait ProfileMetricsExt {
     fn inc_row_count(&self, count: u64);
-    fn inc_blocking_duration_ms(&self, duration: u64);
+    fn inc_blocking_duration_ns(&self, duration: u64);
 }
 
 impl ProfileMetricsExt for ProfileMetrics {
@@ -61,8 +61,8 @@ impl ProfileMetricsExt for ProfileMetrics {
             .fetch_add(count, Ordering::Relaxed);
     }
 
-    fn inc_blocking_duration_ms(&self, duration_ms: u64) {
-        self.stream_node_output_blocking_duration_ms
+    fn inc_blocking_duration_ns(&self, duration_ms: u64) {
+        self.stream_node_output_blocking_duration_ns
             .count
             .fetch_add(duration_ms, Ordering::Relaxed);
     }
@@ -76,11 +76,11 @@ impl ProfileMetricsExt for ProfileMetricsImpl {
         }
     }
 
-    fn inc_blocking_duration_ms(&self, duration: u64) {
+    fn inc_blocking_duration_ns(&self, duration: u64) {
         match self {
             ProfileMetricsImpl::NoopProfileMetrics => {}
             ProfileMetricsImpl::ProfileMetrics(metrics) => {
-                metrics.inc_blocking_duration_ms(duration)
+                metrics.inc_blocking_duration_ns(duration)
             }
         }
     }

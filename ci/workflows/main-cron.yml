@@ -99,7 +99,6 @@ steps:
         || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
       depends_on:
         - "build"
-        - "build-other"
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
@@ -146,21 +145,6 @@ steps:
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 18
       retry: *auto-retry
-
-  - label: "end-to-end test (parallel, in-memory) (release)"
-    key: "e2e-test-release-parallel-memory"
-    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
-    retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
     steps:
@@ -643,8 +627,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -660,8 +642,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -677,7 +657,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?-for-opendal(,|$$)/
     depends_on:
       - "build"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs

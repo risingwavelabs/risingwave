@@ -47,41 +47,45 @@ use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
-pub(crate) type SeqIdType = i32;
+// TODO: unify with `risingwave_common::Epoch`
+
+pub(crate) type Epoch = u64;
+
+pub(crate) type SeqId = i32;
 type RowOpCodeType = i16;
 
-pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
+pub(crate) const FIRST_SEQ_ID: SeqId = 0;
 
 /// Readers truncate the offset at the granularity of seq id.
 /// None `SeqIdType` means that the whole epoch is truncated.
-pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
+pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqId>);
 
 #[derive(Clone)]
 pub struct KvLogStoreReadMetrics {
-    pub storage_read_count: LabelGuardedIntCounter<5>,
-    pub storage_read_size: LabelGuardedIntCounter<5>,
+    pub storage_read_count: LabelGuardedIntCounter,
+    pub storage_read_size: LabelGuardedIntCounter,
 }
 
 impl KvLogStoreReadMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self {
-            storage_read_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_read_size: LabelGuardedIntCounter::test_int_counter(),
+            storage_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+            storage_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
         }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: LabelGuardedIntCounter<4>,
-    pub storage_write_size: LabelGuardedIntCounter<4>,
-    pub rewind_count: LabelGuardedIntCounter<4>,
-    pub rewind_delay: LabelGuardedHistogram<4>,
-    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
+    pub storage_write_count: LabelGuardedIntCounter,
+    pub storage_write_size: LabelGuardedIntCounter,
+    pub rewind_count: LabelGuardedIntCounter,
+    pub rewind_delay: LabelGuardedHistogram,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -128,18 +132,18 @@ impl KvLogStoreMetrics {
         let persistent_log_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
@@ -147,18 +151,18 @@ impl KvLogStoreMetrics {
         let flushed_buffer_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
@@ -207,14 +211,14 @@ impl KvLogStoreMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
-            storage_write_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            rewind_count: LabelGuardedIntCounter::test_int_counter(),
-            rewind_delay: LabelGuardedHistogram::test_histogram(),
+            storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
+            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
             flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
         }
@@ -254,7 +258,7 @@ pub(crate) struct KvLogStorePkInfo {
     pub predefined_columns: &'static [(&'static str, DataType)],
     pub pk_orderings: &'static [OrderType],
     pub compute_pk:
-        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> KvLogStorePkRow,
+        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqId>) -> KvLogStorePkRow,
 }
 
 impl KvLogStorePkInfo {
@@ -287,14 +291,14 @@ mod v1 {
     use risingwave_common::types::ScalarImpl;
 
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::SeqId;
 
     #[deprecated]
     pub(crate) static KV_LOG_STORE_V1_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             _vnode: VirtualNode,
             encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
+            seq_id: Option<SeqId>,
         ) -> KvLogStorePkRow {
             KvLogStorePkRow::from_array_len(
                 [
@@ -338,13 +342,13 @@ mod v2 {
     use risingwave_common::types::ScalarImpl;
 
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::SeqId;
 
     pub(crate) static KV_LOG_STORE_V2_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             vnode: VirtualNode,
             encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
+            seq_id: Option<SeqId>,
         ) -> KvLogStorePkRow {
             KvLogStorePkRow::from([
                 Some(ScalarImpl::Int64(encoded_epoch)),
@@ -1018,10 +1022,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
-        test_update_vnode_recover_inner().await
-    }
-
-    async fn test_update_vnode_recover_inner() {
         let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
 
@@ -1205,13 +1205,28 @@ mod tests {
             .unwrap();
         reader.init().await.unwrap();
         reader.start_from(None).await.unwrap();
+        {
+            // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
+            // set to true, we won't receive the following commented items.
+            match reader.next_item().await.unwrap() {
+                (_epoch, LogStoreReadItem::StreamChunk { chunk: _, .. }) => {}
+                _ => unreachable!(),
+            }
+            match reader.next_item().await.unwrap() {
+                (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
+                    assert_eq!(epoch, epoch1);
+                    assert!(!is_checkpoint);
+                }
+                _ => unreachable!(),
+            }
+        }
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_rows_eq(
                     chunk2_1.rows().chain(chunk2_2.rows()),
                     chunk.rows()
-                ));
+                ))
             }
             _ => unreachable!(),
         }

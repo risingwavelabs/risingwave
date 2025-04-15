@@ -345,9 +345,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     })?;
                                     let workers = runtime_info.database_fragment_info.workers();
                                     for worker_id in workers {
-                                        if !self.control_stream_manager.contains_worker(worker_id) {
-                                            let node = self.active_streaming_nodes.current()[&worker_id].clone();
-                                            self.control_stream_manager.try_add_worker(node, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
+                                        if !self.control_stream_manager.is_connected(worker_id) {
+                                            self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
@@ -740,7 +739,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
             {
-                let mut builder = FragmentEdgeBuilder::new(database_fragment_infos.values().flat_map(|info| info.fragment_infos()));
+                let mut builder = FragmentEdgeBuilder::new(database_fragment_infos.values().flat_map(|info| info.fragment_infos()), &control_stream_manager);
                 builder.add_relations(&fragment_relations);
                 let mut edges = builder.build();
 
@@ -859,6 +858,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     failed_databases,
                     &mut control_stream_manager,
                     hummock_version_stats,
+                    self.env.clone(),
                 );
                 Ok((
                     active_streaming_nodes,
