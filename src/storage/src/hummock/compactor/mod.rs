@@ -322,7 +322,7 @@ impl TaskPullManager {
     /// Calculate the pending pull task count.
     fn calculate_pending_pull_task_count(&self) -> u32 {
         if self.pull_task_ack {
-            self.get_max_available_parallelism()
+            self.get_available_parallelism()
                 .min(self.max_pull_task_count)
         } else {
             0
@@ -362,12 +362,6 @@ impl TaskPullManager {
     }
 
     fn get_available_parallelism(&self) -> u32 {
-        let running_parallelism = self.running_task_parallelism.load(Ordering::SeqCst);
-        self.absolute_max_parallelism
-            .saturating_sub(running_parallelism)
-    }
-
-    fn get_max_available_parallelism(&self) -> u32 {
         let running_parallelism = self.running_task_parallelism.load(Ordering::SeqCst);
         let current_cpu_usage = self.get_cpu_usage();
 
