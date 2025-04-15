@@ -26,6 +26,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        graceful-shutdown: true
 
 other-sql-backend: &other-sql-backend
   matrix:

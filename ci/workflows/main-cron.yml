@@ -11,6 +11,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        graceful-shutdown: true
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env

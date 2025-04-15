@@ -137,6 +137,8 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
     volumes:
       - ..:/risingwave
+    stop_signal: SIGINT
+    stop_grace_period: 30s
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
@@ -146,6 +148,8 @@ services:
       - db
     volumes:
       - ..:/risingwave
+    stop_signal: SIGINT
+    stop_grace_period: 30s
 
   iceberg-engine-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326
