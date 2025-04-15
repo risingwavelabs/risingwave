@@ -18,7 +18,7 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_system_schema};
+use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::user::grant_privilege::PbObject;
@@ -230,6 +230,15 @@ impl Binder {
 
         match self.bind_for {
             BindFor::Stream | BindFor::Batch => {
+                // reject sources for cross-db access
+                if matches!(self.bind_for, BindFor::Stream)
+                    && matches!(object, PbObject::SourceId(_))
+                {
+                    return Err(PermissionDenied(
+                        "SOURCE is not allowed for cross-db access".to_owned(),
+                    )
+                    .into());
+                }
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
                     if user.is_super || user.id == owner {
                         return Ok(());
