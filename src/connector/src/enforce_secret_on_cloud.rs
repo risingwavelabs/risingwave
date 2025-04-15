@@ -27,9 +27,6 @@ pub trait EnforceSecretOnCloud {
     const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {};
 
     fn enforce_secret_on_cloud<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<()> {
-        if !Deployment::is_cloud_hosted() {
-            return Ok(());
-        }
         for prop in prop_iter {
             if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
                 return Err(EnforceSecretOnCloudError {
@@ -42,9 +39,6 @@ pub trait EnforceSecretOnCloud {
     }
 
     fn enforce_one(prop: &str) -> Result<()> {
-        if !Deployment::is_cloud_hosted() {
-            return Ok(());
-        }
         if Self::ENFORCE_SECRET_PROPERTIES_ON_CLOUD.contains(prop) {
             return Err(EnforceSecretOnCloudError {
                 key: prop.to_owned(),
