@@ -339,7 +339,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         .rows()
                                         .map(|row| {
                                             let filename = row.datum_at(0).unwrap().into_utf8();
-
+                                            reading_file = filename.into();
                                             let size = row.datum_at(2).unwrap().into_int64();
                                             OpendalFsSplit::<Src>::new(
                                                 filename.to_owned(),
