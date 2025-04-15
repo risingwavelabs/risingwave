@@ -26,7 +26,7 @@ const DATABASE_RECOVERY_SUCCESS: &str = "DATABASE_RECOVERY_SUCCESS";
 
 const GLOBAL_RECOVERY_REASON_BOOTSTRAP: &str = "bootstrap";
 
-const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 1000;
+const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 10;
 
 #[tokio::test]
 async fn test_isolation_simple_two_databases() -> Result<()> {
