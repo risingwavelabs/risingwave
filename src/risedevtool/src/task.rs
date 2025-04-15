@@ -40,6 +40,7 @@ mod task_tcp_ready_check;
 mod tempo_service;
 mod utils;
 
+use std::collections::HashMap;
 use std::env;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -309,6 +310,7 @@ where
             // Set session name for this window
             .arg("-n")
             .arg(self.id.as_ref().unwrap());
+
         if let Some(dir) = user_cmd.get_current_dir() {
             cmd.arg("-c").arg(dir);
         }
@@ -327,6 +329,57 @@ where
         for arg in user_cmd.get_args() {
             cmd.arg(arg);
         }
+
+        // Record the command for potential restart
+        {
+            let node_id = self.id.as_ref().unwrap().clone();
+
+            let mut node_commands =
+                read_node_command_info().context("Failed to read node command info for saving")?;
+            node_commands.retain(|id, _| id != &node_id); // Remove old entry if exists
+            node_commands.insert(
+                node_id.clone(),
+                format!("{} {}", get_program_name(&cmd), get_program_args(&cmd)),
+            );
+            write_node_command_info(&node_commands)
+                .context("Failed to write node command info after updating")?;
+        }
+
         Ok(cmd)
     }
+}
+
+use serde::{Deserialize, Serialize};
+
+/// Represents the command information for a specific node.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NodeCommandInfo {
+    pub id: String,
+    pub cmd: String,
+}
+
+/// Path to the file storing node command information.
+const NODE_COMMAND_INFO_PATH: &str = ".risingwave/config/node_commands.yaml";
+
+/// Read node command information from the storage file.
+pub fn read_node_command_info() -> Result<HashMap<String, String>, anyhow::Error> {
+    let path_str = NODE_COMMAND_INFO_PATH;
+    let path = std::path::Path::new(path_str);
+    if path.exists() {
+        let content = fs_err::read_to_string(path)
+            .with_context(|| format!("Failed to read node command info from {}", path_str))?;
+        serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to deserialize node command info from {}", path_str))
+    } else {
+        Ok(HashMap::new())
+    }
+}
+
+/// Write node command information to the storage file.
+pub fn write_node_command_info(info: &HashMap<String, String>) -> Result<(), anyhow::Error> {
+    let path_str = NODE_COMMAND_INFO_PATH;
+    let path = std::path::Path::new(path_str);
+    let content = serde_yaml::to_string(info).context("Failed to serialize node command info")?;
+    fs_err::write(path, content)
+        .with_context(|| format!("Failed to write node command info to {}", path_str))
 }

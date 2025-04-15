@@ -1493,3 +1493,45 @@ cat ${PREFIX_CONFIG}/risedev-env
 echo "Hint: To load the environment variables into the shell, you may run:"
 echo "$(tput setaf 4)\set -a; source ${PREFIX_CONFIG}/risedev-env; set +a$(tput sgr0)"
 '''
+
+[tasks.restart]
+category = "RiseDev - Start/Stop"
+description = "Restart a specific node in the cluster"
+script = '''
+#!/usr/bin/env bash
+
+set -e
+
+NODE_NAME="$1"
+
+if [[ -z "${NODE_NAME}" ]]; then
+  echo "Usage: ./risedev restart <node_name>"
+  echo "Available nodes:"
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
+  exit 1
+fi
+
+COMMAND_FILE=".risingwave/config/node_commands.yaml"
+
+if [[ ! -f "${COMMAND_FILE}" ]]; then
+  echo "Error: Command file ${COMMAND_FILE} not found. Did you start the cluster with './risedev d'?"
+  exit 1
+fi
+
+COMMAND=$(yq ".${NODE_NAME}" "${COMMAND_FILE}")
+
+if [[ -z "${COMMAND}" ]]; then
+  echo "Error: Node '${NODE_NAME}' not found in ${COMMAND_FILE}"
+  echo "Available nodes:"
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
+  exit 1
+fi
+
+echo "killing existing node ${NODE_NAME}..."
+${TMUX} kill-window -t "${NODE_NAME}"
+
+echo "Restarting node ${NODE_NAME}..."
+eval "${COMMAND}"
+
+echo "Node ${NODE_NAME} restarted."
+'''
