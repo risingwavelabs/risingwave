@@ -39,8 +39,4 @@ impl Deployment {
             Self::Other
         }
     }
-
-    pub fn is_cloud_hosted() -> bool {
-        matches!(Self::current(), Self::Cloud)
-    }
 }

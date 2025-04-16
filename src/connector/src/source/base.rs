@@ -46,7 +46,7 @@ use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
@@ -77,7 +77,7 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
 pub trait SourceProperties:
-    TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecretOnCloud
+    TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecret
 {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
@@ -581,7 +581,7 @@ impl ConnectorProperties {
         match_source_name_str!(
             connector.as_str(),
             PropType,
-            PropType::enforce_secret_on_cloud(key_iter),
+            PropType::enforce_secret(key_iter),
             |other| bail!("connector '{}' is not supported", other)
         )
     }
@@ -944,37 +944,6 @@ mod tests {
             assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {
             panic!("extract kafka config failed");
-        }
-    }
-
-    #[test]
-    fn test_enforce_secret_on_cloud() {
-        use std::env::{remove_var, set_var};
-
-        let props = convert_args!(btreemap!(
-            "connector" => "kafka",
-            "properties.bootstrap.server" => "b1,b2",
-            "topic" => "test",
-            "scan.startup.mode" => "earliest",
-            "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
-            "properties.security.protocol" => "SASL_PLAINTEXT",
-            "properties.sasl.mechanism" => "PLAIN",
-            "properties.sasl.username" => "user",
-            "properties.sasl.password" => "pass",
-        ));
-
-        let props_with_secret = WithOptionsSecResolved::without_secrets(props.clone());
-        assert!(ConnectorProperties::enforce_secret_on_cloud_source(&props_with_secret).is_ok());
-
-        unsafe {
-            // comes from risingwave_common::util::deployment::Deployment
-            remove_var("RISINGWAVE_CI");
-            set_var("RISINGWAVE_CLOUD", "1");
-        }
-        assert!(ConnectorProperties::enforce_secret_on_cloud_source(&props_with_secret).is_err());
-        unsafe {
-            remove_var("RISINGWAVE_CLOUD");
-            set_var("RISINGWAVE_CI", "1");
         }
     }
 
