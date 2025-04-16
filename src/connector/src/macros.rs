@@ -247,7 +247,7 @@ macro_rules! impl_connection {
             }
         }
 
-        pub fn enforce_secret_on_cloud_connection<'a>(
+        pub fn enforce_secret_connection<'a>(
             pb_connection_type: &risingwave_pb::catalog::connection_params::PbConnectionType,
             prop_iter: impl Iterator<Item = &'a str>,
         ) -> $crate::error::ConnectorResult<()> {

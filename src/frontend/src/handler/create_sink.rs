@@ -114,7 +114,7 @@ pub async fn gen_sink_plan(
         .system_params_manager()
         .get_params()
         .load()
-        .enforce_secret_on_cloud()
+        .enforce_secret()
         && Feature::SecretManagement.check_available().is_ok()
     {
         enforce_secret_sink(&with_options)?;
