@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 Connects to a PostgreSQL database, executes a given SQL query, and compares the
 output against an expected template using wildcard matching.
