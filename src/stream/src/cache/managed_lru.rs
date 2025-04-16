@@ -102,11 +102,6 @@ where
         old_val
     }
 
-    // TODO(MrCroxx): REMOVE ME!!!
-    pub fn push(&mut self, k: K, v: V) -> Option<V> {
-        self.put(k, v)
-    }
-
     pub fn remove(&mut self, k: &K) -> Option<V> {
         let key_size = k.estimated_size();
         let old_val = self.inner.remove(k);
