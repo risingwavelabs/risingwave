@@ -88,7 +88,6 @@ pub struct ElasticSearchOpenSearchConfig {
 
 impl EnforceSecret for ElasticSearchOpenSearchConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
-        "username",
         "password",
     };
 }

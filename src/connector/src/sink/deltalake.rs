@@ -27,6 +27,7 @@ use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveTyp
 use deltalake::operations::transaction::CommitBuilder;
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
+use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
@@ -72,8 +73,15 @@ pub struct DeltaLakeCommon {
 }
 
 impl EnforceSecret for DeltaLakeCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "gcs.service.account",
+    };
+
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
-        AwsAuthProps::enforce_one(prop)
+        AwsAuthProps::enforce_one(prop)?;
+        Self::enforce_one(prop)?;
+
+        Ok(())
     }
 }
 
