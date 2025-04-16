@@ -303,6 +303,9 @@ message ExprNode {
     MAP_INSERT = 709;
     MAP_DELETE = 710;
 
+    // Vector functions
+    L2_DISTANCE = 800;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions

@@ -424,6 +424,8 @@ impl Binder {
                 ("map_delete", raw_call(ExprType::MapDelete)),
                 ("map_insert", raw_call(ExprType::MapInsert)),
                 ("map_length", raw_call(ExprType::MapLength)),
+                // vector
+                ("l2_distance", raw_call(ExprType::L2Distance)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

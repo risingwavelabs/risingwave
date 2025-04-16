@@ -23,7 +23,9 @@ use risingwave_common::array::{
 };
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, F64, Int256, JsonbRef, MapRef, MapValue, ToText};
+use risingwave_common::types::{
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ToText, VectorRef,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
@@ -204,6 +206,29 @@ fn str_to_vector(input: &str, ctx: &Context) -> Result<VectorVal> {
         unreachable!()
     };
     VectorVal::from_text(input, *size).map_err(|err| ExprError::Parse(err.into()))
+}
+
+#[function("l2_distance(vector, vector) -> float8"/*, type_infer = "unreachable"*/)]
+fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
+    let lhs = lhs.into_inner();
+    let rhs = rhs.into_inner();
+    if lhs.len() != rhs.len() {
+        return Err(ExprError::InvalidParam {
+            name: "l2_distance",
+            reason: format!(
+                "different vector dimensions {} and {}",
+                lhs.len(),
+                rhs.len()
+            )
+            .into(),
+        });
+    }
+    let mut sum = 0.0f32;
+    for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
+        let diff = l.unwrap().into_float32().0 - r.unwrap().into_float32().0;
+        sum += diff * diff;
+    }
+    Ok((sum as f64).sqrt().into())
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
