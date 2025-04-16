@@ -85,7 +85,7 @@ struct StatusQueue<T> {
 
 struct DatabaseQueue {
     inner: VecDeque<ScheduledQueueItem>,
-    send_latency: LabelGuardedHistogram<1>,
+    send_latency: LabelGuardedHistogram,
 }
 
 type DatabaseScheduledQueue = StatusQueue<DatabaseQueue>;

@@ -228,6 +228,14 @@ impl ObjectName {
     pub fn from_test_str(s: &str) -> Self {
         ObjectName::from(vec![s.into()])
     }
+
+    pub fn base_name(&self) -> String {
+        self.0
+            .iter()
+            .last()
+            .expect("should have base name")
+            .real_value()
+    }
 }
 
 impl fmt::Display for ObjectName {
@@ -2341,6 +2349,25 @@ impl Statement {
                 write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
             }
         }
+    }
+
+    pub fn is_create(&self) -> bool {
+        matches!(
+            self,
+            Statement::CreateTable { .. }
+                | Statement::CreateView { .. }
+                | Statement::CreateSource { .. }
+                | Statement::CreateSink { .. }
+                | Statement::CreateSubscription { .. }
+                | Statement::CreateConnection { .. }
+                | Statement::CreateSecret { .. }
+                | Statement::CreateUser { .. }
+                | Statement::CreateDatabase { .. }
+                | Statement::CreateFunction { .. }
+                | Statement::CreateAggregate { .. }
+                | Statement::CreateIndex { .. }
+                | Statement::CreateSchema { .. }
+        )
     }
 }
 

@@ -289,7 +289,6 @@ impl MergeExecutor {
                         let new_upstream_fragment_id = update
                             .new_upstream_fragment_id
                             .unwrap_or(self.upstream_fragment_id);
-                        let added_upstream_actor_id = update.added_upstream_actor_id.clone();
                         let removed_upstream_actor_id: HashSet<_> =
                             if update.new_upstream_fragment_id.is_some() {
                                 select_all.upstream_actor_ids().iter().copied().collect()
@@ -303,17 +302,18 @@ impl MergeExecutor {
                             .values_mut()
                             .for_each(|buffers| buffers.clear());
 
-                        if !added_upstream_actor_id.is_empty() {
+                        if !update.added_upstream_actors.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = added_upstream_actor_id
+                            let new_upstreams: Vec<_> = update
+                                .added_upstream_actors
                                 .iter()
-                                .map(|&upstream_actor_id| {
+                                .map(|upstream_actor| {
                                     new_input(
                                         &self.local_barrier_manager,
                                         self.metrics.clone(),
                                         self.actor_context.id,
                                         self.fragment_id,
-                                        upstream_actor_id,
+                                        upstream_actor,
                                         new_upstream_fragment_id,
                                     )
                                 })
@@ -338,7 +338,12 @@ impl MergeExecutor {
                                 .buffered_watermarks
                                 .values_mut()
                                 .for_each(|buffers| {
-                                    buffers.add_buffers(added_upstream_actor_id.clone())
+                                    buffers.add_buffers(
+                                        update
+                                            .added_upstream_actors
+                                            .iter()
+                                            .map(|actor| actor.actor_id),
+                                    )
                                 });
                         }
 
@@ -398,7 +403,7 @@ pub struct SelectReceivers {
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
     /// If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
 }
 
 impl Stream for SelectReceivers {
@@ -496,7 +501,7 @@ impl SelectReceivers {
     fn new(
         actor_id: u32,
         upstreams: Vec<BoxedInput>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
     ) -> Self {
         assert!(!upstreams.is_empty());
         let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
@@ -572,7 +577,7 @@ impl SelectReceivers {
         self.extend_active(new_upstreams);
     }
 
-    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram, 2>> {
+    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
         self.merge_barrier_align_duration.clone()
     }
 }
@@ -909,12 +914,6 @@ mod tests {
         let ctx = barrier_test_env.shared_context.clone();
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info in context.
-        ctx.add_actors(
-            [actor_id, untouched, old, new]
-                .into_iter()
-                .map(helper_make_local_actor),
-        );
         // untouched -> actor_id
         // old -> actor_id
         // new -> actor_id
@@ -929,7 +928,7 @@ mod tests {
                     metrics.clone(),
                     actor_id,
                     fragment_id,
-                    upstream_actor_id,
+                    &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
                 )
             })
@@ -941,7 +940,7 @@ mod tests {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
+                added_upstream_actors: vec![helper_make_local_actor(new)],
                 removed_upstream_actor_id: vec![old],
             }
         };

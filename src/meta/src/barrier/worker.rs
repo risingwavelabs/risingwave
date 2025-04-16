@@ -76,7 +76,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
-    enable_per_database_isolation: bool,
+    /// Whether per database failure isolation is enabled in system parameters.
+    system_enable_per_database_isolation: bool,
 
     pub(super) context: Arc<C>,
 
@@ -133,7 +134,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         let reader = env.system_params_reader().await;
         let checkpoint_frequency = reader.checkpoint_frequency() as _;
-        let enable_per_database_isolation = reader.per_database_isolation();
+        let system_enable_per_database_isolation = reader.per_database_isolation();
         let interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
         let periodic_barriers = PeriodicBarriers::new(interval, checkpoint_frequency);
         tracing::info!(
@@ -146,7 +147,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             enable_recovery,
             periodic_barriers,
             in_flight_barrier_nums,
-            enable_per_database_isolation,
+            system_enable_per_database_isolation,
             context,
             env,
             checkpoint_control,
@@ -241,6 +242,19 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    fn enable_per_database_isolation(&self) -> bool {
+        self.system_enable_per_database_isolation && {
+            if let Err(e) =
+                risingwave_common::license::Feature::DatabaseFailureIsolation.check_available()
+            {
+                warn!(error = %e.as_report(), "DatabaseFailureIsolation disabled by license");
+                false
+            } else {
+                true
+            }
+        }
+    }
+
     async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -302,7 +316,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.periodic_barriers
                                 .set_checkpoint_frequency(p.checkpoint_frequency() as usize);
-                            self.enable_per_database_isolation = p.per_database_isolation();
+                            self.system_enable_per_database_isolation = p.per_database_isolation();
                         }
                     }
                 }
@@ -345,9 +359,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     })?;
                                     let workers = runtime_info.database_fragment_info.workers();
                                     for worker_id in workers {
-                                        if !self.control_stream_manager.contains_worker(worker_id) {
-                                            let node = self.active_streaming_nodes.current()[&worker_id].clone();
-                                            self.control_stream_manager.try_add_worker(node, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
+                                        if !self.control_stream_manager.is_connected(worker_id) {
+                                            self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
@@ -377,7 +390,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     if !self.enable_recovery {
                                         panic!("control stream to worker {} failed but recovery not enabled: {:?}", worker_id, err.as_report());
                                     }
-                                    if !self.enable_per_database_isolation {
+                                    if !self.enable_per_database_isolation() {
                                         Err(err.clone())?;
                                     }
                                     Self::report_collect_failure(&self.env, &err);
@@ -406,7 +419,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if !self.enable_recovery {
                                     panic!("database failure reported but recovery not enabled: {:?}", resp)
                                 }
-                                if !self.enable_per_database_isolation {
+                                if !self.enable_per_database_isolation() {
                                         Err(anyhow!("database {} reset", resp.database_id))?;
                                     }
                                 let database_id = DatabaseId::new(resp.database_id);
@@ -443,7 +456,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             );
                         }
                         let result: MetaResult<_> = try {
-                            if !self.enable_per_database_isolation {
+                            if !self.enable_per_database_isolation() {
                                 let errs = failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec();
                                 let err = anyhow!("failed to inject barrier for databases: {:?}", errs);
                                 Err(err)?;
@@ -698,6 +711,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             .with_label_values(&["global"])
             .start_timer();
 
+        let enable_per_database_isolation = self.enable_per_database_isolation();
+
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
             // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
             // it holds the reschedule_read_lock and wait for creating job to finish, and caused the following scale_actor fail
@@ -740,7 +755,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
             {
-                let mut builder = FragmentEdgeBuilder::new(database_fragment_infos.values().flat_map(|info| info.fragment_infos()));
+                let mut builder = FragmentEdgeBuilder::new(database_fragment_infos.values().flat_map(|info| info.fragment_infos()), &control_stream_manager);
                 builder.add_relations(&fragment_relations);
                 let mut edges = builder.build();
 
@@ -848,7 +863,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
                 }
-                if !self.enable_per_database_isolation && !failed_databases.is_empty() {
+                if !enable_per_database_isolation && !failed_databases.is_empty() {
                     return Err(anyhow!(
                         "global recovery failed due to failure of databases {:?}",
                         failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
@@ -859,6 +874,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     failed_databases,
                     &mut control_stream_manager,
                     hummock_version_stats,
+                    self.env.clone(),
                 );
                 Ok((
                     active_streaming_nodes,

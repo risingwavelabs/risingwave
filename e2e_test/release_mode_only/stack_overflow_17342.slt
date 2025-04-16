@@ -1,3 +1,5 @@
+# Why this is release mode only: https://github.com/risingwavelabs/risingwave/issues/21355#issuecomment-2806876248
+
 statement ok
 SET streaming_parallelism TO 1;
 

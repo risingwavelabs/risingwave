@@ -52,7 +52,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl DispatcherWithMetrics {
@@ -86,7 +86,7 @@ struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
-    actor_out_record_cnt: LabelGuardedIntCounter<2>,
+    actor_out_record_cnt: LabelGuardedIntCounter,
 }
 
 impl DispatchExecutorMetrics {
@@ -96,8 +96,8 @@ impl DispatchExecutorMetrics {
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
                 .with_guarded_label_values(&[
-                    &self.actor_id_str,
-                    &self.fragment_id_str,
+                    self.actor_id_str.as_str(),
+                    self.fragment_id_str.as_str(),
                     dispatcher.dispatcher_id_str(),
                 ]),
             dispatcher,
@@ -1173,7 +1173,6 @@ mod tests {
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
-    use crate::task::test_utils::helper_make_local_actor;
 
     // TODO: this test contains update being shuffled to different partitions, which is not
     // supported for now.
@@ -1263,12 +1262,6 @@ mod tests {
         let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
         let (old_simple, new_simple) = (114, 514); // simple downstream actors
 
-        // 1. Register info in context.
-        ctx.add_actors(
-            [actor_id, untouched, old, new, old_simple, new_simple]
-                .into_iter()
-                .map(helper_make_local_actor),
-        );
         // actor_id -> untouched, old, new, old_simple, new_simple
 
         let broadcast_dispatcher_id = 666;

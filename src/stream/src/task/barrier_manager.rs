@@ -842,10 +842,6 @@ impl LocalBarrierWorker {
             .get_mut(&DatabaseId::new(request.database_id))
             .expect("should exist");
         if let Some(state) = database_status.state_for_request() {
-            state
-                .local_barrier_manager
-                .shared_context
-                .add_actors(request.broadcast_info.iter().cloned());
             state.transform_to_issued(barrier, request)?;
         }
         Ok(())
@@ -1271,7 +1267,6 @@ pub(crate) mod barrier_test_utils {
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             subscriptions: vec![],
-                            actor_infos: vec![],
                         }],
                     }],
                     term_id: "for_test".into(),
@@ -1312,7 +1307,6 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                            broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],
                             subscriptions_to_remove: vec![],

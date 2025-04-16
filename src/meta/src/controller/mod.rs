@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use risingwave_common::bail;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
@@ -66,7 +67,7 @@ pub struct SqlMetaStore {
 
 impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
-    pub async fn connect(backend: MetaStoreBackend) -> Result<Self, sea_orm::DbErr> {
+    pub async fn connect(backend: MetaStoreBackend) -> MetaResult<Self> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
 
         #[easy_ext::ext]
@@ -117,6 +118,11 @@ impl SqlMetaStore {
                     .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
                 if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                    if endpoint.contains(":memory:") || endpoint.contains("mode=memory") {
+                        bail!(
+                            "use the `mem` backend instead of specifying a URL of in-memory SQLite"
+                        );
+                    }
                     options.sqlite_common();
                 }
 

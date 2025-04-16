@@ -63,6 +63,7 @@ compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
 periodic_scheduling_compaction_group_merge_interval_sec = 600
+compaction_group_merge_dimension_threshold = 1.2
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -323,6 +324,7 @@ license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
 per_database_isolation = true
+enforce_secret_on_cloud = false
 
 [udf]
 enable_embedded_python_udf = false

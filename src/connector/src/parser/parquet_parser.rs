@@ -14,9 +14,11 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use prometheus::core::GenericCounter;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use crate::parser::ConnectorResult;
@@ -50,16 +52,10 @@ impl ParquetParser {
             tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
         file_source_input_row_count_metrics: Option<
-            risingwave_common::metrics::LabelGuardedMetric<
-                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-                4,
-            >,
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
         >,
         parquet_source_skip_row_count_metrics: Option<
-            risingwave_common::metrics::LabelGuardedMetric<
-                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-                4,
-            >,
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
         >,
     ) {
         #[for_await]
@@ -104,16 +100,10 @@ impl ParquetParser {
         &mut self,
         record_batch: RecordBatch,
         file_source_input_row_count_metrics: Option<
-            risingwave_common::metrics::LabelGuardedMetric<
-                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-                4,
-            >,
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
         >,
         parquet_source_skip_row_count_metrics: Option<
-            risingwave_common::metrics::LabelGuardedMetric<
-                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-                4,
-            >,
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
         >,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;

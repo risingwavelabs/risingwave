@@ -51,14 +51,14 @@ pub async fn barrier_align(
     let actor_id = actor_id.to_string();
     let fragment_id = fragment_id.to_string();
     let left_barrier_align_duration = metrics.barrier_align_duration.with_guarded_label_values(&[
-        &actor_id,
-        &fragment_id,
+        actor_id.as_str(),
+        fragment_id.as_str(),
         "left",
         executor_name,
     ]);
     let right_barrier_align_duration = metrics.barrier_align_duration.with_guarded_label_values(&[
-        &actor_id,
-        &fragment_id,
+        actor_id.as_str(),
+        fragment_id.as_str(),
         "right",
         executor_name,
     ]);

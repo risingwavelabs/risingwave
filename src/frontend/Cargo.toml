@@ -52,7 +52,7 @@ pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 quick-xml = { version = "0.37", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
