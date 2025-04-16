@@ -50,7 +50,7 @@ use super::{
     SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
 };
 use crate::connector_common::AwsAuthProps;
-use crate::enforce_secret::EnforceSecret;
+use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -79,7 +79,12 @@ impl EnforceSecret for DeltaLakeCommon {
 
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         AwsAuthProps::enforce_one(prop)?;
-        Self::enforce_one(prop)?;
+        if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+            return Err(EnforceSecretError {
+                key: prop.to_owned(),
+            }
+            .into());
+        }
 
         Ok(())
     }
