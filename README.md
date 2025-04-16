@@ -23,7 +23,7 @@
     href="https://github.com/risingwavelabs/risingwave/releases/latest"
     target="_blank"
   >
-    <img alt="Release" src="https://img.shields.io/github/v/tag/risingwavelabs/risingwave.svg?sort=semver" />
+    <img alt="Release" src="https://img.shields.io/github/v/release/risingwavelabs/risingwave.svg?sort=semver" />
   </a>
   <a
     href="https://go.risingwave.com/slack"
