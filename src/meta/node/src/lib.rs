@@ -418,6 +418,9 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
+                compaction_group_merge_dimension_threshold: config
+                    .meta
+                    .compaction_group_merge_dimension_threshold,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,
