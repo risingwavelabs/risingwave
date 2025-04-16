@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
@@ -31,7 +32,8 @@ use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_WITHOUT_BACKFILL, enforce_secret_sink,
 };
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
@@ -113,8 +115,9 @@ pub async fn gen_sink_plan(
         .get_params()
         .load()
         .enforce_secret_on_cloud()
+        && Feature::SecretManagement.check_available().is_ok()
     {
-        todo!()
+        enforce_secret_sink(&with_options)?;
     }
 
     resolve_privatelink_in_with_option(&mut with_options)?;
