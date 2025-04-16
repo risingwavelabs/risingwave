@@ -107,6 +107,15 @@ where
         self.put(k, v)
     }
 
+    pub fn remove(&mut self, k: &K) -> Option<V> {
+        let key_size = k.estimated_size();
+        let old_val = self.inner.remove(k);
+        if let Some(old_val) = &old_val {
+            self.reporter.dec(key_size + old_val.estimated_size());
+        }
+        old_val
+    }
+
     pub fn get_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
         let v = self.inner.get_mut(k);
         v.map(|inner| MutGuard::new(inner, &mut self.reporter))
