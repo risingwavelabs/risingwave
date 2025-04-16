@@ -61,7 +61,7 @@ pub struct DorisCommon {
 
 impl EnforceSecret for DorisCommon {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
-        "doris.password",
+        "doris.password", "doris.user"
     };
 }
 

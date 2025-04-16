@@ -74,7 +74,7 @@ pub struct ClickHouseCommon {
 
 impl EnforceSecret for ClickHouseCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
-        "clickhouse.password",
+        "clickhouse.password", "clickhouse.user"
     };
 }
 
