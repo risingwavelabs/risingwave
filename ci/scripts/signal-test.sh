@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.sh
+# source ci/scripts/common.sh
 
 export PYTHONUNBUFFERED=1
 
