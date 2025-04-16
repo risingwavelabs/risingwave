@@ -4,7 +4,7 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-statement ok
+statement o
 CREATE TABLE dates(i DATE);
 
 statement error
