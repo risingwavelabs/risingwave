@@ -150,7 +150,7 @@ where
                     let mut ptr = *o.get();
                     let entry = ptr.as_mut();
                     std::mem::swap(&mut value, entry.value_mut());
-                    self.detach(ptr);
+                    Self::detach(ptr);
                     self.attach(ptr);
                     Some(value)
                 }
@@ -180,31 +180,27 @@ where
         unsafe {
             let hash = self.hash_builder.hash_one(key);
 
-            if let Some(ptr) = self.map.find(hash, |p| p.as_ref().key() == key) {
-                let ptr = *ptr;
+            match self
+                .map
+                .entry(hash, |p| p.as_ref().key() == key, |p| p.as_ref().hash)
+            {
+                Entry::Occupied(o) => {
+                    let ptr = *o.get();
 
-                // Detach the entry from the LRU list
-                self.detach(ptr);
+                    // Detach the entry from the LRU list
+                    Self::detach(ptr);
 
-                // Remove entry from the hash table
-                match self
-                    .map
-                    .entry(hash, |p| p.as_ref().key() == key, |p| p.as_ref().hash)
-                {
-                    Entry::Occupied(o) => {
-                        o.remove();
-                    }
-                    Entry::Vacant(_) => {}
+                    // Extract entry from the box and get its value
+                    let mut entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
+                    entry.key.assume_init_drop();
+                    let value = entry.value.assume_init();
+
+                    // Remove entry from the hash table
+                    o.remove();
+
+                    Some(value)
                 }
-
-                // Extract entry from the box and return its value
-                let mut entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
-                entry.key.assume_init_drop();
-                let value = entry.value.assume_init();
-
-                Some(value)
-            } else {
-                None
+                Entry::Vacant(_) => None,
             }
         }
     }
@@ -219,7 +215,7 @@ where
             let hash = self.hash_builder.hash_one(key);
             if let Some(ptr) = self.map.find(hash, |p| p.as_ref().key().borrow() == key) {
                 let ptr = *ptr;
-                self.detach(ptr);
+                Self::detach(ptr);
                 self.attach(ptr);
                 Some(ptr.as_ref().value())
             } else {
@@ -241,7 +237,7 @@ where
                 .find_mut(hash, |p| p.as_ref().key().borrow() == key)
             {
                 let mut ptr = *ptr;
-                self.detach(ptr);
+                Self::detach(ptr);
                 self.attach(ptr);
                 Some(ptr.as_mut().value_mut())
             } else {
@@ -312,7 +308,7 @@ where
                 return None;
             }
 
-            self.detach(ptr);
+            Self::detach(ptr);
 
             let entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
 
@@ -342,7 +338,7 @@ where
             std::mem::swap(&mut map, &mut self.map);
 
             for ptr in map.drain() {
-                self.detach(ptr);
+                Self::detach(ptr);
                 let mut entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
                 entry.key.assume_init_drop();
                 entry.value.assume_init_drop();
@@ -356,7 +352,7 @@ where
         }
     }
 
-    fn detach(&mut self, mut ptr: NonNull<LruEntry<K, V>>) {
+    fn detach(mut ptr: NonNull<LruEntry<K, V>>) {
         unsafe {
             let entry = ptr.as_mut();
 
