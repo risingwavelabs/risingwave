@@ -333,21 +333,7 @@ impl Parser<'_> {
                 }
                 Keyword::CANCEL => Ok(self.parse_cancel_job()?),
                 Keyword::KILL => Ok(self.parse_kill_process()?),
-                Keyword::DESCRIBE => {
-                    let plan = self.parse_keyword(Keyword::PLAN);
-                    let plan = if plan {
-                        let (options, analyze_duration) = self.parse_explain_options()?;
-                        if analyze_duration.is_some() {
-                            return self
-                                .expected("ANALYZE duration is not supported for DESCRIBE PLAN");
-                        }
-                        Some(options)
-                    } else {
-                        None
-                    };
-                    let name = self.parse_object_name()?;
-                    Ok(Statement::Describe { name, plan })
-                }
+                Keyword::DESCRIBE => Ok(self.parse_describe()?),
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -4443,6 +4429,23 @@ impl Parser<'_> {
             statement: Box::new(statement),
             options,
         })
+    }
+
+    pub fn parse_describe(&mut self) -> ModalResult<Statement> {
+        let kind = match self.parse_one_of_keywords(&[Keyword::PLAN, Keyword::FRAGMENTS]) {
+            Some(Keyword::PLAN) => {
+                let (options, analyze_duration) = self.parse_explain_options()?;
+                if analyze_duration.is_some() {
+                    return self.expected("ANALYZE duration is not supported for DESCRIBE PLAN");
+                }
+                DescribeKind::Plan(options)
+            }
+            Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
+            None => DescribeKind::Plain,
+            Some(_) => unreachable!(),
+        };
+        let name = self.parse_object_name()?;
+        Ok(Statement::Describe { name, kind })
     }
 
     /// Parse a query expression, i.e. a `SELECT` statement optionally

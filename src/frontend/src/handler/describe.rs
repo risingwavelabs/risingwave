@@ -21,7 +21,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::types::{DataType, Fields};
 use risingwave_expr::bail;
-use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement, display_comma_separated};
+use risingwave_sqlparser::ast::{
+    DescribeKind, ExplainOptions, ObjectName, Statement, display_comma_separated,
+};
 
 use super::explain::ExplainRow;
 use super::show::ShowColumnRow;
@@ -237,15 +239,19 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         .into())
 }
 
-pub fn infer_describe(plan: bool) -> Vec<PgFieldDescriptor> {
-    if plan {
-        vec![PgFieldDescriptor::new(
+pub fn infer_describe(kind: &DescribeKind) -> Vec<PgFieldDescriptor> {
+    match kind {
+        DescribeKind::Plan(_) => vec![PgFieldDescriptor::new(
             "Query Plan".to_owned(),
             DataType::Varchar.to_oid(),
             DataType::Varchar.type_len(),
-        )]
-    } else {
-        fields_to_descriptors(ShowColumnRow::fields())
+        )],
+        DescribeKind::Fragments => vec![PgFieldDescriptor::new(
+            "Fragments".to_owned(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
+        )],
+        DescribeKind::Plain => fields_to_descriptors(ShowColumnRow::fields()),
     }
 }
 
@@ -261,6 +267,9 @@ async fn generate_plan_string(
     let mut blocks = vec![];
     super::explain::do_handle_explain(explain_handler_args, explain_options, stmt, &mut blocks)
         .await?;
+    blocks.push(
+        "Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.".to_owned(),
+    );
 
     let rows = blocks.iter().flat_map(|b| b.lines()).map(|l| ExplainRow {
         query_plan: l.into(),

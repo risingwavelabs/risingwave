@@ -247,6 +247,8 @@ define_keywords!(
     FOR,
     FOREIGN,
     FORMAT,
+    FRAGMENT,
+    FRAGMENTS,
     FRAME_ROW,
     FREE,
     FREEZE,

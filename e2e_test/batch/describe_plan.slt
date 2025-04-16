@@ -89,6 +89,7 @@ StreamMaterialize { columns: [id, name, age, created_at, data], stream_key: [id]
     └─StreamExchange { dist: HashShard(id) }
       └─StreamDml { columns: [id, name, age, created_at, data] }
         └─StreamSource
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 # Test DESCRIBE PLAN for each relation
@@ -96,6 +97,7 @@ query ?
 DESCRIBE PLAN (logical) describe_plan_test.tbl;
 ----
 LogicalSource
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 
@@ -110,7 +112,7 @@ StreamMaterialize { columns: [name, count, avg_age, all_data], stream_key: [name
       └─StreamExchange { dist: HashShard(tbl.name) }
         └─StreamFilter { predicate: (tbl.age > 18:Int32) }
           └─StreamTableScan { table: tbl, columns: [name, age, data, id] }
-
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 # Should show materialized view creation plan with complex aggregations
@@ -189,17 +191,68 @@ LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age
   └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
     └─LogicalScan { table: tbl, columns: [name, age, data], predicate: (tbl.age > 18:Int32) }
 (empty)
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
-query error
-DESCRIBE PLAN idx;
+# TODO: fetch actual fragments of the job.
+# Commented out since fragment IDs are not stable.
+# query ??
+# DESCRIBE FRAGMENTS describe_plan_test.complex_mv;
+# ----
+# Fragment 0
+# StreamMaterialize { columns: [name, count, avg_age, all_data], stream_key: [name], pk_columns: [name], pk_conflict: NoCheck }
+# ├── tables: [ Materialize: 4294967294 ]
+# └── StreamProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+#     └── StreamFilter { predicate: (count > 1:Int32) }
+#         └── StreamHashAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+#             ├── tables: [ HashAggState: 1, HashAggCall3: 0 ]
+#             └── StreamExchange Hash([0]) from 1
+# (empty)
+# Fragment 1
+# StreamFilter { predicate: (tbl.age > 18:Int32) }
+# └── StreamTableScan { table: tbl, columns: [name, age, data, id] } { tables: [ StreamScan: 2 ] }
+#     ├── Upstream
+#     └── BatchPlanNode
+# (empty)
+# Table 0
+# ├── columns: [ tbl_name, tbl_id, tbl_data, _rw_timestamp ]
+# ├── primary key: [ $0 ASC, $1 ASC ]
+# ├── value indices: [ 1, 2 ]
+# ├── distribution key: [ 0 ]
+# └── read pk prefix len hint: 1
+# (empty)
+# Table 1
+# ├── columns: [ tbl_name, count, sum(tbl_age), count(tbl_age), jsonb_agg(tbl_data), _rw_timestamp ]
+# ├── primary key: [ $0 ASC ]
+# ├── value indices: [ 1, 2, 3, 4 ]
+# ├── distribution key: [ 0 ]
+# └── read pk prefix len hint: 1
+# (empty)
+# Table 2
+# ├── columns: [ vnode, id, backfill_finished, row_count, _rw_timestamp ]
+# ├── primary key: [ $0 ASC ]
+# ├── value indices: [ 1, 2, 3 ]
+# ├── distribution key: [ 0 ]
+# ├── read pk prefix len hint: 1
+# └── vnode column idx: 0
+# (empty)
+# Table 4294967294
+# ├── columns: [ name, count, avg_age, all_data, _rw_timestamp ]
+# ├── primary key: [ $0 ASC ]
+# ├── value indices: [ 0, 1, 2, 3 ]
+# ├── distribution key: [ 0 ]
+# └── read pk prefix len hint: 1
+# (empty)
+# Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+
+
+query ?
+DESCRIBE PLAN describe_plan_test.idx;
 ----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Catalog error
-  2: table, source, sink or view not found: idx
-
+StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
+└─StreamExchange { dist: HashShard(tbl.name) }
+  └─StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 query error
@@ -232,6 +285,7 @@ BatchExchange { order: [], dist: Single }
   └─BatchExchange { order: [], dist: UpstreamHashShard(tbl.name) }
     └─BatchFilter { predicate: (tbl.age > 25:Int32) }
       └─BatchScan { table: tbl, columns: [name, age] }
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 # Should handle special characters in names
@@ -243,6 +297,7 @@ StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk
   └─StreamExchange { dist: HashShard(id) }
     └─StreamDml { columns: [id, value] }
       └─StreamSource
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 query ??
@@ -250,6 +305,7 @@ DESCRIBE PLAN describe_plan_test."view-with-dashes";
 ----
 BatchExchange { order: [], dist: Single }
 └─BatchScan { table: table.with.dots, columns: [id, value] }
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 # Test error cases
@@ -275,7 +331,7 @@ Caused by these errors (recent errors listed first):
   2: table, source, sink or view not found: describe_plan_test.non_existent_table
 
 
-# System catalog (should fail)
+# System table (view)
 query ?
 DESCRIBE PLAN pg_catalog.pg_tables;
 ----
@@ -287,6 +343,21 @@ BatchProject { exprs: [rw_schemas.name, rw_tables.name, PgGetUserbyid(rw_tables.
   │   └─BatchScan { table: rw_system_tables, columns: [name, schema_id, owner] }
   └─BatchFilter { predicate: (rw_schemas.name <> 'rw_catalog':Varchar) }
     └─BatchScan { table: rw_schemas, columns: [id, name] }
+Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+
+
+# System table (should fail)
+query error
+DESCRIBE PLAN pg_catalog.rw_system_tables;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table, source, sink or view not found: pg_catalog.rw_system_tables
+
+
+
 
 # Clean up
 statement ok

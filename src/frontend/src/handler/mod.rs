@@ -456,13 +456,25 @@ pub async fn handle(
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
-        Statement::Describe { name, plan } => {
-            if let Some(options) = plan {
+        Statement::Describe { name, kind } => match kind {
+            DescribeKind::Plan(options) => {
                 describe::handle_describe_plan(handler_args, name, options).await
-            } else {
-                describe::handle_describe(handler_args, name)
             }
-        }
+            DescribeKind::Fragments => {
+                // TODO: fetch accurate fragments from meta to replace the implementation here.
+                // Current implementation is a quick hack based on replan.
+                describe::handle_describe_plan(
+                    handler_args,
+                    name,
+                    ExplainOptions {
+                        explain_type: ExplainType::DistSql,
+                        ..ExplainOptions::default()
+                    },
+                )
+                .await
+            }
+            DescribeKind::Plain => describe::handle_describe(handler_args, name),
+        },
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,
