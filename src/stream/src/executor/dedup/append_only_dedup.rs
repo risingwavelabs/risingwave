@@ -18,9 +18,11 @@ use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::row::RowExt;
 
-use super::cache::DedupCache;
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::prelude::*;
+
+type Cache = ManagedLruCache<OwnedRow, ()>;
 
 /// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
 /// messages. It only accepts append-only input, and its output will be append-only as well.
@@ -30,7 +32,7 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
     input: Option<Executor>,
     dedup_cols: Vec<usize>,
     state_table: StateTable<S>,
-    cache: DedupCache<OwnedRow>,
+    cache: Cache,
 }
 
 impl<S: StateStore> AppendOnlyDedupExecutor<S> {
@@ -49,7 +51,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             input: Some(input),
             dedup_cols,
             state_table,
-            cache: DedupCache::new(watermark_epoch, metrics_info),
+            cache: Cache::unbounded(watermark_epoch, metrics_info),
         }
     }
 
@@ -92,8 +94,11 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                     for key in dedup_keys {
                         match key {
                             Some(key) => {
-                                if self.cache.dedup_insert(key) {
+                                if self.cache.put(key, ()).is_none() {
                                     // The key doesn't exist before. The row should be visible.
+                                    // Note that we can do deduplication in such a simple way because
+                                    // this executor only accepts append-only input. Otherwise, we can
+                                    // only do this if dedup columns contain all the input columns.
                                     vis_builder.append(true);
                                 } else {
                                     // The key exists before. The row shouldn't be visible.
@@ -162,7 +167,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 let (key, value) = result;
                 if value?.is_some() {
                     // Only insert into the cache when we have this key in storage.
-                    self.cache.insert(key.to_owned());
+                    self.cache.put(key.to_owned(), ());
                 }
             }
         }
