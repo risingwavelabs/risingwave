@@ -73,8 +73,8 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                     // Append-only dedup executor only receives INSERT messages.
                     debug_assert!(chunk.ops().iter().all(|&op| op == Op::Insert));
 
-                    // Extract pk for all rows (regardless of visibility) in the chunk.
-                    let keys = chunk
+                    // Extract dedup keys for all rows (regardless of visibility) in the chunk.
+                    let dedup_keys = chunk
                         .data_chunk()
                         .rows_with_holes()
                         .map(|row_ref| {
@@ -84,11 +84,12 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                     // Ensure that if a key for a visible row exists before, then it is in the
                     // cache, by querying the storage.
-                    self.populate_cache(keys.iter().flatten()).await?;
+                    self.populate_cache(dedup_keys.iter().flatten().unique())
+                        .await?;
 
                     // Now check for duplication and insert new keys into the cache.
                     let mut vis_builder = BitmapBuilder::with_capacity(chunk.capacity());
-                    for key in keys {
+                    for key in dedup_keys {
                         match key {
                             Some(key) => {
                                 if self.cache.dedup_insert(key) {
@@ -112,10 +113,10 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         let (ops, columns, _) = chunk.into_inner();
                         let chunk = StreamChunk::with_visibility(ops, columns, vis);
                         self.state_table.write_chunk(chunk.clone());
+                        self.state_table.try_flush().await?;
 
                         yield Message::Chunk(chunk);
                     }
-                    self.state_table.try_flush().await?;
                 }
 
                 Message::Barrier(barrier) => {
@@ -145,19 +146,17 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         &mut self,
         keys: impl Iterator<Item = &'a OwnedRow>,
     ) -> StreamExecutorResult<()> {
-        let mut read_from_storage = false;
         let mut futures = vec![];
         for key in keys {
             if self.cache.contains(key) {
                 continue;
             }
-            read_from_storage = true;
 
             let table = &self.state_table;
             futures.push(async move { (key, table.get_encoded_row(key).await) });
         }
 
-        if read_from_storage {
+        if !futures.is_empty() {
             let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (key, value) = result;
