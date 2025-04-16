@@ -925,6 +925,7 @@ impl LogicalJoin {
         Ok((left, right))
     }
 
+    #[inline(never)]
     fn to_stream_hash_join(
         &self,
         predicate: EqJoinPredicate,
@@ -999,24 +1000,26 @@ impl LogicalJoin {
         }
     }
 
+    #[inline(never)]
     fn to_stream_temporal_join_with_index_selection(
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<StreamTemporalJoin> {
+    ) -> Result<PlanRef> {
         // Index selection for temporal join.
         let right = self.right();
         // `should_be_temporal_join()` has already check right input for us.
         let logical_scan: &LogicalScan = right.as_logical_scan().unwrap();
 
         // Use primary table.
-        let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
+        let mut result_plan: Result<StreamTemporalJoin> =
+            self.to_stream_temporal_join(predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
         if let Ok(temporal_join) = &result_plan
             && temporal_join.eq_join_predicate().eq_indexes().len()
                 == logical_scan.primary_key().len()
         {
-            return result_plan;
+            return result_plan.map(|x| x.into());
         }
         let indexes = logical_scan.indexes();
         for index in indexes {
@@ -1040,7 +1043,7 @@ impl LogicalJoin {
             }
         }
 
-        result_plan
+        result_plan.map(|x| x.into())
     }
 
     fn check_temporal_rhs(right: &PlanRef) -> Result<&LogicalScan> {
@@ -1238,11 +1241,12 @@ impl LogicalJoin {
         ))
     }
 
+    #[inline(never)]
     fn to_stream_nested_loop_temporal_join(
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<StreamTemporalJoin> {
+    ) -> Result<PlanRef> {
         use super::stream::prelude::*;
         assert!(!predicate.has_eq());
 
@@ -1288,13 +1292,10 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Ok(StreamTemporalJoin::new(
-            new_logical_join,
-            new_predicate,
-            true,
-        ))
+        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true).into())
     }
 
+    #[inline(never)]
     fn to_stream_dynamic_filter(
         &self,
         predicate: Condition,
@@ -1406,11 +1407,12 @@ impl LogicalJoin {
             .into())
     }
 
+    #[inline(never)]
     fn to_stream_asof_join(
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<StreamAsOfJoin> {
+    ) -> Result<PlanRef> {
         use super::stream::prelude::*;
 
         if predicate.eq_keys().is_empty() {
@@ -1427,11 +1429,7 @@ impl LogicalJoin {
         let inequality_desc =
             Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
 
-        Ok(StreamAsOfJoin::new(
-            logical_join.core.clone(),
-            predicate,
-            inequality_desc,
-        ))
+        Ok(StreamAsOfJoin::new(logical_join.core.clone(), predicate, inequality_desc).into())
     }
 
     /// Convert the logical join to a Hash join.
@@ -1559,7 +1557,7 @@ impl ToStream for LogicalJoin {
         );
 
         if self.join_type() == JoinType::AsofInner || self.join_type() == JoinType::AsofLeftOuter {
-            self.to_stream_asof_join(predicate, ctx).map(|x| x.into())
+            self.to_stream_asof_join(predicate, ctx)
         } else if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
                 return Err(ErrorCode::InternalError(format!(
@@ -1570,13 +1568,11 @@ impl ToStream for LogicalJoin {
 
             if self.should_be_temporal_join() {
                 self.to_stream_temporal_join_with_index_selection(predicate, ctx)
-                    .map(|x| x.into())
             } else {
                 self.to_stream_hash_join(predicate, ctx)
             }
         } else if self.should_be_temporal_join() {
             self.to_stream_nested_loop_temporal_join(predicate, ctx)
-                .map(|x| x.into())
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {
