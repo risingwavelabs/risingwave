@@ -32,6 +32,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -134,6 +135,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
+
+    async fn list_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -320,5 +323,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_meta_store_endpoint(&self) -> Result<String> {
         self.0.get_meta_store_endpoint().await
+    }
+
+    async fn list_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
+        self.0.list_iceberg_tables().await
     }
 }
