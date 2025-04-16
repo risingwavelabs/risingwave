@@ -194,7 +194,8 @@ seed_old_cluster() {
   cp -r e2e_test/tpch/* $TEST_DIR/tpch
 
   ./risedev clean-data
-  ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ./risedev d full-without-monitoring && rm .risingwave/log/*
+  # `ENABLE_PYTHON_UDF` and `ENABLE_JS_UDF` are set for backwards-compartibility
+  ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ENABLE_UDF=1 ./risedev d full-without-monitoring && rm .risingwave/log/*
 
   check_version "$OLD_VERSION"
 
@@ -256,7 +257,7 @@ seed_old_cluster() {
 
 validate_new_cluster() {
   echo "--- Start cluster on latest"
-  ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ./risedev d full-without-monitoring
+  ENABLE_UDF=1 ./risedev d full-without-monitoring
 
   echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
   sleep $RECOVERY_DURATION
