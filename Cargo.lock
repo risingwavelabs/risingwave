@@ -1211,9 +1211,9 @@ dependencies = [
 
 [[package]]
 name = "auto_impl"
-version = "1.2.0"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c87f3f15e7794432337fc718554eaa4dc8f04c9677a950ffe366f20a162ae42"
+checksum = "ffdcb70bdbc4d478427380519163274ac86e52916e10f0a8889adf0f96d3fee7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9685,10 +9685,20 @@ version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b5edd582b62f5cde844716e66d92565d7faf7ab1445c8cebce6e00fba83ddb2"
 dependencies = [
- "base64 0.22.1",
  "logos",
  "miette",
  "once_cell",
+ "prost 0.13.4",
+ "prost-types 0.13.4",
+]
+
+[[package]]
+name = "prost-reflect"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
+dependencies = [
+ "base64 0.22.1",
  "prost 0.13.4",
  "prost-types 0.13.4",
  "serde",
@@ -9742,7 +9752,7 @@ dependencies = [
  "bytes",
  "miette",
  "prost 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.14.7",
  "prost-types 0.13.4",
  "protox-parse",
  "thiserror 1.0.63",
@@ -11117,7 +11127,7 @@ dependencies = [
  "proc-macro2",
  "prometheus",
  "prost 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.15.1",
  "prost-types 0.13.4",
  "pulsar",
  "quote",
@@ -11194,7 +11204,7 @@ dependencies = [
  "num-bigint",
  "prost 0.13.4",
  "prost-build 0.13.4",
- "prost-reflect",
+ "prost-reflect 0.15.1",
  "prost-types 0.13.4",
  "protox",
  "reqwest 0.12.4",

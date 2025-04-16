@@ -116,6 +116,8 @@ mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
 
+use crate::stream_fragmenter::GraphJobType;
+
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
@@ -911,6 +913,7 @@ pub async fn bind_create_source_or_table_with_connector(
         .get_params()
         .load()
         .enforce_secret_on_cloud()
+        && Feature::SecretManagement.check_available().is_ok()
     {
         // check enforce using secret for some props on cloud
         ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
@@ -1121,7 +1124,7 @@ pub(super) fn generate_stream_graph_for_source(
     )?;
 
     let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-    let graph = build_graph(stream_plan)?;
+    let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
 

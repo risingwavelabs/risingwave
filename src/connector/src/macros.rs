@@ -254,7 +254,7 @@ macro_rules! impl_connection {
             match pb_connection_type {
                 $(
                     <$pb_connection_path>::$variant_name => {
-                        <$connection_type>::enforce_secret_on_cloud(prop_iter)
+                        <$connection_type>::enforce_secret(prop_iter)
                     },
                 )*
                 risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
