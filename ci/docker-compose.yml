@@ -138,7 +138,7 @@ services:
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
-    init: true
+    # init: true
     # environment:
     #   - TINI_KILL_PROCESS_GROUP=1
 
@@ -151,7 +151,7 @@ services:
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
-    init: true
+    # init: true
     # environment:
     #   - TINI_KILL_PROCESS_GROUP=1
 
