@@ -13,9 +13,11 @@ def signal_handler(sig, frame):
 
 
 def main():
-    # Register the signal handler for SIGINT and SIGTERM
+    # Register the signal handler for signals
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
+    signal.signal(signal.SIGHUP, signal_handler)
 
     print("[SUB] Starting sleep loop.")
 
