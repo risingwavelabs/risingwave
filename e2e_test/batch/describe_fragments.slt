@@ -143,13 +143,20 @@ StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
 └── BatchPlanNode { output: [ name, age, created_at, id ], stream key: [] }'
 
 
-query ?
-DESCRIBE PLAN describe_plan_test.idx;
-----
+system ok
+psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
+--expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
-└─StreamExchange { dist: HashShard(tbl.name) }
-  └─StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
+├── stream key: [ tbl.id ]
+└── MergeExecutor { output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ], stream key: [ tbl.id ] }
+(empty)
+Fragment % (Actor %)
+StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
+├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
+├── stream key: [ tbl.id ]
+├── Upstream { output: [ name, age, created_at, id ], stream key: [] }
+└── BatchPlanNode { output: [ name, age, created_at, id ], stream key: [] }'
 
 
 system ok
@@ -172,63 +179,60 @@ StreamSink { type: upsert, columns: [id, name, age, created_at, type], downstrea
 
 
 query error
-DESCRIBE PLAN describe_plan_test."view-with-dashes";
+DESCRIBE FRAGMENTS describe_plan_test."view-with-dashes";
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: table, source, sink or view not found: describe_plan_test."view-with-dashes"
+  2: stream job not found: describe_plan_test."view-with-dashes"
 
 
 
 # Test error cases
 # Non-existent schema
 query error
-DESCRIBE PLAN non_existent_schema.some_table;
+DESCRIBE FRAGMENTS non_existent_schema.some_table;
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: table, source, sink or view not found: non_existent_schema.some_table
+  2: stream job not found: non_existent_schema.some_table
 
 
 # Non-existent relation in existing schema
 query error
-DESCRIBE PLAN describe_plan_test.non_existent_table;
+DESCRIBE FRAGMENTS describe_plan_test.non_existent_table;
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: table, source, sink or view not found: describe_plan_test.non_existent_table
+  2: stream job not found: describe_plan_test.non_existent_table
 
 
 # System table (view)
-query ?
-DESCRIBE PLAN pg_catalog.pg_tables;
+query error
+DESCRIBE FRAGMENTS pg_catalog.pg_tables;
 ----
-BatchProject { exprs: [rw_schemas.name, rw_tables.name, PgGetUserbyid(rw_tables.owner) as $expr1, null:Varchar] }
-└─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id }
-  ├─BatchHashAgg { group_key: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], aggs: [] }
-  │ └─BatchUnion { all: true }
-  │   ├─BatchScan { table: rw_tables, columns: [name, schema_id, owner] }
-  │   └─BatchScan { table: rw_system_tables, columns: [name, schema_id, owner] }
-  └─BatchFilter { predicate: (rw_schemas.name <> 'rw_catalog':Varchar) }
-    └─BatchScan { table: rw_schemas, columns: [id, name] }
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: view has no fragments to describe
+HINT: Use `DESCRIBE` instead.
+
 
 
 # System table (should fail)
 query error
-DESCRIBE PLAN pg_catalog.rw_system_tables;
+DESCRIBE FRAGMENTS pg_catalog.rw_system_tables;
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: table, source, sink or view not found: pg_catalog.rw_system_tables
+  2: stream job not found: pg_catalog.rw_system_tables
 
 
 
