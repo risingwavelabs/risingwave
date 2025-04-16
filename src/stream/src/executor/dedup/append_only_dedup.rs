@@ -86,8 +86,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                     // Ensure that if a key for a visible row exists before, then it is in the
                     // cache, by querying the storage.
-                    self.populate_cache(dedup_keys.iter().flatten().unique())
-                        .await?;
+                    self.populate_cache(dedup_keys.iter().flatten()).await?;
 
                     // Now check for duplication and insert new keys into the cache.
                     let mut vis_builder = BitmapBuilder::with_capacity(chunk.capacity());
