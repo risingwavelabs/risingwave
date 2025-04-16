@@ -16,6 +16,7 @@ RUN apt-get update -yy && \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
     golang perl \
+    dumb-init \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
@@ -89,3 +90,5 @@ cd "/risingwave"
 ./risedev "\$@"
 EOF
 RUN chmod +x /root/.cargo/bin/risedev
+
+ENTRYPOINT [ "/usr/bin/dumb-init", "-v", "--rewrite", "15:2", "--" ]
