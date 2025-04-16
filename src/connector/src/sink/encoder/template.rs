@@ -623,15 +623,9 @@ mod tests {
         let result = encoder.encode_cols(row, vec![0, 1, 2].into_iter()).unwrap();
 
         // Check that all column values are in the result
-        assert!(result.contains("123"));
-        assert!(result.contains("John Doe"));
-        assert!(result.contains("john@example.com"));
-
-        // Check the structure of the result
-        assert!(result.contains("prefix123"));
-        assert!(result.contains("suffixJohn Doe"));
-        assert!(result.contains("email:john@example.com"));
-        assert!(result.contains("nesteddeeply123"));
-        assert!(result.contains("outerinnerJohn Doe"));
+        assert_eq!(
+            result,
+            "user:{prefix123,suffixJohn Doe,email:john@example.com,nested{deeply123},outer{innerJohn Doe}}"
+        );
     }
 }
