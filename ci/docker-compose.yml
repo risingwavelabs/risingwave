@@ -139,8 +139,8 @@ services:
       - ..:/risingwave
     stop_grace_period: 30s
     init: true
-    # environment:
-    #   - TINI_KILL_PROCESS_GROUP=1
+    environment:
+      - TINI_KILL_PROCESS_GROUP=1
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
@@ -152,8 +152,8 @@ services:
       - ..:/risingwave
     stop_grace_period: 30s
     init: true
-    # environment:
-    #   - TINI_KILL_PROCESS_GROUP=1
+    environment:
+      - TINI_KILL_PROCESS_GROUP=1
 
   iceberg-engine-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250326

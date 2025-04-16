@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
-set -euo pipefail
+# set -euo pipefail
 
 # source ci/scripts/common.sh
+
+trap "echo Received SIGINT" SIGINT
+trap "echo Received SIGTERM" SIGTERM
+trap "echo Received SIGQUIT" SIGQUIT
 
 export PYTHONUNBUFFERED=1
 
