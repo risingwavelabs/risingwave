@@ -75,6 +75,19 @@ impl SinkWriterCoordinationHandle {
             .map_err(|_| anyhow!("fail to send start response"))
     }
 
+    pub(super) fn ack_aligned_initial_epoch(
+        &mut self,
+        aligned_initial_epoch: u64,
+    ) -> anyhow::Result<()> {
+        self.response_tx
+            .send(Ok(CoordinateResponse {
+                msg: Some(coordinate_response::Msg::AlignInitialEpochResponse(
+                    aligned_initial_epoch,
+                )),
+            }))
+            .map_err(|_| anyhow!("fail to send start response"))
+    }
+
     pub(super) fn abort(self, status: Status) {
         let _ = self.response_tx.send(Err(status));
     }
@@ -106,7 +119,9 @@ impl SinkWriterCoordinationHandle {
                 .ok_or_else(|| anyhow!("end of request stream"))??;
             let request = request.msg.ok_or_else(|| anyhow!("None msg in request"))?;
             match &request {
-                coordinate_request::Msg::StartRequest(_) | coordinate_request::Msg::Stop(_) => {}
+                coordinate_request::Msg::StartRequest(_)
+                | coordinate_request::Msg::Stop(_)
+                | coordinate_request::Msg::AlignInitialEpochRequest(_) => {}
                 coordinate_request::Msg::CommitRequest(request) => {
                     if let Some(prev_epoch) = self.prev_epoch {
                         if request.epoch < prev_epoch {
