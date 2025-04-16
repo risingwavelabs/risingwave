@@ -18,6 +18,7 @@ use risingwave_pb::meta::{
     ListIcebergTablesRequest, ListIcebergTablesResponse, list_iceberg_tables_response,
 };
 use sea_orm::{ConnectionTrait, DeriveIden, EnumIter, Statement, TryGetableMany};
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
@@ -54,7 +55,7 @@ impl HostedIcebergCatalogService for HostedIcebergCatalogServiceImpl {
                 [],
             ))
                 .all(&self.env.meta_store().conn)
-                .await.map_err(|e| Status::internal(format!("Failed to list iceberg tables: {}", e)))?;
+                .await.map_err(|e| Status::internal(format!("Failed to list iceberg tables: {}", e.as_report())))?;
 
         let iceberg_tables = rows
             .into_iter()
