@@ -388,10 +388,6 @@ pub struct SimulationTestIcebergCommitter {
     db: DatabaseConnection,
     committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
     sink_id: SinkId,
-    // should_panic is used to construct some corner cases that will lead to repeated errors.
-    // If set to true, it will use the erroneous implementation in certain places, and during testing,
-    // encountering specific corner cases will cause a panic due to the repetition.
-    should_panic: bool,
 }
 
 #[async_trait]
@@ -639,16 +635,8 @@ impl SimulationTestIcebergCommitter {
         snapshot_id: i64,
     ) -> risingwave_connector::sink::Result<()> {
         println!("Starting mock iceberg re commit in epoch {}.", epoch);
-        if self.should_panic {
-            // This is to simulate a corner case that is difficult to test in Chaos Mesh.
-            // If, during a re-commit, a new snapshot_id is generated instead of using the previously persisted snapshot_id, it can lead to duplicate data when consecutive "23" appears in err_events.
-            let fake_snapshot_id = generate_unique_snapshot_id();
-            self.commit_inner(epoch, metadata, Some(fake_snapshot_id))
-                .await?;
-        } else {
-            self.commit_inner(epoch, metadata, Some(snapshot_id))
-                .await?;
-        }
+        self.commit_inner(epoch, metadata, Some(snapshot_id))
+            .await?;
 
         Ok(())
     }
@@ -834,7 +822,7 @@ impl Drop for SimulationTestIcebergExactlyOnceSink {
 }
 
 impl SimulationTestIcebergExactlyOnceSink {
-    pub fn register_new_with_err_rate(err_rate_list: Vec<f64>, should_panic: bool) -> Self {
+    pub fn register_new_with_err_rate(err_rate_list: Vec<f64>) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
         let mut err_rate_vec: Vec<Arc<AtomicU32>> = Vec::new();
 
@@ -896,7 +884,6 @@ impl SimulationTestIcebergExactlyOnceSink {
                             db: db.clone(),
                             committed_epoch_subscriber: None,
                             sink_id: sink_id,
-                            should_panic: should_panic,
                         })
                     }
                 },
