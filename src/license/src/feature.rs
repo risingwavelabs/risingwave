@@ -59,6 +59,7 @@ macro_rules! for_all_features {
             { IcebergSinkWithGlue,       Paid,       "Delivering data to Iceberg with Glue catalog." },
             { ResourceGroup,             Paid,       "Resource group to isolate workload and failure." },
             { ElasticDiskCache,          Paid,       "Disk cache and refilling to boost performance and reduce object store access cost." },
+            { DatabaseFailureIsolation,  Paid,       "Failure isolation between databases" },
         }
     };
 }
