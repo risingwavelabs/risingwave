@@ -461,17 +461,7 @@ pub async fn handle(
                 describe::handle_describe_plan(handler_args, name, options).await
             }
             DescribeKind::Fragments => {
-                // TODO: fetch accurate fragments from meta to replace the implementation here.
-                // Current implementation is a quick hack based on replan.
-                describe::handle_describe_plan(
-                    handler_args,
-                    name,
-                    ExplainOptions {
-                        explain_type: ExplainType::DistSql,
-                        ..ExplainOptions::default()
-                    },
-                )
-                .await
+                describe::handle_describe_fragments(handler_args, name).await
             }
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },

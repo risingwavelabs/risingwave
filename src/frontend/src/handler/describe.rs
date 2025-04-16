@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::types::{DataType, Fields};
 use risingwave_expr::bail;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_sqlparser::ast::{
     DescribeKind, ExplainOptions, ObjectName, Statement, display_comma_separated,
 };
@@ -325,6 +329,126 @@ pub async fn handle_describe_plan(
     let res = generate_plan_string(session.clone(), handler_args.clone(), stmt, options).await?;
 
     Ok(res)
+}
+
+pub async fn handle_describe_fragments(
+    handler_args: HandlerArgs,
+    object_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let job_id = {
+        let mut binder = Binder::new_for_system(&session);
+
+        Binder::validate_cross_db_reference(&session.database(), &object_name)?;
+        let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
+
+        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None, false) {
+            match relation {
+                Relation::Source(s) => {
+                    if s.is_shared() {
+                        s.catalog.id
+                    } else {
+                        bail!(ErrorCode::NotSupported(
+                            "non shared source has no fragments to describe".to_owned(),
+                            "Use `DESCRIBE` instead.".to_owned(),
+                        ));
+                    }
+                }
+                Relation::BaseTable(t) => t.table_catalog.id.table_id,
+                Relation::SystemTable(_t) => {
+                    bail!(ErrorCode::NotSupported(
+                        "system table has no fragments to describe".to_owned(),
+                        "Use `DESCRIBE` instead.".to_owned(),
+                    ));
+                }
+                Relation::Share(_s) => {
+                    bail!(ErrorCode::NotSupported(
+                        "view has no fragments to describe".to_owned(),
+                        "Use `DESCRIBE` instead.".to_owned(),
+                    ));
+                }
+                _ => {
+                    // Other relation types (Subquery, Join, etc.) are not directly describable.
+                    return Err(not_found_err.into());
+                }
+            }
+        } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
+            sink.sink_catalog.id.sink_id
+        } else {
+            return Err(not_found_err.into());
+        }
+    };
+
+    let meta_client = session.env().meta_client();
+    let fragments = &meta_client.list_table_fragments(&[job_id]).await?[&job_id];
+    let res = generate_fragments_string(&fragments)?;
+    Ok(res)
+}
+
+/// The implementation largely copied from `crate::utils::stream_graph_formatter::StreamGraphFormatter`.
+/// The input is different, so we need separate implementation.
+fn generate_fragments_string(fragments: &TableFragmentInfo) -> Result<RwPgResponse> {
+    let mut config = PrettyConfig {
+        need_boundaries: false,
+        width: 80,
+        ..Default::default()
+    };
+
+    let mut max_width = 80;
+
+    let mut blocks = vec![];
+    for fragment in fragments.fragments.iter().sorted_by_key(|f| f.id) {
+        let mut res = String::new();
+        let actor_ids = fragment.actors.iter().map(|a| a.id).format(",");
+        res.push_str(&format!("Fragment {} (Actor {})\n", fragment.id, actor_ids));
+        let node = &fragment.actors[0].node;
+        let node = explain_node(node.as_ref().unwrap(), true);
+        let width = config.unicode(&mut res, &node);
+        max_width = max(width, max_width);
+        config.width = max_width;
+        blocks.push(res);
+        blocks.push("".to_string());
+    }
+
+    let rows = blocks.iter().map(|b| ExplainRow {
+        query_plan: b.into(),
+    });
+    Ok(PgResponse::builder(StatementType::DESCRIBE)
+        .rows(rows)
+        .into())
+}
+
+fn explain_node<'a>(node: &StreamNode, verbose: bool) -> Pretty<'a> {
+    // TODO: we need extra edge information to get which fragment MergeExecutor connects to.
+    let one_line_explain = node.identity.clone();
+
+    let mut fields = Vec::with_capacity(3);
+    if verbose {
+        fields.push((
+            "output",
+            Pretty::Array(
+                node.fields
+                    .iter()
+                    .map(|f| Pretty::display(f.get_name()))
+                    .collect(),
+            ),
+        ));
+        fields.push((
+            "stream key",
+            Pretty::Array(
+                node.stream_key
+                    .iter()
+                    .map(|i| Pretty::display(node.fields[*i as usize].get_name()))
+                    .collect(),
+            ),
+        ));
+    }
+    let children = node
+        .input
+        .iter()
+        .map(|input| explain_node(input, verbose))
+        .collect();
+    Pretty::simple_record(one_line_explain, fields, children)
 }
 
 #[cfg(test)]

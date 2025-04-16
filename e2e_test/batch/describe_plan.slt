@@ -1,4 +1,4 @@
-# Test DESCRIBE PLAN with complex relations and schemas
+# Test DESCRIBE FRAGMENTS with complex relations and schemas
 
 # Setup test schema
 statement ok
@@ -71,179 +71,76 @@ SELECT
 FROM aged_users t
 LEFT JOIN describe_plan_test.complex_mv m ON t.name = m.name;
 
-# Test special characters in relation names
-statement ok
-CREATE TABLE describe_plan_test."table.with.dots" (id INT PRIMARY KEY, value VARCHAR);
+# Test DESCRIBE FRAGMENTS for each relation
+# Assuming psql_validate.py is executable and in the PATH or accessible via relative path
+# Use ../commands/psql_validate.py if running sqllogictest from e2e_test directory
 
-statement ok
-CREATE VIEW describe_plan_test."view-with-dashes" AS SELECT * FROM describe_plan_test."table.with.dots";
-
-
-# Test DESCRIBE PLAN for each relation
-query ?
-DESCRIBE PLAN describe_plan_test.tbl;
-----
+system ok
+psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.tbl" \
+--expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [id, name, age, created_at, data], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
-└─StreamFilter { predicate: IsNotNull(name) }
-  └─StreamUnion { all: true }
-    └─StreamExchange { dist: HashShard(id) }
-      └─StreamDml { columns: [id, name, age, created_at, data] }
-        └─StreamSource
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+├── output: [ id, name, age, created_at, data ]
+├── stream key: [ id ]
+└── StreamFilter { predicate: IsNotNull(name) } { output: [ id, name, age, created_at, data ], stream key: [] }
+    └── StreamUnion { all: true } { output: [ id, name, age, created_at, data ], stream key: [] }
+        └── MergeExecutor { output: [ id, name, age, created_at, data ], stream key: [] }
+(empty)
+Fragment % (Actor %)
+StreamDml { columns: [id, name, age, created_at, data] } { output: [ id, name, age, created_at, data ], stream key: [] }
+└── StreamSource { output: [ id, name, age, created_at, data ], stream key: [] }'
 
 
-# Test DESCRIBE PLAN for each relation
-query ?
-DESCRIBE PLAN (logical) describe_plan_test.tbl;
+statement error
+DESCRIBE FRAGMENTS describe_plan_test.src;
 ----
-LogicalSource
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: non shared source has no fragments to describe
+HINT: Use `DESCRIBE` instead.
 
 
 
-# Should show materialized view creation plan with complex aggregations
-query ?
-DESCRIBE PLAN describe_plan_test.complex_mv;
-----
+system ok
+psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.complex_mv" \
+--expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [name, count, avg_age, all_data], stream_key: [name], pk_columns: [name], pk_conflict: NoCheck }
-└─StreamProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-  └─StreamFilter { predicate: (count > 1:Int32) }
-    └─StreamHashAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-      └─StreamExchange { dist: HashShard(tbl.name) }
-        └─StreamFilter { predicate: (tbl.age > 18:Int32) }
-          └─StreamTableScan { table: tbl, columns: [name, age, data, id] }
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+├── output: [ tbl.name, count, $expr1, jsonb_agg(tbl.data) ]
+├── stream key: [ tbl.name ]
+└── StreamProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
+    ├── output: [ tbl.name, count, $expr1, jsonb_agg(tbl.data) ]
+    ├── stream key: [ tbl.name ]
+    └── StreamFilter { predicate: (count > 1:Int32) }
+        ├── output: [ tbl.name, count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data) ]
+        ├── stream key: [ tbl.name ]
+        └── StreamHashAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
+            ├── output: [ tbl.name, count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data) ]
+            ├── stream key: [ tbl.name ]
+            └── MergeExecutor { output: [ tbl.name, tbl.age, tbl.data, tbl.id ], stream key: [ tbl.id ] }
+(empty)
+Fragment % (Actor %)
+StreamFilter { predicate: (tbl.age > 18:Int32) } { output: [ tbl.name, tbl.age, tbl.data, tbl.id ], stream key: [ tbl.id ] }
+└── StreamTableScan { table: tbl, columns: [name, age, data, id] }
+    ├── output: [ tbl.name, tbl.age, tbl.data, tbl.id ]
+    ├── stream key: [ tbl.id ]
+    ├── Upstream { output: [ name, age, data, id ], stream key: [] }
+    └── BatchPlanNode { output: [ name, age, data, id ], stream key: [] }'
 
 
-# Should show materialized view creation plan with complex aggregations
-query ?
-DESCRIBE PLAN (logical, trace) describe_plan_test.complex_mv;
-----
-Begin:
+system ok
+psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
+--expected 'Fragment % (Actor %)
+StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
+├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
+├── stream key: [ tbl.id ]
+└── MergeExecutor { output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ], stream key: [ tbl.id ] }
 (empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalProject { exprs: [tbl.name, tbl.age, tbl.data] }
-      └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
-        └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
-(empty)
-Project Remove:
-(empty)
-apply AggProjectMergeRule 1 time(s)
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
-      └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
-(empty)
-Common Sub-plan Sharing:
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
-      └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
-(empty)
-Logical Filter Expression Simplify:
-(empty)
-apply LogicalFilterExpressionSimplifyRule 2 time(s)
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalFilter { predicate: (tbl.age > 18:Int32) }
-      └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp] }
-(empty)
-Predicate Push Down:
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp], predicate: (tbl.age > 18:Int32) }
-(empty)
-Predicate Push Down:
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp], predicate: (tbl.age > 18:Int32) }
-(empty)
-Predicate Push Down:
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalScan { table: tbl, columns: [id, name, age, created_at, data, _rw_timestamp], predicate: (tbl.age > 18:Int32) }
-(empty)
-Prune Columns:
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalScan { table: tbl, columns: [name, age, data], predicate: (tbl.age > 18:Int32) }
-(empty)
-Predicate Push Down:
-(empty)
-LogicalProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-└─LogicalFilter { predicate: (count > 1:Int32) }
-  └─LogicalAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-    └─LogicalScan { table: tbl, columns: [name, age, data], predicate: (tbl.age > 18:Int32) }
-(empty)
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
-
-
-# TODO: fetch actual fragments of the job.
-# Commented out since fragment IDs are not stable.
-# query ??
-# DESCRIBE FRAGMENTS describe_plan_test.complex_mv;
-# ----
-# Fragment 0
-# StreamMaterialize { columns: [name, count, avg_age, all_data], stream_key: [name], pk_columns: [name], pk_conflict: NoCheck }
-# ├── tables: [ Materialize: 4294967294 ]
-# └── StreamProject { exprs: [tbl.name, count, (sum(tbl.age)::Decimal / count(tbl.age)::Decimal) as $expr1, jsonb_agg(tbl.data)] }
-#     └── StreamFilter { predicate: (count > 1:Int32) }
-#         └── StreamHashAgg { group_key: [tbl.name], aggs: [count, sum(tbl.age), count(tbl.age), jsonb_agg(tbl.data)] }
-#             ├── tables: [ HashAggState: 1, HashAggCall3: 0 ]
-#             └── StreamExchange Hash([0]) from 1
-# (empty)
-# Fragment 1
-# StreamFilter { predicate: (tbl.age > 18:Int32) }
-# └── StreamTableScan { table: tbl, columns: [name, age, data, id] } { tables: [ StreamScan: 2 ] }
-#     ├── Upstream
-#     └── BatchPlanNode
-# (empty)
-# Table 0
-# ├── columns: [ tbl_name, tbl_id, tbl_data, _rw_timestamp ]
-# ├── primary key: [ $0 ASC, $1 ASC ]
-# ├── value indices: [ 1, 2 ]
-# ├── distribution key: [ 0 ]
-# └── read pk prefix len hint: 1
-# (empty)
-# Table 1
-# ├── columns: [ tbl_name, count, sum(tbl_age), count(tbl_age), jsonb_agg(tbl_data), _rw_timestamp ]
-# ├── primary key: [ $0 ASC ]
-# ├── value indices: [ 1, 2, 3, 4 ]
-# ├── distribution key: [ 0 ]
-# └── read pk prefix len hint: 1
-# (empty)
-# Table 2
-# ├── columns: [ vnode, id, backfill_finished, row_count, _rw_timestamp ]
-# ├── primary key: [ $0 ASC ]
-# ├── value indices: [ 1, 2, 3 ]
-# ├── distribution key: [ 0 ]
-# ├── read pk prefix len hint: 1
-# └── vnode column idx: 0
-# (empty)
-# Table 4294967294
-# ├── columns: [ name, count, avg_age, all_data, _rw_timestamp ]
-# ├── primary key: [ $0 ASC ]
-# ├── value indices: [ 0, 1, 2, 3 ]
-# ├── distribution key: [ 0 ]
-# └── read pk prefix len hint: 1
-# (empty)
-# Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
+Fragment % (Actor %)
+StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
+├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
+├── stream key: [ tbl.id ]
+├── Upstream { output: [ name, age, created_at, id ], stream key: [] }
+└── BatchPlanNode { output: [ name, age, created_at, id ], stream key: [] }'
 
 
 query ?
@@ -255,57 +152,34 @@ StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key
 Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
+system ok
+psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.snk" \
+--expected 'Fragment % (Actor %)
+StreamSink { type: upsert, columns: [id, name, age, created_at, type], downstream_pk: [] }
+├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, $expr1 ]
+├── stream key: [ tbl.id ]
+└── StreamProject { exprs: [tbl.id, tbl.name, tbl.age, tbl.created_at, JsonbAccessStr(tbl.data, '\''type'\'':Varchar) as $expr1] }
+    ├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, $expr1 ]
+    ├── stream key: [ tbl.id ]
+    └── StreamFilter { predicate: (tbl.age >= 21:Int32) }
+        ├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, tbl.data ]
+        ├── stream key: [ tbl.id ]
+        └── StreamTableScan { table: tbl, columns: [id, name, age, created_at, data] }
+            ├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, tbl.data ]
+            ├── stream key: [ tbl.id ]
+            ├── Upstream { output: [ id, name, age, created_at, data ], stream key: [] }
+            └── BatchPlanNode { output: [ id, name, age, created_at, data ], stream key: [] }'
+
+
 query error
-DESCRIBE PLAN describe_plan_test.src;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Feature is not yet implemented: unsupported statement for EXPLAIN: CREATE SOURCE describe_plan_test.src (id INT, event_time TIMESTAMP, payload STRUCT<name CHARACTER VARYING, value INT>, metadata MAP(CHARACTER VARYING,CHARACTER VARYING)) WITH (connector = 'datagen') FORMAT NATIVE ENCODE NATIVE
-No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-
-
-query error
-DESCRIBE PLAN describe_plan_test.snk;
+DESCRIBE PLAN describe_plan_test."view-with-dashes";
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: table, source, sink or view not found: describe_plan_test.snk
+  2: table, source, sink or view not found: describe_plan_test."view-with-dashes"
 
-
-
-# Should show view creation plan with CTE and joins
-query ?
-DESCRIBE PLAN describe_plan_test.complex_view;
-----
-BatchExchange { order: [], dist: Single }
-└─BatchLookupJoin { type: LeftOuter, predicate: tbl.name = complex_mv.name, lookup table: complex_mv }
-  └─BatchExchange { order: [], dist: UpstreamHashShard(tbl.name) }
-    └─BatchFilter { predicate: (tbl.age > 25:Int32) }
-      └─BatchScan { table: tbl, columns: [name, age] }
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
-
-
-# Should handle special characters in names
-query ??
-DESCRIBE PLAN describe_plan_test."table.with.dots";
-----
-StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
-└─StreamUnion { all: true }
-  └─StreamExchange { dist: HashShard(id) }
-    └─StreamDml { columns: [id, value] }
-      └─StreamSource
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
-
-
-query ??
-DESCRIBE PLAN describe_plan_test."view-with-dashes";
-----
-BatchExchange { order: [], dist: Single }
-└─BatchScan { table: table.with.dots, columns: [id, value] }
-Note: The result above is a newly generated plan based on the same SQL statement, which might be different from the job's actual plan.
 
 
 # Test error cases
