@@ -11,6 +11,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 apache-avro = { workspace = true }
+bigdecimal = "0.4.7"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
@@ -21,7 +22,7 @@ jsonbb = { workspace = true }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 num-bigint = "0.4"
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.14", features = ["serde"] }
+prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
 protox = "0.7"
 reqwest = { version = "0.12.2", features = ["json"] }

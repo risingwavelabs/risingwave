@@ -15,11 +15,10 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::LogStoreResult;
@@ -31,9 +30,7 @@ use risingwave_storage::store::{
 };
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{
-    FlushInfo, ReaderTruncationOffsetType, SeqIdType,
-};
+use crate::common::log_store_impl::kv_log_store::{FlushInfo, ReaderTruncationOffsetType, SeqId};
 
 pub(crate) struct LogStoreReadState<S: StateStoreRead> {
     pub(super) table_id: TableId,
@@ -90,10 +87,6 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         self.epoch.expect("should have init")
     }
 
-    pub(crate) fn is_dirty(&self) -> bool {
-        self.state_store.is_dirty()
-    }
-
     pub(crate) fn start_writer(&mut self, record_vnode: bool) -> LogStoreStateWriter<'_, S> {
         let written_vnodes = if record_vnode {
             Some(BitmapBuilder::zeroed(self.serde.vnodes().len()))
@@ -140,15 +133,6 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         self.on_post_seal = true;
         LogStorePostSealCurrentEpoch { inner: self }
     }
-
-    pub(crate) fn aligned_init_range_start(&self) -> Option<Bytes> {
-        (0..self.serde.vnodes().len())
-            .flat_map(|vnode| {
-                self.state_store
-                    .get_table_watermark(VirtualNode::from_index(vnode))
-            })
-            .max()
-    }
 }
 
 #[must_use]
@@ -181,8 +165,8 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         mut self,
         chunk: StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> LogStoreStateWriteChunkFuture<S> {
         async move {
             let result = try {
@@ -210,11 +194,12 @@ impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
         &mut self,
         chunk: &StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> LogStoreResult<()> {
+        tracing::trace!(epoch, start_seq_id, end_seq_id, "write_chunk");
         for (i, (op, row)) in chunk.rows().enumerate() {
-            let seq_id = start_seq_id + (i as SeqIdType);
+            let seq_id = start_seq_id + (i as SeqId);
             assert!(seq_id <= end_seq_id);
             let (vnode, key, value) = self.inner.serde.serialize_data_row(epoch, seq_id, op, row);
             if let Some(written_vnodes) = &mut self.written_vnodes {

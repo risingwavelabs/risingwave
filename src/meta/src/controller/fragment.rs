@@ -72,8 +72,8 @@ use crate::controller::utils::{
 };
 use crate::manager::LocalNotification;
 use crate::model::{
-    Fragment, FragmentActorDispatchers, StreamActor, StreamContext, StreamJobFragments,
-    TableParallelism,
+    DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
+    StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::stream::{SplitAssignment, build_actor_split_impls};
 use crate::{MetaError, MetaResult, model};
@@ -580,6 +580,30 @@ impl CatalogController {
     ) -> MetaResult<FragmentActorDispatchers> {
         let inner = self.inner.read().await;
         get_fragment_actor_dispatchers(&inner.db, fragment_ids).await
+    }
+
+    pub async fn get_fragment_downstream_relations(
+        &self,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<FragmentDownstreamRelation> {
+        let inner = self.inner.read().await;
+        let mut stream = FragmentRelation::find()
+            .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
+            .stream(&inner.db)
+            .await?;
+        let mut relations = FragmentDownstreamRelation::new();
+        while let Some(relation) = stream.try_next().await? {
+            relations
+                .entry(relation.source_fragment_id as _)
+                .or_default()
+                .push(DownstreamFragmentRelation {
+                    downstream_fragment_id: relation.target_fragment_id as _,
+                    dispatcher_type: relation.dispatcher_type,
+                    dist_key_indices: relation.dist_key_indices.into_u32_array(),
+                    output_indices: relation.output_indices.into_u32_array(),
+                });
+        }
+        Ok(relations)
     }
 
     pub async fn get_job_fragment_backfill_scan_type(
@@ -1667,7 +1691,11 @@ mod tests {
 
     use crate::MetaResult;
     use crate::controller::catalog::CatalogController;
-    use crate::model::{ActorUpstreams, Fragment, FragmentActorUpstreams, StreamActor};
+    use crate::model::{Fragment, StreamActor};
+
+    type ActorUpstreams = BTreeMap<crate::model::FragmentId, HashSet<crate::model::ActorId>>;
+
+    type FragmentActorUpstreams = HashMap<crate::model::ActorId, ActorUpstreams>;
 
     const TEST_FRAGMENT_ID: FragmentId = 1;
 

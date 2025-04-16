@@ -108,7 +108,7 @@ impl CoordinatorStreamHandle {
         }
     }
 
-    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<()> {
+    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<u64> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::UpdateVnodeRequest(
                 UpdateVnodeBitmapRequest {
@@ -117,14 +117,46 @@ impl CoordinatorStreamHandle {
             )),
         })
         .await?;
-        Ok(())
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg:
+                    Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse {
+                        log_store_rewind_start_epoch,
+                    })),
+            } => Ok(log_store_rewind_start_epoch
+                .ok_or_else(|| anyhow!("should get start epoch after update vnode bitmap"))?),
+            msg => Err(anyhow!("should get start response but get {:?}", msg)),
+        }
     }
 
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub async fn stop(mut self) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::Stop(true)),
         })
         .await?;
-        Ok(())
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::Stopped(_)),
+            } => Ok(()),
+            msg => Err(anyhow!("should get Stopped but get {:?}", msg)),
+        }
+    }
+
+    pub async fn align_initial_epoch(&mut self, initial_epoch: u64) -> anyhow::Result<u64> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::AlignInitialEpochRequest(
+                initial_epoch,
+            )),
+        })
+        .await?;
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::AlignInitialEpochResponse(epoch)),
+            } => Ok(epoch),
+            msg => Err(anyhow!(
+                "should get AlignInitialEpochResponse but get {:?}",
+                msg
+            )),
+        }
     }
 }

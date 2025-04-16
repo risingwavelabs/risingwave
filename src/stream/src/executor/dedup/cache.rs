@@ -40,7 +40,7 @@ impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
 
     /// Insert a `key` into the cache without checking for duplication.
     pub fn insert(&mut self, key: K) {
-        self.inner.push(key, ());
+        self.inner.put(key, ());
     }
 
     /// Check whether the given key is in the cache.

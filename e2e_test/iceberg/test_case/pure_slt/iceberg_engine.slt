@@ -1,6 +1,3 @@
-statement ok
-set sink_decouple = false;
-
 # test iceberg connection in iceberg engine
 statement ok
 create secret my_secret with (
@@ -32,6 +29,7 @@ insert into t values(1, 'xxx');
 statement ok
 FLUSH;
 
+sleep 5s
 query ??
 select * from t;
 ----
@@ -77,6 +75,7 @@ INSERT INTO full_type_t VALUES
 statement ok
 FLUSH;
 
+sleep 5s
 query ????????????????? rowsort
 select * from full_type_t
 ----
@@ -123,6 +122,8 @@ insert into t_without_pk values('xxx');
 statement ok
 FLUSH;
 
+sleep 5s
+
 query ?
 select * from t_without_pk;
 ----
@@ -153,6 +154,7 @@ INSERT INTO price (id, price, date) VALUES
 statement ok
 FLUSH;
 
+sleep 5s
 query ??? rowsort
 SELECT id, price, date FROM price WHERE date <= DATE '2025-02-10' - interval '5' day;
 ----
@@ -164,6 +166,49 @@ DROP TABLE price;
 
 statement ok
 DROP CONNECTION my_conn;
+
+# test hosted catalog (meta store as jdbc catalog)
+statement ok
+create connection my_hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_hosted_catalog_conn';
+
+statement ok
+create table t_hosted_catalog(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_hosted_catalog values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+query ??
+select * from t_hosted_catalog;
+----
+1 xxx
+
+statement ok
+DROP TABLE t_hosted_catalog;
+
+statement ok
+DROP CONNECTION public.my_hosted_catalog_conn;
+
+statement ok
+set sink_decouple = false;
+
+statement error
+create table t2(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
 DROP SECRET my_secret;

@@ -483,6 +483,42 @@ where
         .unwrap()
 }
 
+#[derive(Default, Clone)]
+pub struct StateStoreTestReadOptions {
+    pub table_id: TableId,
+    pub prefix_hint: Option<Bytes>,
+    pub prefetch_options: PrefetchOptions,
+    pub cache_policy: CachePolicy,
+    pub read_committed: bool,
+    pub retention_seconds: Option<u32>,
+    pub read_version_from_backup: bool,
+}
+
+impl StateStoreTestReadOptions {
+    fn get_read_epoch(&self, epoch: u64) -> HummockReadEpoch {
+        if self.read_version_from_backup {
+            HummockReadEpoch::Backup(epoch)
+        } else if self.read_committed {
+            HummockReadEpoch::Committed(epoch)
+        } else {
+            HummockReadEpoch::NoWait(epoch)
+        }
+    }
+}
+
+pub type ReadOptions = StateStoreTestReadOptions;
+
+impl From<StateStoreTestReadOptions> for crate::store::ReadOptions {
+    fn from(val: StateStoreTestReadOptions) -> crate::store::ReadOptions {
+        crate::store::ReadOptions {
+            prefix_hint: val.prefix_hint,
+            prefetch_options: val.prefetch_options,
+            cache_policy: val.cache_policy,
+            retention_seconds: val.retention_seconds,
+        }
+    }
+}
+
 pub trait StateStoreReadTestExt: StateStore {
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -544,13 +580,17 @@ impl<S: StateStore> StateStoreReadTestExt for S {
     ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let snapshot = self
             .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
+                read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
                 },
             )
             .await?;
-        snapshot.get_keyed_row(key, read_options).await
+        snapshot
+            .on_key_value(key, read_options.into(), |key, value| {
+                Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+            })
+            .await
     }
 
     async fn iter(
@@ -561,13 +601,13 @@ impl<S: StateStore> StateStoreReadTestExt for S {
     ) -> StorageResult<<<Self as StateStore>::ReadSnapshot as StateStoreRead>::Iter> {
         let snapshot = self
             .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
+                read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
                 },
             )
             .await?;
-        snapshot.iter(key_range, read_options).await
+        snapshot.iter(key_range, read_options.into()).await
     }
 
     async fn rev_iter(
@@ -578,13 +618,13 @@ impl<S: StateStore> StateStoreReadTestExt for S {
     ) -> StorageResult<<<Self as StateStore>::ReadSnapshot as StateStoreRead>::RevIter> {
         let snapshot = self
             .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
+                read_options.get_read_epoch(epoch),
                 NewReadSnapshotOptions {
                     table_id: read_options.table_id,
                 },
             )
             .await?;
-        snapshot.rev_iter(key_range, read_options).await
+        snapshot.rev_iter(key_range, read_options.into()).await
     }
 
     async fn scan(
@@ -592,11 +632,8 @@ impl<S: StateStore> StateStoreReadTestExt for S {
         key_range: TableKeyRange,
         epoch: u64,
         limit: Option<usize>,
-        mut read_options: ReadOptions,
+        read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreKeyedRow>> {
-        if limit.is_some() {
-            read_options.prefetch_options.prefetch = false;
-        }
         const MAX_INITIAL_CAP: usize = 1024;
         let limit = limit.unwrap_or(usize::MAX);
         let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
@@ -605,5 +642,26 @@ impl<S: StateStore> StateStoreReadTestExt for S {
             ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
         }
         Ok(ret)
+    }
+}
+
+pub trait StateStoreGetTestExt: StateStoreGet {
+    fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<Bytes>>;
+}
+
+impl<S: StateStoreGet> StateStoreGetTestExt for S {
+    async fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        self.on_key_value(key, read_options.into(), |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
     }
 }

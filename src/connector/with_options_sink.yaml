@@ -524,6 +524,11 @@ IcebergConfig:
     comments: enable config load.
     required: false
     default: Default::default
+  - name: hosted_catalog
+    field_type: bool
+    comments: This is only used by iceberg engine to enable the hosted catalog.
+    required: false
+    default: Default::default
   - name: primary_key
     field_type: Vec<String>
     required: false
@@ -542,6 +547,11 @@ IcebergConfig:
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: create_table_if_not_exists
     field_type: bool
+    required: false
+    default: Default::default
+  - name: is_exactly_once
+    field_type: bool
+    comments: Whether it is exactly_once, the default is not.
     required: false
     default: Default::default
   - name: commit_retry_num
@@ -678,6 +688,10 @@ KafkaConfig:
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+  - name: properties.socket.keepalive.enable
+    field_type: bool
+    required: false
+    default: 'true'
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.

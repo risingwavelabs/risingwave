@@ -34,6 +34,7 @@ struct CreatingStreamingJobEpochState {
     node_to_collect: NodeToCollect,
     resps: Vec<BarrierCompleteResponse>,
     is_checkpoint: bool,
+    is_first_commit: bool,
     enqueue_time: Instant,
 }
 
@@ -43,38 +44,38 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
     backfill_epoch: u64,
-    initial_epoch: Option<u64>,
+    is_first_committed: bool,
     max_collected_epoch: Option<u64>,
     // newer epoch at the front.
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
     completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
 
     // metrics
-    consuming_snapshot_barrier_latency: LabelGuardedHistogram<2>,
-    consuming_log_store_barrier_latency: LabelGuardedHistogram<2>,
+    consuming_snapshot_barrier_latency: LabelGuardedHistogram,
+    consuming_log_store_barrier_latency: LabelGuardedHistogram,
 
-    wait_commit_latency: LabelGuardedHistogram<1>,
-    inflight_barrier_num: LabelGuardedIntGauge<1>,
+    wait_commit_latency: LabelGuardedHistogram,
+    inflight_barrier_num: LabelGuardedIntGauge,
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(table_id: TableId, backfill_epoch: u64) -> Self {
+    pub(super) fn new(table_id: TableId, backfill_epoch: u64, is_first_committed: bool) -> Self {
         let table_id_str = format!("{}", table_id.table_id);
         Self {
             table_id,
             inflight_barrier_queue: Default::default(),
             backfill_epoch,
-            initial_epoch: None,
+            is_first_committed,
             max_collected_epoch: None,
             pending_barriers_to_complete: Default::default(),
             completing_barrier: None,
 
             consuming_snapshot_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
-                .with_guarded_label_values(&[&table_id_str, "consuming_snapshot"]),
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_snapshot"]),
             consuming_log_store_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
-                .with_guarded_label_values(&[&table_id_str, "consuming_log_store"]),
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_log_store"]),
             wait_commit_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_wait_commit_latency
                 .with_guarded_label_values(&[&table_id_str]),
@@ -123,8 +124,9 @@ impl CreatingStreamingJobBarrierControl {
             table_id = self.table_id.table_id,
             "creating job enqueue epoch"
         );
-        if self.initial_epoch.is_none() {
-            self.initial_epoch = Some(epoch);
+        let is_first_commit = !self.is_first_committed;
+        if !self.is_first_committed {
+            self.is_first_committed = true;
             assert!(is_checkpoint, "first barrier must be checkpoint barrier");
         }
         if let Some(latest_epoch) = self.latest_epoch() {
@@ -135,6 +137,7 @@ impl CreatingStreamingJobBarrierControl {
             node_to_collect,
             resps: vec![],
             is_checkpoint,
+            is_first_commit,
             enqueue_time: Instant::now(),
         };
         if epoch_state.node_to_collect.is_empty() && self.inflight_barrier_queue.is_empty() {
@@ -195,7 +198,7 @@ impl CreatingStreamingJobBarrierControl {
                 .pop_back()
                 .expect("non-empty");
             let epoch = epoch_state.epoch;
-            let is_first = self.initial_epoch.expect("should have set") == epoch;
+            let is_first = epoch_state.is_first_commit;
             if is_first {
                 assert!(epoch_state.is_checkpoint);
             } else if !epoch_state.is_checkpoint {

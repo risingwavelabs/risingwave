@@ -21,6 +21,7 @@ use anyhow::{Context, anyhow};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
+use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
@@ -35,6 +36,7 @@ use with_options::WithOptions;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
@@ -98,6 +100,19 @@ pub struct AwsAuthProps {
     pub profile: Option<String>,
     #[serde(rename = "aws.msk.signer_timeout_sec")]
     pub msk_signer_timeout_sec: Option<u64>,
+}
+
+impl EnforceSecret for AwsAuthProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "access_key",
+        "aws.credentials.access_key_id",
+        "s3.access.key",
+        "secret_key",
+        "aws.credentials.secret_access_key",
+        "s3.secret.key",
+        "session_token",
+        "aws.credentials.session_token",
+    };
 }
 
 impl AwsAuthProps {
@@ -252,6 +267,14 @@ pub struct KafkaConnectionProps {
     sasl_oathbearer_config: Option<String>,
 }
 
+impl EnforceSecret for KafkaConnectionProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "properties.ssl.key.pem",
+        "properties.ssl.key.password",
+        "properties.sasl.password",
+    };
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
@@ -278,6 +301,10 @@ pub struct KafkaPrivateLinkCommon {
 
 const fn default_kafka_sync_call_timeout() -> Duration {
     Duration::from_secs(5)
+}
+
+const fn default_socket_keepalive_enable() -> bool {
+    true
 }
 
 #[serde_as]
@@ -311,6 +338,13 @@ pub struct RdKafkaPropertiesCommon {
     #[serde(rename = "properties.enable.ssl.certificate.verification")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub enable_ssl_certificate_verification: Option<bool>,
+
+    #[serde(
+        rename = "properties.socket.keepalive.enable",
+        default = "default_socket_keepalive_enable"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub socket_keepalive_enable: bool,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -330,6 +364,10 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.enable_ssl_certificate_verification {
             c.set("enable.ssl.certificate.verification", v.to_string());
         }
+        c.set(
+            "socket.keepalive.enable",
+            self.socket_keepalive_enable.to_string(),
+        );
     }
 }
 
@@ -470,6 +508,12 @@ pub struct PulsarCommon {
     pub auth_token: Option<String>,
 }
 
+impl EnforceSecret for PulsarCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "pulsar.auth.token",
+    };
+}
+
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarOauthCommon {
     #[serde(rename = "oauth.issuer.url")]
@@ -582,6 +626,14 @@ pub struct KinesisCommon {
     pub assume_role_external_id: Option<String>,
 }
 
+impl EnforceSecret for KinesisCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "kinesis.credentials.access",
+        "kinesis.credentials.secret",
+        "kinesis.credentials.session_token",
+    };
+}
+
 impl KinesisCommon {
     pub(crate) async fn build_client(&self) -> ConnectorResult<KinesisClient> {
         let config = AwsAuthProps {
@@ -636,6 +688,14 @@ pub struct NatsCommon {
     #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
+}
+
+impl EnforceSecret for NatsCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "password",
+        "jwt",
+        "nkey",
+    };
 }
 
 impl NatsCommon {

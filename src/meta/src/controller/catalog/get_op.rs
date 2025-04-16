@@ -128,6 +128,21 @@ impl CatalogController {
             .collect())
     }
 
+    pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        let tables: Vec<I32Array> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::StateTableIds)
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(tables
+            .into_iter()
+            .flat_map(|ids| ids.into_inner().into_iter())
+            .collect())
+    }
+
     pub async fn get_subscription_by_id(
         &self,
         subscription_id: SubscriptionId,

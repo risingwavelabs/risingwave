@@ -67,13 +67,13 @@ impl<const N: usize> ErrorMetric<N> {
             }
 
             let mut metric = Metric::new();
-            metric.set_label(label_pairs.into());
+            metric.set_label(label_pairs);
             let mut gauge = Gauge::default();
             gauge.set_value(count as f64);
             metric.set_gauge(gauge);
             metrics.push(metric);
         }
-        m.set_metric(metrics.into());
+        m.set_metric(metrics);
         m
     }
 }

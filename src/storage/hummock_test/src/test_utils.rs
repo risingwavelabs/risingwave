@@ -96,7 +96,6 @@ pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
 
@@ -105,9 +104,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        write_options: WriteOptions,
     ) -> StorageResult<usize> {
-        assert_eq!(self.epoch(), write_options.epoch);
         for (key, value) in kv_pairs {
             match value.user_value {
                 None => self.delete(key, Bytes::new())?,

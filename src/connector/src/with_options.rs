@@ -81,6 +81,16 @@ pub trait Get {
     fn get(&self, key: &str) -> Option<&String>;
 }
 
+pub trait GetKeyIter {
+    fn key_iter(&self) -> impl Iterator<Item = &str>;
+}
+
+impl GetKeyIter for HashMap<String, String> {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.keys().map(|s| s.as_str())
+    }
+}
+
 impl Get for HashMap<String, String> {
     fn get(&self, key: &str) -> Option<&String> {
         self.get(key)
@@ -93,8 +103,14 @@ impl Get for BTreeMap<String, String> {
     }
 }
 
+impl GetKeyIter for BTreeMap<String, String> {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.keys().map(|s| s.as_str())
+    }
+}
+
 /// Utility methods for `WITH` properties (`HashMap` and `BTreeMap`).
-pub trait WithPropertiesExt: Get + Sized {
+pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     #[inline(always)]
     fn get_connector(&self) -> Option<String> {
         self.get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase())
@@ -161,6 +177,10 @@ pub trait WithPropertiesExt: Get + Sized {
 
     fn connector_need_pk(&self) -> bool {
         // Currently only iceberg connector doesn't need primary key
+        // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
+        // XXX: This seems not the correct way. Iceberg doesn't necessarily lack a PK.
+        // "batch source" doesn't need a PK?
+        // For streaming, if it has a PK, do we want to use it? It seems not safe.
         !self.is_iceberg_connector()
     }
 
@@ -182,7 +202,7 @@ pub trait WithPropertiesExt: Get + Sized {
     }
 }
 
-impl<T: Get> WithPropertiesExt for T {}
+impl<T: Get + GetKeyIter> WithPropertiesExt for T {}
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
@@ -251,5 +271,11 @@ impl TryFrom<&WithOptionsSecResolved> for Option<SinkFormatDesc> {
 impl Get for WithOptionsSecResolved {
     fn get(&self, key: &str) -> Option<&String> {
         self.inner.get(key)
+    }
+}
+
+impl GetKeyIter for WithOptionsSecResolved {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.inner.keys().map(|s| s.as_str())
     }
 }

@@ -1,0 +1,48 @@
+# Expected functions:
+# weighted_avg(value int, weight int) -> float
+
+# batch
+query F
+select weighted_avg(value, weight) from (values (1, 1), (null, 2), (3, 3)) as t(value, weight);
+----
+2.5
+
+# streaming
+statement ok
+create table t(value int, weight int);
+
+statement ok
+create materialized view mv as select weighted_avg(value, weight) from t;
+
+query F
+select * from mv;
+----
+NULL
+
+statement ok
+insert into t values (1, 1), (null, 2), (3, 3);
+
+statement ok
+flush;
+
+query F
+select * from mv;
+----
+2.5
+
+statement ok
+delete from t where value = 3;
+
+statement ok
+flush;
+
+query F
+select * from mv;
+----
+1
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

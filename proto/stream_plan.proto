@@ -58,7 +58,7 @@ message UpdateMutation {
     //   In this case, all the upstream actors should be removed and replaced by the `new` ones.
     optional uint32 new_upstream_fragment_id = 5;
     // Added upstream actors.
-    repeated uint32 added_upstream_actor_id = 3;
+    repeated common.ActorInfo added_upstream_actors = 3;
     // Removed upstream actors.
     // Note: this is empty for replace job.
     repeated uint32 removed_upstream_actor_id = 4;

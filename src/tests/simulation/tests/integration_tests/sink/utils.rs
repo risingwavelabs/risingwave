@@ -15,6 +15,8 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::iter::once;
+use std::mem::take;
+use std::num::NonZero;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicUsize};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
@@ -32,12 +34,17 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::sink::SinkError;
-use risingwave_connector::sink::test_sink::{TestSinkRegistryGuard, registry_build_sink};
-use risingwave_connector::sink::writer::SinkWriter;
-use risingwave_connector::source::test_source::{
-    BoxSource, TestSourceRegistryGuard, TestSourceSplit, registry_test_source,
+use risingwave_connector::sink::coordinate::CoordinatedLogSinker;
+use risingwave_connector::sink::test_sink::{
+    TestSinkRegistryGuard, register_build_coordinated_sink, register_build_sink,
 };
+use risingwave_connector::sink::writer::SinkWriter;
+use risingwave_connector::sink::{SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError};
+use risingwave_connector::source::test_source::{
+    BoxSource, TestSourceRegistryGuard, TestSourceSplit, register_test_source,
+};
+use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::task::yield_now;
 use tokio::time::sleep;
@@ -51,10 +58,10 @@ pub const DROP_SINK: &str = "drop sink test_sink";
 pub const DROP_SOURCE: &str = "drop source test_source";
 
 pub struct TestSinkStoreInner {
-    pub id_name: HashMap<i32, Vec<String>>,
-    pub epochs: Vec<u64>,
-    pub checkpoint_count: usize,
-    pub err_count: usize,
+    id_name: HashMap<i32, Vec<String>>,
+    epochs: Vec<u64>,
+    checkpoint_count: usize,
+    err_count: usize,
 }
 
 #[derive(Clone)]
@@ -74,6 +81,13 @@ impl TestSinkStore {
         }
     }
 
+    pub fn insert_many(&self, pairs: impl Iterator<Item = (i32, Vec<String>)>) {
+        let mut inner = self.inner();
+        for (id, names) in pairs {
+            inner.id_name.entry(id).or_default().extend(names);
+        }
+    }
+
     pub fn insert(&self, id: i32, name: String) {
         self.inner().id_name.entry(id).or_default().push(name);
     }
@@ -82,7 +96,7 @@ impl TestSinkStore {
         self.inner().epochs.push(epoch)
     }
 
-    pub fn inner(&self) -> MutexGuard<'_, TestSinkStoreInner> {
+    fn inner(&self) -> MutexGuard<'_, TestSinkStoreInner> {
         self.inner.lock().unwrap()
     }
 
@@ -101,6 +115,18 @@ impl TestSinkStore {
 
     pub fn id_count(&self) -> usize {
         self.inner().id_name.len()
+    }
+
+    pub fn inc_checkpoint(&self) {
+        self.inner().checkpoint_count += 1;
+    }
+
+    pub fn checkpoint_count(&self) -> usize {
+        self.inner().checkpoint_count
+    }
+
+    pub fn inc_err(&self) {
+        self.inner().err_count += 1;
     }
 
     pub fn err_count(&self) -> usize {
@@ -148,20 +174,6 @@ pub struct TestWriter {
     err_rate: Arc<AtomicU32>,
 }
 
-impl TestWriter {
-    pub fn new(
-        store: TestSinkStore,
-        parallelism_counter: Arc<AtomicUsize>,
-        err_rate: Arc<AtomicU32>,
-    ) -> Self {
-        Self {
-            store,
-            parallelism_counter,
-            err_rate,
-        }
-    }
-}
-
 #[async_trait]
 impl SinkWriter for TestWriter {
     async fn begin_epoch(&mut self, epoch: u64) -> risingwave_connector::sink::Result<()> {
@@ -172,7 +184,7 @@ impl SinkWriter for TestWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
         if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
             println!("write with err");
-            self.store.inner().err_count += 1;
+            self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
         }
         for (op, row) in chunk.rows() {
@@ -190,7 +202,7 @@ impl SinkWriter for TestWriter {
         is_checkpoint: bool,
     ) -> risingwave_connector::sink::Result<Self::CommitMetadata> {
         if is_checkpoint {
-            self.store.inner().checkpoint_count += 1;
+            self.store.inc_checkpoint();
             sleep(Duration::from_millis(100)).await;
         }
         Ok(())
@@ -200,6 +212,127 @@ impl SinkWriter for TestWriter {
 impl Drop for TestWriter {
     fn drop(&mut self) {
         self.parallelism_counter.fetch_sub(1, Relaxed);
+    }
+}
+
+#[derive(Default)]
+struct StagingDataStoreInner {
+    next_file_id: usize,
+    files: HashMap<usize, HashMap<i32, Vec<String>>>,
+}
+
+#[derive(Default, Clone)]
+struct StagingDataStore {
+    inner: Arc<Mutex<StagingDataStoreInner>>,
+}
+
+impl StagingDataStore {
+    fn add(&self, id_names: HashMap<i32, Vec<String>>) -> SinkMetadata {
+        let mut inner = self.inner.lock().unwrap();
+        let file_id = inner.next_file_id;
+        inner.next_file_id += 1;
+        inner.files.insert(file_id, id_names);
+        SinkMetadata {
+            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                metadata: file_id.to_le_bytes().into(),
+            })),
+        }
+    }
+
+    fn get(&self, file_id: usize) -> HashMap<i32, Vec<String>> {
+        self.inner.lock().unwrap().files[&file_id].clone()
+    }
+}
+
+pub struct CoordinatedTestWriter {
+    store: TestSinkStore,
+    parallelism_counter: Arc<AtomicUsize>,
+    err_rate: Arc<AtomicU32>,
+    staging: HashMap<i32, Vec<String>>,
+    staging_store: StagingDataStore,
+}
+
+#[async_trait]
+impl SinkWriter for CoordinatedTestWriter {
+    type CommitMetadata = Option<SinkMetadata>;
+
+    async fn begin_epoch(&mut self, epoch: u64) -> risingwave_connector::sink::Result<()> {
+        self.store.begin_epoch(epoch);
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> risingwave_connector::sink::Result<()> {
+        if thread_rng().random_ratio(self.err_rate.load(Relaxed), u32::MAX) {
+            println!("write with err");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
+        }
+        for (op, row) in chunk.rows() {
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.len(), 2);
+            let id = row.datum_at(0).unwrap().into_int32();
+            let name = row.datum_at(1).unwrap().into_utf8().to_string();
+            self.staging.entry(id).or_default().push(name);
+        }
+        Ok(())
+    }
+
+    async fn barrier(
+        &mut self,
+        is_checkpoint: bool,
+    ) -> risingwave_connector::sink::Result<Self::CommitMetadata> {
+        let metadata = if is_checkpoint {
+            self.store.inc_checkpoint();
+            sleep(Duration::from_millis(100)).await;
+            Some(self.staging_store.add(take(&mut self.staging)))
+        } else {
+            None
+        };
+        Ok(metadata)
+    }
+}
+
+impl Drop for CoordinatedTestWriter {
+    fn drop(&mut self) {
+        self.parallelism_counter.fetch_sub(1, Relaxed);
+    }
+}
+
+pub struct TestCoordinator {
+    store: TestSinkStore,
+    err_rate: Arc<AtomicU32>,
+    staging_store: StagingDataStore,
+}
+
+#[async_trait]
+impl SinkCommitCoordinator for TestCoordinator {
+    async fn init(
+        &mut self,
+        subscriber: SinkCommittedEpochSubscriber,
+    ) -> risingwave_connector::sink::Result<Option<u64>> {
+        Ok(None)
+    }
+
+    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
+    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
+    /// to be passed between different gRPC node, so in this general trait, the metadata is
+    /// serialized bytes.
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+    ) -> risingwave_connector::sink::Result<()> {
+        let file_ids = metadata.into_iter().map(|metadata| {
+            let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
+            usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
+        });
+        self.store.insert_many(
+            file_ids
+                .into_iter()
+                .map(|file_id| self.staging_store.get(file_id))
+                .flatten(),
+        );
+        Ok(())
     }
 }
 
@@ -215,24 +348,81 @@ pub struct SimulationTestSink {
 }
 
 impl SimulationTestSink {
-    pub fn register_new() -> Self {
+    pub fn register_new(is_coordinated_sink: bool) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
         let err_rate = Arc::new(AtomicU32::new(0));
         let store = TestSinkStore::new();
 
-        let _sink_guard = registry_build_sink({
-            let parallelism_counter = parallelism_counter.clone();
-            let err_rate = err_rate.clone();
-            let store = store.clone();
-            move |_, _| {
-                parallelism_counter.fetch_add(1, Relaxed);
-                Box::new(TestWriter::new(
-                    store.clone(),
-                    parallelism_counter.clone(),
-                    err_rate.clone(),
-                ))
-            }
-        });
+        let _sink_guard = if is_coordinated_sink {
+            let staging_store = StagingDataStore::default();
+            register_build_coordinated_sink(
+                {
+                    let parallelism_counter = parallelism_counter.clone();
+                    let err_rate = err_rate.clone();
+                    let store = store.clone();
+                    let staging_store = staging_store.clone();
+                    use risingwave_connector::sink::SinkWriterMetrics;
+                    use risingwave_connector::sink::writer::SinkWriterExt;
+                    move |param, writer_param| {
+                        parallelism_counter.fetch_add(1, Relaxed);
+                        let metrics = SinkWriterMetrics::new(&writer_param);
+                        let writer = CoordinatedTestWriter {
+                            store: store.clone(),
+                            parallelism_counter: parallelism_counter.clone(),
+                            err_rate: err_rate.clone(),
+                            staging_store: staging_store.clone(),
+                            staging: Default::default(),
+                        };
+                        async move {
+                            let log_sinker = risingwave_connector::sink::boxed::boxed_log_sinker(
+                                CoordinatedLogSinker::new(
+                                    &writer_param,
+                                    param,
+                                    writer,
+                                    NonZero::new(1).unwrap(),
+                                )
+                                .await?,
+                            );
+                            Ok(log_sinker)
+                        }
+                        .boxed()
+                    }
+                },
+                {
+                    let err_rate = err_rate.clone();
+                    let store = store.clone();
+                    let staging_store = staging_store.clone();
+                    move |_| {
+                        Box::new(TestCoordinator {
+                            err_rate: err_rate.clone(),
+                            store: store.clone(),
+                            staging_store: staging_store.clone(),
+                        })
+                    }
+                },
+            )
+        } else {
+            register_build_sink({
+                let parallelism_counter = parallelism_counter.clone();
+                let err_rate = err_rate.clone();
+                let store = store.clone();
+                use risingwave_connector::sink::SinkWriterMetrics;
+                use risingwave_connector::sink::writer::SinkWriterExt;
+                move |_, writer_param| {
+                    parallelism_counter.fetch_add(1, Relaxed);
+                    let metrics = SinkWriterMetrics::new(&writer_param);
+                    let log_sinker = risingwave_connector::sink::boxed::boxed_log_sinker(
+                        TestWriter {
+                            store: store.clone(),
+                            parallelism_counter: parallelism_counter.clone(),
+                            err_rate: err_rate.clone(),
+                        }
+                        .into_log_sinker(metrics),
+                    );
+                    async move { Ok(log_sinker) }.boxed()
+                }
+            })
+        };
 
         Self {
             _sink_guard,
@@ -314,7 +504,7 @@ impl SimulationTestSource {
         let create_stream_count = Arc::new(AtomicUsize::new(0));
         let id_lists_clone = id_lists.iter().map(|l| Arc::new(l.clone())).collect_vec();
         let box_source_create_stream_count = create_stream_count.clone();
-        let _source_guard = registry_test_source(BoxSource::new(
+        let _source_guard = register_test_source(BoxSource::new(
             move |_, _| {
                 Ok((0..source_parallelism)
                     .map(|i: usize| TestSourceSplit {

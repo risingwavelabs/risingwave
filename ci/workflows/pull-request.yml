@@ -102,7 +102,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (part %n)"
+  - label: "end-to-end test"
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -110,7 +110,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -149,7 +148,7 @@ steps:
     timeout_in_minutes: 45
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, part %n)"
+  - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -177,17 +176,7 @@ steps:
     timeout_in_minutes: 14
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, in-memory)"
-    if: build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
-    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
-    depends_on: "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
-    retry: *auto-retry
-
-  - label: "end-to-end source test (part %n)"
+  - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -206,7 +195,7 @@ steps:
     parallelism: 2
     retry: *auto-retry
 
-  - label: "end-to-end sink test (part %n)"
+  - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -254,6 +243,7 @@ steps:
           run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 22
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"
@@ -327,7 +317,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
-    if: build.pull_request.labels includes "ci/run- e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
     command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -508,7 +498,7 @@ steps:
     timeout_in_minutes: 22
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation, part %n)"
+  - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=4 ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -529,7 +519,7 @@ steps:
     cancel_on_build_failing: true
     retry: *auto-retry
 
-  - label: "recovery test (deterministic simulation, part %n)"
+  - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -677,8 +667,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-standalone-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -690,8 +678,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -704,8 +690,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose

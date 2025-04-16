@@ -114,9 +114,9 @@ pub struct JoinHashMapMetrics {
     insert_cache_miss_count: usize,
 
     // Metrics
-    join_lookup_total_count_metric: LabelGuardedIntCounter<4>,
-    join_lookup_miss_count_metric: LabelGuardedIntCounter<4>,
-    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<4>,
+    join_lookup_total_count_metric: LabelGuardedIntCounter,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter,
 }
 
 impl JoinHashMapMetrics {

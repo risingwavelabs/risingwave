@@ -37,7 +37,7 @@ pub enum SinkCoordinationRpcClientEnum {
 impl SinkCoordinationRpcClientEnum {
     pub async fn new_stream_handle(
         self,
-        param: SinkParam,
+        param: &SinkParam,
         vnode_bitmap: Bitmap,
     ) -> super::Result<(CoordinatorStreamHandle, Option<u64>)> {
         match self {

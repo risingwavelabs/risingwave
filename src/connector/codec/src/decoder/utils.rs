@@ -33,6 +33,20 @@ pub fn scaled_bigint_to_rust_decimal(
     ))
 }
 
+/// Converts a Rust Decimal back to a `BigInt` with scale for Avro encoding
+pub fn rust_decimal_to_scaled_bigint(
+    decimal: rust_decimal::Decimal,
+    expect_scale: usize,
+) -> Result<Vec<u8>, String> {
+    let mantissa = decimal.mantissa();
+    let scale = decimal.scale();
+    let big_decimal = bigdecimal::BigDecimal::from((mantissa, scale as i64));
+    let scaled_big_decimal = big_decimal.with_scale(expect_scale as i64);
+    let (scaled_big_int, _) = scaled_big_decimal.as_bigint_and_scale();
+
+    Ok(scaled_big_int.to_signed_bytes_be())
+}
+
 fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
     match bytes.len() {
         len @ 0..=4 => {
@@ -67,5 +81,18 @@ fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
             Ok((lo, mid, hi))
         }
         _ => bail_uncategorized!("invalid decimal bytes length {}", bytes.len()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_extract_decimal() {
+        let decimal_max = rust_decimal::Decimal::MAX; // 79228162514264337593543950335
+        let decimal_min = rust_decimal::Decimal::MIN; // -79228162514264337593543950335
+
+        println!("decimal_max: {}", decimal_max);
+        println!("decimal_min: {}", decimal_min);
     }
 }
