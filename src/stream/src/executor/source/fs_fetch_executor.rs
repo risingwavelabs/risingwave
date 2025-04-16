@@ -411,7 +411,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             None => {
                                 if let Some(ref delete_file_name) = reading_file {
                                     splits_on_fetch -= 1;
-                                    state_store_handler.delete(delete_file_name).await?;
+                                    state_store_handler.delete(delete_file_name.clone()).await?;
                                 }
                             }
                         },
