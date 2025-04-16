@@ -9,6 +9,8 @@
 # trap "echo Received SIGTERM" SIGTERM
 # trap "echo Received SIGQUIT" SIGQUIT
 
+echo "Running as process id $$"
+
 export PYTHONUNBUFFERED=1
 
 echo "--- Running signal-test-sub"
