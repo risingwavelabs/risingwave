@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-
 """
 Connects to a PostgreSQL database, executes a given SQL query, and compares the
 output against an expected template using wildcard matching.
@@ -24,7 +21,6 @@ Wildcard Matching:
     - The comparison uses `re.fullmatch` to ensure the entire actual output
       matches the pattern derived from the template.
 """
-
 
 import argparse
 import psycopg2

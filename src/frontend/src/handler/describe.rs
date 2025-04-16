@@ -299,7 +299,7 @@ pub async fn handle_describe_fragments(
 
     let meta_client = session.env().meta_client();
     let fragments = &meta_client.list_table_fragments(&[job_id]).await?[&job_id];
-    let res = generate_fragments_string(&fragments)?;
+    let res = generate_fragments_string(fragments)?;
     Ok(res)
 }
 
@@ -325,7 +325,7 @@ fn generate_fragments_string(fragments: &TableFragmentInfo) -> Result<RwPgRespon
         max_width = max(width, max_width);
         config.width = max_width;
         blocks.push(res);
-        blocks.push("".to_string());
+        blocks.push("".to_owned());
     }
 
     let rows = blocks.iter().map(|b| ExplainRow {
