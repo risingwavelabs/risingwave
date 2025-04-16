@@ -5,9 +5,9 @@ set -euo pipefail
 
 # source ci/scripts/common.sh
 
-# trap "echo Received SIGINT" SIGINT
-# trap "echo Received SIGTERM" SIGTERM
-# trap "echo Received SIGQUIT" SIGQUIT
+trap "echo Received SIGINT" SIGINT
+trap "echo Received SIGTERM" SIGTERM
+trap "echo Received SIGQUIT" SIGQUIT
 
 echo "Running as process id $$"
 

@@ -12,7 +12,7 @@ anchors:
         mount-buildkite-agent: true
         propagate-environment: true
         graceful-shutdown: true
-        shell: false
+        # shell: false
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
