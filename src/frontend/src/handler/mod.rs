@@ -457,9 +457,6 @@ pub async fn handle(
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
         Statement::Describe { name, kind } => match kind {
-            DescribeKind::Plan(options) => {
-                describe::handle_describe_plan(handler_args, name, options).await
-            }
             DescribeKind::Fragments => {
                 describe::handle_describe_fragments(handler_args, name).await
             }

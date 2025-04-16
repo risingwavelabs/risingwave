@@ -4432,14 +4432,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_describe(&mut self) -> ModalResult<Statement> {
-        let kind = match self.parse_one_of_keywords(&[Keyword::PLAN, Keyword::FRAGMENTS]) {
-            Some(Keyword::PLAN) => {
-                let (options, analyze_duration) = self.parse_explain_options()?;
-                if analyze_duration.is_some() {
-                    return self.expected("ANALYZE duration is not supported for DESCRIBE PLAN");
-                }
-                DescribeKind::Plan(options)
-            }
+        let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENTS]) {
             Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
             None => DescribeKind::Plain,
             Some(_) => unreachable!(),

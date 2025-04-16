@@ -1660,8 +1660,7 @@ pub enum Statement {
 pub enum DescribeKind {
     /// `DESCRIBE <name>`
     Plain,
-    /// `DESCRIBE PLAN (options) <name>`
-    Plan(ExplainOptions),
+
     /// `DESCRIBE FRAGMENTS <name>`
     Fragments,
 }
@@ -1724,9 +1723,7 @@ impl Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 match kind {
                     DescribeKind::Plain => {}
-                    DescribeKind::Plan(options) => {
-                        write!(f, " PLAN {}", options)?;
-                    }
+
                     DescribeKind::Fragments => {
                         write!(f, " FRAGMENTS")?;
                     }
