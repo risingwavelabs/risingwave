@@ -497,6 +497,7 @@ mod tests {
             "user:{invalid_column}", // Non-existent column
             "user:{id",              // Unclosed brace
             "user:id}",              // Unopened brace
+            "sadsadsad{}qw4e2ewq21", // Empty braces
         ];
 
         for template in invalid_templates {
