@@ -450,15 +450,15 @@ mod tests {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "id".to_string(),
+                name: "id".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "name".to_string(),
+                name: "name".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "email".to_string(),
+                name: "email".to_owned(),
             },
         ]);
 
@@ -516,15 +516,15 @@ mod tests {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "id".to_string(),
+                name: "id".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "name".to_string(),
+                name: "name".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "email".to_string(),
+                name: "email".to_owned(),
             },
         ]);
 
@@ -556,7 +556,7 @@ mod tests {
             let encoder = TemplateStringEncoder::new(
                 schema.clone(),
                 Some(col_indices.clone()),
-                template.to_string(),
+                template.to_owned(),
             );
 
             // Create a test row
@@ -580,15 +580,15 @@ mod tests {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "id".to_string(),
+                name: "id".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "name".to_string(),
+                name: "name".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "email".to_string(),
+                name: "email".to_owned(),
             },
         ]);
 
@@ -609,7 +609,7 @@ mod tests {
         let encoder = TemplateStringEncoder::new(
             schema.clone(),
             Some(vec![0, 1, 2]), // Include all columns
-            complex_template.to_string(),
+            complex_template.to_owned(),
         );
 
         // Create a test row
