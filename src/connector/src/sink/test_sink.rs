@@ -19,7 +19,7 @@ use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use sea_orm::DatabaseConnection;
 
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 
@@ -37,7 +37,7 @@ pub struct TestSink {
     param: SinkParam,
 }
 
-impl EnforceSecretOnCloud for TestSink {}
+impl EnforceSecret for TestSink {}
 
 impl TryFrom<SinkParam> for TestSink {
     type Error = SinkError;

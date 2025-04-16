@@ -903,8 +903,8 @@ pub struct MongodbCommon {
     pub collection_name: String,
 }
 
-impl EnforceSecretOnCloud for MongodbCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for MongodbCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "mongodb.url"
     };
 }

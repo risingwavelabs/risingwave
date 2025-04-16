@@ -34,7 +34,7 @@ use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
 use crate::dispatch_sink_formatter_str_key_impl;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -61,8 +61,8 @@ pub struct RedisCommon {
     pub url: String,
 }
 
-impl EnforceSecretOnCloud for RedisCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf_set! {
+impl EnforceSecret for RedisCommon {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
         "redis.url"
     };
 }
@@ -221,10 +221,8 @@ pub struct RedisConfig {
     pub common: RedisCommon,
 }
 
-impl EnforceSecretOnCloud for RedisConfig {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> ConnectorResult<()> {
+impl EnforceSecret for RedisConfig {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
         for prop in prop_iter {
             RedisCommon::enforce_one(prop)?;
         }
@@ -251,10 +249,8 @@ pub struct RedisSink {
     sink_from_name: String,
 }
 
-impl EnforceSecretOnCloud for RedisSink {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> ConnectorResult<()> {
+impl EnforceSecret for RedisSink {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
         for prop in prop_iter {
             RedisConfig::enforce_one(prop)?;
         }

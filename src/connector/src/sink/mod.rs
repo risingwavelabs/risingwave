@@ -306,8 +306,8 @@ impl SinkParam {
     }
 }
 
-pub fn enforce_secret_on_cloud_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()> {
-    use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+pub fn enforce_secret_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()> {
+    use crate::enforce_secret::EnforceSecret;
 
     let connector = props
         .get_connector()
@@ -316,7 +316,7 @@ pub fn enforce_secret_on_cloud_sink(props: &impl WithPropertiesExt) -> Connector
     match_sink_name_str!(
         connector.as_str(),
         PropType,
-        PropType::enforce_secret_on_cloud(key_iter),
+        PropType::enforce_secret(key_iter),
         |other| bail!("connector '{}' is not supported", other)
     )
 }

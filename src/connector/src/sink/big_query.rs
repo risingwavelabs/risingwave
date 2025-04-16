@@ -64,7 +64,7 @@ use super::{
 };
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
@@ -96,8 +96,8 @@ pub struct BigQueryCommon {
     pub credentials: Option<String>,
 }
 
-impl EnforceSecretOnCloud for BigQueryCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for BigQueryCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "bigquery.credentials",
     };
 }
@@ -248,7 +248,7 @@ pub struct BigQueryConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
-impl EnforceSecretOnCloud for BigQueryConfig {
+impl EnforceSecret for BigQueryConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         BigQueryCommon::enforce_one(prop)?;
         AwsAuthProps::enforce_one(prop)?;
@@ -281,8 +281,8 @@ pub struct BigQuerySink {
     is_append_only: bool,
 }
 
-impl EnforceSecretOnCloud for BigQuerySink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for BigQuerySink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

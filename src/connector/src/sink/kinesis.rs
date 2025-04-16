@@ -31,7 +31,7 @@ use super::SinkParam;
 use super::catalog::SinkFormatDesc;
 use crate::connector_common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -50,8 +50,8 @@ pub struct KinesisSink {
     sink_from_name: String,
 }
 
-impl EnforceSecretOnCloud for KinesisSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for KinesisSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
@@ -140,7 +140,7 @@ pub struct KinesisSinkConfig {
     pub common: KinesisCommon,
 }
 
-impl EnforceSecretOnCloud for KinesisSinkConfig {
+impl EnforceSecret for KinesisSinkConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         KinesisCommon::enforce_one(prop)?;
         Ok(())

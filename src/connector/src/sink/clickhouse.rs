@@ -39,7 +39,7 @@ use super::decouple_checkpoint_log_sink::{
 };
 use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterMetrics, SinkWriterParam};
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
@@ -72,8 +72,8 @@ pub struct ClickHouseCommon {
     pub commit_checkpoint_interval: u64,
 }
 
-impl EnforceSecretOnCloud for ClickHouseCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ClickHouseCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "clickhouse.password",
     };
 }
@@ -330,12 +330,12 @@ pub struct ClickHouseConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
-impl EnforceSecretOnCloud for ClickHouseConfig {
+impl EnforceSecret for ClickHouseConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         ClickHouseCommon::enforce_one(prop)
     }
 
-    fn enforce_secret_on_cloud<'a>(
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
@@ -353,8 +353,8 @@ pub struct ClickHouseSink {
     is_append_only: bool,
 }
 
-impl EnforceSecretOnCloud for ClickHouseSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for ClickHouseSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

@@ -38,7 +38,7 @@ use crate::connector_common::{
     AwsAuthProps, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
     RdKafkaPropertiesCommon,
 };
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -251,7 +251,7 @@ pub struct KafkaConfig {
     pub aws_auth_props: AwsAuthProps,
 }
 
-impl EnforceSecretOnCloud for KafkaConfig {
+impl EnforceSecret for KafkaConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         KafkaConnectionProps::enforce_one(prop)?;
         AwsAuthProps::enforce_one(prop)?;
@@ -303,8 +303,8 @@ pub struct KafkaSink {
     sink_from_name: String,
 }
 
-impl EnforceSecretOnCloud for KafkaSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for KafkaSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

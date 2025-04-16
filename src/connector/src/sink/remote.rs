@@ -65,7 +65,7 @@ use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -91,8 +91,8 @@ macro_rules! def_remote_sink {
         impl RemoteSinkTrait for $variant_name {
             const SINK_NAME: &'static str = $sink_name;
         }
-        impl EnforceSecretOnCloud for $variant_name {
-            const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf_set! {
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
                 $($enforce_secret_prop),*
             };
         }
@@ -107,8 +107,8 @@ macro_rules! def_remote_sink {
                 $body
             }
         }
-        impl EnforceSecretOnCloud for $variant_name {
-            const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf_set! {
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
                 $($enforce_secret_prop),*
             };
         }
@@ -129,7 +129,7 @@ macro_rules! def_remote_sink {
 
 def_remote_sink!();
 
-pub trait RemoteSinkTrait: EnforceSecretOnCloud + Send + Sync + 'static {
+pub trait RemoteSinkTrait: EnforceSecret + Send + Sync + 'static {
     const SINK_NAME: &'static str;
     fn default_sink_decouple() -> bool {
         true
@@ -142,9 +142,8 @@ pub struct RemoteSink<R: RemoteSinkTrait> {
     _phantom: PhantomData<R>,
 }
 
-impl<R: RemoteSinkTrait> EnforceSecretOnCloud for RemoteSink<R> {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> =
-        R::ENFORCE_SECRET_PROPERTIES_ON_CLOUD;
+impl<R: RemoteSinkTrait> EnforceSecret for RemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
 }
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
@@ -527,9 +526,8 @@ pub struct CoordinatedRemoteSink<R: RemoteSinkTrait> {
     _phantom: PhantomData<R>,
 }
 
-impl<R: RemoteSinkTrait> EnforceSecretOnCloud for CoordinatedRemoteSink<R> {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> =
-        R::ENFORCE_SECRET_PROPERTIES_ON_CLOUD;
+impl<R: RemoteSinkTrait> EnforceSecret for CoordinatedRemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
 }
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {

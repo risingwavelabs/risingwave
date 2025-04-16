@@ -28,7 +28,7 @@ use super::elasticsearch::ES_SINK;
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
 use super::opensearch::OPENSEARCH_SINK;
 use crate::connector_common::ElasticsearchConnection;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
 use crate::sink::Result;
 
@@ -86,8 +86,8 @@ pub struct ElasticSearchOpenSearchConfig {
     pub r#type: String,
 }
 
-impl EnforceSecretOnCloud for ElasticSearchOpenSearchConfig {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf::phf_set! {
+impl EnforceSecret for ElasticSearchOpenSearchConfig {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
         "username",
         "password",
     };

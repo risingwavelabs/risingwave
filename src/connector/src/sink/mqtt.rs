@@ -37,7 +37,7 @@ use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::MqttCommon;
 use crate::deserialize_bool_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam};
@@ -65,7 +65,7 @@ pub struct MqttConfig {
     pub topic_field: Option<String>,
 }
 
-impl EnforceSecretOnCloud for MqttConfig {
+impl EnforceSecret for MqttConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         MqttCommon::enforce_one(prop)
     }
@@ -121,8 +121,8 @@ pub struct MqttSink {
     name: String,
 }
 
-impl EnforceSecretOnCloud for MqttSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for MqttSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

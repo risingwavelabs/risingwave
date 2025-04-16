@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
@@ -53,8 +53,8 @@ pub type TableSink = TrivialSink<TableSinkName>;
 #[derive(Debug)]
 pub struct TrivialSink<T: TrivialSinkName>(PhantomData<T>);
 
-impl<T: TrivialSinkName> EnforceSecretOnCloud for TrivialSink<T> {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {};
+impl<T: TrivialSinkName> EnforceSecret for TrivialSink<T> {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {};
 }
 
 impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {

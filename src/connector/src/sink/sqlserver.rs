@@ -33,7 +33,7 @@ use with_options::WithOptions;
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -85,8 +85,8 @@ impl SqlServerConfig {
     }
 }
 
-impl EnforceSecretOnCloud for SqlServerConfig {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for SqlServerConfig {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "sqlserver.password"
     };
 }
@@ -98,8 +98,8 @@ pub struct SqlServerSink {
     is_append_only: bool,
 }
 
-impl EnforceSecretOnCloud for SqlServerSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for SqlServerSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::sink::ConnectorResult<()> {
         for prop in prop_iter {

@@ -90,7 +90,7 @@ use super::{
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
 use crate::connector_common::IcebergCommon;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
@@ -147,8 +147,8 @@ pub struct IcebergConfig {
     pub commit_retry_num: u32,
 }
 
-impl EnforceSecretOnCloud for IcebergConfig {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for IcebergConfig {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
@@ -244,8 +244,8 @@ pub struct IcebergSink {
     unique_column_ids: Option<Vec<usize>>,
 }
 
-impl EnforceSecretOnCloud for IcebergSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for IcebergSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

@@ -32,7 +32,7 @@ use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
 use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
@@ -61,8 +61,8 @@ pub struct PostgresConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
-impl EnforceSecretOnCloud for PostgresConfig {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf_set! {
+impl EnforceSecret for PostgresConfig {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
         "password", "ssl.root.cert"
     };
 }
@@ -116,8 +116,8 @@ impl PostgresSink {
     }
 }
 
-impl EnforceSecretOnCloud for PostgresSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for PostgresSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

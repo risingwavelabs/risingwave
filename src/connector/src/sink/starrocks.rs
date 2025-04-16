@@ -42,7 +42,7 @@ use super::{
     DummySinkCommitCoordinator, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SinkError, SinkParam, SinkWriterMetrics,
 };
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -80,8 +80,8 @@ pub struct StarrocksCommon {
     pub table: String,
 }
 
-impl EnforceSecretOnCloud for StarrocksCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: phf::Set<&'static str> = phf::phf_set! {
+impl EnforceSecret for StarrocksCommon {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
         "starrocks.password", "starrocks.user"
     };
 }
@@ -116,7 +116,7 @@ pub struct StarrocksConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
-impl EnforceSecretOnCloud for StarrocksConfig {
+impl EnforceSecret for StarrocksConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         StarrocksCommon::enforce_one(prop)
     }
@@ -156,8 +156,8 @@ pub struct StarrocksSink {
     is_append_only: bool,
 }
 
-impl EnforceSecretOnCloud for StarrocksSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for StarrocksSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {

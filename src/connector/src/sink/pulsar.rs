@@ -29,7 +29,7 @@ use with_options::WithOptions;
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -125,7 +125,7 @@ pub struct PulsarConfig {
     pub producer_properties: PulsarPropertiesProducer,
 }
 
-impl EnforceSecretOnCloud for PulsarConfig {
+impl EnforceSecret for PulsarConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         PulsarCommon::enforce_one(prop)?;
         AwsAuthProps::enforce_one(prop)?;
@@ -151,8 +151,8 @@ pub struct PulsarSink {
     sink_from_name: String,
 }
 
-impl EnforceSecretOnCloud for PulsarSink {
-    fn enforce_secret_on_cloud<'a>(
+impl EnforceSecret for PulsarSink {
+    fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
