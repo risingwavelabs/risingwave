@@ -310,6 +310,9 @@ message ExprNode {
     // Internal function for schema change
     COMPOSITE_CAST = 800;
 
+    // Vector functions
+    L2_DISTANCE = 800;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
