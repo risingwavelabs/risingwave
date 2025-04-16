@@ -5,6 +5,8 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+export PYTHONUNBUFFERED=1
+
 echo "--- Running signal-test-sub"
 ci/scripts/signal-test-sub.py
 echo "--- Finished signal-test-sub"
