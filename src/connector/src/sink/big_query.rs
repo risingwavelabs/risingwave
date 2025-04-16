@@ -27,7 +27,7 @@ use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
-use google_cloud_bigquery::grpc::apiv1::conn_pool::{DOMAIN, WriteConnectionManager};
+use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
 use google_cloud_gax::grpc::Request;
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
@@ -794,15 +794,10 @@ impl StorageWriterClient {
             timeout: CONNECTION_TIMEOUT,
         };
         let environment = Environment::GoogleCloud(Box::new(ts_grpc));
-        let conn = WriteConnectionManager::new(
-            DEFAULT_GRPC_CHANNEL_NUMS,
-            &environment,
-            DOMAIN,
-            &conn_options,
-        )
-        .await
-        .map_err(|e| SinkError::BigQuery(e.into()))?;
-        let mut client = conn.conn();
+        let conn = ConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, &conn_options)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        let mut client = conn.writer();
 
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);

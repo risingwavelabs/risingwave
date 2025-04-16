@@ -83,8 +83,8 @@ use risingwave_storage::StateStoreIter;
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
     backoff_policy: RewindBackoffPolicy,
-    rewind_count: LabelGuardedIntCounter<4>,
-    rewind_delay: LabelGuardedHistogram<4>,
+    rewind_count: LabelGuardedIntCounter,
+    rewind_delay: LabelGuardedHistogram,
 }
 
 impl RewindDelay {
@@ -171,8 +171,8 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     state: LogStoreReadState<S>,
 
     rx: LogStoreBufferReceiver,
-    init_epoch_rx: Option<oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>>,
-    update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
+    init_epoch_rx: Option<oneshot::Receiver<EpochPair>>,
+    update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64)>,
 
     /// The first epoch that newly written by the log writer
     first_write_epoch: Option<u64>,
@@ -190,21 +190,17 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
-
-    align_epoch_on_init: bool,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
-        init_epoch_rx: oneshot::Receiver<(EpochPair, Option<Option<Bytes>>)>,
-        update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64, Option<Option<Bytes>>)>,
+        init_epoch_rx: oneshot::Receiver<EpochPair>,
+        update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64)>,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
-        align_epoch_on_init: bool,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -220,7 +216,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             is_paused,
             identity,
             rewind_delay,
-            align_epoch_on_init,
         }
     }
 }
@@ -259,6 +254,7 @@ pub(crate) mod timeout_auto_rebuild {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::TableKeyRange;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{ReadOptions, StateStoreRead};
@@ -271,6 +267,7 @@ pub(crate) mod timeout_auto_rebuild {
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
         state_store: Arc<S>,
         range: TableKeyRange,
+        table_id: TableId,
         options: ReadOptions,
         timeout: Duration,
     ) -> StorageResult<TimeoutAutoRebuildIter<S>> {
@@ -295,7 +292,7 @@ pub(crate) mod timeout_auto_rebuild {
                         curr_iter_item_count.0 = 0;
                         start_time = Instant::now();
                         info!(
-                            table_id = options.table_id.table_id,
+                            table_id = table_id.table_id,
                             iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
                             prev_iter_item_count,
                             total_iter_item_count = total_count.0,
@@ -419,8 +416,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     }
 
     async fn init(&mut self) -> LogStoreResult<()> {
-        let aligned_range_start = if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
-            let (init_epoch, aligned_range_start) = init_epoch_rx
+        if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
+            let init_epoch = init_epoch_rx
                 .await
                 .map_err(|_| anyhow!("should get the first epoch"))?;
             let first_write_epoch = init_epoch.curr;
@@ -430,27 +427,17 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 None,
                 "should not init twice"
             );
-            aligned_range_start
         } else {
-            let (new_vnode_bitmap, write_epoch, aligned_range_start) = self
+            let (new_vnode_bitmap, write_epoch) = self
                 .update_vnode_bitmap_rx
                 .recv()
                 .await
                 .ok_or_else(|| anyhow!("failed to receive update vnode"))?;
             self.state.serde.update_vnode_bitmap(new_vnode_bitmap);
             self.first_write_epoch = Some(write_epoch);
-            aligned_range_start
         };
 
-        let range_start: LogStoreReadStateStreamRangeStart = if self.align_epoch_on_init
-            && let Some(range_start) = aligned_range_start.expect("should have aligned range start")
-        {
-            LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start)
-        } else {
-            LogStoreReadStateStreamRangeStart::Unbounded
-        };
-
-        self.future_state = KvLogStoreReaderFutureState::Reset(Some(range_start));
+        self.future_state = KvLogStoreReaderFutureState::Reset(None);
         self.latest_offset = None;
         self.truncate_offset = None;
         self.rewind_delay = RewindDelay::new(&self.metrics);
@@ -489,7 +476,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     Some(TruncateOffset::Chunk { epoch, chunk_id });
                                 LogStoreReadItem::StreamChunk { chunk, chunk_id }
                             }
-                            KvLogStoreItem::Barrier { is_checkpoint } => {
+                            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
                                 LogStoreReadItem::Barrier {
                                     is_checkpoint,
@@ -675,7 +662,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
     ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
-        let table_id = self.table_id;
         async move {
             tracing::trace!(
                 start_seq_id,
@@ -693,20 +679,17 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 // Use MAX EPOCH here because the epoch to consume may be below the safe
                 // epoch
                 async move {
-                    Ok::<_, anyhow::Error>(
-                        state_store
-                            .iter(
-                                (Included(range_start), Included(range_end)),
-                                ReadOptions {
-                                    prefetch_options:
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
-                                    cache_policy: CachePolicy::Fill(CacheHint::Low),
-                                    table_id,
-                                    ..Default::default()
-                                },
-                            )
-                            .await?,
-                    )
+                    let iter = state_store
+                        .iter(
+                            (Included(range_start), Included(range_end)),
+                            ReadOptions {
+                                prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
+                                cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
+                    Ok::<_, anyhow::Error>((vnode, iter))
                 }
             }))
             .instrument_await("Wait Create Iter Stream")
@@ -733,7 +716,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
 pub(crate) enum LogStoreReadStateStreamRangeStart {
     Unbounded,
     LastPersistedEpoch(u64),
-    SerializedInclusive(Bytes),
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
@@ -753,9 +735,6 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 // start from the next epoch of last_persisted_epoch
                 Included(serde.serialize_pk_epoch_prefix(last_persisted_epoch + 1))
             }
-            LogStoreReadStateStreamRangeStart::SerializedInclusive(range_start) => {
-                Included(range_start)
-            }
         };
         let range_end = serde.serialize_pk_epoch_prefix(first_write_epoch);
 
@@ -772,16 +751,17 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 iter_with_timeout_rebuild(
                     state_store,
                     key_range,
+                    table_id,
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
                         cache_policy: CachePolicy::Fill(CacheHint::Low),
-                        table_id,
                         ..Default::default()
                     },
                     Duration::from_secs(10 * 60),
                 )
                 .await
+                .map(|iter| (vnode, iter))
             }
         }));
 
@@ -866,7 +846,6 @@ mod tests {
         }
 
         let read_options = ReadOptions {
-            table_id: TEST_TABLE_ID,
             ..Default::default()
         };
         let key_range = prefixed_range_with_vnode(

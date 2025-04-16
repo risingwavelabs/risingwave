@@ -15,10 +15,9 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
-use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
+use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::error::StreamResult;
@@ -91,9 +90,6 @@ pub struct SharedContext {
     /// is on the server-side and we will also introduce backpressure.
     channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
-    /// Stores all actor information.
-    actor_infos: RwLock<HashMap<ActorId, ActorInfo>>,
-
     /// Stores the local address.
     ///
     /// It is used to test whether an actor is local or not,
@@ -123,7 +119,6 @@ impl SharedContext {
             database_id,
             term_id,
             channel_map: Default::default(),
-            actor_infos: Default::default(),
             addr: env.server_address().clone(),
             config: env.config().as_ref().to_owned(),
             compute_client_pool: env.client_pool(),
@@ -145,7 +140,6 @@ impl SharedContext {
             database_id: TEST_DATABASE_ID,
             term_id: "for_test".into(),
             channel_map: Default::default(),
-            actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
@@ -192,14 +186,6 @@ impl SharedContext {
             .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
     }
 
-    pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {
-        self.actor_infos
-            .read()
-            .get(actor_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("actor {} not found in info table", actor_id).into())
-    }
-
     pub fn config(&self) -> &StreamingConfig {
         &self.config
     }
@@ -208,29 +194,5 @@ impl SharedContext {
         self.channel_map
             .lock()
             .retain(|(up_id, _), _| !actors.contains(up_id));
-        let mut actor_infos = self.actor_infos.write();
-        for actor_id in actors {
-            actor_infos.remove(actor_id);
-        }
-    }
-
-    pub(crate) fn add_actors(&self, new_actor_infos: impl Iterator<Item = ActorInfo>) {
-        let mut actor_infos = self.actor_infos.write();
-        for actor in new_actor_infos {
-            if let Some(prev_actor) = actor_infos.get(&actor.actor_id) {
-                if cfg!(debug_assertions) {
-                    panic!("duplicate actor info: {:?} {:?}", actor, actor_infos);
-                }
-                if prev_actor != &actor {
-                    warn!(
-                        ?prev_actor,
-                        ?actor,
-                        "add actor again but have different actor info. ignored"
-                    );
-                }
-            } else {
-                actor_infos.insert(actor.actor_id, actor);
-            }
-        }
     }
 }

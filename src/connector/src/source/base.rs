@@ -46,6 +46,7 @@ use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
@@ -53,8 +54,9 @@ use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlS
 use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
-    WithOptionsSecResolved, dispatch_source_prop, dispatch_split_impl, for_all_connections,
-    for_all_sources, impl_connection, impl_connector_properties, impl_split, match_source_name_str,
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_source_prop, dispatch_split_impl,
+    for_all_connections, for_all_sources, impl_connection, impl_connector_properties, impl_split,
+    match_source_name_str,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -74,7 +76,9 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug {
+pub trait SourceProperties:
+    TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecret
+{
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -562,6 +566,22 @@ impl ConnectorProperties {
             PropType,
             PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
+
+    pub fn enforce_secret_on_cloud(
+        with_properties: &impl WithPropertiesExt,
+    ) -> crate::error::ConnectorResult<()> {
+        let connector = with_properties
+            .get_connector()
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
+        let key_iter = with_properties.key_iter();
+        match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            PropType::enforce_secret(key_iter),
             |other| bail!("connector '{}' is not supported", other)
         )
     }

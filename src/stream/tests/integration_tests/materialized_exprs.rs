@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use risingwave_common::array::DataChunk;
@@ -62,6 +63,7 @@ async fn create_executor<S: StateStore>(
         exprs,
         state_table,
         state_clean_col_idx: None,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
     });
     (tx, executor.boxed().execute())
 }

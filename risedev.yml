@@ -280,6 +280,10 @@ profile:
       - use: kafka
         persist-data: true
 
+  kafka:
+    steps:
+      - use: kafka
+
   meta-1cn-1fe-sqlite:
     steps:
       - use: minio
@@ -314,7 +318,6 @@ profile:
         exporter-port: 1224
         enable-tiered-cache: true
       - use: frontend
-
 
   ci-time-travel:
     config-path: src/config/ci-time-travel.toml
@@ -765,27 +768,6 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-1cn-3fe-in-memory:
-    config-path: src/config/ci-mem.toml
-    steps:
-      - use: meta-node
-        enable-in-memory-kv-state-backend: true
-      - use: compute-node
-        port: 5687
-        exporter-port: 1222
-      - use: frontend
-        port: 4565
-        exporter-port: 2222
-        health-check-port: 6786
-      - use: frontend
-        port: 4566
-        exporter-port: 2223
-        health-check-port: 6787
-      - use: frontend
-        port: 4567
-        exporter-port: 2224
-        health-check-port: 6788
-
   ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml
     steps:
@@ -1055,7 +1037,6 @@ profile:
       - use: frontend
       - use: compactor
 
-
   full-with-batch-query-limit:
     config-path: src/config/full-with-batch-query-limit.toml
     steps:
@@ -1232,9 +1213,6 @@ template:
 
     # Tempo used by this meta node
     provide-tempo: "tempo*"
-
-    # Whether to enable in-memory pure KV state backend
-    enable-in-memory-kv-state-backend: false
 
   prometheus:
     # Advertise address of Prometheus

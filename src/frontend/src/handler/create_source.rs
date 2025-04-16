@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithPropertiesExt;
@@ -46,7 +47,9 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::schema_registry::{
-    SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME, SchemaRegistryAuth, name_strategy_from_str,
+    SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+    SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
@@ -113,6 +116,8 @@ mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
 
+use crate::stream_fragmenter::GraphJobType;
+
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
@@ -126,6 +131,23 @@ fn try_consume_string_from_options(
     key: &str,
 ) -> Option<AstString> {
     format_encode_options.remove(key).map(AstString)
+}
+
+fn try_consume_schema_registry_config_from_options(
+    format_encode_options: &mut BTreeMap<String, String>,
+) {
+    [
+        SCHEMA_REGISTRY_USERNAME,
+        SCHEMA_REGISTRY_PASSWORD,
+        SCHEMA_REGISTRY_MAX_DELAY_KEY,
+        SCHEMA_REGISTRY_BACKOFF_DURATION_KEY,
+        SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+        SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    ]
+    .iter()
+    .for_each(|key| {
+        try_consume_string_from_options(format_encode_options, key);
+    });
 }
 
 fn consume_string_from_options(
@@ -810,6 +832,7 @@ pub async fn bind_create_source_or_table_with_connector(
         )
         .into());
     }
+
     if is_create_source {
         match format_encode.format {
             Format::Upsert
@@ -882,6 +905,19 @@ pub async fn bind_create_source_or_table_with_connector(
     // resolve privatelink connection for Kafka
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
+
+    // check the system parameter `enforce_secret_on_cloud`
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret_on_cloud()
+        && Feature::SecretManagement.check_available().is_ok()
+    {
+        // check enforce using secret for some props on cloud
+        ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
+    }
 
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
@@ -1088,7 +1124,7 @@ pub(super) fn generate_stream_graph_for_source(
     )?;
 
     let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-    let graph = build_graph(stream_plan)?;
+    let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
 

@@ -27,6 +27,7 @@ use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUA
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
@@ -77,12 +78,21 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
         let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k.0, v.to_string()))
+                .map(|(k, v)| {
+                    (
+                        k.0,
+                        if req.actor_traces_format == ActorTracesFormat::Text as i32 {
+                            v.to_string()
+                        } else {
+                            serde_json::to_string(&v).unwrap()
+                        },
+                    )
+                })
                 .collect()
         } else {
             Default::default()
@@ -314,7 +324,7 @@ impl MonitorService for MonitorServiceImpl {
                     let fragment_id = get_label_infallible(&metric, "fragment_id");
                     if fragment_ids.contains(&fragment_id) {
                         let entry = metrics.entry(fragment_id).or_insert(0);
-                        *entry += metric.get_counter().get_value() as u64;
+                        *entry += metric.get_counter().value() as u64;
                     }
                 }
             }
@@ -343,12 +353,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
 
         fn collect<T: Collector>(m: &T) -> Vec<Metric> {
-            m.collect()
-                .into_iter()
-                .next()
-                .unwrap()
-                .take_metric()
-                .into_vec()
+            m.collect().into_iter().next().unwrap().take_metric()
         }
 
         let actor_output_buffer_blocking_duration_ns =
@@ -359,7 +364,7 @@ impl MonitorService for MonitorServiceImpl {
             .iter()
             .map(|m| {
                 let fragment_id: u32 = get_label_infallible(m, "fragment_id");
-                let count = m.get_gauge().get_value() as u32;
+                let count = m.get_gauge().value() as u32;
                 (fragment_id, count)
             })
             .collect();
@@ -378,7 +383,7 @@ impl MonitorService for MonitorServiceImpl {
         let actor_current_epoch = collect(&metrics.actor_current_epoch);
         for m in &actor_current_epoch {
             let fragment_id: u32 = get_label_infallible(m, "fragment_id");
-            let epoch = m.get_gauge().get_value() as u64;
+            let epoch = m.get_gauge().value() as u64;
             if let Some(s) = fragment_stats.get_mut(&fragment_id) {
                 s.current_epoch = if s.current_epoch == 0 {
                     epoch
@@ -397,7 +402,7 @@ impl MonitorService for MonitorServiceImpl {
         let mview_current_epoch = collect(&metrics.materialize_current_epoch);
         for m in &mview_current_epoch {
             let table_id: u32 = get_label_infallible(m, "table_id");
-            let epoch = m.get_gauge().get_value() as u64;
+            let epoch = m.get_gauge().value() as u64;
             if let Some(s) = relation_stats.get_mut(&table_id) {
                 s.current_epoch = if s.current_epoch == 0 {
                     epoch
@@ -439,7 +444,7 @@ impl MonitorService for MonitorServiceImpl {
                 } else {
                     1
                 };
-            channel_stat.output_blocking_duration += metric.get_counter().get_value();
+            channel_stat.output_blocking_duration += metric.get_counter().value();
         }
 
         let actor_output_row_count = collect(&metrics.actor_out_record_cnt);
@@ -450,7 +455,7 @@ impl MonitorService for MonitorServiceImpl {
             let key_prefix = format!("{}_", fragment_id);
             let key_range_end = format!("{}`", fragment_id); // '`' is next to `_`
             for (_, s) in channel_stats.range_mut(key_prefix..key_range_end) {
-                s.send_row_count += metric.get_counter().get_value() as u64;
+                s.send_row_count += metric.get_counter().value() as u64;
             }
         }
 
@@ -461,7 +466,7 @@ impl MonitorService for MonitorServiceImpl {
 
             let key = format!("{}_{}", upstream_fragment_id, fragment_id);
             if let Some(s) = channel_stats.get_mut(&key) {
-                s.recv_row_count += metric.get_counter().get_value() as u64;
+                s.recv_row_count += metric.get_counter().value() as u64;
             }
         }
 
