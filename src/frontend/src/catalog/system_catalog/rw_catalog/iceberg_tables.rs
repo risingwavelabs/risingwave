@@ -40,7 +40,7 @@ struct IcebergTables {
 
 #[system_catalog(table, "rw_catalog.iceberg_tables")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
-    let rows = reader.meta_client.list_iceberg_tables().await?;
+    let rows = reader.meta_client.list_hosted_iceberg_tables().await?;
 
     let catalog_reader = reader.catalog_reader.read_guard();
     let user_reader = reader.user_info_reader.read_guard();

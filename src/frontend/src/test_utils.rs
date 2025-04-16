@@ -1123,7 +1123,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn list_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
+    async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
     }
 }

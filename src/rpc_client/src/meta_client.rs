@@ -1560,7 +1560,7 @@ impl MetaClient {
         Ok(resp.rate_limits)
     }
 
-    pub async fn list_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
+    pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         let request = ListIcebergTablesRequest {};
         let resp = self.inner.list_iceberg_tables(request).await?;
         Ok(resp.iceberg_tables)

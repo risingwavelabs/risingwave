@@ -136,7 +136,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
-    async fn list_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
+    async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -325,7 +325,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_meta_store_endpoint().await
     }
 
-    async fn list_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
-        self.0.list_iceberg_tables().await
+    async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
+        self.0.list_hosted_iceberg_tables().await
     }
 }
