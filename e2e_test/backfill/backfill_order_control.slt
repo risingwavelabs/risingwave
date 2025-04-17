@@ -91,6 +91,11 @@ create materialized view m1
         price_ranges
       GROUP BY name, price_range;
 
+query I
+select count(*) from m1;
+----
+2500000
+
 statement ok
 drop table if exists car_sales cascade;
 
