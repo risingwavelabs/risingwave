@@ -508,7 +508,7 @@ impl CreateMviewProgressTracker {
         self.pending_finished_jobs.push(finished_job);
     }
 
-    pub(super) fn queue_backfill(&mut self, backfill_nodes: Vec<FragmentId>) {
+    fn queue_backfill(&mut self, backfill_nodes: Vec<FragmentId>) {
         self.pending_backfill_nodes.extend(backfill_nodes);
     }
 
