@@ -336,7 +336,11 @@ It only indicates the physical clustering of the data, which may improve the per
                 )
                 .collect();
 
-        let graph = build_graph_with_strategy(plan, Some(GraphJobType::MaterializedView), Some(backfill_order_strategy))?;
+        let graph = build_graph_with_strategy(
+            plan,
+            Some(GraphJobType::MaterializedView),
+            Some(backfill_order_strategy),
+        )?;
 
         (table, graph, dependencies, resource_group)
     };
