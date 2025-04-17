@@ -668,6 +668,7 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
+                    assert!(next_backfill_nodes.is_empty());
                     UpdateProgressResult::Finished(o.remove().1)
                 } else if !next_backfill_nodes.is_empty() {
                     tracing::debug!("scheduling next backfill nodes: {:?}", next_backfill_nodes);
