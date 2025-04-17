@@ -244,3 +244,5 @@ Caused by these errors (recent errors listed first):
 # Clean up
 statement ok
 DROP SCHEMA describe_plan_test CASCADE;
+
+control substitution off
