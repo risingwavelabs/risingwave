@@ -20,7 +20,7 @@ use risingwave_common::catalog::UserId;
 use risingwave_sqlparser::ast::CreateSubscriptionStatement;
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
+use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId, SubscriptionState};
 use crate::error::Result;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -62,6 +62,7 @@ pub fn create_subscription_catalog(
         created_at_epoch: None,
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
+        subscription_state: SubscriptionState::Init,
     };
 
     subscription_catalog.set_retention_seconds(context.with_options())?;

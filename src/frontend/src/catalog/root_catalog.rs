@@ -28,7 +28,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
-use super::subscription_catalog::SubscriptionCatalog;
+use super::subscription_catalog::{SubscriptionCatalog, SubscriptionState};
 use super::view_catalog::ViewCatalog;
 use super::{
     CatalogError, CatalogResult, ConnectionId, SecretId, SinkId, SourceId, SubscriptionId, ViewId,
@@ -969,10 +969,11 @@ impl Catalog {
             Err(CatalogError::duplicated("sink", relation_name.to_owned()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::duplicated("view", relation_name.to_owned()))
-        } else if schema.get_subscription_by_name(relation_name).is_some() {
-            Err(CatalogError::duplicated(
+        } else if let Some(subscription) = schema.get_subscription_by_name(relation_name) {
+            let is_creating = !(subscription.subscription_state == SubscriptionState::Created);
+            Err(CatalogError::Duplicated(
                 "subscription",
-                relation_name.to_owned(),
+                relation_name.to_owned(),is_creating,
             ))
         } else {
             Ok(())
