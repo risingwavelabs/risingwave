@@ -74,7 +74,7 @@ impl BackfillOrderState {
                             .map(|actor| actor.actor_id)
                             .collect(),
                         remaining_dependencies: Default::default(),
-                        children: vec![],
+                        children: backfill_orders[&fragment_id].clone(),
                     },
                 );
             }
@@ -85,9 +85,6 @@ impl BackfillOrderState {
                 let child_node = backfill_nodes.get_mut(child).unwrap();
                 child_node.remaining_dependencies.insert(fragment_id);
             }
-
-            let backfill_node = backfill_nodes.get_mut(&fragment_id).unwrap();
-            backfill_node.children = children;
         }
 
         let mut current_backfill_nodes = HashMap::new();
