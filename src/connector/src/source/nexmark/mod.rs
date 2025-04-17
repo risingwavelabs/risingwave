@@ -26,7 +26,7 @@ use serde_with::{DisplayFromStr, serde_as};
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
 pub const NEXMARK_CONNECTOR: &str = "nexmark";
@@ -43,7 +43,7 @@ const fn none<T>() -> Option<T> {
     None
 }
 
-impl EnforceSecretOnCloud for NexmarkProperties {}
+impl EnforceSecret for NexmarkProperties {}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
