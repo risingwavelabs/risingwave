@@ -43,9 +43,7 @@ use tracing::warn;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
-use crate::task::{
-    ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment, UpDownActorIds,
-};
+use crate::task::{ActorId, AtomicU64Ref, PartialGraphId, StreamEnvironment, UpDownActorIds};
 
 mod managed_state;
 mod progress;
@@ -68,7 +66,7 @@ use risingwave_pb::stream_service::{
     StreamingControlStreamResponse, streaming_control_stream_response,
 };
 
-use crate::executor::exchange::permit::Receiver;
+use crate::executor::exchange::permit::{Receiver, channel_from_config};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::{
@@ -1058,7 +1056,9 @@ impl DatabaseManagedBarrierState {
 pub struct LocalBarrierManager {
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
     actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
-    pub shared_context: Arc<SharedContext>,
+    pub(crate) database_id: DatabaseId,
+    pub(crate) term_id: String,
+    pub(crate) env: StreamEnvironment,
 }
 
 impl LocalBarrierWorker {
@@ -1126,7 +1126,9 @@ pub(crate) enum NewOutputRequest {
 
 impl LocalBarrierManager {
     pub(super) fn new(
-        shared_context: Arc<SharedContext>,
+        database_id: DatabaseId,
+        term_id: String,
+        env: StreamEnvironment,
     ) -> (
         Self,
         UnboundedReceiver<LocalBarrierEvent>,
@@ -1138,7 +1140,9 @@ impl LocalBarrierManager {
             Self {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: err_tx,
-                shared_context,
+                database_id,
+                term_id,
+                env,
             },
             event_rx,
             err_rx,
@@ -1181,7 +1185,7 @@ impl LocalBarrierManager {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
     ) -> permit::Receiver {
-        let (tx, rx) = self.shared_context.new_channel();
+        let (tx, rx) = channel_from_config(self.env.config());
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,

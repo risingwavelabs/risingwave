@@ -38,8 +38,8 @@ use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::{
-    ActorId, LocalBarrierManager, NewOutputRequest, PartialGraphId, SharedContext,
-    StreamActorManager, UpDownActorIds,
+    ActorId, LocalBarrierManager, NewOutputRequest, PartialGraphId, StreamActorManager,
+    UpDownActorIds,
 };
 
 struct IssuedState {
@@ -84,6 +84,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
 };
 
 use crate::executor::exchange::permit;
+use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
 
@@ -600,9 +601,8 @@ impl DatabaseManagedBarrierState {
         actor_manager: Arc<StreamActorManager>,
         initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
-        let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env, term_id));
         let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
-            LocalBarrierManager::new(shared_context);
+            LocalBarrierManager::new(database_id, term_id, actor_manager.env.clone());
         Self {
             database_id,
             actor_states: Default::default(),
@@ -876,7 +876,7 @@ impl DatabaseManagedBarrierState {
         upstream_actor_id: ActorId,
         result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
     ) {
-        let (tx, rx) = self.local_barrier_manager.shared_context.new_channel();
+        let (tx, rx) = channel_from_config(self.local_barrier_manager.env.config());
         self.new_actor_output_request(actor_id, upstream_actor_id, NewOutputRequest::Remote(tx));
         let _ = result_sender.send(Ok(rx));
     }

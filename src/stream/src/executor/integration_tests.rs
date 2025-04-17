@@ -154,7 +154,7 @@ async fn test_merger_sum_aggr() {
                 ))],
                 0,
                 0,
-                local_barrier_manager.shared_context.clone(),
+                local_barrier_manager.clone(),
                 metrics,
             );
             let actor = Actor::new(

@@ -683,7 +683,6 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
     };
-    use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status, Streaming};
@@ -1114,7 +1113,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
-        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -1142,16 +1140,12 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let remote_input = {
-            let pool = ComputeClientPool::for_test();
             RemoteInput::new(
-                pool,
+                &test_env.local_barrier_manager,
                 addr.into(),
                 (0, 0),
                 (0, 0),
-                test_env.local_barrier_manager.shared_context.database_id,
                 Arc::new(StreamingMetrics::unused()),
-                BATCHED_PERMITS,
-                "for_test".into(),
             )
             .await
             .unwrap()

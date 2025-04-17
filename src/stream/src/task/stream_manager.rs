@@ -613,7 +613,7 @@ impl StreamActorManager {
                 actor.dispatchers,
                 actor_id,
                 fragment_id,
-                local_barrier_manager.shared_context.clone(),
+                local_barrier_manager.clone(),
                 self.streaming_metrics.clone(),
             )
             .await?;

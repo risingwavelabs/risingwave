@@ -43,7 +43,7 @@ use super::{
 };
 use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
-use crate::task::{DispatcherId, NewOutputRequest, SharedContext};
+use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -111,7 +111,7 @@ impl DispatchExecutorMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
-    context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     pending_new_output_requests: HashMap<ActorId, NewOutputRequest>,
@@ -159,7 +159,12 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
-        let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
+        let limit = self
+            .local_barrier_manager
+            .env
+            .config()
+            .developer
+            .exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
         match msg {
             MessageBatch::BarrierBatch(barrier_batch) => {
@@ -402,7 +407,7 @@ impl DispatchExecutor {
         dispatchers: Vec<stream_plan::Dispatcher>,
         actor_id: u32,
         fragment_id: u32,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
         let mut executor = Self::new_inner(
@@ -411,7 +416,7 @@ impl DispatchExecutor {
             vec![],
             actor_id,
             fragment_id,
-            context,
+            local_barrier_manager,
             metrics,
         );
         let inner = &mut executor.inner;
@@ -432,7 +437,7 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         fragment_id: u32,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> (
         Self,
@@ -447,7 +452,7 @@ impl DispatchExecutor {
                 dispatchers,
                 actor_id,
                 fragment_id,
-                context,
+                local_barrier_manager,
                 metrics,
             ),
             tx,
@@ -460,10 +465,10 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         fragment_id: u32,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let chunk_size = context.config().developer.chunk_size;
+        let chunk_size = local_barrier_manager.env.config().developer.chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
@@ -492,7 +497,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                context,
+                local_barrier_manager,
                 metrics,
                 new_output_request_rx,
                 pending_new_output_requests: Default::default(),
@@ -505,8 +510,13 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        let max_barrier_count_per_batch =
-            self.inner.context.config.developer.max_barrier_batch_size;
+        let max_barrier_count_per_batch = self
+            .inner
+            .local_barrier_manager
+            .env
+            .config()
+            .developer
+            .max_barrier_batch_size;
         #[try_stream]
         async move {
             let mut input = self.input.execute().peekable();
@@ -1352,7 +1362,6 @@ mod tests {
         let actor_id = 233;
         let fragment_id = 666;
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
         let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
@@ -1428,7 +1437,7 @@ mod tests {
                 vec![broadcast_dispatcher, simple_dispatcher],
                 actor_id,
                 fragment_id,
-                ctx.clone(),
+                barrier_test_env.local_barrier_manager.clone(),
                 metrics,
             )
             .await

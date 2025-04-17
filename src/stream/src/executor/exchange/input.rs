@@ -20,7 +20,6 @@ use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
-use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc;
 
 use super::permit::Receiver;
@@ -172,34 +171,33 @@ pub struct RemoteInput {
 }
 
 use remote_input::RemoteInputStreamInner;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::ActorInfo;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
-    #[expect(clippy::too_many_arguments)]
     pub async fn new(
-        client_pool: ComputeClientPool,
+        local_barrier_manager: &LocalBarrierManager,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
-        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
-        batched_permits: usize,
-        term_id: String,
     ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
-        let client = client_pool.get_by_addr(upstream_addr).await?;
+        let client = local_barrier_manager
+            .env
+            .client_pool()
+            .get_by_addr(upstream_addr)
+            .await?;
         let (stream, permits_tx) = client
             .get_stream(
                 up_down_ids.0,
                 up_down_ids.1,
                 up_down_frag.0,
                 up_down_frag.1,
-                database_id,
-                term_id,
+                local_barrier_manager.database_id,
+                local_barrier_manager.term_id.clone(),
             )
             .await?;
 
@@ -211,7 +209,11 @@ impl RemoteInput {
                 up_down_ids,
                 up_down_frag,
                 metrics,
-                batched_permits,
+                local_barrier_manager
+                    .env
+                    .config()
+                    .developer
+                    .exchange_batched_permits,
             ),
         })
     }
@@ -352,11 +354,10 @@ pub(crate) async fn new_input(
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
 ) -> StreamExecutorResult<BoxedInput> {
-    let context = &local_barrier_manager.shared_context;
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
 
-    let input = if is_local_address(&context.addr, &upstream_addr) {
+    let input = if is_local_address(local_barrier_manager.env.server_address(), &upstream_addr) {
         LocalInput::new(
             local_barrier_manager.register_local_upstream_output(actor_id, upstream_actor_id),
             upstream_actor_id,
@@ -364,14 +365,11 @@ pub(crate) async fn new_input(
         .boxed_input()
     } else {
         RemoteInput::new(
-            context.compute_client_pool.as_ref().to_owned(),
+            local_barrier_manager,
             upstream_addr,
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
-            context.database_id,
             metrics,
-            context.config.developer.exchange_batched_permits,
-            context.term_id(),
         )
         .await?
         .boxed_input()
