@@ -453,7 +453,7 @@ impl LogStoreRowSerde {
         );
         pin_mut!(stream);
         while let Some(row) = stream.try_next().await? {
-            let vnode = VirtualNode::ZERO; // FIXME
+            let vnode = row.row_meta.vnode;
             let epoch = row.row_meta.epoch;
             let op = row.op;
             let row_size = row.row_meta.size;
