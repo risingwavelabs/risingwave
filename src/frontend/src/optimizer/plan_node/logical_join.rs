@@ -925,7 +925,6 @@ impl LogicalJoin {
         Ok((left, right))
     }
 
-    #[inline(never)]
     fn to_stream_hash_join(
         &self,
         predicate: EqJoinPredicate,
@@ -1000,7 +999,6 @@ impl LogicalJoin {
         }
     }
 
-    #[inline(never)]
     fn to_stream_temporal_join_with_index_selection(
         &self,
         predicate: EqJoinPredicate,
@@ -1241,7 +1239,6 @@ impl LogicalJoin {
         ))
     }
 
-    #[inline(never)]
     fn to_stream_nested_loop_temporal_join(
         &self,
         predicate: EqJoinPredicate,
@@ -1295,7 +1292,6 @@ impl LogicalJoin {
         Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true).into())
     }
 
-    #[inline(never)]
     fn to_stream_dynamic_filter(
         &self,
         predicate: Condition,
@@ -1407,7 +1403,6 @@ impl LogicalJoin {
             .into())
     }
 
-    #[inline(never)]
     fn to_stream_asof_join(
         &self,
         predicate: EqJoinPredicate,
