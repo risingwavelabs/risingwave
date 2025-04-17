@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 pub type VectorItem = f32;
@@ -25,8 +24,8 @@ pub type Vector = VectorInner<Arc<[VectorItem]>>;
 pub type VectorRef<'a> = VectorInner<&'a [VectorItem]>;
 
 impl Vector {
-    pub fn new(inner: Vec<VectorItem>) -> Self {
-        Self(inner.into())
+    pub fn new(inner: &[VectorItem]) -> Self {
+        Self(Arc::from(inner))
     }
 
     pub fn to_ref(&self) -> VectorRef<'_> {
@@ -35,6 +34,36 @@ impl Vector {
 
     pub fn clone_from_ref(r: VectorRef<'_>) -> Self {
         Self(Vec::from(r.0).into())
+    }
+}
+
+impl<T: AsRef<[VectorItem]>> VectorInner<T> {
+    pub fn magnitude(&self) -> VectorItem {
+        self.0
+            .as_ref()
+            .iter()
+            .map(|item| item.powi(2))
+            .sum::<VectorItem>()
+            .sqrt()
+    }
+
+    pub fn normalized(&self) -> Vector {
+        let slice = self.0.as_ref();
+        let len = slice.len();
+        let mut uninit = Arc::new_uninit_slice(len);
+        // safety: just initialized, must be owned
+        let uninit_mut = unsafe { Arc::get_mut_unchecked(&mut uninit) };
+        let magnitude = self.magnitude();
+        for i in 0..len {
+            // safety: 0 <= i < len
+            unsafe {
+                uninit_mut
+                    .get_unchecked_mut(i)
+                    .write(slice.get_unchecked(i) / magnitude)
+            };
+        }
+        // safety: initialized with len, and have set all item
+        unsafe { VectorInner(uninit.assume_init()) }
     }
 }
 
@@ -48,8 +77,11 @@ macro_rules! for_all_distance_measurement {
     ($macro:ident $($param:tt)*) => {
         $macro! {
             {
+                (L1, $crate::vector::L1Distance),
+                (L2, $crate::vector::L2Distance),
+                (KlDivergence, $crate::vector::KlDivergenceDistance),
                 (Cosine, $crate::vector::CosineDistance),
-                (KlDivergence, $crate::vector::KlDivergenceDistance)
+                (InnerProduct, $crate::vector::InnerProductDistance),
             }
             $($param)*
         }
@@ -58,7 +90,7 @@ macro_rules! for_all_distance_measurement {
 
 macro_rules! define_measure {
     ({
-        $(($distance_name:ident, $_distance_type:ty)),+
+        $(($distance_name:ident, $_distance_type:ty),)+
     }) => {
         pub enum DistanceMeasurement {
             $($distance_name),+
@@ -74,7 +106,7 @@ define_measure!();
 #[macro_export]
 macro_rules! dispatch_measurement {
     ({
-        $(($distance_name:ident, $distance_type:ty)),+
+        $(($distance_name:ident, $distance_type:ty),)+
     },
     $measurement:expr, $type_name:ident, $body:expr) => {
         match $measurement {
@@ -91,39 +123,143 @@ macro_rules! dispatch_measurement {
     };
 }
 
-pub trait MeasureDistance {
-    fn measure(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance;
+pub trait MeasureDistanceBuilder {
+    type Measure<'a>: MeasureDistance<'a>;
+    fn new(target: VectorRef<'_>) -> Self::Measure<'_>;
+
+    #[cfg(test)]
+    fn distance(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance
+    where
+        Self: Sized,
+    {
+        Self::new(target).measure(other)
+    }
 }
 
-pub struct CosineDistance;
+pub struct L1Distance;
 
-impl MeasureDistance for CosineDistance {
-    fn measure(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance {
+pub struct L1DistanceMeasure<'a>(VectorRef<'a>);
+
+impl MeasureDistanceBuilder for L1Distance {
+    type Measure<'a> = L1DistanceMeasure<'a>;
+
+    fn new(target: VectorRef<'_>) -> Self::Measure<'_> {
+        L1DistanceMeasure(target)
+    }
+}
+
+impl<'a> MeasureDistance<'a> for L1DistanceMeasure<'a> {
+    fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
         // TODO: use some library with simd support
-        let len = target.0.len();
+        let len = self.0.0.len();
         assert_eq!(len, other.0.len());
+        // In this implementation, we don't take the square root to avoid unnecessary computation, because
+        // we only want comparison rather than the actual distance.
         (0..len)
             .map(|i| {
-                let diff = target.0[i] - other.0[i];
-                diff * diff
+                let diff = self.0.0[i] - other.0[i];
+                diff.abs()
             })
             .sum()
     }
 }
 
-pub struct KlDivergenceDistance;
+pub trait MeasureDistance<'a> {
+    fn measure(&self, other: VectorRef<'_>) -> VectorDistance;
+}
 
-impl MeasureDistance for KlDivergenceDistance {
-    fn measure(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance {
+pub struct L2Distance;
+
+pub struct L2DistanceMeasure<'a>(VectorRef<'a>);
+
+impl MeasureDistanceBuilder for L2Distance {
+    type Measure<'a> = L2DistanceMeasure<'a>;
+
+    fn new(target: VectorRef<'_>) -> Self::Measure<'_> {
+        L2DistanceMeasure(target)
+    }
+}
+
+impl<'a> MeasureDistance<'a> for L2DistanceMeasure<'a> {
+    fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
         // TODO: use some library with simd support
-        let len = target.0.len();
+        let len = self.0.0.len();
+        assert_eq!(len, other.0.len());
+        // In this implementation, we don't take the square root to avoid unnecessary computation, because
+        // we only want comparison rather than the actual distance.
+        (0..len).map(|i| (self.0.0[i] - other.0[i]).powi(2)).sum()
+    }
+}
+
+pub struct KlDivergenceDistance;
+pub struct KlDivergenceDistanceMeasure<'a>(VectorRef<'a>);
+
+impl MeasureDistanceBuilder for KlDivergenceDistance {
+    type Measure<'a> = KlDivergenceDistanceMeasure<'a>;
+
+    fn new(target: VectorRef<'_>) -> KlDivergenceDistanceMeasure<'_> {
+        KlDivergenceDistanceMeasure(target)
+    }
+}
+
+impl<'a> MeasureDistance<'a> for KlDivergenceDistanceMeasure<'a> {
+    fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
+        // TODO: use some library with simd support
+        let len = self.0.0.len();
         assert_eq!(len, other.0.len());
         (0..len)
             .map(|i| {
-                let other_prob = other.0[i];
-                other_prob * (other_prob / target.0[i]).ln()
+                let target_prob = self.0.0[i];
+                target_prob * (target_prob / other.0[i]).ln()
             })
             .sum()
+    }
+}
+
+pub struct CosineDistance;
+pub struct CosineDistanceMeasure<'a> {
+    target: VectorRef<'a>,
+    magnitude: VectorItem,
+}
+
+impl MeasureDistanceBuilder for CosineDistance {
+    type Measure<'a> = CosineDistanceMeasure<'a>;
+
+    fn new(target: VectorRef<'_>) -> Self::Measure<'_> {
+        let magnitude = target.magnitude();
+        CosineDistanceMeasure { target, magnitude }
+    }
+}
+
+impl<'a> MeasureDistance<'a> for CosineDistanceMeasure<'a> {
+    fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
+        // TODO: use some library with simd support
+        let len = self.target.0.len();
+        assert_eq!(len, other.0.len());
+        let magnitude_mul = other.magnitude() * self.magnitude;
+        (0..len)
+            .map(|i| self.target.0[i] * other.0[i] / magnitude_mul)
+            .sum()
+    }
+}
+
+pub struct InnerProductDistance;
+pub struct InnerProductDistanceMeasure<'a>(VectorRef<'a>);
+
+impl MeasureDistanceBuilder for InnerProductDistance {
+    type Measure<'a> = InnerProductDistanceMeasure<'a>;
+
+    fn new(target: VectorRef<'_>) -> Self::Measure<'_> {
+        InnerProductDistanceMeasure(target)
+    }
+}
+
+impl<'a> MeasureDistance<'a> for InnerProductDistanceMeasure<'a> {
+    fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
+        // TODO: use some library with simd support
+        let len = self.0.0.len();
+        assert_eq!(len, other.0.len());
+        (0..len).map(|i| self.0.0[i] * other.0[i]).sum()
     }
 }
 
@@ -159,22 +295,20 @@ impl<O> Ord for NearestNode<O> {
     }
 }
 
-pub struct NearestBuilder<'a, O, M: MeasureDistance> {
-    target: VectorRef<'a>,
+pub struct NearestBuilder<'a, O, M: MeasureDistanceBuilder> {
+    measure: M::Measure<'a>,
     /// max-heap with
     heap: BinaryHeap<NearestNode<O>>,
     n: usize,
-    _phantom: PhantomData<M>,
 }
 
-impl<'a, O, M: MeasureDistance> NearestBuilder<'a, O, M> {
+impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
     pub fn new(target: VectorRef<'a>, n: usize) -> Self {
         assert!(n > 0);
         NearestBuilder {
-            target,
+            measure: M::new(target),
             heap: BinaryHeap::with_capacity(n),
             n,
-            _phantom: Default::default(),
         }
     }
 
@@ -184,7 +318,7 @@ impl<'a, O, M: MeasureDistance> NearestBuilder<'a, O, M> {
         on_nearest_item: impl OnNearestItemFn<O>,
     ) {
         for (vec, info) in vecs {
-            let distance = M::measure(self.target, vec);
+            let distance = self.measure.measure(vec);
             if self.heap.len() >= self.n {
                 let mut top = self.heap.peek_mut().expect("non-empty");
                 if top.distance > distance {
@@ -222,7 +356,6 @@ impl<'a, O, M: MeasureDistance> NearestBuilder<'a, O, M> {
 #[cfg(test)]
 mod tests {
     use std::cmp::min;
-    use std::iter::repeat_with;
 
     use bytes::Bytes;
     use expect_test::expect;
@@ -230,8 +363,8 @@ mod tests {
     use rand::{Rng, rng};
 
     use crate::vector::{
-        CosineDistance, KlDivergenceDistance, MeasureDistance, NearestBuilder, Vector,
-        VectorDistance, VectorInner, VectorItem,
+        CosineDistance, InnerProductDistance, KlDivergenceDistance, L1Distance, L2Distance,
+        MeasureDistanceBuilder, NearestBuilder, Vector, VectorDistance, VectorInner, VectorItem,
     };
 
     const VECTOR_LEN: usize = 10;
@@ -248,11 +381,7 @@ mod tests {
 
     fn gen_vector() -> Vector {
         let mut rng = rng();
-        Vector::new(
-            repeat_with(|| rng.random::<VectorItem>())
-                .take(VECTOR_LEN)
-                .collect(),
-        )
+        Vector::new(&[(); VECTOR_LEN].map(|_| rng.random::<VectorItem>()))
     }
 
     fn gen_random_input(count: usize) -> Vec<(Vector, Bytes)> {
@@ -268,24 +397,74 @@ mod tests {
 
     #[test]
     fn test_distance() {
+        let first_vec = [0.238474, 0.578234];
+        let second_vec = [0.93271829, 0.387495];
+        let [v1_1, v1_2] = first_vec;
+        let [v2_1, v2_2] = second_vec;
+        assert_eq!(
+            L1Distance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            (v1_1 - v2_1).abs() + (v1_2 - v2_2).abs()
+        );
+        assert_eq!(
+            L2Distance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            (v1_1 - v2_1).powi(2) + (v1_2 - v2_2).powi(2)
+        );
+        assert_eq!(
+            KlDivergenceDistance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            v1_1 * (v1_1 / v2_1).ln() + v1_2 * (v1_2 / v2_2).ln()
+        );
+        assert_eq!(
+            CosineDistance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            (v1_1 * v2_1 + v1_2 * v2_2)
+                / ((v1_1.powi(2) + v1_2.powi(2)).sqrt() * (v2_1.powi(2) + v2_2.powi(2)).sqrt())
+        );
+        assert_eq!(
+            InnerProductDistance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            v1_1 * v2_1 + v1_2 * v2_2
+        );
+    }
+
+    #[test]
+    fn test_expect_distance() {
+        expect![[r#"
+            3.6808228
+        "#]]
+        .assert_debug_eq(&L1Distance::distance(
+            VectorInner(&VEC1),
+            VectorInner(&VEC2),
+        ));
         expect![[r#"
             2.054677
         "#]]
-        .assert_debug_eq(&CosineDistance::measure(
+        .assert_debug_eq(&L2Distance::distance(
             VectorInner(&VEC1),
             VectorInner(&VEC2),
         ));
         expect![[r#"
             4.672073
         "#]]
-        .assert_debug_eq(&KlDivergenceDistance::measure(
+        .assert_debug_eq(&KlDivergenceDistance::distance(
+            VectorInner(&VEC1),
+            VectorInner(&VEC2),
+        ));
+        expect![[r#"
+            0.7715104
+        "#]]
+        .assert_debug_eq(&CosineDistance::distance(
+            VectorInner(&VEC1),
+            VectorInner(&VEC2),
+        ));
+        expect![[r#"
+            3.2870955
+        "#]]
+        .assert_debug_eq(&InnerProductDistance::distance(
             VectorInner(&VEC1),
             VectorInner(&VEC2),
         ));
     }
     #[test]
     fn test_empty_top_n() {
-        let builder = NearestBuilder::<'_, (), CosineDistance>::new(VectorInner(&VEC1), 10);
+        let builder = NearestBuilder::<'_, (), L2Distance>::new(VectorInner(&VEC1), 10);
         assert!(builder.finish().is_empty());
     }
 
@@ -299,7 +478,7 @@ mod tests {
 
     fn test_inner(count: usize, n: usize) {
         let input = gen_random_input(count);
-        let mut builder = NearestBuilder::<'_, _, CosineDistance>::new(VectorInner(&VEC1), 10);
+        let mut builder = NearestBuilder::<'_, _, L2Distance>::new(VectorInner(&VEC1), 10);
         builder.add(
             input.iter().map(|(v, b)| (v.to_ref(), b.as_ref())),
             |_, d, b| (d, Bytes::copy_from_slice(b)),
@@ -307,7 +486,7 @@ mod tests {
         let output = builder.finish();
         let mut expected_output = input
             .into_iter()
-            .map(|(v, b)| (CosineDistance::measure(VectorInner(&VEC1), v.to_ref()), b))
+            .map(|(v, b)| (L2Distance::distance(VectorInner(&VEC1), v.to_ref()), b))
             .collect_vec();
         top_n(&mut expected_output, n);
         assert_eq!(output, expected_output);
