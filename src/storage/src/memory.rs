@@ -45,7 +45,7 @@ use crate::hummock::utils::{
 use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::vector::{MeasureDistance, NearestBuilder};
+use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
@@ -734,7 +734,7 @@ impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> StorageResult<Vec<O>> {
-        fn nearest_impl<M: MeasureDistance, O>(
+        fn nearest_impl<M: MeasureDistanceBuilder, O>(
             store: &InMemVectorStore,
             epoch: u64,
             table_id: TableId,
