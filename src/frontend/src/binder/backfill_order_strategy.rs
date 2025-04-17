@@ -78,9 +78,11 @@ fn has_cycle(order: &HashMap<ObjectId, Uint32Vector>) -> bool {
         }
         if visited.insert(node) {
             stack.insert(node);
-            for &neighbor in &order.get(&node).unwrap_or(&Uint32Vector::default()).data {
-                if dfs(neighbor, order, visited, stack) {
-                    return true;
+            if let Some(downstreams) = order.get(&node) {
+                for neighbor in &downstreams.data {
+                    if dfs(*neighbor, order, visited, stack) {
+                        return true;
+                    }
                 }
             }
             stack.remove(&node);
