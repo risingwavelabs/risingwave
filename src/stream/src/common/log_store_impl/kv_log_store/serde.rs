@@ -610,14 +610,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
         }
     }
 
-    fn into_log_store_item_stream(
-        self,
-        chunk_size: usize,
-    ) -> impl Stream<Item = anyhow::Result<(u64, KvLogStoreItem)>> {
-        self.into_vnode_log_store_item_stream(chunk_size)
-            .map_ok(|(epoch, _progress, item)| (epoch, item))
-    }
-
     #[try_stream(ok = (Epoch, LogStoreVnodeProgress, KvLogStoreItem), error = anyhow::Error)]
     async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
@@ -718,24 +710,13 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 }
 
 pub(crate) type LogStoreItemMergeStream<S: StateStoreReadIter> =
-    impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
+    impl Stream<Item = LogStoreResult<(Epoch, LogStoreVnodeProgress, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
     iters: Vec<(VirtualNode, S)>,
     serde: LogStoreRowSerde,
     chunk_size: usize,
     metrics: KvLogStoreReadMetrics,
 ) -> LogStoreItemMergeStream<S> {
-    LogStoreRowOpStream::new(iters, serde, metrics).into_log_store_item_stream(chunk_size)
-}
-
-pub(crate) type LogStoreVnodeItemMergeStream<S: StateStoreReadIter> =
-    impl Stream<Item = LogStoreResult<(Epoch, LogStoreVnodeProgress, KvLogStoreItem)>>;
-pub(crate) fn merge_log_store_vnode_item_stream<S: StateStoreReadIter>(
-    iters: Vec<(VirtualNode, S)>,
-    serde: LogStoreRowSerde,
-    chunk_size: usize,
-    metrics: KvLogStoreReadMetrics,
-) -> LogStoreVnodeItemMergeStream<S> {
     LogStoreRowOpStream::new(iters, serde, metrics).into_vnode_log_store_item_stream(chunk_size)
 }
 
