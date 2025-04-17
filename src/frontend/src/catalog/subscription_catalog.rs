@@ -58,7 +58,7 @@ pub struct SubscriptionCatalog {
     pub subscription_state: SubscriptionState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash,Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub enum SubscriptionState {
     Init,
     Created,

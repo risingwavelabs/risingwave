@@ -970,11 +970,11 @@ impl Catalog {
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::duplicated("view", relation_name.to_owned()))
         } else if let Some(subscription) = schema.get_subscription_by_name(relation_name) {
-            let is_creating = !(subscription.subscription_state == SubscriptionState::Created);
+            let is_not_created = subscription.subscription_state != SubscriptionState::Created;
             Err(CatalogError::Duplicated(
                 "subscription",
                 relation_name.to_owned(),
-                is_creating,
+                is_not_created,
             ))
         } else {
             Ok(())
