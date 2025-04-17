@@ -53,7 +53,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, LogStoreVnodeProgress, SeqId,
+    Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, LogStoreVnodeRowProgress, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -126,7 +126,7 @@ enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// `Some` means consuming historical log data
     ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
     ReadFlushedChunk(
-        BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeProgress)>>,
+        BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeRowProgress)>>,
     ),
     Reset(Option<LogStoreReadStateStreamRangeStart>),
     Empty,
@@ -661,8 +661,9 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
-    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeProgress)>> + 'static
-    {
+    ) -> impl Future<
+        Output = LogStoreResult<(ChunkId, StreamChunk, Epoch, LogStoreVnodeRowProgress)>,
+    > + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
         async move {

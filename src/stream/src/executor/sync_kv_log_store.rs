@@ -72,6 +72,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
@@ -93,7 +94,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, SeqId,
+    Epoch, FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, LogStoreVnodeRowProgress, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -303,7 +304,7 @@ pub mod metrics {
 }
 
 type ReadFlushedChunkFuture =
-    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeProgress)>>;
+    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch, LogStoreVnodeRowProgress)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
@@ -782,10 +783,15 @@ impl<S: StateStoreRead> ReadFuture<S> {
     ) -> StreamExecutorResult<StreamChunk> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
-                while let Some((_epoch, mut latest_progress, item)) = stream.try_next().await? {
+                while let Some((epoch, mut latest_progress, item)) = stream.try_next().await? {
                     progress.extend(latest_progress.drain());
                     match item {
-                        KvLogStoreItem::Barrier { .. } => {
+                        KvLogStoreItem::Barrier { vnodes, .. } => {
+                            // update the progress
+                            for vnode_index in vnodes.iter_ones() {
+                                progress
+                                    .insert(VirtualNode::from_index(vnode_index), (epoch, None));
+                            }
                             continue;
                         }
                         KvLogStoreItem::StreamChunk(chunk) => {
@@ -860,8 +866,10 @@ impl<S: StateStoreRead> ReadFuture<S> {
             ReadFuture::ReadingFlushedChunk { future, .. } => future,
         };
 
-        let (_, chunk, _, mut local_progress) = future.await?;
-        progress.extend(local_progress.drain());
+        let (_, chunk, epoch, local_progress) = future.await?;
+        for (vnode, seq_id) in local_progress {
+            progress.insert(vnode, (epoch, Some(seq_id)));
+        }
         tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
         *self = ReadFuture::Idle;
         Ok(chunk)

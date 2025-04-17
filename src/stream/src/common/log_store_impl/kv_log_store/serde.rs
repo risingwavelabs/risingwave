@@ -46,7 +46,7 @@ use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
     Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, LogStoreVnodeProgress,
-    ReaderTruncationOffsetType, RowOpCodeType, SeqId,
+    LogStoreVnodeRowProgress, ReaderTruncationOffsetType, RowOpCodeType, SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -439,13 +439,13 @@ impl LogStoreRowSerde {
         end_seq_id: SeqId,
         expected_epoch: u64,
         metrics: &KvLogStoreReadMetrics,
-    ) -> LogStoreResult<(LogStoreVnodeProgress, StreamChunk)> {
+    ) -> LogStoreResult<(LogStoreVnodeRowProgress, StreamChunk)> {
         let size_bound = (end_seq_id - start_seq_id + 1) as usize;
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.payload_schema.clone(), size_bound + 1);
         let mut ops = Vec::with_capacity(size_bound);
         let mut read_info = ReadInfo::new();
-        let mut progress = LogStoreVnodeProgress::new();
+        let mut progress = LogStoreVnodeRowProgress::new();
         let stream = select_all(
             iters
                 .into_iter()
@@ -548,7 +548,6 @@ enum StreamState {
     BarrierEmitted { prev_epoch: u64 },
 }
 
-#[expect(dead_code)]
 pub(crate) enum KvLogStoreItem {
     StreamChunk(StreamChunk),
     Barrier {
@@ -640,7 +639,14 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             match row_op {
                 AlignedLogStoreOp::Row { vnode, seq_id, .. }
                 | AlignedLogStoreOp::Update { vnode, seq_id, .. } => {
-                    progress.insert(vnode, seq_id);
+                    if let Some((previous_epoch, previous_seq_id)) =
+                        progress.insert(vnode, (epoch, Some(seq_id)))
+                    {
+                        assert!(previous_epoch <= epoch);
+                        if previous_epoch == epoch {
+                            assert!(previous_seq_id <= Some(seq_id));
+                        }
+                    }
                 }
                 _ => {}
             }

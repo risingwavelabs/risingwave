@@ -172,15 +172,6 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         self.on_post_seal = true;
         LogStorePostSealCurrentEpoch { inner: self }
     }
-
-    pub(crate) fn aligned_init_range_start(&self) -> Option<Bytes> {
-        (0..self.serde.vnodes().len())
-            .flat_map(|vnode| {
-                self.state_store
-                    .get_table_watermark(VirtualNode::from_index(vnode))
-            })
-            .max()
-    }
 }
 
 #[must_use]
