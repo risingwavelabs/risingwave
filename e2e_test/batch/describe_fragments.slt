@@ -1,4 +1,4 @@
-# Test DESCRIBE FRAGMENTS with complex relations and schemas
+control substitution on
 
 # Setup test schema
 statement ok
