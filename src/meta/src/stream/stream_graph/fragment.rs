@@ -340,6 +340,12 @@ impl StreamFragmentEdge {
     }
 }
 
+/// Adjacency list (G) of backfill orders.
+/// G[10] -> [1, 2, 11]
+/// means for the backfill node in `fragment 10`
+/// should be backfilled before the backfill nodes in `fragment 1, 2 and 11`.
+pub type FragmentBackfillOrder = HashMap<FragmentId, Vec<FragmentId>>;
+
 /// In-memory representation of a **Fragment** Graph, built from the [`StreamFragmentGraphProto`]
 /// from the frontend.
 ///
@@ -734,9 +740,7 @@ impl StreamFragmentGraph {
     /// Initially the mapping that comes from frontend is between `table_ids`.
     /// We should remap it to fragment level, since we track progress by actor, and we can get
     /// a fragment <-> actor mapping
-    pub fn create_fragment_backfill_ordering(
-        &self,
-    ) -> Option<HashMap<FragmentId, Vec<FragmentId>>> {
+    pub fn create_fragment_backfill_ordering(&self) -> Option<FragmentBackfillOrder> {
         match self.backfill_order_strategy.strategy.as_ref() {
             None | Some(backfill_order_strategy::Strategy::Auto(_)) => None,
             Some(backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order })) => {

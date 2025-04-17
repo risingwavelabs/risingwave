@@ -43,11 +43,11 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
+use crate::barrier::InflightSubscriptionInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::collect_resp_info;
-use crate::barrier::{BackfillOrderState, InflightSubscriptionInfo};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
@@ -57,8 +57,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    ConnectorPropsChange, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
-    build_actor_connector_splits,
+    ConnectorPropsChange, FragmentBackfillOrder, JobReschedulePostUpdates, SplitAssignment,
+    ThrottleConfig, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -180,7 +180,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
-    pub backfill_order_state: Option<BackfillOrderState>,
+    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
 }
 
 impl StreamJobFragments {
