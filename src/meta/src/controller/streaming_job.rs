@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -40,8 +43,10 @@ use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode};
+use risingwave_pb::stream_plan::{FragmentTypeFlag, PbFragmentTypeFlag, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
+use risingwave_sqlparser::ast::{SqlOption, Statement};
+use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
@@ -1566,6 +1571,156 @@ impl CatalogController {
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")
             .await
+    }
+
+    pub async fn update_sink_props_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        props: BTreeMap<String, String>,
+    ) -> MetaResult<HashMap<String, String>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (sink, _obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+
+        // Validate that props can be altered
+        match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+            Some(connector) => {
+                let connector_type = connector.to_lowercase();
+                match_sink_name_str!(
+                    connector_type.as_str(),
+                    SinkType,
+                    {
+                        for (k, v) in &props {
+                            if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
+                                return Err(SinkError::Config(anyhow!(
+                                    "unsupported alter config: {}={}",
+                                    k,
+                                    v
+                                ))
+                                .into());
+                            }
+                        }
+                        let mut new_props = sink.properties.0.clone();
+                        new_props.extend(props.clone());
+                        SinkType::validate_alter_config(&new_props)
+                    },
+                    |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+                )?
+            }
+            None => {
+                return Err(
+                    SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
+                );
+            }
+        };
+        let definition = sink.definition.clone();
+        let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+            .map_err(|e| SinkError::Config(anyhow!(e)))?
+            .try_into()
+            .unwrap();
+        if let Statement::CreateSink { stmt } = &mut stmt {
+            let mut new_sql_options = stmt
+                .with_properties
+                .0
+                .iter()
+                .map(|sql_option| (&sql_option.name, sql_option))
+                .collect::<IndexMap<_, _>>();
+            let add_sql_options = props
+                .iter()
+                .map(|(k, v)| SqlOption::try_from((k, v)))
+                .collect::<Result<Vec<SqlOption>, ParserError>>()
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+            new_sql_options.extend(
+                add_sql_options
+                    .iter()
+                    .map(|sql_option| (&sql_option.name, sql_option)),
+            );
+            stmt.with_properties.0 = new_sql_options.into_values().cloned().collect();
+        } else {
+            panic!("sink definition is not a create sink statement")
+        }
+        let mut new_config = sink.properties.clone().into_inner();
+        new_config.extend(props);
+
+        let active_sink = sink::ActiveModel {
+            sink_id: Set(sink_id),
+            properties: Set(risingwave_meta_model::Property(new_config.clone())),
+            definition: Set(stmt.to_string()),
+            ..Default::default()
+        };
+        active_sink.update(&txn).await?;
+
+        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let fragments = fragments
+            .into_iter()
+            .filter(|(_, fragment_type_mask, _)| {
+                *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
+            })
+            .filter_map(|(id, _, stream_node)| {
+                let mut stream_node = stream_node.to_protobuf();
+                let mut found = false;
+                visit_stream_node_mut(&mut stream_node, |node| {
+                    if let PbNodeBody::Sink(node) = node
+                        && let Some(sink_desc) = &mut node.sink_desc
+                        && sink_desc.id == sink_id as u32
+                    {
+                        sink_desc.properties = new_config.clone();
+                        found = true;
+                    }
+                });
+                if found { Some((id, stream_node)) } else { None }
+            })
+            .collect_vec();
+        assert!(
+            !fragments.is_empty(),
+            "sink id should be used by at least one fragment"
+        );
+        for (id, stream_node) in fragments {
+            fragment::ActiveModel {
+                fragment_id: Set(id),
+                stream_node: Set(StreamNode::from(&stream_node)),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+
+        let (sink, obj) = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+
+        txn.commit().await?;
+
+        let relation_info = PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into());
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(relation_info),
+                    }],
+                }),
+            )
+            .await;
+
+        Ok(new_config.into_iter().collect())
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(
