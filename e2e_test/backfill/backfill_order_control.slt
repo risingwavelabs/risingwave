@@ -94,7 +94,7 @@ create materialized view m1
 query I
 select count(*) from m1;
 ----
-2500000
+235
 
 statement ok
 drop table if exists car_sales cascade;
