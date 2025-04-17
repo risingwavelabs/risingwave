@@ -787,7 +787,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
     ) -> StreamExecutorResult<(StreamChunk, Option<ReaderTruncationOffsetType>)> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
-                while let Some((_, item)) = stream.try_next().await? {
+                while let Some((_epoch, _progress, item)) = stream.try_next().await? {
                     match item {
                         KvLogStoreItem::Barrier { .. } => {
                             continue;

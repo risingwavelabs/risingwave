@@ -729,7 +729,7 @@ pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
 }
 
 pub(crate) type LogStoreVnodeItemMergeStream<S: StateStoreReadIter> =
-    impl Stream<Item = LogStoreResult<(LogStoreVnodeProgress, KvLogStoreItem)>>;
+    impl Stream<Item = LogStoreResult<(Epoch, LogStoreVnodeProgress, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_vnode_item_stream<S: StateStoreReadIter>(
     iters: Vec<(VirtualNode, S)>,
     serde: LogStoreRowSerde,
