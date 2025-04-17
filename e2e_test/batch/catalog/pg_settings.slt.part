@@ -14,6 +14,7 @@ postmaster backup_storage_url
 postmaster barrier_interval_ms
 postmaster checkpoint_frequency
 postmaster enable_tracing
+postmaster enforce_secret_on_cloud
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
@@ -67,6 +68,11 @@ user streaming_force_filter_inside_join
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_parallelism_for_index
+user streaming_parallelism_for_materialized_view
+user streaming_parallelism_for_sink
+user streaming_parallelism_for_source
+user streaming_parallelism_for_table
 user streaming_sync_log_store_buffer_size
 user streaming_sync_log_store_pause_duration_ms
 user streaming_use_arrangement_backfill

@@ -38,10 +38,8 @@ flush;
 
 ############## Check data
 
-skipif in-memory
 sleep 3s
 
-skipif in-memory
 query I
 select count(*) from kafka_source;
 ----
@@ -62,14 +60,11 @@ select count(*) from kafka_source;
 
 ############## Alter source (rate_limit = 0 --> rate_limit = 1000)
 
-skipif in-memory
 statement ok
 alter table kafka_source set source_rate_limit to 1000;
 
-skipif in-memory
 sleep 3s
 
-skipif in-memory
 query I
 select count(*) > 1 from kafka_source;
 ----
@@ -80,10 +75,8 @@ t
 statement ok
 create materialized view mv as select * from kafka_source;
 
-skipif in-memory
 sleep 3s
 
-skipif in-memory
 query I
 select count(*) > 1 from mv;
 ----

@@ -328,20 +328,6 @@ impl ReplayWorker {
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 local_storage.seal_current_epoch(epoch, opts);
             }
-            Operation::LocalStorageIsDirty => {
-                assert_ne!(storage_type, StorageType::Global);
-                let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                let res = res_rx.recv().await.expect("recv result failed");
-                if let OperationResult::LocalStorageIsDirty(expected) = res {
-                    let actual = local_storage.is_dirty();
-                    assert_eq!(TraceResult::Ok(actual), expected, "is_dirty wrong",);
-                } else {
-                    panic!(
-                        "wrong local storage is_dirty result, expect is_dirty result, but got {:?}",
-                        res
-                    );
-                }
-            }
             Operation::Flush => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();

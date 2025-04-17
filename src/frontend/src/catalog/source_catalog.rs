@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context as _;
-use itertools::Itertools as _;
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
@@ -67,11 +65,7 @@ impl SourceCatalog {
     ///
     /// Returns error if it's invalid.
     pub fn create_sql_ast(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse definition sql")?
-            .into_iter()
-            .exactly_one()
-            .context("expecting exactly one statement in definition")?)
+        Ok(Parser::parse_exactly_one(&self.definition)?)
     }
 
     pub fn to_prost(&self) -> PbSource {

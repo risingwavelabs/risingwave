@@ -49,6 +49,7 @@ impl ExecutorBuilder for MaterializedExprsExecutorBuilder {
             exprs,
             state_table,
             state_clean_col_idx: node.state_clean_col_idx.map(|i| i as _),
+            watermark_epoch: params.watermark_epoch,
         });
         Ok((params.info, exec).into())
     }
