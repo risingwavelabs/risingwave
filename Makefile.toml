@@ -121,7 +121,6 @@ skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
 min_version = "0.37.24"
-unstable_features = [ "CTRL_C_HANDLING" ]
 
 [tasks.clean-full]
 category = "Misc"
