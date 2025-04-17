@@ -467,12 +467,7 @@ impl CreateMviewProgressTracker {
         let new_tracking_job_info =
             if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
                 match job_type {
-                    CreateStreamingJobType::Normal => {
-                        if let Some(order) = &info.backfill_order_state {
-                            self.queue_backfill(order.get_initial_nodes());
-                        }
-                        Some((info, None))
-                    }
+                    CreateStreamingJobType::Normal => Some((info, None)),
                     CreateStreamingJobType::SinkIntoTable(replace_stream_job) => {
                         Some((info, Some(replace_stream_job)))
                     }
@@ -571,9 +566,9 @@ impl CreateMviewProgressTracker {
             definition,
             job_type,
             create_type,
-            backfill_order_state,
+            fragment_backfill_ordering,
             ..
-        } = &info;
+        } = info;
 
         let creating_mv_id = table_fragments.stream_job_id();
         let upstream_mv_count = table_fragments.upstream_table_counts();
@@ -584,6 +579,11 @@ impl CreateMviewProgressTracker {
             self.actor_map.insert(*actor, creating_mv_id);
         }
 
+        let backfill_order_state = fragment_backfill_ordering
+            .map(|order| BackfillOrderState::new(order, &table_fragments));
+        if let Some(ref state) = backfill_order_state {
+            self.queue_backfill(state.get_initial_nodes());
+        }
         let progress = Progress::new(
             actors,
             upstream_mv_count,
@@ -591,7 +591,7 @@ impl CreateMviewProgressTracker {
             definition.clone(),
             backfill_order_state.clone(),
         );
-        if *job_type == StreamingJobType::Sink && *create_type == CreateType::Background {
+        if job_type == StreamingJobType::Sink && create_type == CreateType::Background {
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
             // We don't need to wait for sink to finish backfill.

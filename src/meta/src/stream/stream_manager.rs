@@ -31,12 +31,12 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
-    JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
-    JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
+    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
+    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
 };
 use crate::barrier::{
-    BackfillOrderState, BarrierScheduler, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::error::bail_invalid_parameter;
@@ -98,7 +98,7 @@ pub struct CreateStreamingJobContext {
 
     pub streaming_job: StreamingJob,
 
-    pub backfill_order_state: Option<BackfillOrderState>,
+    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
 }
 
 impl CreateStreamingJobContext {
@@ -389,7 +389,7 @@ impl GlobalStreamManager {
             internal_tables,
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
-            backfill_order_state,
+            fragment_backfill_ordering,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<(SourceChange, StreamingJob)> {
@@ -455,7 +455,7 @@ impl GlobalStreamManager {
             internal_tables: internal_tables.into_values().collect_vec(),
             job_type,
             create_type,
-            backfill_order_state,
+            fragment_backfill_ordering,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {

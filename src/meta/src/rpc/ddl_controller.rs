@@ -62,7 +62,7 @@ use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::{BackfillOrderState, BarrierManagerRef};
+use crate::barrier::BarrierManagerRef;
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
@@ -1792,10 +1792,6 @@ impl DdlController {
             None => None,
         };
 
-        // 5. Build the backfill order control.
-        let backfill_order_state = fragment_backfill_ordering
-            .map(|orders| BackfillOrderState::new(orders, &stream_job_fragments));
-
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
             new_no_shuffle,
@@ -1812,7 +1808,7 @@ impl DdlController {
             option: CreateStreamingJobOption {},
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
-            backfill_order_state,
+            fragment_backfill_ordering,
         };
 
         Ok((
