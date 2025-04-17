@@ -18,7 +18,7 @@ use risingwave_pb::hummock::compact_task;
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{EmergencyCompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::selector::CompactionSelectorContext;
-use crate::hummock::compaction::{create_compaction_task, CompactionTask};
+use crate::hummock::compaction::{CompactionTask, create_compaction_task};
 
 #[derive(Default)]
 pub struct EmergencySelector {}

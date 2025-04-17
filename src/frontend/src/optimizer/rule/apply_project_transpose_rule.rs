@@ -17,8 +17,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 
 /// Transpose `LogicalApply` and `LogicalProject`.
 ///

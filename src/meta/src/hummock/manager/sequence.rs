@@ -117,7 +117,7 @@ pub async fn next_sstable_object_id(
 #[cfg(test)]
 mod tests {
     use crate::controller::SqlMetaStore;
-    use crate::hummock::manager::sequence::{SequenceGenerator, COMPACTION_TASK_ID};
+    use crate::hummock::manager::sequence::{COMPACTION_TASK_ID, SequenceGenerator};
 
     #[cfg(not(madsim))]
     #[tokio::test]

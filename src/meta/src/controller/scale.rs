@@ -17,29 +17,30 @@ use std::ops::{BitAnd, BitOrAssign};
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
-    Actor, ActorDispatcher, Fragment, Sink, Source, StreamingJob, Table,
+    Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, sink, source, streaming_job, table, ActorId, ActorMapping,
-    ActorUpstreamActors, ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+    ConnectorSplits, FragmentId, ObjectId, VnodeBitmap, actor, fragment, fragment_relation, sink,
+    source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
     UnionType, WithClause, WithQuery,
 };
+use risingwave_pb::stream_plan::PbDispatcher;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, DerivePartialModel, EntityTrait, FromQueryResult,
-    JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
+    QueryFilter, QuerySelect, Statement, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
-use crate::controller::utils::get_existing_job_resource_group;
+use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
+use crate::model::ActorId;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
@@ -53,9 +54,9 @@ use crate::{MetaError, MetaResult};
 ///
 /// let query = construct_no_shuffle_upstream_traverse_query(vec![2, 3]);
 ///
-/// assert_eq!(query.to_string(MysqlQueryBuilder), r#"WITH RECURSIVE `shuffle_deps` (`fragment_id`, `dispatcher_type`, `dispatcher_id`) AS (SELECT DISTINCT `actor`.`fragment_id`, `actor_dispatcher`.`dispatcher_type`, `actor_dispatcher`.`dispatcher_id` FROM `actor` INNER JOIN `actor_dispatcher` ON `actor`.`actor_id` = `actor_dispatcher`.`actor_id` WHERE `actor_dispatcher`.`dispatcher_type` = 'NO_SHUFFLE' AND `actor_dispatcher`.`dispatcher_id` IN (2, 3) UNION ALL (SELECT `actor`.`fragment_id`, `actor_dispatcher`.`dispatcher_type`, `actor_dispatcher`.`dispatcher_id` FROM `actor` INNER JOIN `actor_dispatcher` ON `actor`.`actor_id` = `actor_dispatcher`.`actor_id` INNER JOIN `shuffle_deps` ON `shuffle_deps`.`fragment_id` = `actor_dispatcher`.`dispatcher_id` WHERE `actor_dispatcher`.`dispatcher_type` = 'NO_SHUFFLE')) SELECT DISTINCT `fragment_id`, `dispatcher_type`, `dispatcher_id` FROM `shuffle_deps`"#);
-/// assert_eq!(query.to_string(PostgresQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("fragment_id", "dispatcher_type", "dispatcher_id") AS (SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE' AND "actor_dispatcher"."dispatcher_id" IN (2, 3) UNION ALL (SELECT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" INNER JOIN "shuffle_deps" ON "shuffle_deps"."fragment_id" = "actor_dispatcher"."dispatcher_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE')) SELECT DISTINCT "fragment_id", "dispatcher_type", "dispatcher_id" FROM "shuffle_deps""#);
-/// assert_eq!(query.to_string(SqliteQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("fragment_id", "dispatcher_type", "dispatcher_id") AS (SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE' AND "actor_dispatcher"."dispatcher_id" IN (2, 3) UNION ALL SELECT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" INNER JOIN "shuffle_deps" ON "shuffle_deps"."fragment_id" = "actor_dispatcher"."dispatcher_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE') SELECT DISTINCT "fragment_id", "dispatcher_type", "dispatcher_id" FROM "shuffle_deps""#);
+/// assert_eq!(query.to_string(MysqlQueryBuilder), r#"WITH RECURSIVE `shuffle_deps` (`source_fragment_id`, `dispatcher_type`, `target_fragment_id`) AS (SELECT DISTINCT `fragment_relation`.`source_fragment_id`, `fragment_relation`.`dispatcher_type`, `fragment_relation`.`target_fragment_id` FROM `fragment_relation` WHERE `fragment_relation`.`dispatcher_type` = 'NO_SHUFFLE' AND `fragment_relation`.`target_fragment_id` IN (2, 3) UNION ALL (SELECT `fragment_relation`.`source_fragment_id`, `fragment_relation`.`dispatcher_type`, `fragment_relation`.`target_fragment_id` FROM `fragment_relation` INNER JOIN `shuffle_deps` ON `shuffle_deps`.`source_fragment_id` = `fragment_relation`.`target_fragment_id` WHERE `fragment_relation`.`dispatcher_type` = 'NO_SHUFFLE')) SELECT DISTINCT `source_fragment_id`, `dispatcher_type`, `target_fragment_id` FROM `shuffle_deps`"#);
+/// assert_eq!(query.to_string(PostgresQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("source_fragment_id", "dispatcher_type", "target_fragment_id") AS (SELECT DISTINCT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE' AND "fragment_relation"."target_fragment_id" IN (2, 3) UNION ALL (SELECT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" INNER JOIN "shuffle_deps" ON "shuffle_deps"."source_fragment_id" = "fragment_relation"."target_fragment_id" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE')) SELECT DISTINCT "source_fragment_id", "dispatcher_type", "target_fragment_id" FROM "shuffle_deps""#);
+/// assert_eq!(query.to_string(SqliteQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("source_fragment_id", "dispatcher_type", "target_fragment_id") AS (SELECT DISTINCT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE' AND "fragment_relation"."target_fragment_id" IN (2, 3) UNION ALL SELECT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" INNER JOIN "shuffle_deps" ON "shuffle_deps"."source_fragment_id" = "fragment_relation"."target_fragment_id" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE') SELECT DISTINCT "source_fragment_id", "dispatcher_type", "target_fragment_id" FROM "shuffle_deps""#);
 /// ```
 pub fn construct_no_shuffle_upstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
     construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::Upstream)
@@ -77,76 +78,90 @@ fn construct_no_shuffle_traverse_query_helper(
     let cte_alias = Alias::new("shuffle_deps");
 
     // If we need to look upwards
-    //     resolve by fragment_id -> dispatcher_id
+    //     resolve by upstream fragment_id -> downstream fragment_id
     // and if downwards
-    //     resolve by dispatcher_id -> fragment_id
+    //     resolve by downstream fragment_id -> upstream fragment_id
     let (cte_ref_column, compared_column) = match direction {
         NoShuffleResolveDirection::Upstream => (
-            (cte_alias.clone(), actor::Column::FragmentId).into_column_ref(),
-            (ActorDispatcher, actor_dispatcher::Column::DispatcherId).into_column_ref(),
+            (
+                cte_alias.clone(),
+                fragment_relation::Column::SourceFragmentId,
+            )
+                .into_column_ref(),
+            (
+                FragmentRelation,
+                fragment_relation::Column::TargetFragmentId,
+            )
+                .into_column_ref(),
         ),
         NoShuffleResolveDirection::Downstream => (
-            (cte_alias.clone(), actor_dispatcher::Column::DispatcherId).into_column_ref(),
-            (Actor, actor::Column::FragmentId).into_column_ref(),
+            (
+                cte_alias.clone(),
+                fragment_relation::Column::TargetFragmentId,
+            )
+                .into_column_ref(),
+            (
+                FragmentRelation,
+                fragment_relation::Column::SourceFragmentId,
+            )
+                .into_column_ref(),
         ),
     };
 
     let mut base_query = SelectStatement::new()
-        .column((Actor, actor::Column::FragmentId))
-        .column((ActorDispatcher, actor_dispatcher::Column::DispatcherType))
-        .column((ActorDispatcher, actor_dispatcher::Column::DispatcherId))
+        .column((
+            FragmentRelation,
+            fragment_relation::Column::SourceFragmentId,
+        ))
+        .column((FragmentRelation, fragment_relation::Column::DispatcherType))
+        .column((
+            FragmentRelation,
+            fragment_relation::Column::TargetFragmentId,
+        ))
         .distinct()
-        .from(Actor)
-        .inner_join(
-            ActorDispatcher,
-            Expr::col((Actor, actor::Column::ActorId)).eq(Expr::col((
-                ActorDispatcher,
-                actor_dispatcher::Column::ActorId,
-            ))),
-        )
+        .from(FragmentRelation)
         .and_where(
-            Expr::col((ActorDispatcher, actor_dispatcher::Column::DispatcherType))
+            Expr::col((FragmentRelation, fragment_relation::Column::DispatcherType))
                 .eq(DispatcherType::NoShuffle),
         )
         .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids.clone()))
         .to_owned();
 
     let cte_referencing = SelectStatement::new()
-        .column((Actor, actor::Column::FragmentId))
-        .column((ActorDispatcher, actor_dispatcher::Column::DispatcherType))
-        .column((ActorDispatcher, actor_dispatcher::Column::DispatcherId))
+        .column((
+            FragmentRelation,
+            fragment_relation::Column::SourceFragmentId,
+        ))
+        .column((FragmentRelation, fragment_relation::Column::DispatcherType))
+        .column((
+            FragmentRelation,
+            fragment_relation::Column::TargetFragmentId,
+        ))
         // NOTE: Uncomment me once MySQL supports DISTINCT in the recursive block of CTE.
         //.distinct()
-        .from(Actor)
-        .inner_join(
-            ActorDispatcher,
-            Expr::col((Actor, actor::Column::ActorId)).eq(Expr::col((
-                ActorDispatcher,
-                actor_dispatcher::Column::ActorId,
-            ))),
-        )
+        .from(FragmentRelation)
         .inner_join(
             cte_alias.clone(),
             Expr::col(cte_ref_column).eq(Expr::col(compared_column)),
         )
         .and_where(
-            Expr::col((ActorDispatcher, actor_dispatcher::Column::DispatcherType))
+            Expr::col((FragmentRelation, fragment_relation::Column::DispatcherType))
                 .eq(DispatcherType::NoShuffle),
         )
         .to_owned();
 
     let common_table_expr = CommonTableExpression::new()
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
-        .column(actor::Column::FragmentId)
-        .column(actor_dispatcher::Column::DispatcherType)
-        .column(actor_dispatcher::Column::DispatcherId)
+        .column(fragment_relation::Column::SourceFragmentId)
+        .column(fragment_relation::Column::DispatcherType)
+        .column(fragment_relation::Column::TargetFragmentId)
         .table_name(cte_alias.clone())
         .to_owned();
 
     SelectStatement::new()
-        .column(actor::Column::FragmentId)
-        .column(actor_dispatcher::Column::DispatcherType)
-        .column(actor_dispatcher::Column::DispatcherId)
+        .column(fragment_relation::Column::SourceFragmentId)
+        .column(fragment_relation::Column::DispatcherType)
+        .column(fragment_relation::Column::TargetFragmentId)
         .distinct()
         .from(cte_alias.clone())
         .to_owned()
@@ -163,10 +178,10 @@ fn construct_no_shuffle_traverse_query_helper(
 pub struct RescheduleWorkingSet {
     pub fragments: HashMap<FragmentId, fragment::Model>,
     pub actors: HashMap<ActorId, actor::Model>,
-    pub actor_dispatchers: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+    pub actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
 
-    pub fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
-    pub fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
+    pub fragment_downstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    pub fragment_upstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
 
     pub job_resource_groups: HashMap<ObjectId, String>,
     pub related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
@@ -196,7 +211,7 @@ where
     Ok(result)
 }
 
-async fn resolve_streaming_job_definition<C>(
+pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
     job_ids: &HashSet<ObjectId>,
 ) -> MetaResult<HashMap<ObjectId, String>>
@@ -275,12 +290,12 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
             .filter(fragment::Column::JobId.is_in(table_ids))
+            .into_tuple()
             .all(&txn)
-            .await?
-            .into_iter()
-            .map(|fragment| fragment.fragment_id)
-            .collect();
+            .await?;
 
         self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
             .await
@@ -323,18 +338,19 @@ impl CatalogController {
             .chain(fragment_ids.iter().cloned())
             .collect();
 
-        let query = Actor::find()
+        let query = FragmentRelation::find()
             .select_only()
-            .column(actor::Column::FragmentId)
-            .column(actor_dispatcher::Column::DispatcherType)
-            .column(actor_dispatcher::Column::DispatcherId)
-            .distinct()
-            .join(JoinType::InnerJoin, actor::Relation::ActorDispatcher.def());
+            .column(fragment_relation::Column::SourceFragmentId)
+            .column(fragment_relation::Column::DispatcherType)
+            .column(fragment_relation::Column::TargetFragmentId)
+            .distinct();
 
         // single-layer upstream fragment ids
         let upstream_fragments: Vec<(FragmentId, DispatcherType, FragmentId)> = query
             .clone()
-            .filter(actor_dispatcher::Column::DispatcherId.is_in(extended_fragment_ids.clone()))
+            .filter(
+                fragment_relation::Column::TargetFragmentId.is_in(extended_fragment_ids.clone()),
+            )
             .into_tuple()
             .all(txn)
             .await?;
@@ -342,7 +358,9 @@ impl CatalogController {
         // single-layer downstream fragment ids
         let downstream_fragments: Vec<(FragmentId, DispatcherType, FragmentId)> = query
             .clone()
-            .filter(actor::Column::FragmentId.is_in(extended_fragment_ids.clone()))
+            .filter(
+                fragment_relation::Column::SourceFragmentId.is_in(extended_fragment_ids.clone()),
+            )
             .into_tuple()
             .all(txn)
             .await?;
@@ -354,20 +372,20 @@ impl CatalogController {
             .chain(downstream_fragments.into_iter())
             .collect();
 
-        let mut fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>> =
+        let mut fragment_upstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>> =
             HashMap::new();
-        let mut fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>> =
+        let mut fragment_downstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>> =
             HashMap::new();
 
         for (src, dispatcher_type, dst) in &all_fragment_relations {
             fragment_upstreams
                 .entry(*dst)
                 .or_default()
-                .push((*src, *dispatcher_type));
+                .insert(*src, *dispatcher_type);
             fragment_downstreams
                 .entry(*src)
                 .or_default()
-                .push((*dst, *dispatcher_type));
+                .insert(*dst, *dispatcher_type);
         }
 
         let all_fragment_ids: HashSet<_> = all_fragment_relations
@@ -381,20 +399,15 @@ impl CatalogController {
             .all(txn)
             .await?;
 
-        let actor_and_dispatchers: Vec<(_, _)> = Actor::find()
+        let actors: Vec<_> = Actor::find()
             .filter(actor::Column::FragmentId.is_in(all_fragment_ids.clone()))
-            .find_with_related(ActorDispatcher)
             .all(txn)
             .await?;
 
-        let mut actors = HashMap::with_capacity(actor_and_dispatchers.len());
-        let mut actor_dispatchers = HashMap::with_capacity(actor_and_dispatchers.len());
-
-        for (actor, dispatchers) in actor_and_dispatchers {
-            let actor_id = actor.actor_id;
-            actors.insert(actor_id, actor);
-            actor_dispatchers.insert(actor_id, dispatchers);
-        }
+        let actors: HashMap<_, _> = actors
+            .into_iter()
+            .map(|actor| (actor.actor_id as _, actor))
+            .collect();
 
         let fragments: HashMap<FragmentId, _> = fragments
             .into_iter()
@@ -435,10 +448,19 @@ impl CatalogController {
             })
             .collect();
 
+        let fragment_actor_dispatchers = get_fragment_actor_dispatchers(
+            txn,
+            fragments
+                .keys()
+                .map(|fragment_id| *fragment_id as _)
+                .collect(),
+        )
+        .await?;
+
         Ok(RescheduleWorkingSet {
             fragments,
             actors,
-            actor_dispatchers,
+            actor_dispatchers: fragment_actor_dispatchers.into_values().flatten().collect(),
             fragment_downstreams,
             fragment_upstreams,
             job_resource_groups,
@@ -470,33 +492,20 @@ impl CatalogController {
         C: ConnectionTrait,
     {
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
-        #[sea_orm(entity = "ActorDispatcher")]
-        pub struct PartialActorDispatcher {
-            pub id: i32,
-            pub actor_id: ActorId,
-            pub dispatcher_type: DispatcherType,
-            pub hash_mapping: Option<ActorMapping>,
-            pub dispatcher_id: FragmentId,
-            pub downstream_actor_ids: I32Array,
-        }
-
-        #[derive(Clone, DerivePartialModel, FromQueryResult)]
         #[sea_orm(entity = "Fragment")]
         pub struct PartialFragment {
             pub fragment_id: FragmentId,
             pub distribution_type: DistributionType,
-            pub upstream_fragment_id: I32Array,
             pub vnode_count: i32,
         }
 
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
         #[sea_orm(entity = "Actor")]
         pub struct PartialActor {
-            pub actor_id: ActorId,
+            pub actor_id: risingwave_meta_model::ActorId,
             pub fragment_id: FragmentId,
             pub status: ActorStatus,
             pub splits: Option<ConnectorSplits>,
-            pub upstream_actor_ids: ActorUpstreamActors,
             pub vnode_bitmap: Option<VnodeBitmap>,
         }
 
@@ -524,14 +533,6 @@ impl CatalogController {
             .into_iter()
             .map(|actor| (actor.actor_id, actor))
             .collect();
-
-        let actor_dispatchers: Vec<PartialActorDispatcher> = ActorDispatcher::find()
-            .into_partial_model()
-            .all(txn)
-            .await?;
-
-        let mut discovered_upstream_fragments = HashMap::new();
-        let mut discovered_upstream_actors = HashMap::new();
 
         for (fragment_id, actor_ids) in &fragment_actors {
             crit_check_in_loop!(
@@ -644,252 +645,8 @@ impl CatalogController {
             }
         }
 
-        for PartialActorDispatcher {
-            id,
-            actor_id,
-            dispatcher_type,
-            hash_mapping,
-            dispatcher_id,
-            downstream_actor_ids,
-        } in &actor_dispatchers
-        {
-            crit_check_in_loop!(
-                flag,
-                actor_map.contains_key(actor_id),
-                format!("ActorDispatcher {id} has actor_id {actor_id} which does not exist",)
-            );
-
-            let actor = &actor_map[actor_id];
-
-            crit_check_in_loop!(
-                flag,
-                fragment_map.contains_key(dispatcher_id),
-                format!(
-                    "ActorDispatcher {id} has dispatcher_id {dispatcher_id} which does not exist",
-                )
-            );
-
-            discovered_upstream_fragments
-                .entry(*dispatcher_id)
-                .or_insert(HashSet::new())
-                .insert(actor.fragment_id);
-
-            let downstream_fragment = &fragment_map[dispatcher_id];
-
-            crit_check_in_loop!(
-                flag,
-                downstream_fragment.upstream_fragment_id.inner_ref().contains(&actor.fragment_id),
-                format!(
-                    "ActorDispatcher {} has downstream fragment {} which does not have upstream fragment {}",
-                    id, dispatcher_id, actor.fragment_id
-                )
-            );
-
-            crit_check_in_loop!(
-                flag,
-                fragment_actors.contains_key(dispatcher_id),
-                format!(
-                "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
-            )
-            );
-
-            let dispatcher_downstream_actor_ids: HashSet<_> =
-                downstream_actor_ids.inner_ref().iter().cloned().collect();
-
-            let target_fragment_actor_ids = &fragment_actors[dispatcher_id];
-
-            for dispatcher_downstream_actor_id in &dispatcher_downstream_actor_ids {
-                crit_check_in_loop!(
-                    flag,
-                    actor_map.contains_key(dispatcher_downstream_actor_id),
-                    format!(
-                        "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not exist",
-                    )
-                );
-
-                let actor_fragment_id = actor.fragment_id;
-
-                crit_check_in_loop!(
-                    flag,
-                    actor_map[dispatcher_downstream_actor_id].upstream_actor_ids.inner_ref().contains_key(&actor.fragment_id),
-                    format!(
-                        "ActorDispatcher {id} has downstream_actor_id {dispatcher_downstream_actor_id} which does not have fragment_id {actor_fragment_id} in upstream_actor_id",
-                    )
-                );
-
-                discovered_upstream_actors
-                    .entry(*dispatcher_downstream_actor_id)
-                    .or_insert(HashSet::new())
-                    .insert(actor.actor_id);
-            }
-
-            match dispatcher_type {
-                DispatcherType::NoShuffle => {}
-                _ => {
-                    crit_check_in_loop!(
-                        flag,
-                        &dispatcher_downstream_actor_ids == target_fragment_actor_ids,
-                        format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id}, but dispatcher downstream actor ids: {dispatcher_downstream_actor_ids:?} != target fragment actor ids: {target_fragment_actor_ids:?}",
-                        )
-                    );
-                }
-            }
-
-            match dispatcher_type {
-                DispatcherType::Hash => {
-                    crit_check_in_loop!(
-                        flag,
-                        hash_mapping.is_some(),
-                        format!(
-                            "ActorDispatcher {id} has no hash_mapping set for {dispatcher_type:?}",
-                        )
-                    );
-                }
-                _ => {
-                    crit_check_in_loop!(
-                        flag,
-                        hash_mapping.is_none(),
-                        format!(
-                            "ActorDispatcher {id} has hash_mapping set for {dispatcher_type:?}"
-                        )
-                    );
-                }
-            }
-
-            match dispatcher_type {
-                DispatcherType::Simple | DispatcherType::NoShuffle => {
-                    crit_check_in_loop!(
-                        flag,
-                        dispatcher_downstream_actor_ids.len() == 1,
-                        format!(
-                            "ActorDispatcher {id} has more than one downstream_actor_ids for {dispatcher_type:?}",
-                        )
-                    );
-                }
-                _ => {}
-            }
-
-            match dispatcher_type {
-                DispatcherType::Hash => {
-                    let mapping = hash::ActorMapping::from_protobuf(
-                        &hash_mapping.as_ref().unwrap().to_protobuf(),
-                    );
-
-                    let mapping_actors: HashSet<_> =
-                        mapping.iter().map(|actor_id| actor_id as ActorId).collect();
-
-                    crit_check_in_loop!(
-                        flag,
-                        &mapping_actors == target_fragment_actor_ids,
-                        format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id}, but dispatcher mapping actor ids {mapping_actors:?} != target fragment actor ids: {target_fragment_actor_ids:?}",
-                        )
-                    );
-
-                    // actors only from hash distribution fragment can have hash mapping
-                    match downstream_fragment.distribution_type {
-                        DistributionType::Hash => {
-                            let mut downstream_bitmaps = HashMap::new();
-
-                            for downstream_actor in target_fragment_actor_ids {
-                                let bitmap = Bitmap::from(
-                                    &actor_map[downstream_actor]
-                                        .vnode_bitmap
-                                        .as_ref()
-                                        .unwrap()
-                                        .to_protobuf(),
-                                );
-
-                                downstream_bitmaps
-                                    .insert(*downstream_actor as hash::ActorId, bitmap);
-                            }
-
-                            crit_check_in_loop!(
-                                flag,
-                                mapping.to_bitmaps() == downstream_bitmaps,
-                                format!(
-                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id}, but dispatcher mapping {mapping:?} != discovered downstream actor bitmaps: {downstream_bitmaps:?}"
-                                )
-                            );
-                        }
-                        DistributionType::Single => {
-                            tracing::warn!(
-                                "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has single distribution type"
-                            );
-                        }
-                    }
-                }
-
-                DispatcherType::Simple => {
-                    crit_check_in_loop!(
-                        flag,
-                        target_fragment_actor_ids.len() == 1,
-                        format!(
-                            "ActorDispatcher {id} has more than one actors in downstream fragment {dispatcher_id} for {dispatcher_type:?}",
-                        )
-                    );
-
-                    crit_check_in_loop!(
-                        flag,
-                        downstream_fragment.distribution_type != DistributionType::Hash,
-                        format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has hash distribution type for {dispatcher_type:?}",
-                        )
-                    );
-                }
-
-                DispatcherType::NoShuffle => {
-                    let downstream_actor_id =
-                        dispatcher_downstream_actor_ids.iter().next().unwrap();
-                    let downstream_actor = &actor_map[downstream_actor_id];
-
-                    crit_check_in_loop!(
-                        flag,
-                        actor.vnode_bitmap == downstream_actor.vnode_bitmap,
-                        format!(
-                            "ActorDispatcher {id} has different vnode_bitmap with downstream_actor_id {downstream_actor_id} for {dispatcher_type:?}",
-                        )
-                    );
-                }
-
-                DispatcherType::Broadcast => {
-                    if let DistributionType::Single = downstream_fragment.distribution_type {
-                        tracing::warn!(
-                            "ActorDispatcher {id} has broadcast downstream fragment {dispatcher_id} which has single distribution type"
-                        );
-                    }
-                }
-            }
-        }
-
-        for (fragment_id, fragment) in &fragment_map {
-            let discovered_upstream_fragment_ids = discovered_upstream_fragments
-                .get(&fragment.fragment_id)
-                .cloned()
-                .unwrap_or_default();
-
-            let upstream_fragment_ids: HashSet<_> = fragment
-                .upstream_fragment_id
-                .inner_ref()
-                .iter()
-                .copied()
-                .collect();
-
-            crit_check_in_loop!(
-                flag,
-                discovered_upstream_fragment_ids == upstream_fragment_ids,
-                format!(
-                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != fragment upstream fragment ids: {upstream_fragment_ids:?}",
-                )
-            );
-        }
-
         for PartialActor {
-            actor_id,
-            status,
-            upstream_actor_ids,
-            ..
+            actor_id, status, ..
         } in actor_map.values()
         {
             crit_check_in_loop!(
@@ -897,25 +654,6 @@ impl CatalogController {
                 *status == ActorStatus::Running,
                 format!("Actor {actor_id} has status {status:?} which is not Running",)
             );
-
-            let discovered_upstream_actor_ids = discovered_upstream_actors
-                .get(actor_id)
-                .cloned()
-                .unwrap_or_default();
-
-            let upstream_actor_ids: HashSet<_> = upstream_actor_ids
-                .inner_ref()
-                .iter()
-                .flat_map(|(_, v)| v.iter().copied())
-                .collect();
-
-            crit_check_in_loop!(
-                flag,
-                discovered_upstream_actor_ids == upstream_actor_ids,
-                format!(
-                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != actor upstream actor ids: {upstream_actor_ids:?}",
-                )
-            )
         }
 
         if flag {

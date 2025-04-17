@@ -40,8 +40,8 @@ fn extract_type_from_option(option_segment: &PathSegment) -> Type {
 ///
 /// Returns `data_type::TypeName`.
 fn extract_enum_type_from_field(field: &Field) -> Option<Type> {
-    use syn::punctuated::Punctuated;
     use syn::Token;
+    use syn::punctuated::Punctuated;
 
     // The type must be i32.
     match &field.ty {

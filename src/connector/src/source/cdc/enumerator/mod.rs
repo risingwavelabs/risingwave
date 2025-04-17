@@ -16,19 +16,19 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
-use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, JVM};
+use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    table_schema_exclude_additional_columns, CdcProperties, CdcSourceTypeTrait, Citus,
-    DebeziumCdcSplit, Mongodb, Mysql, Postgres, SqlServer,
+    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
+    SqlServer, table_schema_exclude_additional_columns,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 

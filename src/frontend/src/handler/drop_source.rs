@@ -62,7 +62,7 @@ pub async fn handle_drop_source(
                         .into())
                 } else {
                     Err(e.into())
-                }
+                };
             }
         }
     };

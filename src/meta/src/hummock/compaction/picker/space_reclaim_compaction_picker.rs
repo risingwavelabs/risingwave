@@ -177,10 +177,11 @@ mod test {
     use risingwave_hummock_sdk::level::Level;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
-    use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::LevelType;
+    use risingwave_pb::hummock::compact_task;
 
     use super::*;
+    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
@@ -189,7 +190,6 @@ mod test {
     use crate::hummock::compaction::selector::{
         CompactionSelector, LocalSelectorStatistic, SpaceReclaimCompactionSelector,
     };
-    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::compaction_selector_context;
 
@@ -358,22 +358,24 @@ mod test {
                 start_id += 1;
             }
 
-            assert!(selector
-                .pick_compaction(
-                    1,
-                    compaction_selector_context(
-                        &group_config,
-                        &levels,
-                        &member_table_ids,
-                        &mut levels_handler,
-                        &mut local_stats,
-                        &HashMap::default(),
-                        Arc::new(CompactionDeveloperConfig::default()),
-                        &Default::default(),
-                        &HummockVersionStateTableInfo::empty(),
-                    ),
-                )
-                .is_none())
+            assert!(
+                selector
+                    .pick_compaction(
+                        1,
+                        compaction_selector_context(
+                            &group_config,
+                            &levels,
+                            &member_table_ids,
+                            &mut levels_handler,
+                            &mut local_stats,
+                            &HashMap::default(),
+                            Arc::new(CompactionDeveloperConfig::default()),
+                            &Default::default(),
+                            &HummockVersionStateTableInfo::empty(),
+                        ),
+                    )
+                    .is_none()
+            )
         }
 
         {

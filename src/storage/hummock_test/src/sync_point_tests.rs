@@ -12,31 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use foyer::CacheHint;
-use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::selector::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{setup_compute_env, setup_compute_env_with_config};
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
-use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
-use risingwave_storage::hummock::compactor::CompactorContext;
-use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::StateStore;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
+use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
+use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions};
 use serial_test::serial;
 
 use super::compactor_tests::tests::get_hummock_storage;

@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
 use std::mem;
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use prehash::{new_prehashed_map_with_capacity, Passthru, Prehashed};
+use prehash::{Passthru, Prehashed, new_prehashed_map_with_capacity};
 use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::stream_record::Record;
@@ -129,31 +129,33 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(v));
             }
-            Entry::Occupied(mut e) => {
-                match e.get() {
-                    RowOp::Delete(ref old_v) => {
-                        e.insert(RowOp::Update((*old_v, v)));
-                    }
-                    RowOp::Insert(_) => {
-                        if self.warn_for_inconsistent_stream {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(
-                                suppressed_count, "double insert for the same pk, breaking the sink's pk constraint"
-                            );
-                            }
-                        }
-                        e.insert(RowOp::Insert(v));
-                    }
-                    RowOp::Update((ref old_v, _)) => {
-                        if self.warn_for_inconsistent_stream {
-                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                tracing::warn!(suppressed_count, "double insert for the same pk, breaking the sink's pk constraint");
-                            }
-                        }
-                        e.insert(RowOp::Update((*old_v, v)));
-                    }
+            Entry::Occupied(mut e) => match e.get() {
+                RowOp::Delete(old_v) => {
+                    e.insert(RowOp::Update((*old_v, v)));
                 }
-            }
+                RowOp::Insert(_) => {
+                    if self.warn_for_inconsistent_stream {
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(
+                                suppressed_count,
+                                "double insert for the same pk, breaking the sink's pk constraint"
+                            );
+                        }
+                    }
+                    e.insert(RowOp::Insert(v));
+                }
+                RowOp::Update((old_v, _)) => {
+                    if self.warn_for_inconsistent_stream {
+                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                            tracing::warn!(
+                                suppressed_count,
+                                "double insert for the same pk, breaking the sink's pk constraint"
+                            );
+                        }
+                    }
+                    e.insert(RowOp::Update((*old_v, v)));
+                }
+            },
         }
     }
 
@@ -167,7 +169,7 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 RowOp::Insert(_) => {
                     e.remove();
                 }
-                RowOp::Update((ref prev, _)) => {
+                RowOp::Update((prev, _)) => {
                     e.insert(RowOp::Delete(*prev));
                 }
                 RowOp::Delete(_) => {

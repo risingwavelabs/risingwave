@@ -16,11 +16,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::{ExecuteContext, Task};
-use crate::util::stylized_risedev_subcmd;
 use crate::MinioConfig;
+use crate::util::stylized_risedev_subcmd;
 
 pub struct MinioService {
     config: MinioConfig,
@@ -77,7 +77,7 @@ impl MinioService {
                 );
             }
             other_length => {
-                return Err(anyhow!("expected 0 or 1 prometheus, get {}", other_length))
+                return Err(anyhow!("expected 0 or 1 prometheus, get {}", other_length));
             }
         }
 

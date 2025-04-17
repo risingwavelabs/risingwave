@@ -16,12 +16,12 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
+    DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("to_jsonb(*) -> jsonb")]
 fn to_jsonb(input: Option<impl ToJsonb>, ctx: &Context) -> Result<JsonbVal> {
@@ -245,16 +245,11 @@ impl ToJsonb for MapRef<'_> {
 impl ToJsonb for StructRef<'_> {
     fn add_to(self, data_type: &DataType, builder: &mut Builder) -> Result<()> {
         builder.begin_object();
-        for (i, (value, (field_name, field_type))) in self
+        for (value, (field_name, field_type)) in self
             .iter_fields_ref()
             .zip_eq_debug(data_type.as_struct().iter())
-            .enumerate()
         {
-            if field_name.is_empty() {
-                builder.display(format_args!("f{}", i + 1));
-            } else {
-                builder.add_string(field_name);
-            };
+            builder.add_string(field_name);
             value.add_to(field_type, builder)?;
         }
         builder.end_object();

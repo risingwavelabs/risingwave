@@ -31,8 +31,8 @@ use hyper_util::rt::TokioIo;
 use itertools::Itertools;
 use pin_project_lite::pin_project;
 use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -41,7 +41,7 @@ use tower_service::Service;
 use tracing::{debug, info, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::{register_guarded_int_counter_vec_with_registry, LabelGuardedIntCounterVec};
+use crate::{LabelGuardedIntCounterVec, register_guarded_int_counter_vec_with_registry};
 
 #[auto_impl::auto_impl(&mut)]
 pub trait MonitorAsyncReadWrite {
@@ -392,7 +392,7 @@ pub struct ConnectionMetrics {
     write_rate: IntCounterVec,
     writer_count: IntGaugeVec,
 
-    io_err_rate: LabelGuardedIntCounterVec<4>,
+    io_err_rate: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =

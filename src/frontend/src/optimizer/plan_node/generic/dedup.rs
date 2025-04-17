@@ -16,9 +16,9 @@ use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{FieldDisplay, Schema};
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Dedup<PlanRef> {

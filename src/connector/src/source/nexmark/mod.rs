@@ -22,13 +22,13 @@ pub use enumerator::*;
 use nexmark::config::{NexmarkConfig, RateShape};
 use nexmark::event::EventType;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::source::nexmark::source::reader::NexmarkSplitReader;
+use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
-
+use crate::source::nexmark::source::reader::NexmarkSplitReader;
 pub const NEXMARK_CONNECTOR: &str = "nexmark";
 
 const fn identity_i32<const V: i32>() -> i32 {
@@ -42,6 +42,8 @@ const fn identity_u64<const V: u64>() -> u64 {
 const fn none<T>() -> Option<T> {
     None
 }
+
+impl EnforceSecret for NexmarkProperties {}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]

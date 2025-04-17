@@ -124,35 +124,3 @@ pub fn request_to_telemetry_event(
         });
     }
 }
-
-#[cfg(test)]
-mod test {
-
-    use super::*;
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_telemetry_report_event() {
-        let event_stage = PbTelemetryEventStage::CreateStreamJob;
-        let event_name = "test_feature";
-        let catalog_id = 1;
-        let connector_name = Some("test_connector".to_string());
-        let object = Some(PbTelemetryDatabaseObject::Source);
-        let attributes = None;
-        let node = "test_node".to_string();
-
-        request_to_telemetry_event(
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
-            event_stage,
-            event_name,
-            catalog_id,
-            connector_name,
-            object,
-            attributes,
-            node,
-            true,
-        );
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    }
-}

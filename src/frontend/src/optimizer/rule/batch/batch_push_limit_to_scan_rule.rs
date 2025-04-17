@@ -19,10 +19,10 @@
 
 use itertools::Itertools;
 
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 
 pub struct BatchPushLimitToScanRule {}
 

@@ -28,12 +28,12 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedUintGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_metrics::{
-    register_guarded_uint_gauge_vec_with_registry, LabelGuardedUintGauge,
+    LabelGuardedUintGauge, register_guarded_uint_gauge_vec_with_registry,
 };
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
 
-static METRICS: LazyLock<LabelGuardedUintGaugeVec<1>> = LazyLock::new(|| {
+static METRICS: LazyLock<LabelGuardedUintGaugeVec> = LazyLock::new(|| {
     register_guarded_uint_gauge_vec_with_registry!(
         "backfill_rate_limit_bytes",
         "backfill rate limit bytes per second",
@@ -245,7 +245,7 @@ impl RateLimiterTrait for RateLimiter {
 /// A rate limiter that supports multiple rate limit policy, online policy switch and metrics support.
 pub struct MonitoredRateLimiter {
     inner: RateLimiter,
-    metric: LabelGuardedUintGauge<1>,
+    metric: LabelGuardedUintGauge,
     rate_limit: AtomicU64,
 }
 
@@ -473,10 +473,10 @@ impl LeakBucket {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, rng as thread_rng};
 
     use super::*;
 
@@ -514,7 +514,7 @@ mod tests {
         let mut handles = vec![];
         let mut rng = thread_rng();
         for _ in 0..THREADS {
-            let rate = rng.gen_range(10..20);
+            let rate = rng.random_range(10..20);
             let handle = std::thread::spawn({
                 let v = v.clone();
                 let limiter = lb.clone();
@@ -564,7 +564,7 @@ mod tests {
         let mut handles = vec![];
         let mut rng = thread_rng();
         for _ in 0..THREADS {
-            let rate = rng.gen_range(500..1500);
+            let rate = rng.random_range(500..1500);
             let handle = std::thread::spawn({
                 let v = v.clone();
                 let limiter = lb.clone();

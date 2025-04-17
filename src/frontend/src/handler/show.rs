@@ -28,27 +28,28 @@ use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
-    display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
+    Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
 };
 
-use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::{Result, RwError};
-use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
-use crate::session::cursor_manager::SubscriptionCursor;
+use crate::handler::create_connection::print_connection_params;
 use crate::session::SessionImpl;
+use crate::session::cursor_manager::SubscriptionCursor;
+use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, None, false)?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns.clone(),
@@ -94,7 +95,7 @@ pub fn get_indexes_from_table(
     table_name: ObjectName,
 ) -> Result<Vec<Arc<IndexCatalog>>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, None, false)?;
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
         _ => {
@@ -160,29 +161,67 @@ struct ShowObjectRow {
 pub struct ShowColumnRow {
     pub name: String,
     pub r#type: String,
-    pub is_hidden: Option<String>,
+    pub is_hidden: Option<String>, // XXX: why not bool?
     pub description: Option<String>,
 }
 
 impl ShowColumnRow {
+    /// Create a row with the given information. If the data type is a struct or list,
+    /// flatten the data type to also generate rows for its fields.
+    fn flatten(
+        name: String,
+        data_type: DataType,
+        is_hidden: bool,
+        description: Option<String>,
+    ) -> Vec<Self> {
+        // TODO(struct): use struct's type name once supported.
+        let r#type = match &data_type {
+            DataType::Struct(_) => "struct".to_owned(),
+            DataType::List(box DataType::Struct(_)) => "struct[]".to_owned(),
+            d => d.to_string(),
+        };
+
+        let mut rows = vec![ShowColumnRow {
+            name: name.clone(),
+            r#type,
+            is_hidden: Some(is_hidden.to_string()),
+            description,
+        }];
+
+        match data_type {
+            DataType::Struct(st) => {
+                rows.extend(st.iter().flat_map(|(field_name, field_data_type)| {
+                    Self::flatten(
+                        format!("{}.{}", name, field_name),
+                        field_data_type.clone(),
+                        is_hidden,
+                        None,
+                    )
+                }));
+            }
+
+            DataType::List(inner @ box DataType::Struct(_)) => {
+                rows.extend(Self::flatten(
+                    format!("{}[1]", name),
+                    *inner,
+                    is_hidden,
+                    None,
+                ));
+            }
+
+            _ => {}
+        }
+
+        rows
+    }
+
     pub fn from_catalog(col: ColumnCatalog) -> Vec<Self> {
-        col.column_desc
-            .flatten()
-            .into_iter()
-            .map(|c| {
-                let type_name = if let DataType::Struct { .. } = c.data_type {
-                    c.type_name.clone()
-                } else {
-                    c.data_type.to_string()
-                };
-                ShowColumnRow {
-                    name: c.name,
-                    r#type: type_name,
-                    is_hidden: Some(col.is_hidden.to_string()),
-                    description: c.description,
-                }
-            })
-            .collect()
+        Self::flatten(
+            col.column_desc.name,
+            col.column_desc.data_type,
+            col.is_hidden,
+            col.column_desc.description,
+        )
     }
 }
 
@@ -324,19 +363,31 @@ pub async fn handle_show_object(
     }
 
     let catalog_reader = session.env().catalog_reader();
+    let user_reader = session.env().user_info_reader();
 
     let names = match command {
         ShowObject::Table { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_user_table().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_user_table_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::InternalTable { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
-                    .iter_internal_table()
+                    .iter_internal_table_with_acl(current_user)
                     .map(|t| t.name.clone())
                     .collect()
             })
@@ -347,28 +398,56 @@ pub async fn handle_show_object(
             .get_all_schema_names(&session.database())?,
         ShowObject::View { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_view().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_view_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::MaterializedView { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_created_mvs().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_created_mvs_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::Source { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             let mut sources = iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_source().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_source_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             });
             sources.extend(session.temporary_source_manager().keys());
             sources
         }
         ShowObject::Sink { schema } => {
             let reader = catalog_reader.read_guard();
+            let user_reader = user_reader.read_guard();
+            let current_user = user_reader
+                .get_user_by_name(&session.user_name())
+                .expect("user not found");
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_sink().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_sink_with_acl(current_user)
+                    .map(|t| t.name.clone())
+                    .collect()
             })
         }
         ShowObject::Subscription { schema } => {
@@ -645,6 +724,10 @@ pub fn handle_show_create_object(
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+    let user_reader = session.env().user_info_reader().read_guard();
+    let current_user = user_reader
+        .get_user_by_name(user_name)
+        .expect("user not found");
 
     let (sql, schema_name) = match show_create_type {
         ShowCreateType::MaterializedView => {
@@ -654,7 +737,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
-                            .filter(|t| t.is_mview()),
+                            .filter(|t| {
+                                t.is_mview()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        t.id.table_id,
+                                        t.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
@@ -663,6 +754,11 @@ pub fn handle_show_create_object(
         ShowCreateType::View => {
             let (view, schema) =
                 catalog_reader.get_view_by_name(&database, schema_path, &object_name)?;
+            if !view.is_system_view()
+                && !has_access_to_object(current_user, schema, view.id, view.owner)
+            {
+                return Err(CatalogError::NotFound("view", name.to_string()).into());
+            }
             (view.create_sql(schema.to_owned()), schema)
         }
         ShowCreateType::Table => {
@@ -672,7 +768,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
-                            .filter(|t| t.is_user_table()),
+                            .filter(|t| {
+                                t.is_user_table()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        t.id.table_id,
+                                        t.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
@@ -682,6 +786,9 @@ pub fn handle_show_create_object(
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_sink_by_name(&database, schema_path, &object_name)?;
+            if !has_access_to_object(current_user, schema, sink.id.sink_id, sink.owner.user_id) {
+                return Err(CatalogError::NotFound("sink", name.to_string()).into());
+            }
             (sink.create_sql(), schema)
         }
         ShowCreateType::Source => {
@@ -691,7 +798,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_source_by_name(&object_name)
-                            .filter(|s| s.associated_table_id.is_none()),
+                            .filter(|s| {
+                                s.associated_table_id.is_none()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        s.id,
+                                        s.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
@@ -704,7 +819,15 @@ pub fn handle_show_create_object(
                         catalog_reader
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
-                            .filter(|t| t.is_index()),
+                            .filter(|t| {
+                                t.is_index()
+                                    && has_access_to_object(
+                                        current_user,
+                                        schema_name,
+                                        t.id.table_id,
+                                        t.owner,
+                                    )
+                            }),
                     )
                 })?
                 .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
@@ -716,6 +839,14 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
+            if !has_access_to_object(
+                current_user,
+                schema,
+                subscription.id.subscription_id,
+                subscription.owner.user_id,
+            ) {
+                return Err(CatalogError::NotFound("subscription", name.to_string()).into());
+            }
             (subscription.create_sql(), schema)
         }
     };
@@ -735,7 +866,7 @@ mod tests {
 
     use futures_async_stream::for_await;
 
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_show_source() {
@@ -790,7 +921,7 @@ mod tests {
                 ),
                 (
                     "country",
-                    "test.Country",
+                    "struct",
                 ),
                 (
                     "country.address",
@@ -798,7 +929,7 @@ mod tests {
                 ),
                 (
                     "country.city",
-                    "test.City",
+                    "struct",
                 ),
                 (
                     "country.city.address",

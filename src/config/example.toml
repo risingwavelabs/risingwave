@@ -63,6 +63,7 @@ compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
 periodic_scheduling_compaction_group_merge_interval_sec = 600
+compaction_group_merge_dimension_threshold = 1.2
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -81,6 +82,15 @@ level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 max_level = 6
+sst_allowed_trivial_move_min_size = 4194304
+sst_allowed_trivial_move_max_count = 64
+max_l0_compact_level_count = 42
+disable_auto_group_scheduling = false
+max_overlapping_level_size = 268435456
+emergency_level0_sst_file_count = 2000
+emergency_level0_sub_level_partition = 256
+level0_stop_write_threshold_max_sst_count = 10000
+level0_stop_write_threshold_max_size = 322122547200
 
 [meta.developer]
 meta_cached_traces_num = 256
@@ -97,6 +107,15 @@ meta_time_travel_vacuum_interval_sec = 30
 meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
 meta_hummock_gc_history_insert_batch_size = 1000
 meta_hummock_time_travel_filter_out_objects_batch_size = 1000
+
+[meta.developer.meta_compute_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_stream_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_frontend_client_config]
+connect_timeout_secs = 5
 
 [meta.meta_store_config]
 max_connections = 10
@@ -116,7 +135,17 @@ enable_spill = true
 [batch.developer]
 batch_connector_message_buffer_size = 16
 batch_output_channel_size = 64
+batch_receiver_channel_size = 1000
+batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+
+[batch.developer.batch_compute_client_config]
+connect_timeout_secs = 5
+
+[frontend]
+max_total_query_size_bytes = 1073741824
+min_single_query_size_bytes = 1048576
+max_single_query_size_bytes = 1073741824
 
 [streaming]
 in_flight_barrier_nums = 10000
@@ -151,7 +180,15 @@ stream_exchange_connection_pool_size = 1
 stream_enable_auto_schema_change = true
 stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
+stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
+stream_enable_explain_analyze_stats = true
+stream_iceberg_list_interval_sec = 1
+stream_iceberg_fetch_batch_size = 1024
+stream_iceberg_sink_positional_delete_cache_size = 1024
+
+[streaming.developer.stream_compute_client_config]
+connect_timeout_secs = 5
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -185,7 +222,7 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
-time_travel_version_cache_capacity = 2
+time_travel_version_cache_capacity = 10
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
@@ -203,7 +240,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-recover_mode = "None"
+recover_mode = "Quiet"
 
 [storage.data_file_cache.runtime_config.Unified]
 worker_threads = 0
@@ -219,7 +256,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-recover_mode = "None"
+recover_mode = "Quiet"
 
 [storage.meta_file_cache.runtime_config.Unified]
 worker_threads = 0
@@ -285,3 +322,11 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
+adaptive_parallelism_strategy = "Auto"
+per_database_isolation = true
+enforce_secret_on_cloud = false
+
+[udf]
+enable_embedded_python_udf = false
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true

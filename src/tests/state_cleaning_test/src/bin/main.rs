@@ -25,7 +25,7 @@ use clap::Parser;
 use futures::{StreamExt, TryStreamExt};
 use regex::Regex;
 use serde::Deserialize;
-use serde_with::{serde_as, OneOrMany};
+use serde_with::{OneOrMany, serde_as};
 use tokio::fs;
 use tokio_postgres::{NoTls, SimpleQueryMessage};
 use tokio_stream::wrappers::ReadDirStream;

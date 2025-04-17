@@ -15,7 +15,10 @@
 use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
+use risingwave_connector::source::enforce_secret_on_cloud_connection;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::catalog::connection_params::ConnectionType;
@@ -25,15 +28,15 @@ use risingwave_pb::secret::SecretRef;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
+use crate::WithOptions;
 use crate::binder::Binder;
-use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::SecretId;
+use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
-use crate::WithOptions;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 
@@ -71,6 +74,7 @@ fn resolve_create_connection_payload(
         KAFKA_CONNECTOR => ConnectionType::Kafka,
         ICEBERG_CONNECTOR => ConnectionType::Iceberg,
         SCHEMA_REGISTRY_CONNECTION_TYPE => ConnectionType::SchemaRegistry,
+        ES_SINK => ConnectionType::Elasticsearch,
         _ => {
             return Err(RwError::from(ProtocolError(format!(
                 "Connection type \"{connection_type}\" is not supported"
@@ -113,6 +117,24 @@ pub async fn handle_create_connection(
     let create_connection_payload = resolve_create_connection_payload(with_properties, &session)?;
 
     let catalog_writer = session.catalog_writer()?;
+
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret_on_cloud()
+    {
+        use risingwave_pb::ddl_service::create_connection_request::Payload::ConnectionParams;
+        let ConnectionParams(cp) = &create_connection_payload else {
+            unreachable!()
+        };
+        enforce_secret_on_cloud_connection(
+            &cp.connection_type(),
+            cp.properties.keys().map(|s| s.as_str()),
+        )?;
+    }
+
     catalog_writer
         .create_connection(
             connection_name,

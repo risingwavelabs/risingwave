@@ -14,7 +14,7 @@
 
 use super::{OwnedRow, Row};
 use crate::types::{DefaultOrd, DefaultOrdered, DefaultPartialOrd};
-use crate::util::sort_util::{cmp_datum_iter, partial_cmp_datum_iter, OrderType};
+use crate::util::sort_util::{OrderType, cmp_datum_iter, partial_cmp_datum_iter};
 
 impl<R: Row> Row for DefaultOrdered<R> {
     deref_forward_row! {}

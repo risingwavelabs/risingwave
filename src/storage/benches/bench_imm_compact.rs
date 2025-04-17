@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use criterion::async_executor::FuturesExecutor;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::compactor::merge_imms_in_memory;

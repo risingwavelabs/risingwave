@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{JsonbRef, JsonbVal, ListRef};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Removes a key (and its value) from a JSON object, or matching string value(s) from a JSON array.
 ///
@@ -130,13 +130,13 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
             return Err(ExprError::InvalidParam {
                 name: "jsonb",
                 reason: "cannot delete from object using integer index".into(),
-            })
+            });
         }
         _ => {
             return Err(ExprError::InvalidParam {
                 name: "jsonb",
                 reason: "cannot delete from scalar".into(),
-            })
+            });
         }
     };
     let Some(idx) = normalize_array_index(array.len(), index) else {

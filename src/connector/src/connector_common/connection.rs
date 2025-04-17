@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::Context;
-use opendal::services::{Gcs, S3};
 use opendal::Operator;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use opendal::services::{Gcs, S3};
+use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::PbConnection;
@@ -33,13 +34,16 @@ use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
 use crate::deserialize_optional_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
+use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
+// All XxxConnection structs should implement this trait as well as EnforceSecretOnCloud trait.
 #[async_trait]
 pub trait Connection: Send {
     async fn validate_connection(&self) -> ConnectorResult<()>;
@@ -55,6 +59,16 @@ pub struct KafkaConnection {
     pub kafka_private_link_common: KafkaPrivateLinkCommon,
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+}
+
+impl EnforceSecret for KafkaConnection {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            KafkaConnectionProps::enforce_one(prop)?;
+            AwsAuthProps::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<()> {
@@ -132,11 +146,14 @@ pub struct IcebergConnection {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
-    /// Path of iceberg warehouse, only applicable in storage catalog.
+    /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
-    /// Catalog name, can be omitted for storage catalog, but
-    /// must be set for other catalogs.
+    /// Catalog id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
+    /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
@@ -150,14 +167,30 @@ pub struct IcebergConnection {
     /// A Bearer token which will be used for interaction with the server.
     #[serde(rename = "catalog.token")]
     pub token: Option<String>,
-    /// `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
     /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
-    #[serde(rename = "catalog.oauth2-server-uri")]
+    #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
     /// Additional scope for OAuth2.
     #[serde(rename = "catalog.scope")]
     pub scope: Option<String>,
+
+    /// The signing region to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_region")]
+    pub rest_signing_region: Option<String>,
+
+    /// The signing name to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_name")]
+    pub rest_signing_name: Option<String>,
+
+    /// Whether to use SigV4 for signing requests to the REST catalog.
+    #[serde(
+        rename = "catalog.rest.sigv4_enabled",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub rest_sigv4_enabled: Option<bool>,
 
     #[serde(
         rename = "s3.path.style.access",
@@ -171,6 +204,23 @@ pub struct IcebergConnection {
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
+}
+
+impl EnforceSecret for IcebergConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "s3.access.key",
+        "s3.secret.key",
+        "gcs.credential",
+        "catalog.token",
+    };
 }
 
 #[async_trait]
@@ -178,12 +228,13 @@ impl Connection for IcebergConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
         let info = match &self.warehouse_path {
             Some(warehouse_path) => {
+                let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                 let url = Url::parse(warehouse_path);
-                if url.is_err()
-                    && let Some(catalog_type) = &self.catalog_type
-                    && catalog_type == "rest"
+                if (url.is_err() || is_s3_tables)
+                    && matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust"))
                 {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
+                    // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                     // so we allow it to pass here.
                     None
                 } else {
@@ -200,9 +251,7 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if let Some(catalog_type) = &self.catalog_type
-                    && catalog_type == "rest"
-                {
+                if matches!(self.catalog_type.as_deref(), Some("rest" | "rest_rust")) {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
@@ -210,7 +259,7 @@ impl Connection for IcebergConnection {
             }
         };
 
-        // test storage
+        // Test warehouse
         if let Some((scheme, bucket, root)) = info {
             match scheme.as_str() {
                 "s3" | "s3a" => {
@@ -246,7 +295,31 @@ impl Connection for IcebergConnection {
             }
         }
 
-        // test catalog
+        if self.hosted_catalog.unwrap_or(false) {
+            // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
+            if self.catalog_type.is_some() {
+                bail!("`catalog.type` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_uri.is_some() {
+                bail!("`catalog.uri` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_name.is_some() {
+                bail!("`catalog.name` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_user.is_some() {
+                bail!("`catalog.jdbc.user` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_password.is_some() {
+                bail!("`catalog.jdbc.password` must not be set when `hosted_catalog` is set");
+            }
+            return Ok(());
+        }
+
+        if self.catalog_type.is_none() {
+            bail!("`catalog.type` must be set");
+        }
+
+        // Test catalog
         let iceberg_common = IcebergCommon {
             catalog_type: self.catalog_type.clone(),
             region: self.region.clone(),
@@ -255,16 +328,21 @@ impl Connection for IcebergConnection {
             secret_key: self.secret_key.clone(),
             gcs_credential: self.gcs_credential.clone(),
             warehouse_path: self.warehouse_path.clone(),
+            glue_id: self.glue_id.clone(),
             catalog_name: self.catalog_name.clone(),
             catalog_uri: self.catalog_uri.clone(),
             credential: self.credential.clone(),
             token: self.token.clone(),
             oauth2_server_uri: self.oauth2_server_uri.clone(),
             scope: self.scope.clone(),
+            rest_signing_region: self.rest_signing_region.clone(),
+            rest_signing_name: self.rest_signing_name.clone(),
+            rest_sigv4_enabled: self.rest_sigv4_enabled,
             path_style_access: self.path_style_access,
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
+            hosted_catalog: self.hosted_catalog,
         };
 
         let mut java_map = HashMap::new();
@@ -304,4 +382,31 @@ impl Connection for ConfluentSchemaRegistryConnection {
         client.validate_connection().await?;
         Ok(())
     }
+}
+
+impl EnforceSecret for ConfluentSchemaRegistryConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "schema.registry.password",
+    };
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Hash, Eq)]
+pub struct ElasticsearchConnection(pub BTreeMap<String, String>);
+
+#[async_trait]
+impl Connection for ElasticsearchConnection {
+    async fn validate_connection(&self) -> ConnectorResult<()> {
+        const CONNECTOR: &str = "elasticsearch";
+
+        let config = ElasticSearchOpenSearchConfig::try_from(self)?;
+        let client = config.build_client(CONNECTOR)?;
+        client.ping().await?;
+        Ok(())
+    }
+}
+
+impl EnforceSecret for ElasticsearchConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "elasticsearch.password",
+    };
 }

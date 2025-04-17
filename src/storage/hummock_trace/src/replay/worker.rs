@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
 use futures::StreamExt;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use futures::stream::BoxStream;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
 use super::{GlobalReplay, LocalReplay, ReplayRequest, WorkerId, WorkerResponse};
@@ -327,39 +327,6 @@ impl ReplayWorker {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 local_storage.seal_current_epoch(epoch, opts);
-            }
-            Operation::LocalStorageEpoch => {
-                assert_ne!(storage_type, StorageType::Global);
-                let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                let res = res_rx.recv().await.expect("recv result failed");
-                if let OperationResult::LocalStorageEpoch(expected) = res {
-                    let actual = local_storage.epoch();
-                    assert_eq!(TraceResult::Ok(actual), expected, "epoch wrong");
-                } else {
-                    panic!(
-                        "wrong local storage epoch result, expect epoch result, but got {:?}",
-                        res
-                    );
-                }
-            }
-            Operation::LocalStorageIsDirty => {
-                assert_ne!(storage_type, StorageType::Global);
-                let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                let res = res_rx.recv().await.expect("recv result failed");
-                if let OperationResult::LocalStorageIsDirty(expected) = res {
-                    let actual = local_storage.is_dirty();
-                    assert_eq!(
-                        TraceResult::Ok(actual),
-                        expected,
-                        "is_dirty wrong, epoch: {}",
-                        local_storage.epoch()
-                    );
-                } else {
-                    panic!(
-                        "wrong local storage is_dirty result, expect is_dirty result, but got {:?}",
-                        res
-                    );
-                }
             }
             Operation::Flush => {
                 assert_ne!(storage_type, StorageType::Global);

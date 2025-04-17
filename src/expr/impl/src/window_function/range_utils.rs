@@ -14,7 +14,7 @@
 
 use std::ops::Range;
 
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 /// Calculate range (A - B), the result might be the union of two ranges when B is totally included
 /// in the A.

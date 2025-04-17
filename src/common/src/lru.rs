@@ -21,8 +21,8 @@ use std::ptr::NonNull;
 use std::sync::atomic::Ordering;
 
 pub use ahash::RandomState;
-use hashbrown::hash_table::Entry;
 use hashbrown::HashTable;
+use hashbrown::hash_table::Entry;
 
 use crate::sequence::{AtomicSequence, Sequence, Sequencer};
 
@@ -150,7 +150,7 @@ where
                     let mut ptr = *o.get();
                     let entry = ptr.as_mut();
                     std::mem::swap(&mut value, entry.value_mut());
-                    self.detach(ptr);
+                    Self::detach(ptr);
                     self.attach(ptr);
                     Some(value)
                 }
@@ -176,6 +176,35 @@ where
         }
     }
 
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        unsafe {
+            let hash = self.hash_builder.hash_one(key);
+
+            match self
+                .map
+                .entry(hash, |p| p.as_ref().key() == key, |p| p.as_ref().hash)
+            {
+                Entry::Occupied(o) => {
+                    let ptr = *o.get();
+
+                    // Detach the entry from the LRU list
+                    Self::detach(ptr);
+
+                    // Extract entry from the box and get its value
+                    let mut entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
+                    entry.key.assume_init_drop();
+                    let value = entry.value.assume_init();
+
+                    // Remove entry from the hash table
+                    o.remove();
+
+                    Some(value)
+                }
+                Entry::Vacant(_) => None,
+            }
+        }
+    }
+
     pub fn get<'a, Q>(&'a mut self, key: &Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
@@ -186,7 +215,7 @@ where
             let hash = self.hash_builder.hash_one(key);
             if let Some(ptr) = self.map.find(hash, |p| p.as_ref().key().borrow() == key) {
                 let ptr = *ptr;
-                self.detach(ptr);
+                Self::detach(ptr);
                 self.attach(ptr);
                 Some(ptr.as_ref().value())
             } else {
@@ -208,7 +237,7 @@ where
                 .find_mut(hash, |p| p.as_ref().key().borrow() == key)
             {
                 let mut ptr = *ptr;
-                self.detach(ptr);
+                Self::detach(ptr);
                 self.attach(ptr);
                 Some(ptr.as_mut().value_mut())
             } else {
@@ -279,7 +308,7 @@ where
                 return None;
             }
 
-            self.detach(ptr);
+            Self::detach(ptr);
 
             let entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
 
@@ -309,7 +338,7 @@ where
             std::mem::swap(&mut map, &mut self.map);
 
             for ptr in map.drain() {
-                self.detach(ptr);
+                Self::detach(ptr);
                 let mut entry = Box::from_raw_in(ptr.as_ptr(), self.alloc.clone());
                 entry.key.assume_init_drop();
                 entry.value.assume_init_drop();
@@ -323,7 +352,7 @@ where
         }
     }
 
-    fn detach(&mut self, mut ptr: NonNull<LruEntry<K, V>>) {
+    fn detach(mut ptr: NonNull<LruEntry<K, V>>) {
         unsafe {
             let entry = ptr.as_mut();
 
@@ -366,4 +395,226 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unbounded() {
+        let cache: LruCache<i32, &str> = LruCache::unbounded();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_unbounded_with_hasher_in() {
+        let cache: LruCache<i32, &str, RandomState, Global> =
+            LruCache::unbounded_with_hasher_in(RandomState::default(), Global);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_put() {
+        let mut cache = LruCache::unbounded();
+
+        // Put new entry
+        assert_eq!(cache.put(1, "one"), None);
+        assert_eq!(cache.len(), 1);
+
+        // Update existing entry
+        assert_eq!(cache.put(1, "ONE"), Some("one"));
+        assert_eq!(cache.len(), 1);
+
+        // Multiple entries
+        assert_eq!(cache.put(2, "two"), None);
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut cache = LruCache::unbounded();
+
+        // Remove non-existent key
+        assert_eq!(cache.remove(&1), None);
+
+        // Remove existing key
+        cache.put(1, "one");
+        assert_eq!(cache.remove(&1), Some("one"));
+        assert!(cache.is_empty());
+
+        // Remove already removed key
+        assert_eq!(cache.remove(&1), None);
+
+        // Multiple entries
+        cache.put(1, "one");
+        cache.put(2, "two");
+        cache.put(3, "three");
+        assert_eq!(cache.remove(&2), Some("two"));
+        assert_eq!(cache.len(), 2);
+        assert!(!cache.contains(&2));
+    }
+
+    #[test]
+    fn test_get() {
+        let mut cache = LruCache::unbounded();
+
+        // Get non-existent key
+        assert_eq!(cache.get(&1), None);
+
+        // Get existing key
+        cache.put(1, "one");
+        assert_eq!(cache.get(&1), Some(&"one"));
+
+        // Check LRU order updated after get
+        cache.put(2, "two");
+        let _ = cache.get(&1); // Moves 1 to most recently used
+
+        // Verify LRU order by using pop_with_sequence
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 2); // key 2 should be least recently used
+    }
+
+    #[test]
+    fn test_get_mut() {
+        let mut cache = LruCache::unbounded();
+
+        // Get_mut non-existent key
+        assert_eq!(cache.get_mut(&1), None);
+
+        // Get_mut and modify existing key
+        cache.put(1, String::from("one"));
+        {
+            let val = cache.get_mut(&1).unwrap();
+            *val = String::from("ONE");
+        }
+        assert_eq!(cache.get(&1), Some(&String::from("ONE")));
+
+        // Check LRU order updated after get_mut
+        cache.put(2, String::from("two"));
+        let _ = cache.get_mut(&1); // Moves 1 to most recently used
+
+        // Verify LRU order by using pop_with_sequence
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 2); // key 2 should be least recently used
+    }
+
+    #[test]
+    fn test_peek() {
+        let mut cache = LruCache::unbounded();
+
+        // Peek non-existent key
+        assert_eq!(cache.peek(&1), None);
+
+        // Peek existing key
+        cache.put(1, "one");
+        cache.put(2, "two");
+        assert_eq!(cache.peek(&1), Some(&"one"));
+
+        // Verify LRU order NOT updated after peek
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 1); // key 1 should still be least recently used
+    }
+
+    #[test]
+    fn test_peek_mut() {
+        let mut cache = LruCache::unbounded();
+
+        // Peek_mut non-existent key
+        assert_eq!(cache.peek_mut(&1), None);
+
+        // Peek_mut and modify existing key
+        cache.put(1, String::from("one"));
+        cache.put(2, String::from("two"));
+        {
+            let val = cache.peek_mut(&1).unwrap();
+            *val = String::from("ONE");
+        }
+        assert_eq!(cache.peek(&1), Some(&String::from("ONE")));
+
+        // Verify LRU order NOT updated after peek_mut
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 1); // key 1 should still be least recently used
+    }
+
+    #[test]
+    fn test_contains() {
+        let mut cache = LruCache::unbounded();
+
+        // Contains on empty cache
+        assert!(!cache.contains(&1));
+
+        // Contains after put
+        cache.put(1, "one");
+        assert!(cache.contains(&1));
+
+        // Contains after remove
+        cache.remove(&1);
+        assert!(!cache.contains(&1));
+    }
+
+    #[test]
+    fn test_len_and_is_empty() {
+        let mut cache = LruCache::unbounded();
+
+        // Empty cache
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+
+        // Non-empty cache
+        cache.put(1, "one");
+        assert!(!cache.is_empty());
+        assert_eq!(cache.len(), 1);
+
+        // After multiple operations
+        cache.put(2, "two");
+        assert_eq!(cache.len(), 2);
+        cache.remove(&1);
+        assert_eq!(cache.len(), 1);
+        cache.clear();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut cache = LruCache::unbounded();
+
+        // Clear empty cache
+        cache.clear();
+        assert!(cache.is_empty());
+
+        // Clear non-empty cache
+        cache.put(1, "one");
+        cache.put(2, "two");
+        cache.put(3, "three");
+        assert_eq!(cache.len(), 3);
+        cache.clear();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+        assert!(!cache.contains(&1));
+        assert!(!cache.contains(&2));
+        assert!(!cache.contains(&3));
+    }
+
+    #[test]
+    fn test_lru_behavior() {
+        let mut cache = LruCache::unbounded();
+
+        // Insert in order
+        cache.put(1, "one");
+        cache.put(2, "two");
+        cache.put(3, "three");
+
+        // Manipulate LRU order
+        let _ = cache.get(&1); // Moves 1 to most recently used
+
+        // Check order: 2->3->1
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 2);
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 3);
+        let (key, _, _) = cache.pop_with_sequence(u64::MAX).unwrap();
+        assert_eq!(key, 1);
+        assert!(cache.is_empty());
+    }
+}

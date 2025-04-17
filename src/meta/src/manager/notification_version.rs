@@ -18,8 +18,8 @@ use risingwave_meta_model::prelude::CatalogVersion;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 
-use crate::controller::SqlMetaStore;
 use crate::MetaResult;
+use crate::controller::SqlMetaStore;
 
 pub struct NotificationVersionGenerator {
     current_version: u64,

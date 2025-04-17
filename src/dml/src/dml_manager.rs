@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::{Arc, Weak};
 
 use parking_lot::RwLock;
@@ -40,7 +40,7 @@ pub struct TableReader {
 /// interface).
 #[derive(Debug)]
 pub struct DmlManager {
-    pub table_readers: RwLock<HashMap<TableId, TableReader>>,
+    table_readers: RwLock<HashMap<TableId, TableReader>>,
     txn_id_generator: TxnIdGenerator,
     dml_channel_initial_permits: usize,
 }

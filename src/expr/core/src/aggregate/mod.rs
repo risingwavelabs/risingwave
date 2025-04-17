@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 use anyhow::anyhow;
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};

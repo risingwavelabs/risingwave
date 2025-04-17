@@ -23,10 +23,10 @@ risingwave_expr_impl::enable!();
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::prelude::IndexedRandom;
 use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnOption, Expr, Join, JoinConstraint, JoinOperator, Statement,
     TableConstraint,
@@ -42,28 +42,28 @@ mod utils;
 pub mod validation;
 pub use validation::is_permissible_error;
 
-pub use crate::sql_gen::{print_function_table, Table};
+pub use crate::sql_gen::{Table, print_function_table};
 
 /// Generate a random SQL string.
 pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
-    let mut gen = SqlGenerator::new(rng, tables);
-    format!("{}", gen.gen_batch_query_stmt())
+    let mut r#gen = SqlGenerator::new(rng, tables);
+    format!("{}", r#gen.gen_batch_query_stmt())
 }
 
 /// Generate `INSERT`
 pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> Vec<String> {
-    let mut gen = SqlGenerator::new(rng, vec![]);
+    let mut r#gen = SqlGenerator::new(rng, vec![]);
     tables
         .into_iter()
-        .map(|table| format!("{}", gen.generate_insert_statement(&table, count)))
+        .map(|table| format!("{}", r#gen.generate_insert_statement(&table, count)))
         .collect()
 }
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
 pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
-    let mut gen = SqlGenerator::new_for_mview(rng, tables);
-    let (mview, table) = gen.gen_mview_stmt(name);
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables);
+    let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
 
@@ -72,8 +72,8 @@ pub fn differential_sql_gen<R: Rng>(
     tables: Vec<Table>,
     name: &str,
 ) -> Result<(String, String, Table)> {
-    let mut gen = SqlGenerator::new_for_mview(rng, tables);
-    let (stream, table) = gen.gen_mview_stmt(name);
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables);
+    let (stream, table) = r#gen.gen_mview_stmt(name);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),
         _ => bail!("Differential pair should be mview statement!"),
@@ -104,8 +104,8 @@ pub fn generate_update_statements<R: Rng>(
     tables: &[Table],
     inserts: &[Statement],
 ) -> Result<Vec<Statement>> {
-    let mut gen = SqlGenerator::new(rng, vec![]);
-    gen.generate_update_statements(tables, inserts)
+    let mut r#gen = SqlGenerator::new(rng, vec![]);
+    r#gen.generate_update_statements(tables, inserts)
 }
 
 /// Parse SQL
@@ -180,7 +180,7 @@ pub fn parse_create_table_statements(sql: impl AsRef<str>) -> (Vec<Table>, Vec<S
 mod tests {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::*;
 

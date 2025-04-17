@@ -19,11 +19,11 @@ mod overlap_strategy;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::level::Levels;
-use risingwave_pb::hummock::compact_task::{self, TaskType};
+use risingwave_pb::hummock::compact_task::{self};
 
 mod picker;
 pub mod selector;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -31,17 +31,17 @@ use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
+use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{CompactionConfig, LevelType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
-use super::check_cg_write_limit;
+use super::GroupStateValidator;
+use crate::MetaOpts;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
-use crate::MetaOpts;
 
 #[derive(Clone)]
 pub struct CompactStatus {
@@ -120,70 +120,34 @@ impl CompactStatus {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        if let Some(task) = selector.pick_compaction(task_id, selector_context) {
-            return Some(task);
-        } else {
-            let compaction_group_config = &group.compaction_config;
-            if check_cg_write_limit(levels, compaction_group_config.as_ref()).is_write_stop()
-                && compaction_group_config.enable_emergency_picker
-            {
-                let selector_context = CompactionSelectorContext {
-                    group,
-                    levels,
-                    member_table_ids,
-                    level_handlers: &mut self.level_handlers,
-                    selector_stats: stats,
-                    table_id_to_options,
-                    developer_config,
-                    table_watermarks,
-                    state_table_info,
-                };
-                return EmergencySelector::default().pick_compaction(task_id, selector_context);
+        match selector.pick_compaction(task_id, selector_context) {
+            Some(task) => {
+                return Some(task);
+            }
+            _ => {
+                let compaction_group_config = &group.compaction_config;
+                let group_state =
+                    GroupStateValidator::group_state(levels, compaction_group_config.as_ref());
+                if (group_state.is_write_stop() || group_state.is_emergency())
+                    && compaction_group_config.enable_emergency_picker
+                {
+                    let selector_context = CompactionSelectorContext {
+                        group,
+                        levels,
+                        member_table_ids,
+                        level_handlers: &mut self.level_handlers,
+                        selector_stats: stats,
+                        table_id_to_options,
+                        developer_config,
+                        table_watermarks,
+                        state_table_info,
+                    };
+                    return EmergencySelector::default().pick_compaction(task_id, selector_context);
+                }
             }
         }
 
         None
-    }
-
-    pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.task_type != TaskType::Dynamic && task.task_type != TaskType::Emergency {
-            return false;
-        }
-
-        if task.input_ssts.len() != 2 || task.input_ssts[0].level_type != LevelType::Nonoverlapping
-        {
-            return false;
-        }
-
-        // it may be a manual compaction task
-        if task.input_ssts[0].level_idx == task.input_ssts[1].level_idx
-            && task.input_ssts[0].level_idx > 0
-        {
-            return false;
-        }
-
-        if task.input_ssts[1].level_idx == task.target_level
-            && task.input_ssts[1].table_infos.is_empty()
-        {
-            return true;
-        }
-
-        false
-    }
-
-    pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
-        // Currently all VnodeWatermark tasks are trivial reclaim.
-        if task.task_type == TaskType::VnodeWatermark {
-            return true;
-        }
-        let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
-        task.input_ssts.iter().all(|level| {
-            level.table_infos.iter().all(|sst| {
-                sst.table_ids
-                    .iter()
-                    .all(|table_id| !exist_table_ids.contains(table_id))
-            })
-        })
     }
 
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {

@@ -15,7 +15,7 @@
 use std::fmt::Write;
 
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use thiserror_ext::AsReport;
 
 const PARSE_BASE64_INVALID_END: &str = "invalid base64 end sequence";

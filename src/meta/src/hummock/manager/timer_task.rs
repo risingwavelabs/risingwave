@@ -194,7 +194,11 @@ impl HummockManager {
 
             tracing::info!(
                 "Hummock timer task [GroupSchedulingSplit interval {} sec] [GroupSchedulingMerge interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
-                periodic_scheduling_compaction_group_split_interval_sec, periodic_scheduling_compaction_group_merge_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
+                periodic_scheduling_compaction_group_split_interval_sec,
+                periodic_scheduling_compaction_group_merge_interval_sec,
+                CHECK_PENDING_TASK_PERIOD_SEC,
+                STAT_REPORT_PERIOD_SEC,
+                COMPACTION_HEARTBEAT_PERIOD_SEC
             );
 
             loop {
@@ -547,8 +551,16 @@ impl HummockManager {
             }
             if let Some((group_id, level_id, task)) = pending_tasks.get(&task_id) {
                 let group_size = *slowdown_groups.get(group_id).unwrap();
-                warn!("COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
-                    task_id, *group_id,group_size / 1024 / 1024,*level_id, compact_time, status, task.ssts);
+                warn!(
+                    "COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
+                    task_id,
+                    *group_id,
+                    group_size / 1024 / 1024,
+                    *level_id,
+                    compact_time,
+                    status,
+                    task.ssts
+                );
             }
         }
     }

@@ -98,6 +98,6 @@ impl Task for ConfigureTmuxTask {
     }
 
     fn id(&self) -> String {
-        "tmux".into()
+        "tmux-configure".into()
     }
 }

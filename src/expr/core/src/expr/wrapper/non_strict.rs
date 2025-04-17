@@ -22,9 +22,9 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use thiserror_ext::AsReport;
 
+use crate::ExprError;
 use crate::error::Result;
 use crate::expr::{Expression, ValueImpl};
-use crate::ExprError;
 
 /// Report an error during evaluation.
 #[auto_impl(&, Arc)]

@@ -24,14 +24,15 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
-use risingwave_common::util::sort_util::{cmp_rows, OrderType};
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
+use risingwave_common::util::sort_util::{OrderType, cmp_rows};
 
 use crate::error::Result;
 use crate::expr::{
-    collect_input_refs, column_self_eq_eliminate, factorization_expr, fold_boolean_constant,
-    push_down_not, to_conjunctions, try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator,
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
+    InequalityInputPair, InputRef, collect_input_refs, column_self_eq_eliminate,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    try_get_bool_constant,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -93,7 +94,7 @@ impl Condition {
     pub fn always_false(&self) -> bool {
         static FALSE: LazyLock<ExprImpl> = LazyLock::new(|| ExprImpl::literal_bool(false));
         // There is at least one conjunction that is false.
-        !self.conjunctions.is_empty() && self.conjunctions.iter().any(|e| *e == *FALSE)
+        !self.conjunctions.is_empty() && self.conjunctions.contains(&*FALSE)
     }
 
     /// Convert condition to an expression. If always true, return `None`.
@@ -527,7 +528,6 @@ impl Condition {
                     false
                 }
             });
-
         // optimize for single row conjunctions. More optimisations may come later
         // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
         // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
@@ -629,6 +629,14 @@ impl Condition {
             }
         }
         Ok(None)
+    }
+
+    /// x = 1 AND y = 2 AND z = 3 => [x, y, z]
+    pub fn get_eq_const_input_refs(&self) -> Vec<InputRef> {
+        self.conjunctions
+            .iter()
+            .filter_map(|expr| expr.as_eq_const().map(|(input_ref, _)| input_ref))
+            .collect()
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
@@ -1321,13 +1329,13 @@ mod tests {
 
         let ty = DataType::Int32;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let left: ExprImpl = FunctionCall::new(
             ExprType::LessThanOrEqual,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
             ],
         )
         .unwrap()
@@ -1337,12 +1345,12 @@ mod tests {
             ExprType::LessThan,
             vec![
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
@@ -1354,9 +1362,9 @@ mod tests {
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty,
                 )
                 .into(),
@@ -1383,9 +1391,9 @@ mod tests {
 
         let ty = DataType::Int32;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
-        let x: ExprImpl = InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into();
+        let x: ExprImpl = InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into();
 
         let left: ExprImpl = FunctionCall::new(ExprType::Equal, vec![x.clone(), x.clone()])
             .unwrap()
@@ -1395,12 +1403,12 @@ mod tests {
             ExprType::LessThan,
             vec![
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
@@ -1412,9 +1420,9 @@ mod tests {
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty,
                 )
                 .into(),

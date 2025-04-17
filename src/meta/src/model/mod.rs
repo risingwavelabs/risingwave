@@ -15,8 +15,8 @@
 mod error;
 mod stream;
 
-use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
+use std::collections::btree_map::{Entry, VacantEntry};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
@@ -146,7 +146,7 @@ where
     }
 }
 
-impl<'a, TXN, T> ValTransaction<TXN> for VarTransaction<'a, T>
+impl<TXN, T> ValTransaction<TXN> for VarTransaction<'_, T>
 where
     T: Transactional<TXN> + PartialEq,
 {
@@ -379,7 +379,9 @@ impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>>
                         Some(v)
                     }
                     BTreeMapOp::Delete => {
-                        unreachable!("we have checked that the op of the key is `Insert`, so it's impossible to be Delete")
+                        unreachable!(
+                            "we have checked that the op of the key is `Insert`, so it's impossible to be Delete"
+                        )
                     }
                 },
             };
@@ -500,8 +502,8 @@ impl<K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'_, 
     }
 }
 
-impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
-    for BTreeMapEntryTransaction<'a, K, V>
+impl<K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
+    for BTreeMapEntryTransaction<'_, K, V>
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)
@@ -543,12 +545,12 @@ pub struct DerefMutForward<
 }
 
 impl<
-        Inner,
-        Target,
-        P: DerefMut<Target = Inner>,
-        F: Fn(&Inner) -> &Target,
-        FMut: Fn(&mut Inner) -> &mut Target,
-    > DerefMutForward<Inner, Target, P, F, FMut>
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> DerefMutForward<Inner, Target, P, F, FMut>
 {
     pub fn new(ptr: P, f: F, f_mut: FMut) -> Self {
         Self { ptr, f, f_mut }
@@ -556,12 +558,12 @@ impl<
 }
 
 impl<
-        Inner,
-        Target,
-        P: DerefMut<Target = Inner>,
-        F: Fn(&Inner) -> &Target,
-        FMut: Fn(&mut Inner) -> &mut Target,
-    > Deref for DerefMutForward<Inner, Target, P, F, FMut>
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> Deref for DerefMutForward<Inner, Target, P, F, FMut>
 {
     type Target = Target;
 
@@ -571,12 +573,12 @@ impl<
 }
 
 impl<
-        Inner,
-        Target,
-        P: DerefMut<Target = Inner>,
-        F: Fn(&Inner) -> &Target,
-        FMut: Fn(&mut Inner) -> &mut Target,
-    > DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         (self.f_mut)(&mut self.ptr)

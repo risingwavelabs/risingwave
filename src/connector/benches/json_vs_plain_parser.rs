@@ -17,7 +17,7 @@
 
 mod json_common;
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use json_common::*;
 use old_json_parser::JsonParser;
@@ -104,7 +104,7 @@ mod old_json_parser {
 }
 
 fn generate_json_rows() -> Vec<Vec<u8>> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut records = Vec::with_capacity(NUM_RECORDS);
     for _ in 0..NUM_RECORDS {
         records.push(generate_json_row(&mut rng).into_bytes());

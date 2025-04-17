@@ -15,15 +15,15 @@
 use std::marker::PhantomData;
 
 use anyhow::Context;
+use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
-use opendal::Operator;
 
-use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
+use super::opendal_enumerator::OpendalEnumerator;
 use crate::error::ConnectorResult;
-use crate::source::filesystem::s3::enumerator::get_prefix;
 use crate::source::filesystem::s3::S3PropertiesCommon;
+use crate::source::filesystem::s3::enumerator::get_prefix;
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal s3 source.

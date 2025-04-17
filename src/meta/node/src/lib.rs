@@ -212,7 +212,7 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, MetaBackend, RwConfig};
+use risingwave_common::config::{MetaBackend, RwConfig, load_config};
 use tracing::info;
 
 /// Start meta node
@@ -233,7 +233,12 @@ pub fn start(
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let meta_store_config = config.meta.meta_store_config.clone();
         let backend = match config.meta.backend {
-            MetaBackend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Mem => {
+                if opts.sql_endpoint.is_some() {
+                    tracing::warn!("`--sql-endpoint` is ignored when using `mem` backend");
+                }
+                MetaStoreBackend::Mem
+            }
             MetaBackend::Sql => MetaStoreBackend::Sql {
                 endpoint: opts
                     .sql_endpoint
@@ -418,6 +423,9 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
+                compaction_group_merge_dimension_threshold: config
+                    .meta
+                    .compaction_group_merge_dimension_threshold,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,
@@ -484,6 +492,9 @@ pub fn start(
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
                 license_key_path: opts.license_key_path,
+                compute_client_config: config.meta.developer.compute_client_config.clone(),
+                stream_client_config: config.meta.developer.stream_client_config.clone(),
+                frontend_client_config: config.meta.developer.frontend_client_config.clone(),
             },
             config.system.into_init_system_params(),
             Default::default(),
@@ -497,6 +508,12 @@ pub fn start(
 fn validate_config(config: &RwConfig) {
     if config.meta.meta_leader_lease_secs <= 2 {
         let error_msg = "meta leader lease secs should be larger than 2";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.parallelism_control_batch_size == 0 {
+        let error_msg = "parallelism control batch size should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

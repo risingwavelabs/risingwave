@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
 
 use foyer::{HybridCacheEntry, RangeBoundsExt};
@@ -25,9 +25,10 @@ use futures::{Future, FutureExt};
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
+    Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
@@ -200,13 +201,21 @@ pub struct CacheRefillConfig {
 
 impl CacheRefillConfig {
     pub fn from_storage_opts(options: &StorageOpts) -> Self {
-        Self {
-            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
-            data_refill_levels: options
+        let data_refill_levels = match Feature::ElasticDiskCache.check_available() {
+            Ok(_) => options
                 .cache_refill_data_refill_levels
                 .iter()
                 .copied()
                 .collect(),
+            Err(e) => {
+                tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                HashSet::new()
+            }
+        };
+
+        Self {
+            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
@@ -543,7 +552,7 @@ impl CacheRefillTask {
         let parent_ssts = match try_join_all(futures).await {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten(),
             Err(e) => {
-                return tracing::error!(error = %e.as_report(), "get old meta from cache error")
+                return tracing::error!(error = %e.as_report(), "get old meta from cache error");
             }
         };
         let units = Self::get_units_to_refill_by_inheritance(context, &holders, parent_ssts);

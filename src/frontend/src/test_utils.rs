@@ -15,8 +15,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
@@ -25,9 +25,9 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    FunctionId, IndexId, ObjectId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType,
+    DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType, alter_name_request,
+    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -57,6 +57,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -70,6 +71,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
 
+use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
@@ -78,10 +80,9 @@ use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
+use crate::user::UserId;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::user::UserId;
-use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -622,7 +623,7 @@ impl CatalogWriter for MockCatalogWriter {
                         if let Some(table) =
                             schema.get_created_table_by_id(&TableId::from(table_id))
                         {
-                            let mut pb_table = table.to_prost(schema.id(), database.id());
+                            let mut pb_table = table.to_prost();
                             pb_table.owner = owner_id;
                             self.catalog.write().update_table(&pb_table);
                             return Ok(());
@@ -643,13 +644,12 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
-                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
-                let database_id = self.get_database_id_by_schema(schema_id);
-                let pb_table = {
+                let mut pb_table = {
                     let reader = self.catalog.read();
                     let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
-                    table.to_prost(new_schema_id, database_id)
+                    table.to_prost()
                 };
+                pb_table.schema_id = new_schema_id;
                 self.catalog.write().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()
@@ -1038,7 +1038,11 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+    async fn get_tables(
+        &self,
+        _table_ids: &[u32],
+        _include_dropped_tables: bool,
+    ) -> RpcResult<HashMap<u32, Table>> {
         Ok(HashMap::new())
     }
 
@@ -1116,6 +1120,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
+        unimplemented!()
+    }
+
+    async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
     }
 }

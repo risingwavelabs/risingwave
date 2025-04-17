@@ -16,10 +16,10 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 use std::time::Instant;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -36,7 +36,9 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
 };
-use crate::hummock::iterator::SkipWatermarkState;
+use crate::hummock::iterator::{
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
+};
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
@@ -113,7 +115,7 @@ impl BlockStreamIterator {
                 self.sstable_info.object_id,
                 &self.sstable.meta.block_metas[self.next_block_index..],
             )
-            .verbose_instrument_await("stream_iter_get_stream")
+            .instrument_await("stream_iter_get_stream".verbose())
             .await?;
         self.block_stream = Some(block_stream);
         Ok(())
@@ -326,7 +328,7 @@ impl ConcatSstableIterator {
             let sstable = self
                 .sstable_store
                 .sstable(sstable_info, &mut self.stats)
-                .verbose_instrument_await("stream_iter_sstable")
+                .instrument_await("stream_iter_sstable".verbose())
                 .await?;
             self.task_progress.inc_num_pending_read_io();
 
@@ -403,7 +405,7 @@ impl CompactorRunner {
             context
                 .storage_opts
                 .compactor_concurrent_uploading_sst_count,
-            compaction_catalog_agent_ref,
+            compaction_catalog_agent_ref.clone(),
         );
         assert_eq!(
             task.input_ssts.len(),
@@ -425,10 +427,24 @@ impl CompactorRunner {
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
-        let state = SkipWatermarkState::from_safe_epoch_watermarks(&task.table_watermarks);
+
+        // Can not consume the watermarks because the watermarks may be used by `check_compact_result`.
+        let state = PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+            task.pk_prefix_table_watermarks.clone(),
+        );
+        let non_pk_prefix_state = NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+            task.non_pk_prefix_table_watermarks.clone(),
+            compaction_catalog_agent_ref,
+        );
 
         Self {
-            executor: CompactTaskExecutor::new(sst_builder, task_config, task_progress, state),
+            executor: CompactTaskExecutor::new(
+                sst_builder,
+                task_config,
+                task_progress,
+                state,
+                non_pk_prefix_state,
+            ),
             left,
             right,
             task_id: task.task_id,
@@ -619,9 +635,10 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     task_progress: Arc<TaskProgress>,
-    state: SkipWatermarkState,
+    skip_watermark_state: PkPrefixSkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
+    non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
 }
 
 impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
@@ -629,7 +646,8 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
-        state: SkipWatermarkState,
+        skip_watermark_state: PkPrefixSkipWatermarkState,
+        non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     ) -> Self {
         Self {
             builder,
@@ -640,8 +658,9 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             last_table_id: None,
             last_table_stats: TableStats::default(),
             task_progress,
-            state,
+            skip_watermark_state,
             progress_key_num: 0,
+            non_pk_prefix_skip_watermark_state,
         }
     }
 
@@ -677,7 +696,9 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        self.state.reset_watermark();
+        self.skip_watermark_state.reset_watermark();
+        self.non_pk_prefix_skip_watermark_state.reset_watermark();
+
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
                 !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
@@ -702,14 +723,13 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             } else if !self.task_config.retain_multiple_version && !is_first_or_new_user_key {
                 drop = true;
             }
-            if self.state.has_watermark() && self.state.should_delete(&iter.key()) {
+
+            if self.watermark_should_delete(&iter.key()) {
                 drop = true;
                 self.last_key_is_delete = true;
             }
 
-            if self.last_table_id.map_or(true, |last_table_id| {
-                last_table_id != self.last_key.user_key.table_id.table_id
-            }) {
+            if self.last_table_id != Some(self.last_key.user_key.table_id.table_id) {
                 if let Some(last_table_id) = self.last_table_id.take() {
                     self.compaction_statistics
                         .delta_drop_stat
@@ -749,9 +769,17 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             // because it would cause a deleted key could be see by user again.
             return false;
         }
-        if self.state.has_watermark() && self.state.should_delete(smallest_key) {
+
+        if self.watermark_should_delete(smallest_key) {
             return false;
         }
+
         true
+    }
+
+    fn watermark_should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+        (self.skip_watermark_state.has_watermark() && self.skip_watermark_state.should_delete(key))
+            || (self.non_pk_prefix_skip_watermark_state.has_watermark()
+                && self.non_pk_prefix_skip_watermark_state.should_delete(key))
     }
 }

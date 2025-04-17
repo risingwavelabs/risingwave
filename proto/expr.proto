@@ -155,7 +155,8 @@ message ExprNode {
     ATANH = 266;
     SINH = 267;
     ACOSD = 268;
-    // skips 268,269,270 so that acosd, atand, atan2d are close to others
+    ATAND = 269;
+    ATAN2D = 270;
     TRUNC = 271;
     LN = 272;
     LOG10 = 273;
@@ -199,6 +200,9 @@ message ExprNode {
     QUOTE_NULLABLE = 331;
     HMAC = 332;
     SECURE_COMPARE = 333;
+
+    // Constraints Check
+    CHECK_NOT_NULL = 350;
 
     // Unary operators
     NEG = 401;
@@ -305,6 +309,7 @@ message ExprNode {
     VNODE = 1101;
     TEST_PAID_TIER = 1102;
     VNODE_USER = 1103;
+    LICENSE = 1104;
     // Non-deterministic functions
     PROCTIME = 2023;
     PG_SLEEP = 2024;
@@ -329,6 +334,7 @@ message ExprNode {
     RW_RECOVERY_STATUS = 2412;
     RW_EPOCH_TO_TS = 2413;
     PG_TABLE_IS_VISIBLE = 2414;
+    HAS_FUNCTION_PRIVILEGE = 2415;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -597,6 +603,13 @@ message WindowFunction {
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
 // while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
 
+enum UdfExprVersion {
+  // Versions before introducing this enum.
+  UDF_EXPR_VERSION_UNSPECIFIED = 0;
+  // Begin from this version, we re-interpret `identifier` as `name_in_runtime`.
+  UDF_EXPR_VERSION_NAME_IN_RUNTIME = 1;
+}
+
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
@@ -605,12 +618,9 @@ message UserDefinedFunction {
   string language = 4;
   // The link to the external function service.
   optional string link = 5;
-  // An unique identifier to the function.
-  // - If `link` is not empty, the name of the function in the external function service.
-  // - If `language` is `rust` or `wasm`, the name of the function in the wasm binary file.
-  // - If `language` is `javascript`, the name of the function.
+  // This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
-  // - If `language` is `javascript`, the source code of the function.
+  // - If `language` is `javascript` or `python`, the source code of the function.
   optional string body = 7;
   // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
   optional bytes compressed_binary = 10;
@@ -619,6 +629,11 @@ message UserDefinedFunction {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 13;
+  optional bool is_batched = 14;
+
+  UdfExprVersion version = 1000;
 }
 
 // Additional information for user defined table/aggregate functions.
@@ -628,10 +643,13 @@ message UserDefinedFunctionMetadata {
   data.DataType return_type = 13;
   string language = 4;
   optional string link = 5;
+  // This is re-interpreted as `name_in_runtime`.
   optional string identifier = 6;
   optional string body = 7;
   optional bytes compressed_binary = 10;
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+
+  UdfExprVersion version = 1000;
 }

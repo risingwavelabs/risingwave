@@ -1,0 +1,21 @@
+name: Flaky Test Report
+description: Report a test that is passing inconsistently
+labels: ["type/flaky-test"]
+body:
+- type: input
+  id: buildkite_url
+  attributes:
+    label: Buildkite URL
+    description: Please provide a link to the Buildkite run where the test failed
+    placeholder: https://buildkite.com/...
+  validations:
+    required: true
+
+- type: textarea
+  id: description
+  attributes:
+    label: Description and Insights
+    description: Please provide any additional information or insights about the flaky test
+    placeholder: What did you observe? Any patterns in the failures? Any ideas about what might be causing it?
+  validations:
+    required: false

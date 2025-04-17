@@ -20,8 +20,8 @@ use bincode::{config, encode_into_std_write};
 use mockall::{automock, mock};
 
 use super::record::Record;
-use crate::error::Result;
 use crate::TraceError;
+use crate::error::Result;
 
 pub(crate) type MagicBytes = u32;
 pub(crate) static MAGIC_BYTES: MagicBytes = 0x484D5452; // HMTR

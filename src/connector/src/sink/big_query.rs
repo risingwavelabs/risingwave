@@ -16,18 +16,18 @@ use core::pin::Pin;
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
+use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
-use gcp_bigquery_client::Client;
-use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMAIN};
+use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
 use google_cloud_gax::grpc::Request;
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
@@ -40,17 +40,17 @@ use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
-    field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
-    FileDescriptorSet,
+    DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+    field_descriptor_proto,
 };
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;
-use tonic::{async_trait, Response, Status};
+use tonic::{Response, Status, async_trait};
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
@@ -59,7 +59,7 @@ use yup_oauth2::ServiceAccountKey;
 use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
 use super::log_store::{LogStoreReadItem, TruncateOffset};
 use super::{
-    LogSinker, SinkError, SinkLogReader, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
@@ -159,7 +159,8 @@ impl BigQueryLogSinker {
 
 #[async_trait]
 impl LogSinker for BigQueryLogSinker {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             tokio::select!(
                 offset = self.bigquery_future_manager.next_offset() => {
@@ -177,7 +178,6 @@ impl LogSinker for BigQueryLogSinker {
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Barrier { epoch },0);
                         }
-                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }
                 }
             )
@@ -200,7 +200,7 @@ impl BigQueryCommon {
     async fn build_writer_client(
         &self,
         aws_auth_props: &AwsAuthProps,
-    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>>)> {
+    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
         let credentials_file = CredentialsFile::new_from_str(&auth_json)
@@ -223,7 +223,9 @@ impl BigQueryCommon {
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
             Ok(String::from_utf8(auth_vec).map_err(|e| SinkError::BigQuery(e.into()))?)
         } else {
-            Err(SinkError::BigQuery(anyhow::anyhow!("`bigquery.local.path` and `bigquery.s3.path` set at least one, configure as needed.")))
+            Err(SinkError::BigQuery(anyhow::anyhow!(
+                "`bigquery.local.path` and `bigquery.s3.path` set at least one, configure as needed."
+            )))
         }
     }
 }
@@ -290,7 +292,11 @@ impl BigQuerySink {
             )));
         }
         if rw_fields_name.len().ne(&big_query_columns_desc.len()) {
-            return Err(SinkError::BigQuery(anyhow::anyhow!("The length of the RisingWave column {} must be equal to the length of the bigquery column {}",rw_fields_name.len(),big_query_columns_desc.len())));
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "The length of the RisingWave column {} must be equal to the length of the bigquery column {}",
+                rw_fields_name.len(),
+                big_query_columns_desc.len()
+            )));
         }
 
         for i in rw_fields_name {
@@ -303,7 +309,10 @@ impl BigQuerySink {
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
             if data_type_string.ne(value) {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ", i.name, value, data_type_string
+                    "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ",
+                    i.name,
+                    value,
+                    data_type_string
                 )));
             };
         }
@@ -361,7 +370,7 @@ impl BigQuerySink {
             DataType::Float32 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Bigquery cannot support real"
-                )))
+                )));
             }
             DataType::Float64 => TableFieldSchema::float(&rw_field.name),
             DataType::Decimal => TableFieldSchema::numeric(&rw_field.name),
@@ -373,13 +382,14 @@ impl BigQuerySink {
             DataType::Interval => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Bigquery cannot support Interval"
-                )))
+                )));
             }
-            DataType::Struct(_) => {
-                let mut sub_fields = Vec::with_capacity(rw_field.sub_fields.len());
-                for rw_field in &rw_field.sub_fields {
-                    let field = Self::map_field(rw_field)?;
-                    sub_fields.push(field)
+            DataType::Struct(st) => {
+                let mut sub_fields = Vec::with_capacity(st.len());
+                for (name, dt) in st.iter() {
+                    let rw_field = Field::with_name(dt.clone(), name);
+                    let field = Self::map_field(&rw_field)?;
+                    sub_fields.push(field);
                 }
                 TableFieldSchema::record(&rw_field.name, sub_fields)
             }
@@ -396,12 +406,12 @@ impl BigQuerySink {
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Bigquery cannot support Int256"
-                )))
+                )));
             }
             DataType::Map(_) => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Bigquery cannot support Map"
-                )))
+                )));
             }
         };
         Ok(tfs)
@@ -458,7 +468,8 @@ impl Sink for BigQuerySink {
             .map_err(|e| anyhow::anyhow!(e))?;
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert bigquery sink (please define in `primary_key` field)")));
+                "Primary key not defined for upsert bigquery sink (please define in `primary_key` field)"
+            )));
         }
         let client = self
             .config
@@ -721,13 +732,13 @@ impl BigQuerySinkWriter {
 #[try_stream(ok = (), error = SinkError)]
 pub async fn resp_to_stream(
     resp_stream: impl Future<
-            Output = std::result::Result<
-                Response<google_cloud_gax::grpc::Streaming<AppendRowsResponse>>,
-                Status,
-            >,
-        >
-        + 'static
-        + Send,
+        Output = std::result::Result<
+            Response<google_cloud_gax::grpc::Streaming<AppendRowsResponse>>,
+            Status,
+        >,
+    >
+    + 'static
+    + Send,
 ) {
     let mut resp_stream = resp_stream
         .await
@@ -783,15 +794,10 @@ impl StorageWriterClient {
             timeout: CONNECTION_TIMEOUT,
         };
         let environment = Environment::GoogleCloud(Box::new(ts_grpc));
-        let conn = WriteConnectionManager::new(
-            DEFAULT_GRPC_CHANNEL_NUMS,
-            &environment,
-            DOMAIN,
-            &conn_options,
-        )
-        .await
-        .map_err(|e| SinkError::BigQuery(e.into()))?;
-        let mut client = conn.conn();
+        let conn = ConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, &conn_options)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        let mut client = conn.writer();
 
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
@@ -914,7 +920,7 @@ fn build_protobuf_field(
         DataType::Float32 | DataType::Int256 => {
             return Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Don't support Float32 and Int256"
-            )))
+            )));
         }
         DataType::Map(_) => todo!(),
     }
@@ -930,7 +936,7 @@ mod test {
     use risingwave_common::types::{DataType, StructType};
 
     use crate::sink::big_query::{
-        build_protobuf_descriptor_pool, build_protobuf_schema, BigQuerySink,
+        BigQuerySink, build_protobuf_descriptor_pool, build_protobuf_schema,
     };
 
     #[tokio::test]

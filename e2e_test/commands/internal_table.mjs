@@ -4,20 +4,24 @@
 // https://google.github.io/zx/
 
 const {
+  db: db_name,
   name: job_name,
   type: table_type,
   count: count,
 } = minimist(process.argv.slice(3), {
-  string: ["name", "type"],
+  string: ["db", "name", "type"],
   boolean: ["count"],
+  default: {
+    "db": "dev",
+  }
 });
 
 // Return an array of CSV string
-async function psql(query) {
+async function psql(db_name, query) {
   return (
     await $`
-psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev \
---csv --tuples-only -c ${query}
+psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d ${db_name} \
+--csv --tuples-only --quiet -c ${query}
 `
   )
     .toString()
@@ -28,9 +32,10 @@ psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root
 
 // If `table_type` is null, return all internal tables for the job.
 // If `job_name` is null, return all jobs' internal tables.
-async function select_internal_table(job_name, table_type) {
+async function select_internal_table(db_name, job_name, table_type) {
   // Note: if we have `t1`, and `t1_balabala`, the latter one will also be matched 😄.
   const internal_tables = await psql(
+    db_name,
     `select name from rw_internal_tables where name like '__internal_${job_name}_%_${table_type}_%'`
   );
   if (internal_tables.length == 0) {
@@ -42,7 +47,7 @@ async function select_internal_table(job_name, table_type) {
   const res = new Map(
     await Promise.all(
       internal_tables.map(async (t) => {
-        let rows = await psql(`select * from ${t}`);
+        let rows = await psql(db_name, `select * from ${t}`);
         return [t, rows];
       })
     )
@@ -50,7 +55,7 @@ async function select_internal_table(job_name, table_type) {
   return res;
 }
 
-const tables = await select_internal_table(job_name, table_type);
+const tables = await select_internal_table(db_name, job_name, table_type);
 for (const [table_name, rows] of tables) {
   if (tables.size > 1) {
     console.log(`Table: ${table_name}`);

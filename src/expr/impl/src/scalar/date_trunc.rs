@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::{Interval, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 use super::timestamptz::timestamp_at_time_zone;
 

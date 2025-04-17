@@ -212,6 +212,8 @@ impl sqllogictest::AsyncDB for RisingWave {
         }
     }
 
+    async fn shutdown(&mut self) {}
+
     fn engine_name(&self) -> &str {
         "risingwave"
     }

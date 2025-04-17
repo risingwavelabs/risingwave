@@ -20,7 +20,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use mockall::automock;
 
 use crate::error::{Result, TraceError};
-use crate::{Record, MAGIC_BYTES};
+use crate::{MAGIC_BYTES, Record};
 #[cfg_attr(test, automock)]
 pub trait TraceReader {
     fn read(&mut self) -> Result<Record>;
@@ -103,8 +103,8 @@ mod test {
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
-        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TracedReadOptions,
-        TracedSubResp, MAGIC_BYTES,
+        BincodeDeserializer, Deserializer, MAGIC_BYTES, MockDeserializer, Operation, Record,
+        TracedReadOptions, TracedSubResp,
     };
 
     mock! {

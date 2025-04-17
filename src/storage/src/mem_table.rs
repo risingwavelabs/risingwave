@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::ops::Bound::{Included, Unbounded};
 use std::ops::RangeBounds;
 
@@ -163,7 +163,7 @@ impl MemTable {
                 self.kv_size.sub_val(old_op);
 
                 match old_op {
-                    KeyOp::Delete(ref mut old_op_old_value) => {
+                    KeyOp::Delete(old_op_old_value) => {
                         let new_op = KeyOp::Update((std::mem::take(old_op_old_value), value));
                         self.kv_size.add_val(&new_op);
                         e.insert(new_op);
@@ -418,17 +418,17 @@ mod tests {
     use bytes::{BufMut, Bytes, BytesMut};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, rng as thread_rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::value::HummockValue;
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
-    use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
+    use crate::store::{CHECK_BYTES_EQUAL, OpConsistencyLevel};
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
@@ -615,7 +615,7 @@ mod tests {
 
         let mut ordered_test_data = (0..10000)
             .map(|i| {
-                let key_op = match rng.gen::<usize>() % 3 {
+                let key_op = match rng.random_range(0..=2) {
                     0 => KeyOp::Insert(Bytes::from("insert")),
                     1 => KeyOp::Delete(Bytes::from("delete")),
                     2 => KeyOp::Update((Bytes::from("old_value"), Bytes::from("new_value"))),

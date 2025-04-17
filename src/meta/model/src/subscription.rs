@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::PbSubscription;
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{ObjectId, SubscriptionId};

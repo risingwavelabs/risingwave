@@ -17,9 +17,9 @@ use std::collections::HashSet;
 use risingwave_common::catalog::TableId;
 
 use super::{DefaultBehavior, DefaultValue};
+use crate::PlanRef;
 use crate::optimizer::plan_node::{BatchSource, LogicalScan, StreamSource, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::PlanRef;
 
 /// TODO(rc): maybe we should rename this to `DependencyCollectorVisitor`.
 #[derive(Debug, Clone, Default)]

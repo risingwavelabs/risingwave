@@ -29,7 +29,7 @@ public class Binding {
     static void ensureInitialized() {}
 
     public static native void tracingSlf4jEvent(
-            String threadName, String name, int level, String message);
+            String threadName, String name, int level, String message, String stackTrace);
 
     public static native boolean tracingSlf4jEventEnabled(int level);
 
@@ -93,6 +93,8 @@ public class Binding {
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
     public static native boolean sendCdcSourceErrorToChannel(long channelPtr, String errorMsg);
+
+    public static native void cdcSourceSenderClose(long channelPtr);
 
     public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
             recvSinkWriterRequestFromChannel(long channelPtr);

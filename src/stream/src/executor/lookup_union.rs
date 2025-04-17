@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use futures::channel::mpsc;
-use futures::future::{join_all, select, Either};
+use futures::future::{Either, join_all, select};
 use futures::{FutureExt, SinkExt};
 use itertools::Itertools;
 

@@ -5,7 +5,14 @@ package monitor_service;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message StackTraceRequest {}
+message StackTraceRequest {
+  enum ActorTracesFormat {
+    UNSPECIFIED = 0;
+    JSON = 1;
+    TEXT = 2;
+  }
+  ActorTracesFormat actor_traces_format = 1;
+}
 
 message StackTraceResponse {
   map<uint32, string> actor_traces = 1;
@@ -93,6 +100,21 @@ message TieredCacheTracingRequest {
 
 message TieredCacheTracingResponse {}
 
+message GetProfileStatsRequest {
+  // Executors to fetch statistics for.
+  repeated uint64 executor_ids = 1;
+  // Dispatchers do not have executors.
+  // We have to fetch their statistics separately.
+  repeated uint32 dispatcher_fragment_ids = 2;
+}
+
+message GetProfileStatsResponse {
+  map<uint64, uint64> stream_node_output_row_count = 1;
+  map<uint64, uint64> stream_node_output_blocking_duration_ns = 2;
+  map<uint32, uint64> dispatch_fragment_output_row_count = 3;
+  map<uint32, uint64> dispatch_fragment_output_blocking_duration_ns = 4;
+}
+
 service MonitorService {
   rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
@@ -101,4 +123,5 @@ service MonitorService {
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
   rpc GetStreamingStats(GetStreamingStatsRequest) returns (GetStreamingStatsResponse);
   rpc TieredCacheTracing(TieredCacheTracingRequest) returns (TieredCacheTracingResponse);
+  rpc GetProfileStats(GetProfileStatsRequest) returns (GetProfileStatsResponse);
 }

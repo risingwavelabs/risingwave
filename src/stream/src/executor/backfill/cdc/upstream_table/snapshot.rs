@@ -14,7 +14,7 @@
 
 use std::future::Future;
 
-use futures::{pin_mut, Stream};
+use futures::{Stream, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;

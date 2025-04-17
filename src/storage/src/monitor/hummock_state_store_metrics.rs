@@ -16,9 +16,9 @@ use std::sync::{Arc, OnceLock};
 
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter};
 use prometheus::{
-    exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry,
+    Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry, exponential_buckets, histogram_opts,
+    proto, register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -39,20 +39,20 @@ use tracing::warn;
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
 #[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
-    pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec<2>,
-    pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec<2>,
+    pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
+    pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
-    pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec<2>,
-    pub iter_scan_key_counts: RelabeledGuardedIntCounterVec<2>,
+    pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
+    pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
-    pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec<1>,
+    pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
-    pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec<2>,
-    pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec<2>,
-    pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec<2>,
+    pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec,
+    pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
+    pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec,
 
     pub write_batch_tuple_counts: RelabeledCounterVec,
     pub write_batch_duration: RelabeledHistogramVec,
@@ -245,10 +245,10 @@ impl HummockStateStoreMetrics {
         );
 
         let opts = histogram_opts!(
-                "state_store_write_batch_duration",
-                "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                time_buckets.clone()
-            );
+            "state_store_write_batch_duration",
+            "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
+            time_buckets.clone()
+        );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let write_batch_duration = RelabeledHistogramVec::with_metric_level(

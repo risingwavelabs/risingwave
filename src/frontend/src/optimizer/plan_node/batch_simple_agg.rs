@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_expr::aggregate::{AggType, PbAggKind};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::generic::{self, PlanAggCall};
@@ -29,7 +29,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
     pub base: PlanBase<Batch>,
-    core: generic::Agg<PlanRef>,
+    pub core: generic::Agg<PlanRef>,
 }
 
 impl BatchSimpleAgg {

@@ -31,10 +31,10 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::HashAggNode;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 use risingwave_pb::Message;
+use risingwave_pb::batch_plan::HashAggNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
@@ -45,7 +45,7 @@ use crate::executor::{
 use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
-    SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
+    DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillBuildHasher, SpillOp,
 };
 use crate::task::{ShutdownToken, TaskId};
 
@@ -532,7 +532,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 }
 
                 if !self.mem_context.add(memory_usage_diff) && check_memory {
-                    warn!("not enough memory to load one partition agg state after spill which is not a normal case, so keep going");
+                    warn!(
+                        "not enough memory to load one partition agg state after spill which is not a normal case, so keep going"
+                    );
                 }
             }
         }
@@ -749,20 +751,20 @@ mod tests {
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
     use risingwave_pb::expr::{AggCall, InputRef};
 
     use super::*;
-    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::SortExecutor;
+    use crate::executor::test_utils::{MockExecutor, diff_executor_output};
 
     const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge(), u64::MAX);
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), u64::MAX);
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(
@@ -811,7 +813,7 @@ mod tests {
 
             let mem_context = MemoryContext::new(
                 Some(parent_mem.clone()),
-                LabelGuardedIntGauge::<4>::test_int_gauge(),
+                LabelGuardedIntGauge::test_int_gauge::<4>(),
             );
             let actual_exec = HashAggExecutorBuilder::deserialize(
                 &agg_prost,
@@ -945,8 +947,10 @@ mod tests {
                 }
 
                 unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-                    let g = Global;
-                    g.deallocate(ptr, layout)
+                    unsafe {
+                        let g = Global;
+                        g.deallocate(ptr, layout)
+                    }
                 }
             }
 
@@ -1100,7 +1104,7 @@ mod tests {
         };
 
         let mem_context =
-            MemoryContext::new_with_mem_limit(None, LabelGuardedIntGauge::<4>::test_int_gauge(), 0);
+            MemoryContext::new_with_mem_limit(None, LabelGuardedIntGauge::test_int_gauge::<4>(), 0);
         let actual_exec = HashAggExecutorBuilder::deserialize(
             &agg_prost,
             src_exec,

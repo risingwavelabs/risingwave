@@ -31,28 +31,28 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
-    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION, SinkError,
 };
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::SinkLogStoreType;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::{derive_columns, derive_pk};
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
+    Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
-use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
+use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, generic};
+use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
+use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
-use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
-use crate::TableCatalog;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 
@@ -354,6 +354,9 @@ impl StreamSink {
             CreateType::Foreground
         };
         let (properties, secret_refs) = properties.into_parts();
+        let is_exactly_once = properties
+            .get("is_exactly_once")
+            .is_some_and(|v| v.to_lowercase() == "true");
         let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -371,6 +374,7 @@ impl StreamSink {
             target_table: target_table.as_ref().map(|catalog| catalog.id()),
             extra_partition_col_idx,
             create_type,
+            is_exactly_once,
         };
 
         let unsupported_sink =
@@ -379,8 +383,9 @@ impl StreamSink {
         // check and ensure that the sink connector is specified and supported
         let sink_decouple = match sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
+                let connector_type = connector.to_lowercase();
                 match_sink_name_str!(
-                    connector.to_lowercase().as_str(),
+                    connector_type.as_str(),
                     SinkType,
                     {
                         // the table sink is created by with properties
@@ -411,6 +416,11 @@ impl StreamSink {
                 SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
             );
         }
+        if !sink_decouple && sink_desc.is_exactly_once {
+            return Err(
+                SinkError::Config(anyhow!("Exactly once sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
+            );
+        }
         let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {
@@ -420,12 +430,13 @@ impl StreamSink {
         Ok(Self::new(input, sink_desc, log_store_type))
     }
 
-    fn is_user_defined_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
+    fn sink_type_in_prop(properties: &WithOptionsSecResolved) -> Result<Option<SinkType>> {
         if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
-            if sink_type != SINK_TYPE_APPEND_ONLY
-                && sink_type != SINK_TYPE_DEBEZIUM
-                && sink_type != SINK_TYPE_UPSERT
-            {
+            if sink_type == SINK_TYPE_APPEND_ONLY {
+                return Ok(Some(SinkType::AppendOnly));
+            } else if sink_type == SINK_TYPE_DEBEZIUM || sink_type == SINK_TYPE_UPSERT {
+                return Ok(Some(SinkType::Upsert));
+            } else {
                 return Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!(
@@ -439,7 +450,7 @@ impl StreamSink {
                 .into());
             }
         }
-        Ok(properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY))
+        Ok(None)
     }
 
     fn is_user_force_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
@@ -465,46 +476,81 @@ impl StreamSink {
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
-        let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
+        let (user_defined_sink_type, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
-                f.format == SinkFormat::AppendOnly,
+                Some(match f.format {
+                    SinkFormat::AppendOnly => SinkType::AppendOnly,
+                    SinkFormat::Upsert | SinkFormat::Debezium => SinkType::Upsert,
+                }),
                 Self::is_user_force_append_only(&WithOptionsSecResolved::without_secrets(
                     f.options.clone(),
                 ))?,
                 false,
             ),
             None => (
-                Self::is_user_defined_append_only(properties)?,
+                Self::sink_type_in_prop(properties)?,
                 Self::is_user_force_append_only(properties)?,
                 true,
             ),
         };
 
-        match (
-            frontend_derived_append_only,
-            user_defined_append_only,
-            user_force_append_only,
-        ) {
-            (true, true, _) => Ok(SinkType::AppendOnly),
-            (false, true, true) => Ok(SinkType::ForceAppendOnly),
-            (_, false, false) => Ok(SinkType::Upsert),
-            (false, true, false) => {
-                Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!(
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
-                        Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
-                        if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
-                    ),
-                )))
-                    .into())
+        if user_force_append_only
+            && user_defined_sink_type.is_some()
+            && user_defined_sink_type != Some(SinkType::AppendOnly)
+        {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "The force_append_only can be only used for type = \'append-only\'".to_owned(),
+            )))
+            .into());
+        }
+
+        let user_force_append_only = if user_force_append_only && frontend_derived_append_only {
+            false
+        } else {
+            user_force_append_only
+        };
+
+        if user_force_append_only && user_defined_sink_type != Some(SinkType::AppendOnly) {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Cannot force the sink to be append-only without \"{}\".",
+                    if syntax_legacy {
+                        "type='append-only'"
+                    } else {
+                        "FORMAT PLAIN"
+                    }
+                ),
+            )))
+            .into());
+        }
+
+        if let Some(user_defined_sink_type) = user_defined_sink_type {
+            if user_defined_sink_type == SinkType::AppendOnly {
+                if user_force_append_only {
+                    return Ok(SinkType::ForceAppendOnly);
+                }
+                if !frontend_derived_append_only {
+                    return Err(ErrorCode::SinkError(Box::new(Error::new(
+                            ErrorKind::InvalidInput,
+                            format!(
+                                "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
+                                Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
+                                if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
+                            ),
+                        )))
+                            .into());
+                } else {
+                    return Ok(SinkType::AppendOnly);
+                }
             }
-            (_, false, true) => {
-                Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy { "type='append-only'" } else { "FORMAT PLAIN" }),
-                )))
-                    .into())
+
+            Ok(user_defined_sink_type)
+        } else {
+            match frontend_derived_append_only {
+                true => Ok(SinkType::AppendOnly),
+                false => Ok(SinkType::Upsert),
             }
         }
     }

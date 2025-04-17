@@ -18,12 +18,12 @@ use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
+use crate::PlanRef;
 use crate::expr::{AggCall, ExprImpl, FunctionCall, InputRef, OrderBy};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalJoin, LogicalProject, LogicalShare, PlanTreeNodeUnary,
 };
 use crate::utils::{Condition, GroupBy};
-use crate::PlanRef;
 pub struct OverWindowToAggAndJoinRule;
 
 impl OverWindowToAggAndJoinRule {

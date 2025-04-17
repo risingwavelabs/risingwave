@@ -23,9 +23,9 @@ use risingwave_sqlparser::ast::{AlterSecretOperation, ObjectName, SqlOption};
 
 use super::create_secret::{get_secret_payload, secret_to_str};
 use super::drop_secret::fetch_secret_catalog_with_db_schema_id;
+use crate::WithOptions;
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
-use crate::WithOptions;
 
 pub async fn handle_alter_secret(
     handler_args: HandlerArgs,

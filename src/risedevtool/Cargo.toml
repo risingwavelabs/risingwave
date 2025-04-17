@@ -15,14 +15,15 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 clap = { workspace = true }
 console = "0.15"
-fs-err = "3.0.0"
+fs-err = "3.1.0"
 glob = "0.3"
 google-cloud-pubsub = "0.30"
 indicatif = "0.17"
 itertools = { workspace = true }
 log = "0.4"
+panic-message = "0.3"
 rdkafka = { workspace = true }
-redis = "0.25"
+redis = { workspace = true }
 regex = "1"
 reqwest = { version = "0.12.2", features = ["blocking"] }
 serde = { version = "1", features = ["derive"] }

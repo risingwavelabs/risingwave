@@ -1,0 +1,9 @@
+statement ok
+set streaming_use_arrangement_backfill=false;
+
+include ./issue_20342.slt.part
+
+statement ok
+set streaming_use_arrangement_backfill=true;
+
+include ./issue_20342.slt.part

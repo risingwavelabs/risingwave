@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -21,8 +21,8 @@ use risingwave_simulation::cluster::{Cluster, KillOpts};
 use tokio::time::sleep;
 
 use crate::sink::utils::{
-    start_sink_test_cluster, SimulationTestSink, SimulationTestSource, CREATE_SINK, CREATE_SOURCE,
-    DROP_SINK, DROP_SOURCE,
+    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
+    start_sink_test_cluster,
 };
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
@@ -53,12 +53,12 @@ async fn kill_and_check(
     Ok(())
 }
 
-async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
+async fn recovery_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(is_coordinated_sink);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -85,20 +85,30 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
 
     assert!(source_parallelism <= test_source.create_stream_count.load(Relaxed));
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_sink_recovery() -> Result<()> {
-    recovery_test_inner(false).await
+    recovery_test_inner(false, false).await
 }
 
 #[tokio::test]
 async fn test_sink_decouple_recovery() -> Result<()> {
-    recovery_test_inner(true).await
+    recovery_test_inner(true, false).await
+}
+
+#[tokio::test]
+async fn test_coordinated_sink_recovery() -> Result<()> {
+    recovery_test_inner(false, true).await
+}
+
+#[tokio::test]
+async fn test_coordinated_sink_decouple_recovery() -> Result<()> {
+    recovery_test_inner(true, true).await
 }

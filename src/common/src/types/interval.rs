@@ -619,7 +619,6 @@ pub mod test_utils {
     }
 
     impl IntervalTestExt for Interval {
-        #[must_use]
         fn from_ymd(year: i32, month: i32, days: i32) -> Self {
             let months = year * 12 + month;
             let usecs = 0;
@@ -630,7 +629,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_month(months: i32) -> Self {
             Interval {
                 months,
@@ -638,7 +636,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_days(days: i32) -> Self {
             Self {
                 days,
@@ -646,7 +643,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_millis(ms: i64) -> Self {
             Self {
                 usecs: ms * 1000,
@@ -654,7 +650,6 @@ pub mod test_utils {
             }
         }
 
-        #[must_use]
         fn from_minutes(minutes: i64) -> Self {
             Self {
                 usecs: USECS_PER_SEC * 60 * minutes,
@@ -1023,7 +1018,9 @@ pub enum IntervalParseError {
     #[error("Invalid interval: {0}")]
     Invalid(String),
 
-    #[error("Invalid interval: {0}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S")]
+    #[error(
+        "Invalid interval: {0}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S"
+    )]
     InvalidIso8601(String),
 
     #[error("Invalid unit: {0}")]
@@ -1264,7 +1261,7 @@ fn parse_interval(s: &str) -> ParseResult<Vec<TimeStrToken>> {
             _ => {
                 return Err(IntervalParseError::uncategorized(format!(
                     "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
-                    i,s, c
+                    i, s, c
                 )));
             }
         };

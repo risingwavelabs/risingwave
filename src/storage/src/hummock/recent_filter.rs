@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry, IntGauge, Registry,
+    IntGauge, Registry, register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 

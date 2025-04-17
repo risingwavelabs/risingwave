@@ -14,7 +14,7 @@
 
 //! Benchmarking JSON parsers for scenarios with exact key matches and case-insensitive key matches.
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use futures::StreamExt;
 use maplit::hashmap;
 use rand::Rng;
@@ -40,10 +40,10 @@ fn gen_input(mode: &str, chunk_size: usize, chunk_num: usize) -> Input {
                     .to_vec(),
                 "mismatch" => {
                     let convert_case = |s: &str| -> String {
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         let mut result = "".to_owned();
                         for char in s.chars() {
-                            if rng.gen_bool(0.5) {
+                            if rng.random_bool(0.5) {
                                 result.push(char.to_uppercase().to_string().parse().unwrap());
                             } else {
                                 result.push(char.to_lowercase().to_string().parse().unwrap());

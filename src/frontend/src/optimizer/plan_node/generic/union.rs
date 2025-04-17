@@ -15,7 +15,7 @@
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
-use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 

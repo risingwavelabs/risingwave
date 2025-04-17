@@ -23,8 +23,8 @@ use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    DataType, Date, Datum, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz, ToDatumRef,
-    F32, F64,
+    DataType, Date, Datum, F32, F64, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz,
+    ToDatumRef,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -333,7 +333,7 @@ pub fn decode_row(
 mod tests {
     use std::ops::Neg;
 
-    use rand::thread_rng;
+    use rand::rng as thread_rng;
 
     use super::*;
     use crate::array::{ListValue, StructValue};

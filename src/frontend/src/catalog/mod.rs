@@ -19,7 +19,7 @@
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
 use risingwave_common::catalog::{
-    is_row_id_column_name, is_system_schema, ROWID_PREFIX, RW_RESERVED_COLUMN_NAME_PREFIX,
+    ROW_ID_COLUMN_NAME, RW_RESERVED_COLUMN_NAME_PREFIX, is_system_schema,
 };
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
@@ -61,11 +61,11 @@ pub(crate) type FragmentId = u32;
 pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.
-pub fn check_valid_column_name(column_name: &str) -> Result<()> {
-    if is_row_id_column_name(column_name) {
+pub fn check_column_name_not_reserved(column_name: &str) -> Result<()> {
+    if column_name.starts_with(ROW_ID_COLUMN_NAME) {
         return Err(ErrorCode::InternalError(format!(
             "column name prefixed with {:?} are reserved word.",
-            ROWID_PREFIX
+            ROW_ID_COLUMN_NAME
         ))
         .into());
     }
@@ -106,8 +106,21 @@ pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 pub enum CatalogError {
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
-    #[error("{0} with name {1} exists")]
-    Duplicated(&'static str, String),
+    #[error(
+        "{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
+    )]
+    Duplicated(
+        &'static str,
+        String,
+        // whether the object is under creation
+        bool,
+    ),
+}
+
+impl CatalogError {
+    pub fn duplicated(object_type: &'static str, name: String) -> Self {
+        Self::Duplicated(object_type, name, false)
+    }
 }
 
 impl From<CatalogError> for RwError {

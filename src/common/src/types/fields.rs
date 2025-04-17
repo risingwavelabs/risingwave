@@ -84,7 +84,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::types::{Fields, StructType, Timestamp, Timestamptz, F32};
+    use crate::types::{F32, Fields, StructType, Timestamp, Timestamptz};
 
     #[test]
     #[allow(dead_code)]

@@ -21,7 +21,7 @@ use risingwave_common_estimate_size::EstimateSize;
 
 use crate::dispatch_scalar_ref_variants;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
-use crate::util::sort_util::{cmp_datum, partial_cmp_datum, OrderType};
+use crate::util::sort_util::{OrderType, cmp_datum, partial_cmp_datum};
 
 pub fn default_partial_cmp_scalar_ref_impl(
     lhs: ScalarRefImpl<'_>,

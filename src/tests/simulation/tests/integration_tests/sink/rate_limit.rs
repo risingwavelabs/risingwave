@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
 use tokio::time::sleep;
 
 use crate::sink::utils::{
-    start_sink_test_cluster, SimulationTestSink, SimulationTestSource, CREATE_SINK, CREATE_SOURCE,
-    DROP_SINK, DROP_SOURCE,
+    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
+    start_sink_test_cluster,
 };
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
@@ -31,7 +31,7 @@ async fn test_sink_decouple_rate_limit() -> Result<()> {
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(false);
     // There will be 1000 * 0.2 = 200 rows generated
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..1000, 0.2, 20);
 
@@ -83,7 +83,7 @@ async fn test_sink_decouple_rate_limit() -> Result<()> {
 
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
 }

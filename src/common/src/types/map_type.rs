@@ -77,11 +77,11 @@ impl MapType {
     }
 
     pub fn key(&self) -> &DataType {
-        &self.0 .0
+        &self.0.0
     }
 
     pub fn value(&self) -> &DataType {
-        &self.0 .1
+        &self.0.1
     }
 
     pub fn into_struct(self) -> DataType {

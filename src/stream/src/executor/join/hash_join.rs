@@ -16,35 +16,35 @@ use std::cmp::Ordering;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::future::{join, try_join};
-use futures::{pin_mut, stream, StreamExt};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::for_await;
 use join_row_set::JoinRowSet;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::row::{once, OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
 use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
+use crate::executor::StreamExecutorError;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::StreamExecutorError;
 use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
@@ -114,9 +114,9 @@ pub struct JoinHashMapMetrics {
     insert_cache_miss_count: usize,
 
     // Metrics
-    join_lookup_total_count_metric: LabelGuardedIntCounter<4>,
-    join_lookup_miss_count_metric: LabelGuardedIntCounter<4>,
-    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<4>,
+    join_lookup_total_count_metric: LabelGuardedIntCounter,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter,
 }
 
 impl JoinHashMapMetrics {
@@ -256,7 +256,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             &self.state.pk_indices,
             &mut self.state.table,
         );
-        let degrees = if let Some(ref degree_state) = degree_state {
+        let degrees = if let Some(degree_state) = degree_state {
             Some(fetch_degrees(key, &self.join_key_data_types, &degree_state.table).await?)
         } else {
             None
@@ -496,23 +496,25 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
         Ok(())
     }
+}
 
-    /// Update the vnode bitmap and manipulate the cache if necessary.
-    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
-        let (_previous_vnode_bitmap, cache_may_stale) =
-            self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self
-            .degree_state
-            .as_mut()
-            .map(|degree_state| degree_state.table.update_vnode_bitmap(vnode_bitmap.clone()));
-
-        if cache_may_stale {
+impl<K: HashKey, S: StateStore> JoinHashMapPostCommit<'_, K, S> {
+    pub async fn post_yield_barrier(
+        self,
+        vnode_bitmap: Option<Arc<Bitmap>>,
+    ) -> StreamExecutorResult<Option<bool>> {
+        let cache_may_stale = self.state.post_yield_barrier(vnode_bitmap.clone()).await?;
+        if let Some(degree_state) = self.degree_state {
+            let _ = degree_state.post_yield_barrier(vnode_bitmap).await?;
+        }
+        let cache_may_stale = cache_may_stale.map(|(_, cache_may_stale)| cache_may_stale);
+        if cache_may_stale.unwrap_or(false) {
             self.inner.clear();
         }
-
-        cache_may_stale
+        Ok(cache_may_stale)
     }
-
+}
+impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
         self.state.table.update_watermark(watermark.clone());
@@ -551,7 +553,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// returned.
     ///
     /// Note: This will NOT remove anything from remote storage.
-    pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
+    pub async fn take_state(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
         self.metrics.total_lookup_count += 1;
         let state = if self.inner.contains(key) {
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
@@ -740,13 +742,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn flush(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<JoinHashMapPostCommit<'_, K, S>> {
         self.metrics.flush();
-        self.state.table.commit(epoch).await?;
-        if let Some(degree_state) = &mut self.degree_state {
-            degree_state.table.commit(epoch).await?;
-        }
-        Ok(())
+        let state_post_commit = self.state.table.commit(epoch).await?;
+        let degree_state_post_commit = if let Some(degree_state) = &mut self.degree_state {
+            Some(degree_state.table.commit(epoch).await?)
+        } else {
+            None
+        };
+        Ok(JoinHashMapPostCommit {
+            state: state_post_commit,
+            degree_state: degree_state_post_commit,
+            inner: &mut self.inner,
+        })
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -923,11 +934,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
+#[must_use]
+pub struct JoinHashMapPostCommit<'a, K: HashKey, S: StateStore> {
+    state: StateTablePostCommit<'a, S>,
+    degree_state: Option<StateTablePostCommit<'a, S>>,
+    inner: &'a mut JoinHashMapInner<K>,
+}
+
 use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
-use crate::executor::prelude::{try_stream, Stream};
+use crate::executor::prelude::{Stream, try_stream};
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.

@@ -47,7 +47,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -67,9 +67,9 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
-use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -79,6 +79,7 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -94,18 +95,18 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
-    handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
+    Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
 };
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
 use crate::handler::variable::infer_show_variable;
-use crate::handler::{handle, RwPgResponse};
+use crate::handler::{RwPgResponse, handle};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -113,14 +114,14 @@ use crate::observer::FrontendObserverNode;
 use crate::rpc::FrontendServiceImpl;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
-    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
-    GLOBAL_DISTRIBUTED_QUERY_METRICS,
+    DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
+    HummockSnapshotManagerRef, QueryManager,
 };
 use crate::telemetry::FrontendTelemetryCreator;
+use crate::user::UserId;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
-use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
@@ -129,7 +130,7 @@ pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
-pub struct FrontendEnv {
+pub(crate) struct FrontendEnv {
     // Different session may access catalog at the same time and catalog is protected by a
     // RwLock.
     meta_client: Arc<dyn FrontendMetaClient>,
@@ -161,8 +162,11 @@ pub struct FrontendEnv {
     spill_metrics: Arc<BatchSpillMetrics>,
 
     batch_config: BatchConfig,
+    frontend_config: FrontendConfig,
+    #[expect(dead_code)]
     meta_config: MetaConfig,
     streaming_config: StreamingConfig,
+    udf_config: UdfConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -174,6 +178,9 @@ pub struct FrontendEnv {
 
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
+
+    /// address of the serverless backfill controller.
+    serverless_backfill_controller_addr: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -241,13 +248,16 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            frontend_config: FrontendConfig::default(),
             meta_config: MetaConfig::default(),
             streaming_config: StreamingConfig::default(),
+            udf_config: UdfConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             spill_metrics: BatchSpillMetrics::for_test(),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            serverless_backfill_controller_addr: Default::default(),
         }
     }
 
@@ -318,6 +328,7 @@ impl FrontendEnv {
 
         let compute_client_pool = Arc::new(ComputeClientPool::new(
             config.batch_exchange_connection_pool_size(),
+            config.batch.developer.compute_client_config.clone(),
         ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -482,8 +493,11 @@ impl FrontendEnv {
                 spill_metrics,
                 sessions_map,
                 batch_config: config.batch,
+                frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
+                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
+                udf_config: config.udf,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -520,10 +534,6 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
-    pub fn worker_node_manager(&self) -> &WorkerNodeManager {
-        &self.worker_node_manager
-    }
-
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
         self.worker_node_manager.clone()
     }
@@ -552,6 +562,10 @@ impl FrontendEnv {
         self.session_params.read_recursive().clone()
     }
 
+    pub fn sbc_address(&self) -> &String {
+        &self.serverless_backfill_controller_addr
+    }
+
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
@@ -564,12 +578,16 @@ impl FrontendEnv {
         &self.batch_config
     }
 
-    pub fn meta_config(&self) -> &MetaConfig {
-        &self.meta_config
+    pub fn frontend_config(&self) -> &FrontendConfig {
+        &self.frontend_config
     }
 
     pub fn streaming_config(&self) -> &StreamingConfig {
         &self.streaming_config
+    }
+
+    pub fn udf_config(&self) -> &UdfConfig {
+        &self.udf_config
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
@@ -646,8 +664,11 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
-    /// buffer the Notices to users,
-    notices: RwLock<Vec<String>>,
+
+    /// Channel sender for frontend handler to send notices.
+    notice_tx: UnboundedSender<String>,
+    /// Channel receiver for pgwire to take notices and send to clients.
+    notice_rx: Mutex<UnboundedReceiver<String>>,
 
     /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
@@ -732,7 +753,7 @@ impl From<CheckRelationError> for RwError {
 }
 
 impl SessionImpl {
-    pub fn new(
+    pub(crate) fn new(
         env: FrontendEnv,
         auth_context: AuthContext,
         user_authenticator: UserAuthenticator,
@@ -741,6 +762,8 @@ impl SessionImpl {
         session_config: SessionConfig,
     ) -> Self {
         let cursor_metrics = env.cursor_metrics.clone();
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
+
         Self {
             env,
             auth_context: Arc::new(RwLock::new(auth_context)),
@@ -750,7 +773,8 @@ impl SessionImpl {
             peer_addr,
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
-            notices: Default::default(),
+            notice_tx,
+            notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
@@ -761,6 +785,8 @@ impl SessionImpl {
     #[cfg(test)]
     pub fn mock() -> Self {
         let env = FrontendEnv::mock();
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
+
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(RwLock::new(AuthContext::new(
@@ -774,7 +800,8 @@ impl SessionImpl {
             id: (0, 0),
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
-            notices: Default::default(),
+            notice_tx,
+            notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             peer_addr: Address::Tcp(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -787,7 +814,7 @@ impl SessionImpl {
         }
     }
 
-    pub fn env(&self) -> &FrontendEnv {
+    pub(crate) fn env(&self) -> &FrontendEnv {
         &self.env
     }
 
@@ -798,6 +825,16 @@ impl SessionImpl {
 
     pub fn database(&self) -> String {
         self.auth_context.read().database.clone()
+    }
+
+    pub fn database_id(&self) -> DatabaseId {
+        let db_name = self.database();
+        self.env
+            .catalog_reader()
+            .read_guard()
+            .get_database_by_name(&db_name)
+            .map(|db| db.id())
+            .expect("session database not found")
     }
 
     pub fn user_name(&self) -> String {
@@ -910,11 +947,21 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
-                PgResponse::builder(stmt_type)
-                    .notice(format!("relation \"{}\" already exists, skipping", name))
-                    .into(),
-            )),
+            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
+                let is_creating_str = if is_creating {
+                    " but still creating"
+                } else {
+                    ""
+                };
+                Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "relation \"{}\" already exists{}, skipping",
+                            name, is_creating_str
+                        ))
+                        .into(),
+                ))
+            }
             Err(e) => Err(e.into()),
             Ok(_) => Ok(Either::Left(())),
         }
@@ -992,7 +1039,7 @@ impl SessionImpl {
                         .into(),
                 ))
             } else {
-                Err(CatalogError::Duplicated("function", full_name).into())
+                Err(CatalogError::duplicated("function", full_name).into())
             }
         } else {
             Ok(Either::Left(()))
@@ -1039,6 +1086,13 @@ impl SessionImpl {
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (connection, _) =
             catalog_reader.get_connection_by_name(db_name, schema_path, connection_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            connection.owner(),
+            AclMode::Usage,
+            Object::ConnectionId(connection.id),
+        )])?;
+
         Ok(connection.clone())
     }
 
@@ -1100,6 +1154,13 @@ impl SessionImpl {
                     format!("table \"{}\" does not exist", table_name),
                 )
             })?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            table.owner(),
+            AclMode::Select,
+            Object::TableId(table.id.table_id()),
+        )])?;
+
         Ok(table.clone())
     }
 
@@ -1115,6 +1176,13 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (secret, _) = catalog_reader.get_secret_by_name(db_name, schema_path, secret_name)?;
+
+        self.check_privileges(&[ObjectCheckItem::new(
+            secret.owner(),
+            AclMode::Create,
+            Object::SecretId(secret.id.secret_id()),
+        )])?;
+
         Ok(secret.clone())
     }
 
@@ -1143,10 +1211,6 @@ impl SessionImpl {
         shutdown_rx
     }
 
-    fn clear_notices(&self) {
-        *self.notices.write() = vec![];
-    }
-
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock();
         if let Some(sender) = flag_guard.take() {
@@ -1158,12 +1222,10 @@ impl SessionImpl {
             info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
-        self.clear_notices()
     }
 
     pub fn cancel_current_creating_job(&self) {
         self.env.creating_streaming_job_tracker.abort_jobs(self.id);
-        self.clear_notices()
     }
 
     /// This function only used for test now.
@@ -1195,7 +1257,9 @@ impl SessionImpl {
     pub fn notice_to_user(&self, str: impl Into<String>) {
         let notice = str.into();
         tracing::trace!(notice, "notice to user");
-        self.notices.write().push(notice);
+        self.notice_tx
+            .send(notice)
+            .expect("notice channel should not be closed");
     }
 
     pub fn is_barrier_read(&self) -> bool {
@@ -1240,22 +1304,36 @@ impl SessionImpl {
             return Ok(());
         }
 
-        let gen_message = |violated_limit: &ActorCountPerParallelism,
+        let gen_message = |ActorCountPerParallelism {
+                               worker_id_to_actor_count,
+                               hard_limit,
+                               soft_limit,
+                           }: ActorCountPerParallelism,
                            exceed_hard_limit: bool|
          -> String {
             let (limit_type, action) = if exceed_hard_limit {
-                ("critical", "Please scale the cluster before proceeding!")
+                ("critical", "Scale the cluster immediately to proceed.")
             } else {
-                ("recommended", "Scaling the cluster is recommended.")
+                (
+                    "recommended",
+                    "Consider scaling the cluster for optimal performance.",
+                )
             };
             format!(
-                "\n- {}\n- {}\n- {}\n- {}\n- {}\n{}",
-                format_args!("Actor count per parallelism exceeds the {} limit.", limit_type),
-                format_args!("Depending on your workload, this may overload the cluster and cause performance/stability issues. {}", action),
-                "Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.",
-                "You can bypass this check via SQL `SET bypass_cluster_limits TO true`.",
-                "You can check actor count distribution via SQL `SELECT * FROM rw_worker_actor_count`.",
-                violated_limit,
+                r#"Actor count per parallelism exceeds the {limit_type} limit.
+
+Depending on your workload, this may overload the cluster and cause performance/stability issues. {action}
+
+HINT:
+- For best practices on managing streaming jobs: https://docs.risingwave.com/operate/manage-a-large-number-of-streaming-jobs
+- To bypass the check (if the cluster load is acceptable): `[ALTER SYSTEM] SET bypass_cluster_limits TO true`.
+  See https://docs.risingwave.com/operate/view-configure-runtime-parameters#how-to-configure-runtime-parameters
+- Contact us via slack or https://risingwave.com/contact-us/ for further enquiry.
+
+DETAILS:
+- hard limit: {hard_limit}
+- soft limit: {soft_limit}
+- worker_id_to_actor_count: {worker_id_to_actor_count:?}"#,
             )
         };
 
@@ -1265,10 +1343,10 @@ impl SessionImpl {
                 cluster_limit::ClusterLimit::ActorCount(l) => {
                     if l.exceed_hard_limit() {
                         return Err(RwError::from(ErrorCode::ProtocolError(gen_message(
-                            &l, true,
+                            l, true,
                         ))));
                     } else if l.exceed_soft_limit() {
-                        self.notice_to_user(gen_message(&l, false));
+                        self.notice_to_user(gen_message(l, false));
                     }
                 }
             }
@@ -1365,7 +1443,7 @@ impl SessionManagerImpl {
         })
     }
 
-    pub fn env(&self) -> &FrontendEnv {
+    pub(crate) fn env(&self) -> &FrontendEnv {
         &self.env
     }
 
@@ -1421,7 +1499,7 @@ impl SessionManagerImpl {
                 )));
             }
             let has_privilege =
-                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
@@ -1435,7 +1513,7 @@ impl SessionManagerImpl {
                         UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                     } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
                         let mut salt = [0; 4];
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         rng.fill_bytes(&mut salt);
                         UserAuthenticator::Md5WithSalt {
                             encrypted_password: md5_hash_with_salt(
@@ -1498,7 +1576,9 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
+        // The handle can be slow. Release potential large String early.
+        drop(string);
+        let rsp = handle(self, stmt, sql, vec![format]).await?;
         Ok(rsp)
     }
 
@@ -1586,9 +1666,10 @@ impl Session for SessionImpl {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 
-    fn take_notices(self: Arc<Self>) -> Vec<String> {
-        let inner = &mut (*self.notices.write());
-        std::mem::take(inner)
+    async fn next_notice(self: &Arc<Self>) -> String {
+        std::future::poll_fn(|cx| self.clone().notice_rx.lock().poll_recv(cx))
+            .await
+            .expect("notice channel should not be closed")
     }
 
     fn transaction_status(&self) -> TransactionStatus {
@@ -1668,7 +1749,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))
         }
-        Statement::Describe { name: _ } => Ok(infer_describe()),
+        Statement::Describe { name: _, kind } => Ok(infer_describe(&kind)),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),

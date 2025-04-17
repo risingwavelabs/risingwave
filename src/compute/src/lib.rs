@@ -205,7 +205,10 @@ impl Role {
 fn validate_opts(opts: &ComputeNodeOpts) {
     let system_memory_available_bytes = system_memory_available_bytes();
     if opts.total_memory_bytes > system_memory_available_bytes {
-        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, system_memory_available_bytes);
+        let error_msg = format!(
+            "total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.",
+            opts.total_memory_bytes, system_memory_available_bytes
+        );
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

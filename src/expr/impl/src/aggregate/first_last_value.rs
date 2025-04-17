@@ -80,9 +80,5 @@ fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
 
 #[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
 fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
-    if retract {
-        state
-    } else {
-        input
-    }
+    if retract { state } else { input }
 }

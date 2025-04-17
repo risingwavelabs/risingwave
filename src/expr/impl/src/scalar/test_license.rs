@@ -12,16 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::license::Feature;
-use risingwave_expr::{function, ExprError, Result};
+//! Functions for testing whether license and paid tier features are working.
 
-/// A function that checks if the `TestPaid` feature is available.
-///
-/// It's mainly for testing purposes only.
+use anyhow::Context;
+use risingwave_common::license::{Feature, LicenseManager};
+use risingwave_common::types::JsonbVal;
+use risingwave_expr::{ExprError, Result, function};
+
+/// Checks if the `TestPaid` feature is available.
 #[function("test_paid_tier() -> boolean")]
 pub fn test_paid_tier() -> Result<bool> {
     Feature::TestPaid
         .check_available()
         .map_err(|e| ExprError::Internal(anyhow::Error::from(e)))?;
     Ok(true)
+}
+
+/// Dump the license information.
+#[function("license() -> jsonb")]
+pub fn license() -> Result<JsonbVal> {
+    let license = LicenseManager::get()
+        .license()
+        .map_err(|e| ExprError::Internal(anyhow::Error::from(e)))?;
+
+    let value = jsonbb::to_value(license)
+        .context("failed to serialize license")
+        .map_err(ExprError::Internal)?;
+
+    Ok(JsonbVal::from(value))
 }

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::recursive::{tracker, Recurse};
+use risingwave_common::util::recursive::{Recurse, tracker};
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
-    Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
-    EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE,
+    AggCall, CorrelatedInputRef, EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE, ExprImpl,
+    FunctionCall, FunctionCallWithLambda, InputRef, Literal, Now, Parameter, Subquery,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 use crate::session::current::notice_to_user;
 

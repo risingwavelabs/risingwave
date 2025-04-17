@@ -31,9 +31,11 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
+use crate::WithPropertiesExt;
 use crate::connector_common::{PostgresExternalTable, SslMode};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
+use crate::source::cdc::CdcSourceType;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
     MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
@@ -42,8 +44,6 @@ use crate::source::cdc::external::postgres::{PostgresExternalTableReader, Postgr
 use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
-use crate::source::cdc::CdcSourceType;
-use crate::WithPropertiesExt;
 
 #[derive(Debug, Clone)]
 pub enum CdcTableType {

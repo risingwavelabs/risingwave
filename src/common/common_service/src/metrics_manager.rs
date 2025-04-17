@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::OnceLock;
 
+use axum::Extension;
 use axum::body::Body;
 use axum::handler::{Handler, HandlerWithoutStateExt};
 use axum::response::{IntoResponse, Response};
-use axum::Extension;
 use axum_extra::extract::Query as ExtraQuery;
 use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -108,9 +108,9 @@ impl MetricsManager {
                 .body("should not specify both include and exclude".into())
                 .unwrap();
         } else if !include.is_empty() {
-            mf.retain(|fam| include.contains(fam.get_name()));
+            mf.retain(|fam| include.contains(fam.name()));
         } else if !exclude.is_empty() {
-            mf.retain(|fam| !exclude.contains(fam.get_name()));
+            mf.retain(|fam| !exclude.contains(fam.name()));
         }
 
         let encoder = TextEncoder::new();

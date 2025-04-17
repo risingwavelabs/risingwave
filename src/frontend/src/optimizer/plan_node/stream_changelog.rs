@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ChangeLogNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::expr_visitable::ExprVisitable;
-use super::stream::prelude::PhysicalPlanRef;
 use super::stream::StreamPlanRef;
+use super::stream::prelude::PhysicalPlanRef;
 use super::utils::impl_distill_by_unit;
-use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, generic};
+use crate::PlanRef;
 use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamChangeLog {

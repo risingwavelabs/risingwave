@@ -13,19 +13,17 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
-use risingwave_common::bitmap::Bitmap;
+use futures::{StreamExt, pin_mut};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
 use super::top_n_cache::CacheKey;
-use super::{serialize_pk_to_cache_key, CacheKeySerde, GroupKey, TopNCache};
-use crate::common::table::state_table::StateTable;
+use super::{CacheKeySerde, GroupKey, TopNCache, serialize_pk_to_cache_key};
+use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::top_n::top_n_cache::Cache;
 
@@ -70,11 +68,6 @@ impl<S: StateStore> ManagedTopNState<S> {
     /// Init epoch for the managed state table.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.init_epoch(epoch).await
-    }
-
-    /// Update vnode bitmap of state table, returning `cache_may_stale`.
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> bool {
-        self.state_table.update_vnode_bitmap(new_vnodes).1
     }
 
     /// Update watermark for the managed state table.
@@ -182,7 +175,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
 
         if WITH_TIES && topn_cache.high_is_full() {
-            let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
+            let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0.0.clone();
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;
 
@@ -253,7 +246,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             }
         }
         if WITH_TIES && topn_cache.middle_is_full() {
-            let middle_last_sort_key = topn_cache.middle.last_key_value().unwrap().0 .0.clone();
+            let middle_last_sort_key = topn_cache.middle.last_key_value().unwrap().0.0.clone();
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
@@ -284,7 +277,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .insert(topn_row.cache_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.high_is_full() {
-            let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
+            let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0.0.clone();
             while let Some(item) = state_table_iter.next().await {
                 group_row_count += 1;
                 let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
@@ -307,9 +300,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(epoch).await?;
-        Ok(())
+    pub async fn flush(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
+        self.state_table.commit(epoch).await
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -328,7 +323,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::top_n::top_n_cache::{TopNCacheTrait, TopNStaging};
-    use crate::executor::top_n::{create_cache_key_serde, NO_GROUP_KEY};
+    use crate::executor::top_n::{NO_GROUP_KEY, create_cache_key_serde};
     use crate::row_nonnull;
 
     fn cache_key_serde() -> CacheKeySerde {

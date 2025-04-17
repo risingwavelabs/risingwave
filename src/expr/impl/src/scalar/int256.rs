@@ -14,7 +14,7 @@
 
 use risingwave_common::types::Int256;
 use risingwave_expr::ExprError::Parse;
-use risingwave_expr::{function, Result};
+use risingwave_expr::{Result, function};
 use thiserror_ext::AsReport;
 const MAX_AVAILABLE_HEX_STR_LEN: usize = 66;
 

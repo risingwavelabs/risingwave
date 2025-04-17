@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::pin::{pin, Pin};
-use std::task::{ready, Context, Poll};
+use std::pin::{Pin, pin};
+use std::task::{Context, Poll, ready};
 
-use futures::future::{pending, select, Either};
+use futures::future::{Either, pending, select};
 use futures::stream::Peekable;
 use futures::{FutureExt, Stream, StreamExt};
 

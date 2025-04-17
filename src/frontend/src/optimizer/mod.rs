@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub mod plan_node;
 
+use plan_node::StreamFilter;
 pub use plan_node::{Explain, PlanRef};
 
 pub mod property;
@@ -60,16 +61,18 @@ use risingwave_pb::stream_plan::StreamScanType;
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
-    stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
-    PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    BatchProject, Convention, LogicalProject, LogicalSource, PartitionComputeInfo, StreamDml,
+    StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    ToStreamContext, stream_enforce_eowc_requirement,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
+use self::plan_visitor::{CardinalityVisitor, StreamKeyChecker, has_batch_exchange};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
+use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
@@ -81,7 +84,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
-use crate::TableCatalog;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -268,15 +270,20 @@ impl PlanRoot {
         );
         Ok(LogicalProject::create(
             agg.into(),
-            vec![FunctionCall::new(
-                ExprType::Coalesce,
-                vec![
-                    InputRef::new(0, return_type).into(),
-                    ExprImpl::literal_list(ListValue::empty(&input_column_type), input_column_type),
-                ],
-            )
-            .unwrap()
-            .into()],
+            vec![
+                FunctionCall::new(
+                    ExprType::Coalesce,
+                    vec![
+                        InputRef::new(0, return_type).into(),
+                        ExprImpl::literal_list(
+                            ListValue::empty(&input_column_type),
+                            input_column_type,
+                        ),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
         ))
     }
 
@@ -413,6 +420,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Count Star",
+            vec![BatchIcebergCountStar::create()],
+            ApplyOrder::TopDown,
+        ))?;
+
         // For iceberg scan, we do iceberg predicate pushdown
         // BatchFilter -> BatchIcebergScan
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
@@ -464,6 +477,12 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Count Star",
+            vec![BatchIcebergCountStar::create()],
+            ApplyOrder::TopDown,
+        ))?;
+
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
@@ -504,6 +523,17 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        // Add Logstore for Unaligned join
+        // Apply this BEFORE delta join rule, because delta join removes
+        // the join
+        if ctx.session_ctx().config().streaming_enable_unaligned_join() {
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "Add Logstore for Unaligned join",
+                vec![AddLogstoreRule::create()],
+                ApplyOrder::BottomUp,
+            ))?;
+        }
+
         if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
@@ -513,7 +543,6 @@ impl PlanRoot {
                 ApplyOrder::BottomUp,
             ))?;
         }
-
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
@@ -652,6 +681,8 @@ impl PlanRoot {
         mut self,
         context: OptimizerContextRef,
         table_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         CreateTableInfo {
             columns,
             pk_column_ids,
@@ -749,11 +780,18 @@ impl PlanRoot {
             PrimaryKeyKind::UserDefinedPrimaryKey
         };
 
-        let column_descs = columns
+        let column_descs: Vec<ColumnDesc> = columns
             .iter()
             .filter(|&c| c.can_dml())
             .map(|c| c.column_desc.clone())
             .collect();
+
+        let mut not_null_idxs = vec![];
+        for (idx, column) in column_descs.iter().enumerate() {
+            if !column.nullable {
+                not_null_idxs.push(idx);
+            }
+        }
 
         let version_column_index = if let Some(version_column) = with_version_column {
             find_version_column_index(&columns, version_column)?
@@ -879,11 +917,18 @@ impl PlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
-        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+        let mut stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+
+        if !not_null_idxs.is_empty() {
+            stream_plan =
+                StreamFilter::filter_out_any_null_rows(stream_plan.clone(), &not_null_idxs);
+        }
 
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
+            database_id,
+            schema_id,
             table_required_dist,
             Order::any(),
             columns,
@@ -902,6 +947,8 @@ impl PlanRoot {
     /// Optimize and generate a create materialized view plan.
     pub fn gen_materialize_plan(
         mut self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         mv_name: String,
         definition: String,
         emit_on_window_close: bool,
@@ -915,6 +962,8 @@ impl PlanRoot {
         StreamMaterialize::create(
             stream_plan,
             mv_name,
+            database_id,
+            schema_id,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
@@ -930,6 +979,8 @@ impl PlanRoot {
     pub fn gen_index_plan(
         mut self,
         index_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         definition: String,
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
@@ -943,6 +994,8 @@ impl PlanRoot {
         StreamMaterialize::create(
             stream_plan,
             index_name,
+            database_id,
+            schema_id,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

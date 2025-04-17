@@ -16,9 +16,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{GlobalReplay, ReplayWorkerScheduler, WorkerScheduler};
+use crate::Operation;
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::Operation;
 
 pub struct HummockReplay<R: TraceReader, G: GlobalReplay> {
     reader: R,

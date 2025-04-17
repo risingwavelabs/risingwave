@@ -18,8 +18,8 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::bail;
-use arrow_flight::flight_service_client::FlightServiceClient;
-use arrow_udf_flight::Client;
+use arrow_udf_runtime::remote::arrow_flight::flight_service_client::FlightServiceClient;
+use arrow_udf_runtime::remote::{Client, arrow_flight};
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
 use risingwave_common::array::arrow::arrow_schema_udf::{self, Fields};
@@ -37,7 +37,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
     },
     create_fn: |opts| {
         let link = opts.using_link.context("USING LINK must be specified")?;
-        let identifier = opts.as_.context("AS must be specified")?.to_owned();
+        let name_in_runtime = opts.as_.context("AS must be specified")?.to_owned();
 
         // check UDF server
         let client = get_or_create_flight_client(link)?;
@@ -61,7 +61,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
             vec![to_field(opts.return_type)?]
         });
         let function = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(client.get(&identifier))
+            tokio::runtime::Handle::current().block_on(client.get(&name_in_runtime))
         })
         .context("failed to check UDF signature")?;
         if !data_types_match(&function.args, &args) {
@@ -79,7 +79,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
             );
         }
         Ok(CreateFunctionOutput {
-            identifier,
+            name_in_runtime,
             body: None,
             compressed_binary: None,
         })
@@ -88,7 +88,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
         let link = opts.link.context("link is required")?;
         let client = get_or_create_flight_client(link)?;
         Ok(Box::new(ExternalFunction {
-            identifier: opts.identifier.to_owned(),
+            remote_name: opts.name_in_runtime.to_owned(),
             client,
             disable_retry_count: AtomicU8::new(INITIAL_RETRY_COUNT),
             always_retry_on_network_error: opts.always_retry_on_network_error,
@@ -98,7 +98,7 @@ static EXTERNAL: UdfImplDescriptor = UdfImplDescriptor {
 
 #[derive(Debug)]
 struct ExternalFunction {
-    identifier: String,
+    remote_name: String,
     client: Arc<Client>,
     /// Number of remaining successful calls until retry is enabled.
     /// This parameter is designed to prevent continuous retry on every call, which would increase delay.
@@ -129,7 +129,7 @@ impl UdfImpl for ExternalFunction {
             self.call_with_always_retry_on_network_error(input).await
         } else {
             let result = if disable_retry_count != 0 {
-                self.client.call(&self.identifier, input).await
+                self.client.call(&self.remote_name, input).await
             } else {
                 self.call_with_retry(input).await
             };
@@ -159,7 +159,7 @@ impl UdfImpl for ExternalFunction {
     ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
         let stream = self
             .client
-            .call_table_function(&self.identifier, input)
+            .call_table_function(&self.remote_name, input)
             .await?;
         Ok(stream.map_err(|e| e.into()).boxed())
     }
@@ -231,10 +231,10 @@ impl ExternalFunction {
     async fn call_with_retry(
         &self,
         input: &RecordBatch,
-    ) -> Result<RecordBatch, arrow_udf_flight::Error> {
+    ) -> Result<RecordBatch, arrow_udf_runtime::remote::Error> {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
-            match self.client.call(&self.identifier, input).await {
+            match self.client.call(&self.remote_name, input).await {
                 Err(err) if is_connection_error(&err) && i != 4 => {
                     tracing::error!(?backoff, error = %err.as_report(), "UDF connection error. retry...");
                 }
@@ -250,10 +250,10 @@ impl ExternalFunction {
     async fn call_with_always_retry_on_network_error(
         &self,
         input: &RecordBatch,
-    ) -> Result<RecordBatch, arrow_udf_flight::Error> {
+    ) -> Result<RecordBatch, arrow_udf_runtime::remote::Error> {
         let mut backoff = Duration::from_millis(100);
         loop {
-            match self.client.call(&self.identifier, input).await {
+            match self.client.call(&self.remote_name, input).await {
                 Err(err) if is_tonic_error(&err) => {
                     tracing::error!(?backoff, error = %err.as_report(), "UDF tonic error. retry...");
                 }
@@ -271,19 +271,23 @@ impl ExternalFunction {
 }
 
 /// Returns true if the arrow flight error is caused by a connection error.
-fn is_connection_error(err: &arrow_udf_flight::Error) -> bool {
+fn is_connection_error(err: &arrow_udf_runtime::remote::Error) -> bool {
     match err {
         // Connection refused
-        arrow_udf_flight::Error::Tonic(status) if status.code() == tonic::Code::Unavailable => true,
+        arrow_udf_runtime::remote::Error::Tonic(status)
+            if status.code() == tonic::Code::Unavailable =>
+        {
+            true
+        }
         _ => false,
     }
 }
 
-fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
+fn is_tonic_error(err: &arrow_udf_runtime::remote::Error) -> bool {
     matches!(
         err,
-        arrow_udf_flight::Error::Tonic(_)
-            | arrow_udf_flight::Error::Flight(arrow_flight::error::FlightError::Tonic(_))
+        arrow_udf_runtime::remote::Error::Tonic(_)
+            | arrow_udf_runtime::remote::Error::Flight(arrow_flight::error::FlightError::Tonic(_))
     )
 }
 

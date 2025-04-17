@@ -14,7 +14,6 @@
 
 use std::future::Future;
 
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -23,6 +22,7 @@ use super::top_n_cache::CacheKey;
 use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {
+    type State: StateStore;
     /// Apply the chunk to the dirty state and get the diffs.
     /// TODO(rc): There can be a 2 times amplification in terms of the chunk size, so we may need to
     /// allow `apply_chunk` return a stream of chunks. Motivation is not quite strong though.
@@ -35,14 +35,12 @@ pub trait TopNExecutorBase: Send + 'static {
     fn flush_data(
         &mut self,
         epoch: EpochPair,
-    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
+    ) -> impl Future<Output = StreamExecutorResult<StateTablePostCommit<'_, Self::State>>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
     fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
-    /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
-    /// by Group Top-N since it's distributed.
-    fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
+    fn clear_cache(&mut self) {
         unreachable!()
     }
 
@@ -106,14 +104,20 @@ where
                     self.inner.try_flush_data().await?;
                 }
                 Message::Barrier(barrier) => {
-                    self.inner.flush_data(barrier.epoch).await?;
+                    let post_commit = self.inner.flush_data(barrier.epoch).await?;
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap, only used by Group Top-N.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.inner.update_vnode_bitmap(vnode_bitmap);
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
+                        // Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
+                        // by Group Top-N since it's distributed.
+                        if cache_may_stale {
+                            self.inner.clear_cache();
+                        }
                     }
-
-                    yield Message::Barrier(barrier)
                 }
             };
         }
@@ -175,5 +179,8 @@ pub fn create_cache_key_serde(
 }
 
 use risingwave_common::row;
+
+use crate::common::table::state_table::StateTablePostCommit;
+
 pub trait GroupKey = row::Row + Send + Sync;
 pub const NO_GROUP_KEY: Option<row::Empty> = None;

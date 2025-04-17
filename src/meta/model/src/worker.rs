@@ -14,8 +14,8 @@
 
 use risingwave_pb::common::worker_node::PbState;
 use risingwave_pb::common::{PbWorkerNode, PbWorkerType};
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{TransactionId, WorkerId};

@@ -15,7 +15,6 @@
 use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -29,8 +28,8 @@ use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
@@ -78,6 +77,10 @@ use crate::user::UserId;
 #[cfg_attr(test, derive(Default))]
 pub struct TableCatalog {
     pub id: TableId,
+
+    pub schema_id: SchemaId,
+
+    pub database_id: DatabaseId,
 
     pub associated_source_id: Option<TableId>, // TODO: use SourceId
 
@@ -475,11 +478,7 @@ impl TableCatalog {
     }
 
     pub fn to_internal_table_prost(&self) -> PbTable {
-        use risingwave_common::catalog::{DatabaseId, SchemaId};
-        self.to_prost(
-            SchemaId::placeholder().schema_id,
-            DatabaseId::placeholder().database_id,
-        )
+        self.to_prost()
     }
 
     /// Returns the SQL definition when the table was created.
@@ -511,11 +510,7 @@ impl TableCatalog {
     }
 
     fn create_sql_ast_from_persisted(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse definition sql")?
-            .into_iter()
-            .exactly_one()
-            .context("expecting exactly one statement in definition")?)
+        Ok(Parser::parse_exactly_one(&self.definition)?)
     }
 
     /// Get a reference to the table catalog's version.
@@ -535,11 +530,11 @@ impl TableCatalog {
         self.vnode_count.value()
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+    pub fn to_prost(&self) -> PbTable {
         PbTable {
             id: self.id.table_id,
-            schema_id,
-            database_id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             // ignore `_rw_timestamp` when serializing
             columns: self
@@ -745,6 +740,8 @@ impl From<PbTable> for TableCatalog {
 
         Self {
             id: id.into(),
+            schema_id: tb.schema_id,
+            database_id: tb.database_id,
             associated_source_id: associated_source_id.map(Into::into),
             name,
             pk,
@@ -813,8 +810,7 @@ impl OwnedByUserCatalog for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-
-    use risingwave_common::catalog::{row_id_column_desc, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
@@ -834,19 +830,16 @@ mod tests {
             name: "test".to_owned(),
             table_type: PbTableType::Table as i32,
             columns: vec![
+                ColumnCatalog::row_id_column().to_protobuf(),
                 PbColumnCatalog {
-                    column_desc: Some((&row_id_column_desc()).into()),
-                    is_hidden: true,
-                },
-                PbColumnCatalog {
-                    column_desc: Some(PbColumnDesc::new_struct(
+                    column_desc: Some(PbColumnDesc::new(
+                        DataType::from(StructType::new([
+                            ("address", DataType::Varchar),
+                            ("zipcode", DataType::Varchar),
+                        ]))
+                        .to_protobuf(),
                         "country",
                         1,
-                        ".test.Country",
-                        vec![
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
-                        ],
                     )),
                     is_hidden: false,
                 },
@@ -898,6 +891,8 @@ mod tests {
             table,
             TableCatalog {
                 id: TableId::new(0),
+                schema_id: 0,
+                database_id: 0,
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,
@@ -912,16 +907,12 @@ mod tests {
                             .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_owned(),
-                            field_descs: vec![
-                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
-                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
-                            ],
-                            type_name: ".test.Country".to_owned(),
                             description: None,
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
-                            version: ColumnDescVersion::Pr13707,
+                            version: ColumnDescVersion::LATEST,
                             system_column: None,
+                            nullable: true,
                         },
                         is_hidden: false
                     },
@@ -964,6 +955,6 @@ mod tests {
                 clean_watermark_index_in_pk: None,
             }
         );
-        assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
+        assert_eq!(table, TableCatalog::from(table.to_prost()));
     }
 }

@@ -14,11 +14,11 @@
 
 use std::env;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use risingwave_common::config::MetaConfig;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_rpc_client::MetaClient;
 
 pub struct MetaServiceOpts {

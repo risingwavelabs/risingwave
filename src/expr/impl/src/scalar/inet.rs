@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Given the dotted-quad representation of an IPv4 network address as a string,
 /// returns an integer that represents the numeric value of the address

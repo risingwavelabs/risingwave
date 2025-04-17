@@ -14,20 +14,20 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
 use dynamodb::types::{AttributeValue, TableStatus, WriteRequest};
-use futures::prelude::future::TryFutureExt;
 use futures::prelude::TryFuture;
+use futures::prelude::future::TryFutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 use write_chunk_future::{DynamoDbPayloadWriter, WriteChunkFuture};
 
@@ -364,8 +364,8 @@ mod write_chunk_future {
         ReturnItemCollectionMetrics, WriteRequest,
     };
     use futures::future::{Map, TryJoinAll};
-    use futures::prelude::future::{try_join_all, FutureExt};
     use futures::prelude::Future;
+    use futures::prelude::future::{FutureExt, try_join_all};
     use itertools::Itertools;
     use maplit::hashmap;
 

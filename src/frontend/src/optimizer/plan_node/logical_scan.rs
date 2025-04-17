@@ -20,17 +20,20 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream, generic,
 };
+use crate::TableCatalog;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -39,9 +42,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Cardinality, Order, WatermarkColumns};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::optimizer::ApplyResult;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
-use crate::TableCatalog;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -146,6 +147,21 @@ impl LogicalScan {
 
     /// Return indexes can satisfy the required order.
     pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
+        self.indexes_satisfy_order_with_prefix(required_order, &HashSet::new())
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Return indexes can satisfy the required order.
+    /// The `prefix` refers to optionally matching columns of the index
+    /// It is unordered initially.
+    /// If any are used, we will return the fixed `Order` prefix.
+    pub fn indexes_satisfy_order_with_prefix(
+        &self,
+        required_order: &Order,
+        prefix: &HashSet<ColumnOrder>,
+    ) -> Vec<(&Rc<IndexCatalog>, Order)> {
         let output_col_map = self
             .output_col_idx()
             .iter()
@@ -154,30 +170,50 @@ impl LogicalScan {
             .map(|(id, col)| (col, id))
             .collect::<BTreeMap<_, _>>();
         let unmatched_idx = output_col_map.len();
-        self.indexes()
-            .iter()
-            .filter(|idx| {
-                let s2p_mapping = idx.secondary_to_primary_mapping();
-                Order {
-                    column_orders: idx
-                        .index_table
-                        .pk()
-                        .iter()
-                        .map(|idx_item| {
-                            let idx = match s2p_mapping.get(&idx_item.column_index) {
-                                Some(col_idx) => {
-                                    *output_col_map.get(col_idx).unwrap_or(&unmatched_idx)
-                                }
-                                // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
-                                None => unmatched_idx,
-                            };
-                            ColumnOrder::new(idx, idx_item.order_type)
-                        })
-                        .collect(),
+        let mut index_catalog_and_orders = vec![];
+        for index in self.indexes() {
+            let s2p_mapping = index.secondary_to_primary_mapping();
+            let index_orders: Vec<ColumnOrder> = index
+                .index_table
+                .pk()
+                .iter()
+                .map(|idx_item| {
+                    let idx = match s2p_mapping.get(&idx_item.column_index) {
+                        Some(col_idx) => *output_col_map.get(col_idx).unwrap_or(&unmatched_idx),
+                        // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
+                        None => unmatched_idx,
+                    };
+                    ColumnOrder::new(idx, idx_item.order_type)
+                })
+                .collect();
+
+            let mut index_orders_iter = index_orders.into_iter().peekable();
+
+            // First check the prefix
+            let fixed_prefix = {
+                let mut fixed_prefix = vec![];
+                loop {
+                    match index_orders_iter.peek() {
+                        Some(index_col_order) if prefix.contains(index_col_order) => {
+                            let index_col_order = index_orders_iter.next().unwrap();
+                            fixed_prefix.push(index_col_order);
+                        }
+                        _ => break,
+                    }
                 }
-                .satisfies(required_order)
-            })
-            .collect()
+                Order {
+                    column_orders: fixed_prefix,
+                }
+            };
+
+            let remaining_orders = Order {
+                column_orders: index_orders_iter.collect(),
+            };
+            if remaining_orders.satisfies(required_order) {
+                index_catalog_and_orders.push((index, fixed_prefix));
+            }
+        }
+        index_catalog_and_orders
     }
 
     /// If the index can cover the scan, transform it to the index scan.
@@ -206,15 +242,13 @@ impl LogicalScan {
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
     fn output_idx_to_input_ref(&self) -> Vec<ExprImpl> {
-        let output_idx = self
-            .output_col_idx()
+        self.output_col_idx()
             .iter()
             .enumerate()
             .map(|(i, &col_idx)| {
                 InputRef::new(i, self.table_desc().columns[col_idx].data_type.clone()).into()
             })
-            .collect_vec();
-        output_idx
+            .collect_vec()
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
@@ -353,9 +387,11 @@ impl ColPrunable for LogicalScan {
             .iter()
             .map(|i| self.required_col_idx()[*i])
             .collect();
-        assert!(output_col_idx
-            .iter()
-            .all(|i| self.output_col_idx().contains(i)));
+        assert!(
+            output_col_idx
+                .iter()
+                .all(|i| self.output_col_idx().contains(i))
+        );
 
         self.clone_with_output_indices(output_col_idx).into()
     }
@@ -401,7 +437,7 @@ impl PredicatePushdown for LogicalScan {
         }
         let non_pushable_predicate: Vec<_> = predicate
             .conjunctions
-            .extract_if(|expr| {
+            .extract_if(.., |expr| {
                 if expr.count_nows() > 0 {
                     true
                 } else {
@@ -519,11 +555,20 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new_with_stream_scan_type(
-                self.core.clone(),
-                ctx.stream_scan_type(),
-            )
-            .into())
+            // Force rewrite scan type to cross-db scan
+            if self.core.table_catalog.database_id != self.base.ctx().session_ctx().database_id() {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    StreamScanType::CrossDbSnapshotBackfill,
+                )
+                .into())
+            } else {
+                Ok(StreamTableScan::new_with_stream_scan_type(
+                    self.core.clone(),
+                    ctx.stream_scan_type(),
+                )
+                .into())
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

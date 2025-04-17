@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_expr::window_function::{
-    BoxedWindowState, WindowFuncCall, WindowFuncKind, WINDOW_STATE_BUILDERS,
+    BoxedWindowState, WINDOW_STATE_BUILDERS, WindowFuncCall, WindowFuncKind,
 };
 use risingwave_expr::{ExprError, Result};
 

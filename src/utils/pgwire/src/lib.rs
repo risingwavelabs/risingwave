@@ -18,10 +18,12 @@
 #![feature(buf_read_has_data_left)]
 #![feature(round_char_boundary)]
 #![feature(never_type)]
+#![feature(let_chains)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
 pub mod error_or_notice;
+pub mod memory_manager;
 pub mod net;
 pub mod pg_extended;
 pub mod pg_field_descriptor;

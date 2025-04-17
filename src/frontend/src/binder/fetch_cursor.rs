@@ -14,8 +14,8 @@
 
 use risingwave_common::catalog::Schema;
 
-use crate::error::Result;
 use crate::Binder;
+use crate::error::Result;
 
 #[derive(Debug, Clone)]
 pub struct BoundFetchCursor {

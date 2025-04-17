@@ -14,30 +14,38 @@
 
 pub mod parquet_file_handler;
 
-use std::collections::HashMap;
+mod metrics;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures_async_stream::for_await;
+use futures::StreamExt;
+use futures_async_stream::{for_await, try_stream};
+use iceberg::Catalog;
 use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
-use iceberg::spec::TableMetadataRef;
+use iceberg::spec::DataContentType;
 use iceberg::table::Table;
-use iceberg::Catalog;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
+use phf::{Set, phf_set};
+use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    Schema, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME,
-    ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    Schema,
 };
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
+pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
 use crate::connector_common::IcebergCommon;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{
@@ -59,6 +67,20 @@ pub struct IcebergProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for IcebergProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "catalog.jdbc.password",
+    };
+
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            IcebergCommon::enforce_one(prop)?;
+            Self::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl IcebergProperties {
@@ -84,23 +106,6 @@ impl IcebergProperties {
         }
         // TODO: support java_catalog_props for iceberg source
         self.common.load_table(&java_catalog_props).await
-    }
-
-    pub async fn load_table_with_metadata(
-        &self,
-        table_meta: TableMetadataRef,
-    ) -> ConnectorResult<Table> {
-        let mut java_catalog_props = HashMap::new();
-        if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
-        }
-        if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
-        }
-        // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common
-            .load_table_with_metadata(table_meta, &java_catalog_props)
-            .await
     }
 }
 
@@ -136,9 +141,15 @@ pub enum IcebergFileScanTask {
     Data(Vec<FileScanTask>),
     EqualityDelete(Vec<FileScanTask>),
     PositionDelete(Vec<FileScanTask>),
+    CountStar(u64),
 }
+
 impl IcebergFileScanTask {
-    pub fn new_with_scan_type(
+    pub fn new_count_star(count_sum: u64) -> Self {
+        IcebergFileScanTask::CountStar(count_sum)
+    }
+
+    pub fn new_scan_with_scan_type(
         iceberg_scan_type: IcebergScanType,
         data_files: Vec<FileScanTask>,
         equality_delete_files: Vec<FileScanTask>,
@@ -152,25 +163,8 @@ impl IcebergFileScanTask {
             IcebergScanType::PositionDeleteScan => {
                 IcebergFileScanTask::PositionDelete(position_delete_files)
             }
-            IcebergScanType::Unspecified => unreachable!("Unspecified iceberg scan type"),
-        }
-    }
-
-    pub fn add_files(
-        &mut self,
-        data_file: FileScanTask,
-        equality_delete_file: FileScanTask,
-        position_delete_file: FileScanTask,
-    ) {
-        match self {
-            IcebergFileScanTask::Data(data_files) => {
-                data_files.push(data_file);
-            }
-            IcebergFileScanTask::EqualityDelete(equality_delete_files) => {
-                equality_delete_files.push(equality_delete_file);
-            }
-            IcebergFileScanTask::PositionDelete(position_delete_files) => {
-                position_delete_files.push(position_delete_file);
+            IcebergScanType::Unspecified | IcebergScanType::CountStar => {
+                unreachable!("Unspecified iceberg scan type")
             }
         }
     }
@@ -184,6 +178,19 @@ impl IcebergFileScanTask {
             IcebergFileScanTask::PositionDelete(position_delete_files) => {
                 position_delete_files.is_empty()
             }
+            IcebergFileScanTask::CountStar(_) => false,
+        }
+    }
+
+    pub fn files(&self) -> Vec<String> {
+        match self {
+            IcebergFileScanTask::Data(file_scan_tasks)
+            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
+            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => file_scan_tasks
+                .iter()
+                .map(|task| task.data_file_path.clone())
+                .collect(),
+            IcebergFileScanTask::CountStar(_) => vec![],
         }
     }
 }
@@ -191,23 +198,30 @@ impl IcebergFileScanTask {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
+    // TODO: remove this field. It seems not used.
     pub snapshot_id: i64,
-    pub table_meta: TableMetadataRef,
     pub task: IcebergFileScanTask,
 }
 
 impl IcebergSplit {
-    pub fn empty(table_meta: TableMetadataRef, iceberg_scan_type: IcebergScanType) -> Self {
-        Self {
-            split_id: 0,
-            snapshot_id: 0,
-            table_meta,
-            task: IcebergFileScanTask::new_with_scan_type(
-                iceberg_scan_type,
-                vec![],
-                vec![],
-                vec![],
-            ),
+    pub fn empty(iceberg_scan_type: IcebergScanType) -> Self {
+        if let IcebergScanType::CountStar = iceberg_scan_type {
+            Self {
+                split_id: 0,
+                snapshot_id: 0,
+                task: IcebergFileScanTask::new_count_star(0),
+            }
+        } else {
+            Self {
+                split_id: 0,
+                snapshot_id: 0,
+                task: IcebergFileScanTask::new_scan_with_scan_type(
+                    iceberg_scan_type,
+                    vec![],
+                    vec![],
+                    vec![],
+                ),
+            }
         }
     }
 }
@@ -248,7 +262,9 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
-        // Iceberg source does not support streaming queries
+        // Like file source, iceberg streaming source has a List Executor and a Fetch Executor,
+        // instead of relying on SplitEnumerator on meta.
+        // TODO: add some validation logic here.
         Ok(vec![])
     }
 }
@@ -266,14 +282,14 @@ pub enum IcebergTimeTravelInfo {
 impl IcebergSplitEnumerator {
     pub fn get_snapshot_id(
         table: &Table,
-        time_traval_info: Option<IcebergTimeTravelInfo>,
+        time_travel_info: Option<IcebergTimeTravelInfo>,
     ) -> ConnectorResult<Option<i64>> {
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             return Ok(None);
         }
 
-        let snapshot_id = match time_traval_info {
+        let snapshot_id = match time_travel_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
                 let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
                     bail!("Cannot find the snapshot id in the iceberg table.");
@@ -320,13 +336,35 @@ impl IcebergSplitEnumerator {
         }
         let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
-        let table_meta = table.metadata_ref();
         if snapshot_id.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
-            return Ok(vec![IcebergSplit::empty(table_meta, iceberg_scan_type)]);
+            return Ok(vec![IcebergSplit::empty(iceberg_scan_type)]);
         }
-        let snapshot_id = snapshot_id.unwrap();
+        if let IcebergScanType::CountStar = iceberg_scan_type {
+            self.list_splits_batch_count_star(&table, snapshot_id.unwrap())
+                .await
+        } else {
+            self.list_splits_batch_scan(
+                &table,
+                snapshot_id.unwrap(),
+                schema,
+                batch_parallelism,
+                iceberg_scan_type,
+                predicate,
+            )
+            .await
+        }
+    }
 
+    async fn list_splits_batch_scan(
+        &self,
+        table: &Table,
+        snapshot_id: i64,
+        schema: Schema,
+        batch_parallelism: usize,
+        iceberg_scan_type: IcebergScanType,
+        predicate: IcebergPredicate,
+    ) -> ConnectorResult<Vec<IcebergSplit>> {
         let schema_names = schema.names();
         let require_names = schema_names
             .iter()
@@ -342,12 +380,15 @@ impl IcebergSplitEnumerator {
         tracing::debug!("iceberg_table_schema: {:?}", table_schema);
 
         let mut position_delete_files = vec![];
+        let mut position_delete_files_set = HashSet::new();
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
+        let mut equality_delete_files_set = HashSet::new();
         let scan = table
             .scan()
             .with_filter(predicate)
             .snapshot_id(snapshot_id)
+            .with_delete_file_processing_enabled(true)
             .select(require_names)
             .build()
             .map_err(|e| anyhow!(e))?;
@@ -357,16 +398,33 @@ impl IcebergSplitEnumerator {
         #[for_await]
         for task in file_scan_stream {
             let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            for mut delete_file in task.deletes.drain(..) {
+                match delete_file.data_file_content {
+                    iceberg::spec::DataContentType::Data => {
+                        bail!("Data file should not in task deletes");
+                    }
+                    iceberg::spec::DataContentType::EqualityDeletes => {
+                        if equality_delete_files_set.insert(delete_file.data_file_path.clone()) {
+                            equality_delete_files.push(delete_file);
+                        }
+                    }
+                    iceberg::spec::DataContentType::PositionDeletes => {
+                        if position_delete_files_set.insert(delete_file.data_file_path.clone()) {
+                            delete_file.project_field_ids = Vec::default();
+                            position_delete_files.push(delete_file);
+                        }
+                    }
+                }
+            }
             match task.data_file_content {
                 iceberg::spec::DataContentType::Data => {
                     data_files.push(task);
                 }
                 iceberg::spec::DataContentType::EqualityDeletes => {
-                    equality_delete_files.push(task);
+                    bail!("Equality delete files should not be in the data files");
                 }
                 iceberg::spec::DataContentType::PositionDeletes => {
-                    task.project_field_ids = Vec::default();
-                    position_delete_files.push(task);
+                    bail!("Position delete files should not be in the data files");
                 }
             }
         }
@@ -384,8 +442,7 @@ impl IcebergSplitEnumerator {
                 |(index, ((data_file, equality_delete_file), position_delete_file))| IcebergSplit {
                     split_id: index as i64,
                     snapshot_id,
-                    table_meta: table_meta.clone(),
-                    task: IcebergFileScanTask::new_with_scan_type(
+                    task: IcebergFileScanTask::new_scan_with_scan_type(
                         iceberg_scan_type,
                         data_file,
                         equality_delete_file,
@@ -397,14 +454,41 @@ impl IcebergSplitEnumerator {
             .collect_vec();
 
         if splits.is_empty() {
-            return Ok(vec![IcebergSplit::empty(
-                table.metadata_ref(),
-                iceberg_scan_type,
-            )]);
+            return Ok(vec![IcebergSplit::empty(iceberg_scan_type)]);
         }
         Ok(splits)
     }
 
+    pub async fn list_splits_batch_count_star(
+        &self,
+        table: &Table,
+        snapshot_id: i64,
+    ) -> ConnectorResult<Vec<IcebergSplit>> {
+        let mut record_counts = 0;
+        let scan = table
+            .scan()
+            .snapshot_id(snapshot_id)
+            .with_delete_file_processing_enabled(true)
+            .build()
+            .map_err(|e| anyhow!(e))?;
+        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+
+        #[for_await]
+        for task in file_scan_stream {
+            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
+            assert_eq!(task.data_file_content, DataContentType::Data);
+            assert!(task.deletes.is_empty());
+            record_counts += task.record_count.expect("must have");
+        }
+        let split = IcebergSplit {
+            split_id: 0,
+            snapshot_id,
+            task: IcebergFileScanTask::new_count_star(record_counts),
+        };
+        Ok(vec![split])
+    }
+
+    /// List all files in the snapshot to check if there are deletes.
     pub async fn all_delete_parameters(
         table: &Table,
         snapshot_id: i64,
@@ -412,6 +496,7 @@ impl IcebergSplitEnumerator {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
+            .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
@@ -421,17 +506,19 @@ impl IcebergSplitEnumerator {
         #[for_await]
         for task in file_scan_stream {
             let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
-            match task.data_file_content {
-                iceberg::spec::DataContentType::Data => {}
-                iceberg::spec::DataContentType::EqualityDeletes => {
-                    if equality_ids.is_empty() {
-                        equality_ids = task.equality_ids;
-                    } else if equality_ids != task.equality_ids {
-                        bail!("The schema of iceberg equality delete file must be consistent");
+            for delete_file in task.deletes {
+                match delete_file.data_file_content {
+                    iceberg::spec::DataContentType::Data => {}
+                    iceberg::spec::DataContentType::EqualityDeletes => {
+                        if equality_ids.is_empty() {
+                            equality_ids = delete_file.equality_ids;
+                        } else if equality_ids != delete_file.equality_ids {
+                            bail!("The schema of iceberg equality delete file must be consistent");
+                        }
                     }
-                }
-                iceberg::spec::DataContentType::PositionDeletes => {
-                    have_position_delete = true;
+                    iceberg::spec::DataContentType::PositionDeletes => {
+                        have_position_delete = true;
+                    }
                 }
             }
         }
@@ -448,10 +535,10 @@ impl IcebergSplitEnumerator {
 
     pub async fn get_delete_parameters(
         &self,
-        time_traval_info: Option<IcebergTimeTravelInfo>,
+        time_travel_info: Option<IcebergTimeTravelInfo>,
     ) -> ConnectorResult<(Vec<String>, bool)> {
         let table = self.config.load_table().await?;
-        let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
+        let snapshot_id = Self::get_snapshot_id(&table, time_travel_info)?;
         if snapshot_id.is_none() {
             return Ok((vec![], false));
         }
@@ -459,20 +546,141 @@ impl IcebergSplitEnumerator {
         Self::all_delete_parameters(&table, snapshot_id).await
     }
 
-    fn split_n_vecs(vecs: Vec<FileScanTask>, split_num: usize) -> Vec<Vec<FileScanTask>> {
-        let split_size = vecs.len() / split_num;
-        let remaining = vecs.len() % split_num;
-        let mut result_vecs = (0..split_num)
-            .map(|i| {
-                let start = i * split_size;
-                let end = (i + 1) * split_size;
-                vecs[start..end].to_vec()
-            })
-            .collect_vec();
-        for i in 0..remaining {
-            result_vecs[i].push(vecs[split_num * split_size + i].clone());
+    /// Uniformly distribute scan tasks to compute nodes.
+    /// It's deterministic so that it can best utilize the data locality.
+    ///
+    /// # Arguments
+    /// * `file_scan_tasks`: The file scan tasks to be split.
+    /// * `split_num`: The number of splits to be created.
+    ///
+    /// This algorithm is based on a min-heap. It will push all groups into the heap, and then pop the smallest group and add the file scan task to it.
+    /// Ensure that the total length of each group is as balanced as possible.
+    /// The time complexity is O(n log k), where n is the number of file scan tasks and k is the number of splits.
+    /// The space complexity is O(k), where k is the number of splits.
+    /// The algorithm is stable, so the order of the file scan tasks will be preserved.
+    fn split_n_vecs(
+        file_scan_tasks: Vec<FileScanTask>,
+        split_num: usize,
+    ) -> Vec<Vec<FileScanTask>> {
+        use std::cmp::{Ordering, Reverse};
+
+        #[derive(Default)]
+        struct FileScanTaskGroup {
+            idx: usize,
+            tasks: Vec<FileScanTask>,
+            total_length: u64,
         }
-        result_vecs
+
+        impl Ord for FileScanTaskGroup {
+            fn cmp(&self, other: &Self) -> Ordering {
+                // when total_length is the same, we will sort by index
+                if self.total_length == other.total_length {
+                    self.idx.cmp(&other.idx)
+                } else {
+                    self.total_length.cmp(&other.total_length)
+                }
+            }
+        }
+
+        impl PartialOrd for FileScanTaskGroup {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl Eq for FileScanTaskGroup {}
+
+        impl PartialEq for FileScanTaskGroup {
+            fn eq(&self, other: &Self) -> bool {
+                self.total_length == other.total_length
+            }
+        }
+
+        let mut heap = BinaryHeap::new();
+        // push all groups into heap
+        for idx in 0..split_num {
+            heap.push(Reverse(FileScanTaskGroup {
+                idx,
+                tasks: vec![],
+                total_length: 0,
+            }));
+        }
+
+        for file_task in file_scan_tasks {
+            let mut group = heap.peek_mut().unwrap();
+            group.0.total_length += file_task.length;
+            group.0.tasks.push(file_task);
+        }
+
+        // convert heap into vec and extract tasks
+        heap.into_vec()
+            .into_iter()
+            .map(|reverse_group| reverse_group.0.tasks)
+            .collect()
+    }
+}
+
+pub struct IcebergScanOpts {
+    pub chunk_size: usize,
+    pub need_seq_num: bool,
+    pub need_file_path_and_pos: bool,
+}
+
+#[try_stream(ok = DataChunk, error = ConnectorError)]
+pub async fn scan_task_to_chunk(
+    table: Table,
+    data_file_scan_task: FileScanTask,
+    IcebergScanOpts {
+        chunk_size,
+        need_seq_num,
+        need_file_path_and_pos,
+    }: IcebergScanOpts,
+    metrics: Option<Arc<IcebergScanMetrics>>,
+) {
+    let table_name = table.identifier().name().to_owned();
+
+    let mut read_bytes = scopeguard::guard(0, |read_bytes| {
+        if let Some(metrics) = metrics {
+            metrics
+                .iceberg_read_bytes
+                .with_guarded_label_values(&[&table_name])
+                .inc_by(read_bytes as _);
+        }
+    });
+
+    let data_file_path = data_file_scan_task.data_file_path.clone();
+    let data_sequence_number = data_file_scan_task.sequence_number;
+
+    let reader = table.reader_builder().with_batch_size(chunk_size).build();
+    let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
+
+    // FIXME: what if the start position is not 0? The logic for index seems not correct.
+    let mut record_batch_stream = reader.read(Box::pin(file_scan_stream)).await?.enumerate();
+
+    while let Some((index, record_batch)) = record_batch_stream.next().await {
+        let record_batch = record_batch?;
+
+        let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+        if need_seq_num {
+            let (mut columns, visibility) = chunk.into_parts();
+            columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
+                vec![data_sequence_number; visibility.len()],
+            ))));
+            chunk = DataChunk::from_parts(columns.into(), visibility)
+        };
+        if need_file_path_and_pos {
+            let (mut columns, visibility) = chunk.into_parts();
+            columns.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
+                vec![data_file_path.as_str(); visibility.len()],
+            ))));
+            let index_start = (index * chunk_size) as i64;
+            columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
+                (index_start..(index_start + visibility.len() as i64)).collect::<Vec<i64>>(),
+            ))));
+            chunk = DataChunk::from_parts(columns.into(), visibility)
+        }
+        *read_bytes += chunk.estimated_heap_size() as u64;
+        yield chunk;
     }
 }
 
@@ -496,5 +704,127 @@ impl SplitReader for IcebergFileReader {
 
     fn into_stream(self) -> BoxSourceChunkStream {
         unimplemented!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use iceberg::scan::FileScanTask;
+    use iceberg::spec::{DataContentType, Schema};
+
+    use super::*;
+
+    fn create_file_scan_task(length: u64, id: u64) -> FileScanTask {
+        FileScanTask {
+            length,
+            start: 0,
+            record_count: Some(0),
+            data_file_path: format!("test_{}.parquet", id).to_owned(),
+            data_file_content: DataContentType::Data,
+            data_file_format: iceberg::spec::DataFileFormat::Parquet,
+            schema: Arc::new(Schema::builder().build().unwrap()),
+            project_field_ids: vec![],
+            predicate: None,
+            deletes: vec![],
+            sequence_number: 0,
+            equality_ids: vec![],
+        }
+    }
+
+    #[test]
+    fn test_split_n_vecs_basic() {
+        let file_scan_tasks = (1..=12)
+            .map(|i| create_file_scan_task(i + 100, i))
+            .collect::<Vec<_>>(); // Ensure the correct function is called
+
+        let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 3);
+
+        assert_eq!(groups.len(), 3);
+
+        let group_lengths: Vec<u64> = groups
+            .iter()
+            .map(|group| group.iter().map(|task| task.length).sum())
+            .collect();
+
+        let max_length = *group_lengths.iter().max().unwrap();
+        let min_length = *group_lengths.iter().min().unwrap();
+        assert!(max_length - min_length <= 10, "Groups should be balanced");
+
+        let total_tasks: usize = groups.iter().map(|group| group.len()).sum();
+        assert_eq!(total_tasks, 12);
+    }
+
+    #[test]
+    fn test_split_n_vecs_empty() {
+        let file_scan_tasks = Vec::new();
+        let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 3);
+        assert_eq!(groups.len(), 3);
+        assert!(groups.iter().all(|group| group.is_empty()));
+    }
+
+    #[test]
+    fn test_split_n_vecs_single_task() {
+        let file_scan_tasks = vec![create_file_scan_task(100, 1)];
+        let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 3);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups.iter().filter(|group| !group.is_empty()).count(), 1);
+    }
+
+    #[test]
+    fn test_split_n_vecs_uneven_distribution() {
+        let file_scan_tasks = vec![
+            create_file_scan_task(1000, 1),
+            create_file_scan_task(100, 2),
+            create_file_scan_task(100, 3),
+            create_file_scan_task(100, 4),
+            create_file_scan_task(100, 5),
+        ];
+
+        let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks, 2);
+        assert_eq!(groups.len(), 2);
+
+        let group_with_large_task = groups
+            .iter()
+            .find(|group| group.iter().any(|task| task.length == 1000))
+            .unwrap();
+        assert_eq!(group_with_large_task.len(), 1);
+    }
+
+    #[test]
+    fn test_split_n_vecs_same_files_distribution() {
+        let file_scan_tasks = vec![
+            create_file_scan_task(100, 1),
+            create_file_scan_task(100, 2),
+            create_file_scan_task(100, 3),
+            create_file_scan_task(100, 4),
+            create_file_scan_task(100, 5),
+            create_file_scan_task(100, 6),
+            create_file_scan_task(100, 7),
+            create_file_scan_task(100, 8),
+        ];
+
+        let groups = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks.clone(), 4)
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|task| task.data_file_path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        for _ in 0..10000 {
+            let groups_2 = IcebergSplitEnumerator::split_n_vecs(file_scan_tasks.clone(), 4)
+                .iter()
+                .map(|g| {
+                    g.iter()
+                        .map(|task| task.data_file_path.clone())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(groups, groups_2);
+        }
     }
 }

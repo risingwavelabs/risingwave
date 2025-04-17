@@ -32,6 +32,8 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
+use crate::executor::UpdateMutation;
+use crate::executor::backfill::CdcScanOptions;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -40,11 +42,9 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{
     get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
-use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -352,9 +352,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     external_database_name.clone(),
                 );
 
-                let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
-                    .map(Either::Right));
+                let right_snapshot = pin!(
+                    upstream_table_reader
+                        .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
+                        .map(Either::Right)
+                );
 
                 let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
                 if is_snapshot_paused {
@@ -886,7 +888,7 @@ impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
 mod tests {
     use std::str::FromStr;
 
-    use futures::{pin_mut, StreamExt};
+    use futures::{StreamExt, pin_mut};
     use risingwave_common::array::{DataChunk, Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::{DataType, Datum, JsonbVal};

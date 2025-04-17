@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
-use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType};
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, EqJoinPredicate, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
-    ToDistributedBatch,
+    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
@@ -38,14 +38,19 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct BatchHashJoin {
     pub base: PlanBase<Batch>,
     core: generic::Join<PlanRef>,
-
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
+    /// `AsOf` desc
+    asof_desc: Option<AsOfJoinDesc>,
 }
 
 impl BatchHashJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(
+        core: generic::Join<PlanRef>,
+        eq_join_predicate: EqJoinPredicate,
+        asof_desc: Option<AsOfJoinDesc>,
+    ) -> Self {
         let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
         let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
 
@@ -53,6 +58,7 @@ impl BatchHashJoin {
             base,
             core,
             eq_join_predicate,
+            asof_desc,
         }
     }
 
@@ -66,11 +72,16 @@ impl BatchHashJoin {
             // we can not derive the hash distribution from the side where outer join can generate a
             // NULL row
             (Distribution::HashShard(_), Distribution::HashShard(_)) => match join.join_type {
-                JoinType::AsofInner | JoinType::AsofLeftOuter | JoinType::Unspecified => {
+                JoinType::Unspecified => {
                     unreachable!()
                 }
                 JoinType::FullOuter => Distribution::SomeShard,
-                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
+                JoinType::Inner
+                | JoinType::LeftOuter
+                | JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::AsofInner
+                | JoinType::AsofLeftOuter => {
                     let l2o = join.l2i_col_mapping().composite(&join.i2o_col_mapping());
                     l2o.rewrite_provided_distribution(left)
                 }
@@ -127,7 +138,7 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone())
+        Self::new(core, self.eq_join_predicate.clone(), self.asof_desc)
     }
 }
 
@@ -215,6 +226,7 @@ impl ToBatchPb for BatchHashJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
+            asof_desc: self.asof_desc,
         })
     }
 }
@@ -238,7 +250,15 @@ impl ExprRewritable for BatchHashJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+        let eq_join_predicate = self.eq_join_predicate.rewrite_exprs(r);
+        let desc = self.asof_desc.map(|_| {
+            LogicalJoin::get_inequality_desc_from_predicate(
+                eq_join_predicate.other_cond().clone(),
+                core.left.schema().len(),
+            )
+            .unwrap()
+        });
+        Self::new(core, eq_join_predicate, desc).into()
     }
 }
 

@@ -15,19 +15,19 @@
 use itertools::Itertools;
 
 use super::expr_visitable::ExprVisitable;
-use super::generic::{GenericPlanRef, CHANGELOG_OP, _CHANGELOG_ROW_ID};
+use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext,
-    StreamChangeLog, StreamRowIdGen, ToBatch, ToStream, ToStreamContext,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalProject, PlanBase,
+    PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext, StreamChangeLog, StreamRowIdGen,
+    ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
 };
+use crate::PlanRef;
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
 use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalChangeLog {

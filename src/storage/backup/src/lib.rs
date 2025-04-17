@@ -15,10 +15,8 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
-#![feature(extract_if)]
 #![feature(custom_test_frameworks)]
 #![feature(map_try_insert)]
-#![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
@@ -69,7 +67,7 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_object_ids(),
+            ssts: v.get_object_ids(false),
             format_version,
             remarks,
             state_table_info: v

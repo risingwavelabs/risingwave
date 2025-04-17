@@ -20,9 +20,9 @@ use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
-use crate::source::pulsar::split::PulsarSplit;
-use crate::source::pulsar::topic::{parse_topic, Topic};
 use crate::source::pulsar::PulsarProperties;
+use crate::source::pulsar::split::PulsarSplit;
+use crate::source::pulsar::topic::{Topic, parse_topic};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct PulsarSplitEnumerator {

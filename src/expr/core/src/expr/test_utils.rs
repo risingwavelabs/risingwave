@@ -19,13 +19,13 @@ use std::num::NonZeroUsize;
 use num_traits::CheckedSub;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::PbDataType;
+use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::Type::Field;
 use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-use super::{build_from_prost, BoxedExpression, Result};
+use super::{BoxedExpression, Result, build_from_prost};
 use crate::ExprError;
 
 pub fn make_func_call(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> ExprNode {

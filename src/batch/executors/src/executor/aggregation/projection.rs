@@ -16,8 +16,8 @@ use std::ops::Range;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::Result;
+use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 
 pub struct Projection {
     inner: BoxedAggregateFunction,

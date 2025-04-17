@@ -14,9 +14,9 @@
 
 use std::ops::Range;
 
+use super::RowRef;
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
-use super::RowRef;
 use crate::array::{Op, StreamChunk};
 
 impl StreamChunk {
@@ -53,7 +53,7 @@ impl StreamChunk {
         (op, row, visible)
     }
 
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<(Op, RowRef<'_>)>> {
+    pub fn rows_with_holes(&self) -> impl ExactSizeIterator<Item = Option<(Op, RowRef<'_>)>> {
         self.data_chunk().rows_with_holes().map(|row| {
             row.map(|row| {
                 (

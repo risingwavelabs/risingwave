@@ -192,7 +192,9 @@ fn parse_create_table_from_pg_dump() {
             release_year public.year,
             active integer
         )";
-    one_statement_parses_to(sql, "CREATE TABLE public.customer (\
+    one_statement_parses_to(
+        sql,
+        "CREATE TABLE public.customer (\
             customer_id INT DEFAULT nextval(CAST('public.customer_customer_id_seq' AS REGCLASS)) NOT NULL, \
             store_id SMALLINT NOT NULL, \
             first_name CHARACTER VARYING NOT NULL, \
@@ -205,7 +207,8 @@ fn parse_create_table_from_pg_dump() {
             last_update TIMESTAMP DEFAULT now(), \
             release_year public.year, \
             active INT\
-        )");
+        )",
+    );
 }
 
 #[test]
@@ -688,7 +691,9 @@ fn test_transaction_statement() {
             session: false
         }
     );
-    let statement = verified_stmt("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY, READ WRITE, ISOLATION LEVEL SERIALIZABLE");
+    let statement = verified_stmt(
+        "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY, READ WRITE, ISOLATION LEVEL SERIALIZABLE",
+    );
     assert_eq!(
         statement,
         Statement::SetTransaction {
@@ -881,8 +886,7 @@ fn parse_create_function() {
         }
     );
 
-    let sql =
-        "CREATE FUNCTION IF NOT EXISTS add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
+    let sql = "CREATE FUNCTION IF NOT EXISTS add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
@@ -910,8 +914,7 @@ fn parse_create_function() {
 
 #[test]
 fn parse_create_aggregate() {
-    let sql =
-        "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
+    let sql = "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateAggregate {
@@ -930,8 +933,7 @@ fn parse_create_aggregate() {
         }
     );
 
-    let sql =
-        "CREATE AGGREGATE IF NOT EXISTS sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
+    let sql = "CREATE AGGREGATE IF NOT EXISTS sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateAggregate {
@@ -1316,8 +1318,10 @@ fn parse_variadic_argument() {
     _ = verified_stmt(sql);
 
     let sql = "SELECT foo(VARIADIC a, b, VARIADIC c)";
-    assert!(parse_sql_statements(sql)
-        .unwrap_err()
-        .to_string()
-        .contains("VARIADIC argument must be the last"),);
+    assert!(
+        parse_sql_statements(sql)
+            .unwrap_err()
+            .to_string()
+            .contains("VARIADIC argument must be the last"),
+    );
 }

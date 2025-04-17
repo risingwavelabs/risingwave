@@ -24,8 +24,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
+use risingwave_expr::expr::NonStrictExpression;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
@@ -529,6 +529,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         );
         pin_mut!(aligned_stream);
 
+        let actor_id = self.ctx.id;
+
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
         let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
@@ -547,26 +549,30 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let left_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
         let right_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let barrier_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                "barrier",
+            ]);
 
         let left_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
 
         let right_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let mut start_time = Instant::now();
 
@@ -645,17 +651,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
-                    self.flush_data(barrier.epoch).await?;
+                    let (left_post_commit, right_post_commit) =
+                        self.flush_data(barrier.epoch).await?;
+
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
-                            self.watermark_buffers
-                                .values_mut()
-                                .for_each(|buffers| buffers.clear());
-                            self.inequality_watermarks.fill(None);
-                        }
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
+                    right_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+                    if left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .unwrap_or(false)
+                    {
+                        self.watermark_buffers
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
+                        self.inequality_watermarks.fill(None);
                     }
 
                     // Report metrics of cached join rows/entries
@@ -668,19 +682,24 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
-                    yield Message::Barrier(barrier);
                 }
             }
             start_time = Instant::now();
         }
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<(
+        JoinHashMapPostCommit<'_, K, S>,
+        JoinHashMapPostCommit<'_, K, S>,
+    )> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush(epoch).await?;
-        self.side_r.ht.flush(epoch).await?;
-        Ok(())
+        let left = self.side_l.ht.flush(epoch).await?;
+        let right = self.side_r.ht.flush(epoch).await?;
+        Ok((left, right))
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
@@ -1212,15 +1231,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         } else {
             // check if need state cleaning
             for (column_idx, watermark) in useful_state_clean_columns {
-                if matched_row
-                    .row
-                    .datum_at(*column_idx)
-                    .map_or(false, |scalar| {
-                        scalar
-                            .default_cmp(&watermark.val.as_scalar_ref_impl())
-                            .is_lt()
-                    })
-                {
+                if matched_row.row.datum_at(*column_idx).is_some_and(|scalar| {
+                    scalar
+                        .default_cmp(&watermark.val.as_scalar_ref_impl())
+                        .is_lt()
+                }) {
                     need_state_clean = true;
                     break;
                 }
@@ -1257,7 +1272,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         side_match_start_pos: usize,
         join_condition: &Option<NonStrictExpression>,
     ) -> bool {
-        if let Some(ref join_condition) = join_condition {
+        if let Some(join_condition) = join_condition {
             let new_row = Self::row_concat(
                 row,
                 side_update_start_pos,
@@ -1282,7 +1297,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::hash::{Key64, Key128};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -1401,11 +1416,7 @@ mod tests {
                 .collect(),
         };
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::for_test(123),
@@ -1481,7 +1492,7 @@ mod tests {
                 OrderType::ascending(),
             ],
             &[0, 1, 1],
-            0,
+            1,
         )
         .await;
 
@@ -1494,11 +1505,7 @@ mod tests {
                 .collect(),
         };
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             ActorContext::for_test(123),

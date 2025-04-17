@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use std::str::FromStr;
 
 use anyhow::Result;
-use rand::distributions::uniform::SampleUniform;
+use rand::distr::uniform::SampleUniform;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
-use crate::types::{Datum, Scalar, F32, F64};
+use crate::types::{Datum, F32, F64, Scalar};
 
 trait NumericType
 where
@@ -88,13 +88,13 @@ where
 
     fn generate(&mut self, offset: u64) -> serde_json::Value {
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let result = rng.gen_range(self.min..=self.max);
+        let result = rng.random_range(self.min..=self.max);
         json!(result)
     }
 
     fn generate_datum(&mut self, offset: u64) -> Datum {
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let result = rng.gen_range(self.min..=self.max);
+        let result = rng.random_range(self.min..=self.max);
         Some(result.to_scalar_value())
     }
 }

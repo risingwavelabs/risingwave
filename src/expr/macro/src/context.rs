@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned, ToTokens};
+use quote::{ToTokens, quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::{Error, FnArg, Ident, ItemFn, Pat, PatType, Result, ReturnType, Token, Type, Visibility};
 
@@ -55,7 +55,7 @@ impl Parse for DefineContextAttr {
 }
 
 impl DefineContextField {
-    pub(super) fn gen(self) -> Result<TokenStream> {
+    pub(super) fn r#gen(self) -> Result<TokenStream> {
         let Self { vis, name, ty } = self;
 
         // We create a sub mod, so we need to extend the vis of getter.
@@ -107,11 +107,11 @@ impl DefineContextField {
 }
 
 impl DefineContextAttr {
-    pub(super) fn gen(self) -> Result<TokenStream> {
+    pub(super) fn r#gen(self) -> Result<TokenStream> {
         let generated_fields: Vec<TokenStream> = self
             .fields
             .into_iter()
-            .map(DefineContextField::gen)
+            .map(DefineContextField::r#gen)
             .try_collect()?;
         Ok(quote! {
             #(#generated_fields)*

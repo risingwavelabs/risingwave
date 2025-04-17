@@ -98,15 +98,19 @@ mod tests {
         let user_info_reader = session.env().user_info_reader();
 
         frontend.run_sql("CREATE USER user").await.unwrap();
-        assert!(user_info_reader
-            .read_guard()
-            .get_user_by_name("user")
-            .is_some());
+        assert!(
+            user_info_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .is_some()
+        );
 
         frontend.run_sql("DROP USER user").await.unwrap();
-        assert!(user_info_reader
-            .read_guard()
-            .get_user_by_name("user")
-            .is_none());
+        assert!(
+            user_info_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .is_none()
+        );
     }
 }

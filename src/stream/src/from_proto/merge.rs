@@ -20,31 +20,34 @@ use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, MergeExecutor, MergeExecutorInput, MergeExecutorUpstream};
-use crate::task::SharedContext;
+use crate::task::LocalBarrierManager;
 
 pub struct MergeExecutorBuilder;
 
 impl MergeExecutorBuilder {
     pub(crate) fn new_input(
-        shared_context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         info: ExecutorInfo,
         node: &MergeNode,
         chunk_size: usize,
     ) -> StreamResult<MergeExecutorInput> {
-        let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let inputs: Vec<_> = upstreams
-            .iter()
-            .map(|&upstream_actor_id| {
+        let inputs: Vec<_> = actor_context
+            .initial_upstream_actors
+            .get(&node.upstream_fragment_id)
+            .map(|actors| actors.actors.iter())
+            .into_iter()
+            .flatten()
+            .map(|upstream_actor| {
                 new_input(
-                    &shared_context,
+                    &local_barrier_manager,
                     executor_stats.clone(),
                     actor_context.id,
                     actor_context.fragment_id,
-                    upstream_actor_id,
+                    upstream_actor,
                     upstream_fragment_id,
                 )
             })
@@ -74,7 +77,7 @@ impl MergeExecutorBuilder {
             upstreams,
             actor_context,
             upstream_fragment_id,
-            shared_context,
+            local_barrier_manager,
             executor_stats,
             info,
             chunk_size,
@@ -94,7 +97,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         Ok(Self::new_input(
-            params.shared_context,
+            params.local_barrier_manager,
             params.executor_stats,
             params.actor_context,
             params.info,

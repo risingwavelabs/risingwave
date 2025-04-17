@@ -19,15 +19,15 @@ use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{Duration, sleep, timeout};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
-    generate_update_statements, insert_sql_gen, mview_sql_gen, parse_create_table_statements,
-    parse_sql, session_sql_gen, sql_gen, Table,
+    Table, generate_update_statements, insert_sql_gen, mview_sql_gen,
+    parse_create_table_statements, parse_sql, session_sql_gen, sql_gen,
 };
 
 pub(super) type PgResult<A> = std::result::Result<A, PgError>;
@@ -336,7 +336,9 @@ pub(super) async fn run_query_inner(
                     _ => {}
                 }
             }
-            bail!("[UNEXPECTED ERROR] Failed to recover after {tries} tries with interval {interval}s")
+            bail!(
+                "[UNEXPECTED ERROR] Failed to recover after {tries} tries with interval {interval}s"
+            )
         } else {
             return validate_response(response);
         }
@@ -350,12 +352,12 @@ pub(super) fn generate_rng(seed: Option<u64>) -> impl Rng {
     if let Some(seed) = seed {
         ChaChaRng::seed_from_u64(seed)
     } else {
-        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+        ChaChaRng::from_rng(&mut SmallRng::from_os_rng())
     }
     #[cfg(not(madsim))]
     if let Some(seed) = seed {
         SmallRng::seed_from_u64(seed)
     } else {
-        SmallRng::from_entropy()
+        SmallRng::from_os_rng()
     }
 }

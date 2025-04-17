@@ -16,13 +16,13 @@ use risingwave_common::catalog::SecretId;
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
-use serde_json::{json, Map as JsonMap};
+use serde_json::{Map as JsonMap, json};
 
-use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::WithOptionsSecResolved;
+use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
-use crate::WithOptionsSecResolved;
 
 #[derive(Fields)]
 struct RwSource {
@@ -100,12 +100,14 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     is_shared: source.info.is_shared(),
 
                     connector_props: serialize_props_with_secret(
-                        schema,
+                        &catalog_reader,
+                        &reader.auth_context.database,
                         source.with_properties.clone(),
                     )
                     .into(),
                     format_encode_options: serialize_props_with_secret(
-                        schema,
+                        &catalog_reader,
+                        &reader.auth_context.database,
                         format_encode_props_with_secrets,
                     )
                     .into(),
@@ -116,7 +118,8 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
 }
 
 pub fn serialize_props_with_secret(
-    schema: &SchemaCatalog,
+    catalog_reader: &CatalogReadGuard,
+    db_name: &str,
     props_with_secret: WithOptionsSecResolved,
 ) -> jsonbb::Value {
     let (inner, secret_ref) = props_with_secret.into_parts();
@@ -128,11 +131,13 @@ pub fn serialize_props_with_secret(
         result.insert(k, json!({"type": "plaintext", "value": v}));
     }
     for (k, v) in secret_ref {
-        let secret_name = schema
-            .get_secret_by_id(&SecretId(v.secret_id))
+        let secret = catalog_reader
+            .iter_schemas(db_name)
             .unwrap()
-            .name
-            .clone();
+            .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)));
+        let secret_name = secret
+            .map(|s| s.name.to_owned())
+            .unwrap_or("not found".to_owned());
         result.insert(
             k,
             json!({"type": "secret", "value": {"value": secret_name}}),

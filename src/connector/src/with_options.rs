@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
+use std::time::Duration;
 
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::sink::catalog::SinkFormatDesc;
-use crate::source::cdc::external::CdcTableType;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
+use crate::source::cdc::external::CdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
-    UPSTREAM_SOURCE_KEY,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
 };
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
@@ -73,9 +75,20 @@ impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for crate::source::filesystem::file_common::CompressionFormat {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
+impl<T> WithOptions for PhantomData<T> {}
 
 pub trait Get {
     fn get(&self, key: &str) -> Option<&String>;
+}
+
+pub trait GetKeyIter {
+    fn key_iter(&self) -> impl Iterator<Item = &str>;
+}
+
+impl GetKeyIter for HashMap<String, String> {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.keys().map(|s| s.as_str())
+    }
 }
 
 impl Get for HashMap<String, String> {
@@ -90,8 +103,14 @@ impl Get for BTreeMap<String, String> {
     }
 }
 
+impl GetKeyIter for BTreeMap<String, String> {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.keys().map(|s| s.as_str())
+    }
+}
+
 /// Utility methods for `WITH` properties (`HashMap` and `BTreeMap`).
-pub trait WithPropertiesExt: Get + Sized {
+pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     #[inline(always)]
     fn get_connector(&self) -> Option<String> {
         self.get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase())
@@ -111,6 +130,14 @@ pub trait WithPropertiesExt: Get + Sized {
             return false;
         };
         connector == MYSQL_CDC_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn get_sync_call_timeout(&self) -> Option<Duration> {
+        const SYNC_CALL_TIMEOUT_KEY: &str = "properties.sync.call.timeout"; // only from kafka props, add more if needed
+        self.get(SYNC_CALL_TIMEOUT_KEY)
+            // ignore the error is ok here, because we will parse the field again when building the properties and has more precise error message
+            .and_then(|s| duration_str::parse_std(s).ok())
     }
 
     #[inline(always)]
@@ -150,7 +177,17 @@ pub trait WithPropertiesExt: Get + Sized {
 
     fn connector_need_pk(&self) -> bool {
         // Currently only iceberg connector doesn't need primary key
+        // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
+        // XXX: This seems not the correct way. Iceberg doesn't necessarily lack a PK.
+        // "batch source" doesn't need a PK?
+        // For streaming, if it has a PK, do we want to use it? It seems not safe.
         !self.is_iceberg_connector()
+    }
+
+    fn is_legacy_fs_connector(&self) -> bool {
+        self.get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.eq_ignore_ascii_case(LEGACY_S3_CONNECTOR))
+            .unwrap_or(false)
     }
 
     fn is_new_fs_connector(&self) -> bool {
@@ -165,7 +202,7 @@ pub trait WithPropertiesExt: Get + Sized {
     }
 }
 
-impl<T: Get> WithPropertiesExt for T {}
+impl<T: Get + GetKeyIter> WithPropertiesExt for T {}
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
@@ -234,5 +271,11 @@ impl TryFrom<&WithOptionsSecResolved> for Option<SinkFormatDesc> {
 impl Get for WithOptionsSecResolved {
     fn get(&self, key: &str) -> Option<&String> {
         self.inner.get(key)
+    }
+}
+
+impl GetKeyIter for WithOptionsSecResolved {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.inner.keys().map(|s| s.as_str())
     }
 }

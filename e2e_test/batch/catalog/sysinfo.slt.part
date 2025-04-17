@@ -20,6 +20,11 @@ statement ok
 create index tab_idx on tab(num desc);
 
 query T
+select pg_get_indexdef(('"' || current_database() || '".' || 'public.tab_idx')::regclass);
+----
+CREATE INDEX tab_idx ON tab(num DESC)
+
+query T
 select pg_get_indexdef('tab_idx'::regclass);
 ----
 CREATE INDEX tab_idx ON tab(num DESC)

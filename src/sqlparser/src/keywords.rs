@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -11,17 +11,18 @@
 // limitations under the License.
 
 //! This module defines
-//! 1) a list of constants for every keyword that
+//! 1. a list of constants for every keyword that
 //!    can appear in [crate::tokenizer::Word::keyword]:
-//!    pub const KEYWORD = "KEYWORD"
-//! 2) an `ALL_KEYWORDS` array with every keyword in it
-//!     This is not a list of *reserved* keywords: some of these can be
-//!     parsed as identifiers if the parser decides so. This means that
-//!     new keywords can be added here without affecting the parse result.
 //!
-//!     As a matter of fact, most of these keywords are not used at all
-//!     and could be removed.
-//! 3) a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
+//!    pub const KEYWORD = "KEYWORD"
+//! 2. an `ALL_KEYWORDS` array with every keyword in it
+//!    This is not a list of *reserved* keywords: some of these can be
+//!    parsed as identifiers if the parser decides so. This means that
+//!    new keywords can be added here without affecting the parse result.
+//!
+//!    As a matter of fact, most of these keywords are not used at all
+//!    and could be removed.
+//! 3. a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
 //!    "table alias" context.
 
 use core::fmt;
@@ -146,6 +147,7 @@ define_keywords!(
     CONNECT,
     CONNECTION,
     CONNECTIONS,
+    CONNECTOR,
     CONSTRAINT,
     CONTAINS,
     CONVERT,
@@ -205,6 +207,7 @@ define_keywords!(
     DOT,
     DOUBLE,
     DROP,
+    DURATION_SECS,
     DYNAMIC,
     EACH,
     ELEMENT,
@@ -244,6 +247,8 @@ define_keywords!(
     FOR,
     FOREIGN,
     FORMAT,
+    FRAGMENT,
+    FRAGMENTS,
     FRAME_ROW,
     FREE,
     FREEZE,
@@ -392,6 +397,7 @@ define_keywords!(
     PERIOD,
     PHYSICAL,
     PLACING,
+    PLAN,
     PORTION,
     POSITION,
     POSITION_REGEX,

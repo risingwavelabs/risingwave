@@ -17,7 +17,7 @@
 use std::alloc::Allocator;
 use std::ops::Deref;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 
 pub struct StatsAlloc<T> {
     bytes_in_use: AtomicUsize,
@@ -58,9 +58,11 @@ where
 
     #[inline(always)]
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        self.bytes_in_use
-            .fetch_sub(layout.size(), atomic::Ordering::Relaxed);
-        self.inner.deallocate(ptr, layout)
+        unsafe {
+            self.bytes_in_use
+                .fetch_sub(layout.size(), atomic::Ordering::Relaxed);
+            self.inner.deallocate(ptr, layout)
+        }
     }
 
     #[inline(always)]
@@ -80,11 +82,13 @@ where
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
-        self.bytes_in_use
-            .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
-        self.inner.grow(ptr, old_layout, new_layout)
+        unsafe {
+            self.bytes_in_use
+                .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
+            self.bytes_in_use
+                .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
+            self.inner.grow(ptr, old_layout, new_layout)
+        }
     }
 
     #[inline(always)]
@@ -94,11 +98,13 @@ where
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
-        self.bytes_in_use
-            .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
-        self.inner.grow_zeroed(ptr, old_layout, new_layout)
+        unsafe {
+            self.bytes_in_use
+                .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
+            self.bytes_in_use
+                .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
+            self.inner.grow_zeroed(ptr, old_layout, new_layout)
+        }
     }
 
     #[inline(always)]
@@ -108,11 +114,13 @@ where
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
-        self.bytes_in_use
-            .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
-        self.inner.shrink(ptr, old_layout, new_layout)
+        unsafe {
+            self.bytes_in_use
+                .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
+            self.bytes_in_use
+                .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
+            self.inner.shrink(ptr, old_layout, new_layout)
+        }
     }
 }
 
@@ -141,7 +149,7 @@ unsafe impl<T: Allocator> Allocator for SharedStatsAlloc<T> {
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        self.0.deallocate(ptr, layout)
+        unsafe { self.0.deallocate(ptr, layout) }
     }
 
     fn allocate_zeroed(
@@ -157,7 +165,7 @@ unsafe impl<T: Allocator> Allocator for SharedStatsAlloc<T> {
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.grow(ptr, old_layout, new_layout)
+        unsafe { self.0.grow(ptr, old_layout, new_layout) }
     }
 
     unsafe fn grow_zeroed(
@@ -166,7 +174,7 @@ unsafe impl<T: Allocator> Allocator for SharedStatsAlloc<T> {
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.grow_zeroed(ptr, old_layout, new_layout)
+        unsafe { self.0.grow_zeroed(ptr, old_layout, new_layout) }
     }
 
     unsafe fn shrink(
@@ -175,6 +183,6 @@ unsafe impl<T: Allocator> Allocator for SharedStatsAlloc<T> {
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.shrink(ptr, old_layout, new_layout)
+        unsafe { self.0.shrink(ptr, old_layout, new_layout) }
     }
 }

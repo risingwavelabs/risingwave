@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::types::{DatumRef, ScalarRefImpl, Timestamptz};
-use risingwave_pb::connector_service::{cdc_message, CdcMessage};
+use risingwave_pb::connector_service::{CdcMessage, cdc_message};
 
-use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
+use crate::source::base::SourceMessage;
 
 #[derive(Clone, Debug)]
 pub enum CdcMessageType {

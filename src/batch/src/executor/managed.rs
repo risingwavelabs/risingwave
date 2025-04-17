@@ -14,7 +14,7 @@
 
 use std::pin::pin;
 
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;

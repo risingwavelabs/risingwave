@@ -12,25 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use iceberg::Result;
 use iceberg::spec::DataFile;
 use iceberg::writer::base_writer::sort_position_delete_writer::{
     PositionDeleteInput, SortPositionDeleteWriter, SortPositionDeleteWriterBuilder,
 };
 use iceberg::writer::file_writer::FileWriterBuilder;
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
-use iceberg::Result;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredPositionDeleteWriterBuilder<B: FileWriterBuilder> {
-    cache_row_metrics: LabelGuardedIntGauge<3>,
+    cache_row_metrics: LabelGuardedIntGauge,
     inner: SortPositionDeleteWriterBuilder<B>,
 }
 
 impl<B: FileWriterBuilder> MonitoredPositionDeleteWriterBuilder<B> {
     pub fn new(
         inner: SortPositionDeleteWriterBuilder<B>,
-        cache_row_metrics: LabelGuardedIntGauge<3>,
+        cache_row_metrics: LabelGuardedIntGauge,
     ) -> Self {
         Self {
             cache_row_metrics,
@@ -59,7 +59,7 @@ pub struct MonitoredPositionDeleteWriter<B: FileWriterBuilder> {
     writer: SortPositionDeleteWriter<B>,
 
     // metrics
-    cache_row_metrics: LabelGuardedIntGauge<3>,
+    cache_row_metrics: LabelGuardedIntGauge,
     last_cache_row: usize,
 }
 

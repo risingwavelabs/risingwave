@@ -17,6 +17,12 @@ import time
 def gen_data(file_num, item_num_per_file):
     assert item_num_per_file % 2 == 0, \
         f'item_num_per_file should be even to ensure sum(mark) == 0: {item_num_per_file}'
+
+    struct_type = pa.struct([
+        ('field1', pa.int32()),
+        ('field2', pa.string())
+    ])
+
     return [
         [{
             'id': file_id * item_num_per_file + item_id,
@@ -44,6 +50,7 @@ def gen_data(file_num, item_num_per_file):
             'test_timestamptz_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms', tz='+00:00')),
             'test_timestamptz_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us', tz='+00:00')),
             'test_timestamptz_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns', tz='+00:00')),
+            'nested_struct': pa.scalar((item_id, f'struct_value_{item_id}'), type=struct_type),
         } for item_id in range(item_num_per_file)]
         for file_id in range(file_num)
     ]
@@ -65,31 +72,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
     print("test table function file scan")
     cur.execute(f'''
     SELECT
-         id,
-        name,
-        sex,
-        mark,
-        test_int,
-        test_int8,
-        test_uint8,
-        test_uint16,
-        test_uint32,
-        test_uint64,
-        test_float_16,
-        test_real,
-        test_double_precision,
-        test_varchar,
-        test_bytea,
-        test_date,
-        test_time,
-        test_timestamp_s,
-        test_timestamp_ms,
-        test_timestamp_us,
-        test_timestamp_ns,
-        test_timestamptz_s,
-        test_timestamptz_ms,
-        test_timestamptz_us,
-        test_timestamptz_ns
+        count(*)
          FROM file_scan(
         'parquet',
         's3',
@@ -100,10 +83,9 @@ def do_test(config, file_num, item_num_per_file, prefix):
         );''')
     try:
         result = cur.fetchone()
-        assert result[0] == 0, f'file scan assertion failed: the first column is {result[0]}, expect 0.'
+        assert result[0] == 2000, f'file scan assertion failed: the first column is {result[0]}, expect 2000.'
     except ValueError as e:
         print(f"cur.fetchone() got ValueError: {e}")
-
 
     print("file scan test pass")
     # Execute a SELECT statement
@@ -132,8 +114,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         test_timestamptz_s timestamptz,
         test_timestamptz_ms timestamptz,
         test_timestamptz_us timestamptz,
-        test_timestamptz_ns timestamptz
-
+        test_timestamptz_ns timestamptz,
+        nested_struct STRUCT<"field1" int, "field2" varchar>
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -213,7 +195,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_s,
         test_timestamptz_ms,
         test_timestamptz_us,
-        test_timestamptz_ns
+        test_timestamptz_ns,
+        nested_struct
         from {_table()} WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -230,7 +213,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     print('Sink into s3 in parquet encode...')
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE test_parquet_sink_table(
-        id bigint primary key,\
+        id bigint primary key,
         name TEXT,
         sex bigint,
         mark bigint,
@@ -254,7 +237,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_s timestamptz,
         test_timestamptz_ms timestamptz,
         test_timestamptz_us timestamptz,
-        test_timestamptz_ns timestamptz
+        test_timestamptz_ns timestamptz,
+        nested_struct STRUCT<"field1" int, "field2" varchar>,
     ) WITH (
         connector = 's3',
         match_pattern = 'test_parquet_sink/*.parquet',
@@ -263,8 +247,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         s3.credentials.access = 'hummockadmin',
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
-
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
     for retry_no in range(MAX_RETRIES):
@@ -305,7 +289,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_s,
         test_timestamptz_ms,
         test_timestamptz_us,
-        test_timestamptz_ns
+        test_timestamptz_ns,
+        nested_struct
         from {_table()} WITH (
         connector = 'snowflake',
         match_pattern = '*.parquet',
@@ -316,7 +301,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
         type = 'append-only',
-        force_append_only='true'
+        force_append_only='true',
+        refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE JSON(force_append_only='true');''')
 
     print('Sink into s3 in json encode...')
@@ -346,7 +332,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_s timestamptz,
         test_timestamptz_ms timestamptz,
         test_timestamptz_us timestamptz,
-        test_timestamptz_ns timestamptz
+        test_timestamptz_ns timestamptz,
+        nested_struct STRUCT<"field1" int, "field2" varchar>
     ) WITH (
         connector = 's3',
         match_pattern = 'test_json_sink/*.json',

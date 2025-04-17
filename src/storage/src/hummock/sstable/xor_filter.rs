@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
-use xorf::{Filter, Xor16, Xor8};
+use xorf::{Filter, Xor8, Xor16};
 
 use super::{FilterBuilder, Sstable};
 use crate::hummock::{BlockMeta, MemoryLimiter};
@@ -456,7 +456,7 @@ mod tests {
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::{SstableBuilder, SstableBuilderOptions};
-    use crate::hummock::test_utils::{test_user_key_of, test_value_of, TEST_KEYS_COUNT};
+    use crate::hummock::test_utils::{TEST_KEYS_COUNT, test_user_key_of, test_value_of};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BlockIterator, CachePolicy, SstableWriterOptions};
     use crate::monitor::StoreLocalStatistic;
@@ -482,9 +482,11 @@ mod tests {
             .create_sst_writer(object_id, writer_opts);
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         let mut builder = SstableBuilder::new(
@@ -495,7 +497,7 @@ mod tests {
             compaction_catalog_agent_ref,
             None,
         );
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for i in 0..TEST_KEYS_COUNT {
             let epoch_count = rng.next_u64() % 20;
             for j in 0..epoch_count {

@@ -31,7 +31,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -42,10 +42,11 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
 
+use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::{
-    unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    DummyExecutor, Executor, ExecutorBuilder, JoinType, LookupJoinBase,
+    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
+    ExecutorBuilder, JoinType, LookupJoinBase, unix_timestamp_sec_to_epoch,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -400,6 +401,11 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
 
         let chunk_size = source.context().get_config().developer.chunk_size;
 
+        let asof_desc = lookup_join_node
+            .asof_desc
+            .map(|desc| AsOfDesc::from_protobuf(&desc))
+            .transpose()?;
+
         let worker_nodes = lookup_join_node.get_worker_nodes();
         let worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode> = worker_nodes
             .iter()
@@ -447,6 +453,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             chunk_size,
+            asof_desc,
             identity: identity.clone(),
             shutdown_rx: source.shutdown_rx().clone(),
             mem_ctx: source.context().create_executor_mem_context(&identity),
@@ -470,6 +477,7 @@ struct LocalLookupJoinExecutorArgs {
     schema: Schema,
     output_indices: Vec<usize>,
     chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
     identity: String,
     shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
@@ -494,6 +502,7 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             schema: self.schema,
             output_indices: self.output_indices,
             chunk_size: self.chunk_size,
+            asof_desc: self.asof_desc,
             identity: self.identity,
             shutdown_rx: self.shutdown_rx,
             mem_ctx: self.mem_ctx,
@@ -517,12 +526,12 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
+    use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
     use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
-        diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
+        FakeInnerSideExecutorBuilder, MockExecutor, diff_executor_output,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
     use crate::monitor::BatchSpillMetrics;
@@ -597,6 +606,7 @@ mod tests {
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
+            asof_desc: None,
             identity: "TestLookupJoinExecutor".to_owned(),
             shutdown_rx: ShutdownToken::empty(),
             mem_ctx: MemoryContext::none(),

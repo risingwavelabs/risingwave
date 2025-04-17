@@ -9,7 +9,7 @@ repos:
         exclude: 'src/frontend/planner_test/tests/testdata/.*'
     -   id: trailing-whitespace
 -   repo: https://github.com/crate-ci/typos
-    rev: v1.28.2
+    rev: v1.30.2
     hooks:
       - id: typos
 -   repo: local

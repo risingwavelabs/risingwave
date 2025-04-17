@@ -17,8 +17,8 @@ use postgres_types::{ToSql, Type};
 use rw_iter_util::ZipEqFast;
 
 use super::{
-    DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, F32,
-    F64,
+    DataType, Date, Decimal, F32, F64, Interval, ScalarRefImpl, Serial, Time, Timestamp,
+    Timestamptz,
 };
 use crate::array::{ListRef, StructRef};
 use crate::error::NotImplemented;

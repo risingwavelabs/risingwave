@@ -12,26 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use iceberg::Result;
 use iceberg::spec::DataFile;
 use iceberg::writer::function_writer::fanout_partition_writer::{
     FanoutPartitionWriter, FanoutPartitionWriterBuilder,
 };
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
-use iceberg::Result;
 use risingwave_common::array::arrow::arrow_array_iceberg;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
     inner: FanoutPartitionWriterBuilder<B>,
-    partition_num_metrics: LabelGuardedIntGauge<2>,
+    partition_num_metrics: LabelGuardedIntGauge,
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
     #[expect(dead_code)]
     pub fn new(
         inner: FanoutPartitionWriterBuilder<B>,
-        partition_num: LabelGuardedIntGauge<2>,
+        partition_num: LabelGuardedIntGauge,
     ) -> Self {
         Self {
             inner,
@@ -56,7 +56,7 @@ impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredFanoutPartitione
 
 pub struct MonitoredFanoutPartitionedWriter<B: IcebergWriterBuilder> {
     inner: FanoutPartitionWriter<B>,
-    partition_num_metrics: LabelGuardedIntGauge<2>,
+    partition_num_metrics: LabelGuardedIntGauge,
     last_partition_num: usize,
 }
 

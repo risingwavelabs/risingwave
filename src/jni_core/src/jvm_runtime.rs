@@ -16,7 +16,7 @@ use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
@@ -59,7 +59,9 @@ impl JavaVmWrapper {
         let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
             PathBuf::from(libs_path)
         } else {
-            tracing::info!("environment variable CONNECTOR_LIBS_PATH is not specified, use default path `./libs` instead");
+            tracing::info!(
+                "environment variable CONNECTOR_LIBS_PATH is not specified, use default path `./libs` instead"
+            );
             std::env::current_exe()
                 .and_then(|p| p.fs_err_canonicalize()) // resolve symlink of the current executable
                 .context("unable to get path of the executable")?
@@ -123,6 +125,7 @@ impl JavaVmWrapper {
             .version(JNIVersion::V8)
             .option("-Dis_embedded_connector=true")
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
+            .option("--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED")
             .option("-Xms16m")
             .option(format!("-Xmx{}", jvm_heap_size));
 
@@ -254,12 +257,18 @@ pub fn execute_with_jni_env<T>(
 
     match env.exception_check() {
         Ok(true) => {
+            let exception = env.exception_occurred().inspect_err(|e| {
+                tracing::warn!(error = %e.as_report(), "Failed to get jvm exception");
+            })?;
             env.exception_describe().inspect_err(|e| {
                 tracing::warn!(error = %e.as_report(), "Failed to describe jvm exception");
             })?;
             env.exception_clear().inspect_err(|e| {
                 tracing::warn!(error = %e.as_report(), "Exception occurred but failed to clear");
             })?;
+            let message = call_method!(env, exception, {String getMessage()})?;
+            let message = jobj_to_str(&mut env, message)?;
+            return Err(anyhow::anyhow!("Caught Java Exception: {}", message));
         }
         Ok(false) => {
             // No exception, do nothing

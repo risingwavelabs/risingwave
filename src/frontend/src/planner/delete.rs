@@ -17,7 +17,7 @@ use fixedbitset::FixedBitSet;
 use super::Planner;
 use crate::binder::BoundDelete;
 use crate::error::Result;
-use crate::optimizer::plan_node::{generic, LogicalDelete, LogicalProject};
+use crate::optimizer::plan_node::{LogicalDelete, LogicalProject, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 

@@ -14,9 +14,9 @@
 
 mod schema;
 
+use apache_avro::Schema;
 use apache_avro::schema::{DecimalSchema, NamesRef, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
-use apache_avro::Schema;
 use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -25,11 +25,10 @@ use risingwave_common::types::{
     DataType, Date, DatumCow, Interval, JsonbVal, MapValue, ScalarImpl, Time, Timestamp,
     Timestamptz, ToOwnedDatum,
 };
-use risingwave_common::util::iter_util::ZipEqFast;
 
-pub use self::schema::{avro_schema_to_column_descs, MapHandling, ResolvedAvroSchema};
+pub use self::schema::{MapHandling, ResolvedAvroSchema, avro_schema_to_fields};
 use super::utils::scaled_bigint_to_rust_decimal;
-use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
+use super::{Access, AccessError, AccessResult, bail_uncategorized, uncategorized};
 use crate::decoder::avro::schema::avro_schema_to_struct_field_name;
 
 #[derive(Clone)]
@@ -82,10 +81,10 @@ impl<'a> AvroParseOptionsInner<'a> {
     ///
     /// Cases: (FIXME: Is this precise?)
     /// - If both `type_expected` and schema are provided, it will check both strictly.
-    /// - If only `type_expected` is provided, it will try to match the value type and the
-    ///    `type_expected`, converting the value if possible.
+    /// - If only `type_expected` is provided, it will try to match the value type
+    ///   and the `type_expected`, converting the value if possible.
     /// - If only value is provided (without schema and `type_expected`),
-    ///     the `DataType` will be inferred.
+    ///   the `DataType` will be inferred.
     fn convert_to_datum<'b>(
         &self,
         unresolved_schema: &'a Schema,
@@ -263,8 +262,7 @@ impl<'a> AvroParseOptionsInner<'a> {
                     return Err(create_error());
                 };
                 struct_type_info
-                    .names()
-                    .zip_eq_fast(struct_type_info.types())
+                    .iter()
                     .map(|(field_name, field_type)| {
                         if let Some(idx) = record_schema.lookup.get(field_name) {
                             let value = &descs[*idx].1;
@@ -545,7 +543,7 @@ pub(crate) fn avro_to_jsonb(avro: &Value, builder: &mut jsonbb::Builder) -> Acce
 mod tests {
     use std::str::FromStr;
 
-    use apache_avro::{from_avro_datum, Decimal as AvroDecimal};
+    use apache_avro::{Decimal as AvroDecimal, from_avro_datum};
     use expect_test::expect;
     use risingwave_common::types::{Datum, Decimal};
 

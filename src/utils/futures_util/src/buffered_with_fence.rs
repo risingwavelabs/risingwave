@@ -16,11 +16,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use futures::TryFutureExt;
 use futures::future::{FusedFuture, IntoFuture, TryFuture};
 use futures::stream::{
     Fuse, FuturesOrdered, IntoStream, Stream, StreamExt, TryStream, TryStreamExt,
 };
-use futures::TryFutureExt;
 use pin_project_lite::pin_project;
 
 pub trait MaybeFence {
@@ -80,7 +80,8 @@ where
             match this.stream.as_mut().poll_next(cx)? {
                 Poll::Ready(Some(fut)) => {
                     let is_fence = fut.is_fence();
-                    this.in_progress_queue.push_back(fut.into_future());
+                    this.in_progress_queue
+                        .push_back(TryFutureExt::into_future(fut));
                     if is_fence {
                         // While receiving a fence, don't buffer more data.
                         *this.syncing = true;

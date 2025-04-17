@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::AuthInfo;
+use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_sqlparser::ast::SqlOption;
 use sha2::{Digest, Sha256};
 

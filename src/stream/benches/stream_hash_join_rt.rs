@@ -24,7 +24,7 @@
 //!  sudo cargo flamegraph --bench stream_hash_join_rt -- hash_join_rt_40000_InCache_Inner
 //! ```
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_stream::executor::test_utils::hash_join_executor::*;

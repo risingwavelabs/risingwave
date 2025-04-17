@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::future::try_join_all;
@@ -45,18 +44,19 @@ use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
+use super::pulsar::source::PulsarMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
-use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
-use crate::source::filesystem::FsPageItem;
-use crate::source::monitor::EnumeratorMetrics;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
+use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
-    dispatch_source_prop, dispatch_split_impl, for_all_connections, for_all_sources,
-    impl_connection, impl_connector_properties, impl_split, match_source_name_str,
-    WithOptionsSecResolved,
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_source_prop, dispatch_split_impl,
+    for_all_connections, for_all_sources, impl_connection, impl_connector_properties, impl_split,
+    match_source_name_str,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -76,7 +76,9 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug {
+pub trait SourceProperties:
+    TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecret
+{
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -190,7 +192,7 @@ pub trait SplitEnumerator: Sized + Send {
     type Properties;
 
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
-        -> Result<Self>;
+    -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
     /// Do some cleanup work when a fragment is dropped, e.g., drop Kafka consumer group.
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
@@ -277,7 +279,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -449,6 +451,13 @@ pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.
 pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
+pub type BoxSourceChunkWithStateStream =
+    BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
+
+/// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.
+pub type BoxStreamingFileSourceChunkStream =
+    BoxStream<'static, crate::error::ConnectorResult<Option<StreamChunk>>>;
 
 // Manually expand the trait alias to improve IDE experience.
 pub trait SourceChunkStream:
@@ -550,12 +559,29 @@ impl ConnectorProperties {
             LocalSecretManager::global().fill_secrets(options, secret_refs)?;
         let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
-            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
         match_source_name_str!(
-            connector.to_lowercase().as_str(),
+            connector.as_str(),
             PropType,
             PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
+
+    pub fn enforce_secret_on_cloud(
+        with_properties: &impl WithPropertiesExt,
+    ) -> crate::error::ConnectorResult<()> {
+        let connector = with_properties
+            .get_connector()
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
+        let key_iter = with_properties.key_iter();
+        match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            PropType::enforce_secret(key_iter),
             |other| bail!("connector '{}' is not supported", other)
         )
     }
@@ -646,8 +672,9 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
     type Error = crate::error::ConnectorError;
 
     fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+        let split_type = split.split_type.to_lowercase();
         match_source_name_str!(
-            split.split_type.to_lowercase().as_str(),
+            split_type.as_str(),
             PropType,
             {
                 <PropType as SourceProperties>::Split::restore_from_bytes(
@@ -662,8 +689,9 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
 
 impl SplitImpl {
     fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
+        let split_type = split_type.to_lowercase();
         match_source_name_str!(
-            split_type.to_lowercase().as_str(),
+            split_type.as_str(),
             PropType,
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
             |other| bail!("connector '{}' is not supported", other)
@@ -734,7 +762,7 @@ impl SplitImpl {
     }
 }
 
-pub type DataType = risingwave_common::types::DataType;
+use risingwave_common::types::DataType;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -780,6 +808,7 @@ impl SourceMessage {
 pub enum SourceMeta {
     Kafka(KafkaMeta),
     Kinesis(KinesisMeta),
+    Pulsar(PulsarMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
@@ -823,17 +852,6 @@ pub trait SplitMetaData: Sized {
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
-
-#[derive(Debug, Clone, Default)]
-pub struct FsFilterCtrlCtx;
-pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
-
-#[async_trait]
-pub trait FsListInner: Sized {
-    // fixme: better to implement as an Iterator, but the last page still have some contents
-    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
-    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
-}
 
 #[cfg(test)]
 mod tests {

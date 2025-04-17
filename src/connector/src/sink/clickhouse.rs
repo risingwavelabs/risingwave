@@ -15,34 +15,32 @@
 use core::fmt::Debug;
 use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
-use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
+use serde::ser::{SerializeSeq, SerializeStruct};
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tonic::async_trait;
 use tracing::warn;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
 };
 use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterMetrics, SinkWriterParam};
 use crate::error::ConnectorResult;
 use crate::sink::{
-    Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
 };
 
 const QUERY_ENGINE: &str =
@@ -247,7 +245,7 @@ impl ClickHouseEngine {
                     .next()
                     .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
                     .split(',')
-                    .last()
+                    .next_back()
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_owned()))?
                     .trim()
                     .to_owned();
@@ -289,7 +287,7 @@ impl ClickHouseEngine {
                     .next()
                     .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
                     .split(',')
-                    .last()
+                    .next_back()
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_owned()))?
                     .trim()
                     .to_owned();
@@ -499,7 +497,8 @@ impl Sink for ClickHouseSink {
         // For upsert clickhouse sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "Primary key not defined for upsert clickhouse sink (please define in `primary_key` field)")));
+                "Primary key not defined for upsert clickhouse sink (please define in `primary_key` field)"
+            )));
         }
 
         // check reachability
@@ -765,10 +764,6 @@ impl SinkWriter for ClickHouseSinkWriter {
         }
         Ok(())
     }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(ClickHouseRow, Deserialize, Clone)]
@@ -900,7 +895,7 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Int256(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Int256".to_owned(),
-                ))
+                ));
             }
             ScalarRefImpl::Serial(v) => ClickHouseField::Serial(v),
             ScalarRefImpl::Float32(v) => ClickHouseField::Float32(v.into_inner()),
@@ -934,7 +929,7 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Interval(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Interval".to_owned(),
-                ))
+                ));
             }
             ScalarRefImpl::Date(v) => {
                 let days = v.get_nums_days_unix_epoch();
@@ -943,12 +938,12 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Time(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Time".to_owned(),
-                ))
+                ));
             }
             ScalarRefImpl::Timestamp(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
-                ))
+                ));
             }
             ScalarRefImpl::Timestamptz(v) => {
                 let micros = v.timestamp_micros();
@@ -967,7 +962,7 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Jsonb(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse rust interface can not support Json".to_owned(),
-                ))
+                ));
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];
@@ -999,12 +994,12 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Bytea(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Bytea".to_owned(),
-                ))
+                ));
             }
             ScalarRefImpl::Map(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Map".to_owned(),
-                ))
+                ));
             }
         };
         let data = if clickhouse_schema_feature.can_null {
@@ -1072,16 +1067,16 @@ impl Serialize for ClickHouseColumn {
 pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String, DataType)>> {
     let mut vec = vec![];
     for field in schema.fields() {
-        if matches!(field.data_type, DataType::Struct(_)) {
-            for i in &field.sub_fields {
-                if matches!(i.data_type, DataType::Struct(_)) {
+        if let DataType::Struct(st) = &field.data_type {
+            for (name, data_type) in st.iter() {
+                if matches!(data_type, DataType::Struct(_)) {
                     return Err(SinkError::ClickHouse(
                         "Only one level of nesting is supported for struct".to_owned(),
                     ));
                 } else {
                     vec.push((
-                        format!("{}.{}", field.name, i.name),
-                        DataType::List(Box::new(i.data_type())),
+                        format!("{}.{}", field.name, name),
+                        DataType::List(Box::new(data_type.clone())),
                     ))
                 }
             }

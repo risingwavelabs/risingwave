@@ -16,7 +16,7 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{aggregate, ExprError, Result};
+use risingwave_expr::{ExprError, Result, aggregate};
 
 use crate::scalar::ToJsonb;
 

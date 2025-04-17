@@ -33,7 +33,7 @@ use core::str::Chars;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{CstyleEscapedString, DollarQuotedString};
-use crate::keywords::{Keyword, ALL_KEYWORDS, ALL_KEYWORDS_INDEX};
+use crate::keywords::{ALL_KEYWORDS, ALL_KEYWORDS_INDEX, Keyword};
 
 /// SQL Token enumeration
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -186,15 +186,15 @@ impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::EOF => f.write_str("EOF"),
-            Token::Word(ref w) => write!(f, "{}", w),
-            Token::Number(ref n) => write!(f, "{}", n),
-            Token::Char(ref c) => write!(f, "{}", c),
-            Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
-            Token::DollarQuotedString(ref s) => write!(f, "{}", s),
-            Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
-            Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
-            Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
-            Token::Parameter(ref s) => write!(f, "${}", s),
+            Token::Word(w) => write!(f, "{}", w),
+            Token::Number(n) => write!(f, "{}", n),
+            Token::Char(c) => write!(f, "{}", c),
+            Token::SingleQuotedString(s) => write!(f, "'{}'", s),
+            Token::DollarQuotedString(s) => write!(f, "{}", s),
+            Token::NationalStringLiteral(s) => write!(f, "N'{}'", s),
+            Token::HexStringLiteral(s) => write!(f, "X'{}'", s),
+            Token::CstyleEscapesString(s) => write!(f, "E'{}'", s),
+            Token::Parameter(s) => write!(f, "${}", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),

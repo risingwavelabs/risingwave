@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "task_service",
         "telemetry",
         "user",
+        "serverless_backfill_controller",
         "secret",
         "frontend_service",
     ];
@@ -159,6 +160,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.global_approx_percentile")
         .boxed(".stream_plan.StreamNode.node_body.row_merge")
         .boxed(".stream_plan.StreamNode.node_body.as_of_join")
+        .boxed(".stream_plan.StreamNode.node_body.sync_log_store")
+        .boxed(".stream_plan.StreamNode.node_body.materialized_exprs")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.
@@ -246,7 +249,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
-        );
+        )
+        // proto version enums
+        .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
+        .type_attribute(
+            "plan_common.ColumnDescVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
+        .type_attribute(
+            "hummock.CompatibilityVersion",
+            "#[derive(prost_helpers::Version)]",
+        )
+        .type_attribute("expr.UdfExprVersion", "#[derive(prost_helpers::Version)]")
+        // end
+        ;
 
     // If any configuration for `prost_build` is not exposed by `tonic_build`, specify it here.
     let mut prost_config = prost_build::Config::new();

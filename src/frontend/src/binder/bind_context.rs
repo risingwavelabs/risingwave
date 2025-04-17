@@ -28,9 +28,9 @@ use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use super::statement::RewriteExprsRecursive;
 use super::BoundSetExpr;
-use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
+use super::statement::RewriteExprsRecursive;
+use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -158,6 +158,8 @@ pub struct BindContext {
     pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
+    /// Whether the security invoker is set, currently only used for views.
+    pub disable_security_invoker: bool,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.
@@ -218,7 +220,7 @@ impl BindContext {
                     self.get_indices_with_group_id(group_id, column_name)
                 } else {
                     Ok(vec![
-                        self.get_index_with_table_name(column_name, table_name)?
+                        self.get_index_with_table_name(column_name, table_name)?,
                     ])
                 }
             }

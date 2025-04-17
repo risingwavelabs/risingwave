@@ -18,9 +18,9 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::type_inference::cast;
-use super::{infer_some_all, infer_type, CastContext, CastError, Expr, ExprImpl, Literal};
+use super::{CastContext, CastError, Expr, ExprImpl, Literal, infer_some_all, infer_type};
 use crate::error::Result as RwResult;
-use crate::expr::{bail_cast_error, ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
+use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer, bail_cast_error};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -178,7 +178,11 @@ impl FunctionCall {
                 target_type,
             );
         };
-        match t.len().cmp(&func.inputs.len()) {
+
+        let expected_len = t.len();
+        let actual_len = func.inputs.len();
+
+        match expected_len.cmp(&actual_len) {
             std::cmp::Ordering::Equal => {
                 // FIXME: `func` shall not be in a partially mutated state when one of its fields
                 // fails to cast.
@@ -189,8 +193,12 @@ impl FunctionCall {
                 func.return_type = target_type;
                 Ok(())
             }
-            std::cmp::Ordering::Less => bail_cast_error!("input has too few columns"),
-            std::cmp::Ordering::Greater => bail_cast_error!("input has too many columns"),
+            std::cmp::Ordering::Less => bail_cast_error!(
+                "input has too many columns, expected {expected_len} but got {actual_len}"
+            ),
+            std::cmp::Ordering::Greater => bail_cast_error!(
+                "input has too few columns, expected {expected_len} but got {actual_len}"
+            ),
         }
     }
 

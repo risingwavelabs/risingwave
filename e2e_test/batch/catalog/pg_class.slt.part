@@ -12,7 +12,7 @@ SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 
 2147478655 pg_attribute 1 v
 2147478656 pg_auth_members 1 v
 2147478657 pg_cast 1 r
-2147478658 pg_class 1 v
+2147478658 pg_class 1 r
 2147478659 pg_collation 1 v
 2147478660 pg_constraint 1 r
 2147478661 pg_conversion 1 v

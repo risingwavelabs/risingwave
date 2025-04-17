@@ -12,27 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use aws_sdk_kinesis::Client as KinesisClient;
 use aws_sdk_kinesis::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
-use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
+use crate::source::kinesis::KinesisProperties;
 use crate::source::kinesis::source::message::from_kinesis_record;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::source::kinesis::KinesisProperties;
 use crate::source::{
-    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId,
-    SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
+    SplitReader, into_chunk_stream,
 };
 
 #[derive(Debug, Clone)]
@@ -92,7 +92,8 @@ impl SplitReader for KinesisSplitReader {
             && properties.start_timestamp_millis.is_some()
         {
             // cannot bail! here because all new split readers will fail to start if user set 'scan.startup.mode' to 'timestamp'
-            tracing::warn!("scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
+            tracing::warn!(
+                "scan.startup.mode needs to be set to 'timestamp' if you want to start with a specific timestamp, starting shard {} from the beginning",
                 split.id()
             );
         }
@@ -126,6 +127,7 @@ impl KinesisSplitReader {
     #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
+        let mut provisioned_throughput_exceeded_start_time: Option<Instant> = None;
         loop {
             if self.shard_iter.is_none() {
                 tracing::warn!(
@@ -181,6 +183,9 @@ impl KinesisSplitReader {
                         self.shard_id,
                         self.latest_offset
                     );
+
+                    // reset the provisioned throughput exceeded time
+                    provisioned_throughput_exceeded_start_time = None;
                     yield chunk;
                 }
                 Err(SdkError::ServiceError(e)) if e.err().is_resource_not_found_exception() => {
@@ -200,11 +205,19 @@ impl KinesisSplitReader {
                 Err(SdkError::ServiceError(e))
                     if e.err().is_provisioned_throughput_exceeded_exception() =>
                 {
-                    tracing::warn!(
-                        "stream {:?} shard {:?} throughput exceeded, retry",
-                        self.stream_name,
-                        self.shard_id
-                    );
+                    if let Some(start_time) = provisioned_throughput_exceeded_start_time
+                        && start_time.elapsed() > Duration::from_secs(5)
+                    {
+                        tracing::warn!(
+                            "stream {:?} shard {:?} has been throttled for {} seconds, retry",
+                            self.stream_name,
+                            self.shard_id,
+                            start_time.elapsed().as_secs()
+                        );
+                    } else if provisioned_throughput_exceeded_start_time.is_none() {
+                        provisioned_throughput_exceeded_start_time = Some(Instant::now());
+                    }
+
                     self.new_shard_iter().await?;
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
@@ -334,7 +347,7 @@ impl KinesisSplitReader {
 
 #[cfg(test)]
 mod tests {
-    use futures::{pin_mut, StreamExt};
+    use futures::{StreamExt, pin_mut};
 
     use super::*;
     use crate::connector_common::KinesisCommon;

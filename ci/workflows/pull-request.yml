@@ -25,6 +25,7 @@ anchors:
         run: rw-build-env
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
+        propagate-environment: true
 
 other-sql-backend: &other-sql-backend
   matrix:
@@ -109,12 +110,11 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
+    parallelism: 4
     retry: *auto-retry
 
   - label: "slow end-to-end test"
@@ -130,7 +130,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 8
+    timeout_in_minutes: 9
     retry: *auto-retry
 
   - label: "meta backup test"
@@ -152,15 +152,17 @@ steps:
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-parallel-tests"
+      || build.pull_request.labels includes "ci/run-e2e-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
       - "build"
+      - "build-other"
       - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 38
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
@@ -168,21 +170,10 @@ steps:
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
     depends_on:
       - "build"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 14
-    retry: *auto-retry
-
-  - label: "end-to-end test (parallel, in-memory)"
-    if: build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
-    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
-    depends_on: "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "end-to-end source test"
@@ -201,6 +192,7 @@ steps:
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end sink test"
@@ -218,6 +210,7 @@ steps:
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
+    parallelism: 2
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -238,60 +231,19 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end iceberg sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
+  - label: "end-to-end iceberg test"
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-tests?(,|$$)/
+    command: "ci/scripts/e2e-iceberg-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg sink v2 test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 19
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg cdc test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-cdc.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg engine test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-engine-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-engine-tests?(,|$$)/
-    command: "ci/scripts/e2e-iceberg-engine-test.sh -p ci-dev"
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: iceberg-engine-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 22
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"
@@ -365,7 +317,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
-    if: build.pull_request.labels includes "ci/run- e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
     command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -562,7 +514,8 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
+    parallelism: 4
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -583,7 +536,8 @@ steps:
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
-    timeout_in_minutes: 35
+    timeout_in_minutes: 40
+    parallelism: 4
     cancel_on_build_failing: true
     retry: *auto-retry
 
@@ -713,8 +667,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-standalone-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -726,8 +678,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -740,15 +690,13 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: ci-standard-env
           propagate-environment: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 32
+    timeout_in_minutes: 37
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.

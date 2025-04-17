@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::rw_catalog::rw_sources::serialize_props_with_secret;
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 
@@ -50,14 +50,18 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_sink().map(|sink| {
+            schema.iter_sink_with_acl(current_user).map(|sink| {
                 let connector_props = serialize_props_with_secret(
-                    schema,
+                    &catalog_reader,
+                    &reader.auth_context.database,
                     WithOptionsSecResolved::new(sink.properties.clone(), sink.secret_refs.clone()),
                 )
                 .into();
@@ -66,7 +70,8 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     .as_ref()
                     .map(|desc| {
                         serialize_props_with_secret(
-                            schema,
+                            &catalog_reader,
+                            &reader.auth_context.database,
                             WithOptionsSecResolved::new(
                                 desc.options.clone(),
                                 desc.secret_refs.clone(),
@@ -112,11 +117,8 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     "rw_catalog.rw_sink_decouple",
     "WITH decoupled_sink_internal_table_ids AS (
         SELECT
-            distinct (node->'sink'->'table'->'id')::int as internal_table_id
-        FROM rw_catalog.rw_actor_infos actor
-            JOIN
-                rw_catalog.rw_fragments fragment
-            ON actor.fragment_id = fragment.fragment_id
+            (node->'sink'->'table'->'id')::int as internal_table_id
+        FROM rw_catalog.rw_fragments
         WHERE
             'SINK' = any(flags)
             AND

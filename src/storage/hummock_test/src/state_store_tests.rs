@@ -20,22 +20,22 @@ use std::sync::Arc;
 use bytes::Bytes;
 use expect_test::expect;
 use foyer::CacheHint;
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH, MAX_EPOCH};
-use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKeyRange};
+use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, MAX_EPOCH, test_epoch};
+use risingwave_hummock_sdk::key::{FullKey, TableKeyRange, prefixed_range_with_vnode};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::CommitEpochInfo;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
 };
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::storage_value::StorageValue;
@@ -44,24 +44,26 @@ use risingwave_storage::store_impl::verify::VerifyStateStore;
 
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_str, with_hummock_storage, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_str, with_hummock_storage};
 
 #[tokio::test]
 async fn test_empty_read() {
     let (hummock_storage, _meta_client) = with_hummock_storage(Default::default()).await;
-    assert!(hummock_storage
-        .get(
-            gen_key_from_str(VirtualNode::ZERO, "test_key"),
-            u64::MAX,
-            ReadOptions {
-                table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_storage
+            .get(
+                gen_key_from_str(VirtualNode::ZERO, "test_key"),
+                u64::MAX,
+                ReadOptions {
+                    table_id: TableId { table_id: 2333 },
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
     let stream = hummock_storage
         .iter(
             prefixed_range_with_vnode(
@@ -136,30 +138,12 @@ async fn test_basic() {
     local.init_for_test(epoch1).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
-    let size = local
-        .ingest_batch(
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    let size = local.ingest_batch(vec![]).await.unwrap();
 
     assert_eq!(size, 0);
 
     // Write the first batch.
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
@@ -208,16 +192,7 @@ async fn test_basic() {
     assert_eq!(value, None);
 
     // Write the second batch.
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
@@ -240,16 +215,7 @@ async fn test_basic() {
 
     // Write the third batch.
 
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
 
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
@@ -439,16 +405,7 @@ async fn test_state_store_sync() {
         .await;
     hummock_storage.start_epoch(epoch, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     // ingest 24B batch
     let mut batch2 = vec![
@@ -466,16 +423,7 @@ async fn test_state_store_sync() {
         ),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
@@ -496,16 +444,7 @@ async fn test_state_store_sync() {
         StorageValue::new_put("5555"),
     )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
@@ -1048,16 +987,7 @@ async fn test_delete_get() {
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
     local.init_for_test(epoch1).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
 
@@ -1073,16 +1003,7 @@ async fn test_delete_get() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = hummock_storage
         .seal_and_sync_epoch(epoch2, table_id_set)
@@ -1096,18 +1017,20 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    assert!(hummock_storage
-        .get(
-            gen_key_from_str(VirtualNode::ZERO, "bb"),
-            epoch2,
-            ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                ..Default::default()
-            }
-        )
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        hummock_storage
+            .get(
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
+                epoch2,
+                ReadOptions {
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1133,16 +1056,7 @@ async fn test_multiple_epoch_sync() {
     let table_id_set = HashSet::from_iter([local.table_id()]);
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
@@ -1151,16 +1065,7 @@ async fn test_multiple_epoch_sync() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
@@ -1175,16 +1080,7 @@ async fn test_multiple_epoch_sync() {
         ),
     ];
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let test_get = |read_committed: bool| {
         let hummock_storage_clone = &hummock_storage;
@@ -1205,19 +1101,21 @@ async fn test_multiple_epoch_sync() {
                     .unwrap(),
                 "222".as_bytes()
             );
-            assert!(hummock_storage_clone
-                .get(
-                    gen_key_from_str(VirtualNode::ZERO, "bb"),
-                    epoch2,
-                    ReadOptions {
-                        read_committed,
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
-                        ..Default::default()
-                    }
-                )
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                hummock_storage_clone
+                    .get(
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
+                        epoch2,
+                        ReadOptions {
+                            read_committed,
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            ..Default::default()
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(
                 hummock_storage_clone
                     .get(
@@ -1354,6 +1252,7 @@ async fn test_clear_shared_buffer() {
 /// 2. GlobalStateStore cannot read replicated ReadVersion.
 #[tokio::test]
 async fn test_replicated_local_hummock_storage() {
+    use risingwave_storage::store::ReadOptions;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
     let (hummock_storage, meta_client) = with_hummock_storage(TEST_TABLE_ID).await;
@@ -1378,13 +1277,14 @@ async fn test_replicated_local_hummock_storage() {
         .await
         .unwrap();
 
-    let read_options = ReadOptions {
+    let test_read_options = StateStoreTestReadOptions {
         table_id: TableId {
             table_id: TEST_TABLE_ID.table_id,
         },
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
+    let read_options: ReadOptions = test_read_options.clone().into();
 
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
@@ -1413,16 +1313,7 @@ async fn test_replicated_local_hummock_storage() {
     ];
 
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local_hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    local_hummock_storage.ingest_batch(batch1).await.unwrap();
 
     // Test local state store read for replicated data.
     {
@@ -1483,16 +1374,7 @@ async fn test_replicated_local_hummock_storage() {
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
-    local_hummock_storage_2
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    local_hummock_storage_2.ingest_batch(batch2).await.unwrap();
 
     // Test Global State Store iter, epoch2
     {
@@ -1503,7 +1385,7 @@ async fn test_replicated_local_hummock_storage() {
                     VirtualNode::ZERO,
                 ),
                 epoch2,
-                read_options.clone(),
+                test_read_options.clone(),
             )
             .await
             .unwrap()
@@ -1539,7 +1421,7 @@ async fn test_replicated_local_hummock_storage() {
                     VirtualNode::ZERO,
                 ),
                 epoch1,
-                read_options,
+                test_read_options,
             )
             .await
             .unwrap()
@@ -1766,10 +1648,12 @@ async fn test_read_log_next_epoch() {
     let first_commit_epoch_next_epoch_future =
         hummock_storage.next_epoch(first_latest_commit_epoch, NextEpochOptions { table_id });
     pin_mut!(first_commit_epoch_next_epoch_future);
-    assert!(first_commit_epoch_next_epoch_future
-        .as_mut()
-        .now_or_never()
-        .is_none());
+    assert!(
+        first_commit_epoch_next_epoch_future
+            .as_mut()
+            .now_or_never()
+            .is_none()
+    );
     let second_commit_log_data = &test_log_data[test_log_data.len() - later_commit_epoch_count..];
     let commit_epoch = second_commit_log_data.last().unwrap().0;
     let res = hummock_storage
@@ -1862,29 +1746,11 @@ async fn test_get_keyed_row() {
     local.init_for_test(epoch1).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
-    let size = local
-        .ingest_batch(
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    let size = local.ingest_batch(vec![]).await.unwrap();
     assert_eq!(size, 0);
 
     // Write the first batch.
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
@@ -1938,16 +1804,7 @@ async fn test_get_keyed_row() {
     assert_eq!(res, None);
 
     // Write the second batch.
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
@@ -1970,16 +1827,7 @@ async fn test_get_keyed_row() {
     assert_eq!(value, Bytes::from("111111"));
 
     // Write the third batch.
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
 
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 

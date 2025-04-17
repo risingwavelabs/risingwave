@@ -138,11 +138,11 @@ async fn test_over_window_lag_lead_append_only() {
             + 5 p1 102 18
         - !barrier 2
         - recovery
-        - !barrier 3
+        - !barrier 2
         - !chunk |2
               I  T  I   i
             + 10 p1 103 13
-        - !barrier 4
+        - !barrier 3
         "###,
         expect![[r#"
             - input: !barrier 1
@@ -186,9 +186,9 @@ async fn test_over_window_lag_lead_append_only() {
               - !barrier 2
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 2
               output:
-              - !barrier 3
+              - !barrier 2
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -207,9 +207,9 @@ async fn test_over_window_lag_lead_append_only() {
                 | 5  | p1 | 102 | 18 | 16 | 13 |
                 | 10 | p1 | 103 | 13 | 18 |    |
                 +----+----+-----+----+----+----+
-            - input: !barrier 4
+            - input: !barrier 3
               output:
-              - !barrier 4
+              - !barrier 3
         "#]],
         snapshot_options(),
     )
@@ -257,19 +257,19 @@ async fn test_over_window_lag_lead_with_updates() {
             + 6 p2 203 23
         - !barrier 2
         - recovery
-        - !barrier 3
+        - !barrier 2
         - !chunk |2
               I T  I   i
             - 6 p2 203 23
            U- 2 p1 101 16
            U+ 2 p2 101 16 // a partition-change update
-        - !barrier 4
+        - !barrier 3
         - recovery
-        - !barrier 5
+        - !barrier 3
         - !chunk |2
               I  T  I   i
             + 10 p3 300 30
-        - !barrier 6
+        - !barrier 4
         "###,
         expect![[r#"
             - input: !barrier 1
@@ -328,9 +328,9 @@ async fn test_over_window_lag_lead_with_updates() {
               - !barrier 2
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 2
               output:
-              - !barrier 3
+              - !barrier 2
             - input: !chunk |-
                 +----+---+----+-----+----+
                 |  - | 6 | p2 | 203 | 23 |
@@ -355,14 +355,14 @@ async fn test_over_window_lag_lead_with_updates() {
                 | 3 | p1 | 100 | 13 |    | 18 |
                 | 5 | p1 | 105 | 18 | 13 |    |
                 +---+----+-----+----+----+----+
-            - input: !barrier 4
+            - input: !barrier 3
               output:
-              - !barrier 4
+              - !barrier 3
             - input: recovery
               output: []
-            - input: !barrier 5
+            - input: !barrier 3
               output:
-              - !barrier 5
+              - !barrier 3
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p3 | 300 | 30 |
@@ -380,9 +380,9 @@ async fn test_over_window_lag_lead_with_updates() {
                 | 5  | p1 | 105 | 18 | 13 |    |
                 | 10 | p3 | 300 | 30 |    |    |
                 +----+----+-----+----+----+----+
-            - input: !barrier 6
+            - input: !barrier 4
               output:
-              - !barrier 6
+              - !barrier 4
         "#]],
         snapshot_options(),
     )
@@ -429,19 +429,19 @@ async fn test_over_window_sum() {
             + 6 p2 203 23
         - !barrier 2
         - recovery
-        - !barrier 3
+        - !barrier 2
         - !chunk |2
               I T  I   i
             - 6 p2 203 23
            U- 2 p1 101 16
            U+ 2 p2 101 16 // a partition-change update
-        - !barrier 4
+        - !barrier 3
         - recovery
-        - !barrier 5
+        - !barrier 3
         - !chunk |2
               I  T  I   i
             + 10 p3 300 30
-        - !barrier 6
+        - !barrier 4
         "###,
         expect![[r#"
             - input: !barrier 1
@@ -504,9 +504,9 @@ async fn test_over_window_sum() {
               - !barrier 2
             - input: recovery
               output: []
-            - input: !barrier 3
+            - input: !barrier 2
               output:
-              - !barrier 3
+              - !barrier 2
             - input: !chunk |-
                 +----+---+----+-----+----+
                 |  - | 6 | p2 | 203 | 23 |
@@ -532,14 +532,14 @@ async fn test_over_window_sum() {
                 | 3 | p1 | 100 | 13 | 35 |
                 | 5 | p1 | 105 | 18 | 13 |
                 +---+----+-----+----+----+
-            - input: !barrier 4
+            - input: !barrier 3
               output:
-              - !barrier 4
+              - !barrier 3
             - input: recovery
               output: []
-            - input: !barrier 5
+            - input: !barrier 3
               output:
-              - !barrier 5
+              - !barrier 3
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p3 | 300 | 30 |
@@ -558,9 +558,9 @@ async fn test_over_window_sum() {
                 | 5  | p1 | 105 | 18 | 13 |
                 | 10 | p3 | 300 | 30 |    |
                 +----+----+-----+----+----+
-            - input: !barrier 6
+            - input: !barrier 4
               output:
-              - !barrier 6
+              - !barrier 4
         "#]],
         snapshot_options(),
     )

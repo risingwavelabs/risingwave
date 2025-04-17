@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Binder, Clause, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::{Binder, COLUMN_GROUP_PREFIX, Clause, Relation};
 use crate::error::{ErrorCode, Result};
 use crate::expr::ExprImpl;
 

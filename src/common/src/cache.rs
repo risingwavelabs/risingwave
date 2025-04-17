@@ -26,13 +26,13 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::ptr;
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::FutureExt;
 use parking_lot::Mutex;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 use tokio::task::JoinHandle;
 
 const IN_CACHE: u8 = 1;
@@ -201,23 +201,31 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
     }
 
     unsafe fn get_key(&self) -> &K {
-        debug_assert!(self.kv.is_some());
-        &self.kv.as_ref().unwrap_unchecked().0
+        unsafe {
+            debug_assert!(self.kv.is_some());
+            &self.kv.as_ref().unwrap_unchecked().0
+        }
     }
 
     unsafe fn get_value(&self) -> &T {
-        debug_assert!(self.kv.is_some());
-        &self.kv.as_ref().unwrap_unchecked().1
+        unsafe {
+            debug_assert!(self.kv.is_some());
+            &self.kv.as_ref().unwrap_unchecked().1
+        }
     }
 
     unsafe fn is_same_key(&self, key: &K) -> bool {
-        debug_assert!(self.kv.is_some());
-        self.kv.as_ref().unwrap_unchecked().0.eq(key)
+        unsafe {
+            debug_assert!(self.kv.is_some());
+            self.kv.as_ref().unwrap_unchecked().0.eq(key)
+        }
     }
 
     unsafe fn take_kv(&mut self) -> (K, T) {
-        debug_assert!(self.kv.is_some());
-        self.kv.take().unwrap_unchecked()
+        unsafe {
+            debug_assert!(self.kv.is_some());
+            self.kv.take().unwrap_unchecked()
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -256,105 +264,117 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
         idx: usize,
         key: &K,
     ) -> (*mut LruHandle<K, T>, *mut LruHandle<K, T>) {
-        let mut ptr = self.list[idx];
-        let mut prev = null_mut();
-        while !ptr.is_null() && !(*ptr).is_same_key(key) {
-            prev = ptr;
-            ptr = (*ptr).next_hash;
+        unsafe {
+            let mut ptr = self.list[idx];
+            let mut prev = null_mut();
+            while !ptr.is_null() && !(*ptr).is_same_key(key) {
+                prev = ptr;
+                ptr = (*ptr).next_hash;
+            }
+            (prev, ptr)
         }
-        (prev, ptr)
     }
 
     unsafe fn remove(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
-        debug_assert!(self.list.len().is_power_of_two());
-        let idx = (hash as usize) & (self.list.len() - 1);
-        let (prev, ptr) = self.find_pointer(idx, key);
-        if ptr.is_null() {
-            return null_mut();
+        unsafe {
+            debug_assert!(self.list.len().is_power_of_two());
+            let idx = (hash as usize) & (self.list.len() - 1);
+            let (prev, ptr) = self.find_pointer(idx, key);
+            if ptr.is_null() {
+                return null_mut();
+            }
+            debug_assert!((*ptr).is_in_cache());
+            (*ptr).set_in_cache(false);
+            if prev.is_null() {
+                self.list[idx] = (*ptr).next_hash;
+            } else {
+                (*prev).next_hash = (*ptr).next_hash;
+            }
+            self.elems -= 1;
+            ptr
         }
-        debug_assert!((*ptr).is_in_cache());
-        (*ptr).set_in_cache(false);
-        if prev.is_null() {
-            self.list[idx] = (*ptr).next_hash;
-        } else {
-            (*prev).next_hash = (*ptr).next_hash;
-        }
-        self.elems -= 1;
-        ptr
     }
 
     /// Insert a handle into the hash table. Return the handle of the previous value if the key
     /// exists.
     unsafe fn insert(&mut self, hash: u64, h: *mut LruHandle<K, T>) -> *mut LruHandle<K, T> {
-        debug_assert!(!h.is_null());
-        debug_assert!(!(*h).is_in_cache());
-        (*h).set_in_cache(true);
-        debug_assert!(self.list.len().is_power_of_two());
-        let idx = (hash as usize) & (self.list.len() - 1);
-        let (prev, ptr) = self.find_pointer(idx, (*h).get_key());
-        if prev.is_null() {
-            self.list[idx] = h;
-        } else {
-            (*prev).next_hash = h;
-        }
+        unsafe {
+            debug_assert!(!h.is_null());
+            debug_assert!(!(*h).is_in_cache());
+            (*h).set_in_cache(true);
+            debug_assert!(self.list.len().is_power_of_two());
+            let idx = (hash as usize) & (self.list.len() - 1);
+            let (prev, ptr) = self.find_pointer(idx, (*h).get_key());
+            if prev.is_null() {
+                self.list[idx] = h;
+            } else {
+                (*prev).next_hash = h;
+            }
 
-        if !ptr.is_null() {
-            debug_assert!((*ptr).is_same_key((*h).get_key()));
-            debug_assert!((*ptr).is_in_cache());
-            // The handle to be removed is set not in cache.
-            (*ptr).set_in_cache(false);
-            (*h).next_hash = (*ptr).next_hash;
-            return ptr;
-        }
+            if !ptr.is_null() {
+                debug_assert!((*ptr).is_same_key((*h).get_key()));
+                debug_assert!((*ptr).is_in_cache());
+                // The handle to be removed is set not in cache.
+                (*ptr).set_in_cache(false);
+                (*h).next_hash = (*ptr).next_hash;
+                return ptr;
+            }
 
-        (*h).next_hash = ptr;
+            (*h).next_hash = ptr;
 
-        self.elems += 1;
-        if self.elems > self.list.len() {
-            self.resize();
+            self.elems += 1;
+            if self.elems > self.list.len() {
+                self.resize();
+            }
+            null_mut()
         }
-        null_mut()
     }
 
     unsafe fn lookup(&self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
-        debug_assert!(self.list.len().is_power_of_two());
-        let idx = (hash as usize) & (self.list.len() - 1);
-        let (_, ptr) = self.find_pointer(idx, key);
-        ptr
+        unsafe {
+            debug_assert!(self.list.len().is_power_of_two());
+            let idx = (hash as usize) & (self.list.len() - 1);
+            let (_, ptr) = self.find_pointer(idx, key);
+            ptr
+        }
     }
 
     unsafe fn resize(&mut self) {
-        let mut l = std::cmp::max(16, self.list.len());
-        let next_capacity = self.elems * 3 / 2;
-        while l < next_capacity {
-            l <<= 1;
-        }
-        let mut count = 0;
-        let mut new_list = vec![null_mut(); l];
-        for head in self.list.drain(..) {
-            let mut handle = head;
-            while !handle.is_null() {
-                let idx = (*handle).hash as usize & (l - 1);
-                let next = (*handle).next_hash;
-                (*handle).next_hash = new_list[idx];
-                new_list[idx] = handle;
-                handle = next;
-                count += 1;
+        unsafe {
+            let mut l = std::cmp::max(16, self.list.len());
+            let next_capacity = self.elems * 3 / 2;
+            while l < next_capacity {
+                l <<= 1;
             }
+            let mut count = 0;
+            let mut new_list = vec![null_mut(); l];
+            for head in self.list.drain(..) {
+                let mut handle = head;
+                while !handle.is_null() {
+                    let idx = (*handle).hash as usize & (l - 1);
+                    let next = (*handle).next_hash;
+                    (*handle).next_hash = new_list[idx];
+                    new_list[idx] = handle;
+                    handle = next;
+                    count += 1;
+                }
+            }
+            assert_eq!(count, self.elems);
+            self.list = new_list;
         }
-        assert_eq!(count, self.elems);
-        self.list = new_list;
     }
 
     unsafe fn for_all<F>(&self, f: &mut F)
     where
         F: FnMut(&K, &T),
     {
-        for idx in 0..self.list.len() {
-            let mut ptr = self.list[idx];
-            while !ptr.is_null() {
-                f((*ptr).get_key(), (*ptr).get_value());
-                ptr = (*ptr).next_hash;
+        unsafe {
+            for idx in 0..self.list.len() {
+                let mut ptr = self.list[idx];
+                while !ptr.is_null() {
+                    f((*ptr).get_key(), (*ptr).get_value());
+                    ptr = (*ptr).next_hash;
+                }
             }
         }
     }
@@ -406,105 +426,117 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     }
 
     unsafe fn lru_remove(&mut self, e: *mut LruHandle<K, T>) {
-        debug_assert!(!e.is_null());
-        #[cfg(debug_assertions)]
-        {
-            assert!((*e).is_in_lru());
-            (*e).set_in_lru(false);
-        }
+        unsafe {
+            debug_assert!(!e.is_null());
+            #[cfg(debug_assertions)]
+            {
+                assert!((*e).is_in_lru());
+                (*e).set_in_lru(false);
+            }
 
-        if ptr::eq(e, self.low_priority_head) {
-            self.low_priority_head = (*e).prev;
-        }
+            if ptr::eq(e, self.low_priority_head) {
+                self.low_priority_head = (*e).prev;
+            }
 
-        (*(*e).next).prev = (*e).prev;
-        (*(*e).prev).next = (*e).next;
-        (*e).prev = null_mut();
-        (*e).next = null_mut();
-        if (*e).is_in_high_pri_pool() {
-            debug_assert!(self.high_priority_pool_usage >= (*e).charge);
-            self.high_priority_pool_usage -= (*e).charge;
+            (*(*e).next).prev = (*e).prev;
+            (*(*e).prev).next = (*e).next;
+            (*e).prev = null_mut();
+            (*e).next = null_mut();
+            if (*e).is_in_high_pri_pool() {
+                debug_assert!(self.high_priority_pool_usage >= (*e).charge);
+                self.high_priority_pool_usage -= (*e).charge;
+            }
+            self.lru_usage.fetch_sub((*e).charge, Ordering::Relaxed);
         }
-        self.lru_usage.fetch_sub((*e).charge, Ordering::Relaxed);
     }
 
     // insert entry in the end of the linked-list
     unsafe fn lru_insert(&mut self, e: *mut LruHandle<K, T>) {
-        debug_assert!(!e.is_null());
-        let entry = &mut (*e);
-        #[cfg(debug_assertions)]
-        {
-            assert!(!(*e).is_in_lru());
-            (*e).set_in_lru(true);
-        }
+        unsafe {
+            debug_assert!(!e.is_null());
+            let entry = &mut (*e);
+            #[cfg(debug_assertions)]
+            {
+                assert!(!(*e).is_in_lru());
+                (*e).set_in_lru(true);
+            }
 
-        if self.high_priority_pool_capacity > 0 && entry.is_high_priority() {
-            entry.set_in_high_pri_pool(true);
-            entry.next = self.lru.as_mut();
-            entry.prev = self.lru.prev;
-            (*entry.prev).next = e;
-            (*entry.next).prev = e;
-            self.high_priority_pool_usage += (*e).charge;
-            self.maintain_pool_size();
-        } else {
-            entry.set_in_high_pri_pool(false);
-            entry.next = (*self.low_priority_head).next;
-            entry.prev = self.low_priority_head;
-            (*entry.next).prev = e;
-            (*entry.prev).next = e;
-            self.low_priority_head = e;
+            if self.high_priority_pool_capacity > 0 && entry.is_high_priority() {
+                entry.set_in_high_pri_pool(true);
+                entry.next = self.lru.as_mut();
+                entry.prev = self.lru.prev;
+                (*entry.prev).next = e;
+                (*entry.next).prev = e;
+                self.high_priority_pool_usage += (*e).charge;
+                self.maintain_pool_size();
+            } else {
+                entry.set_in_high_pri_pool(false);
+                entry.next = (*self.low_priority_head).next;
+                entry.prev = self.low_priority_head;
+                (*entry.next).prev = e;
+                (*entry.prev).next = e;
+                self.low_priority_head = e;
+            }
+            self.lru_usage.fetch_add((*e).charge, Ordering::Relaxed);
         }
-        self.lru_usage.fetch_add((*e).charge, Ordering::Relaxed);
     }
 
     unsafe fn maintain_pool_size(&mut self) {
-        while self.high_priority_pool_usage > self.high_priority_pool_capacity {
-            // overflow last entry in high-pri pool to low-pri pool.
-            self.low_priority_head = (*self.low_priority_head).next;
-            (*self.low_priority_head).set_in_high_pri_pool(false);
-            self.high_priority_pool_usage -= (*self.low_priority_head).charge;
+        unsafe {
+            while self.high_priority_pool_usage > self.high_priority_pool_capacity {
+                // overflow last entry in high-pri pool to low-pri pool.
+                self.low_priority_head = (*self.low_priority_head).next;
+                (*self.low_priority_head).set_in_high_pri_pool(false);
+                self.high_priority_pool_usage -= (*self.low_priority_head).charge;
+            }
         }
     }
 
     unsafe fn evict_from_lru(&mut self, charge: usize, last_reference_list: &mut Vec<(K, T)>) {
-        // TODO: may want to optimize by only loading at the beginning and storing at the end for
-        // only once.
-        while self.usage.load(Ordering::Relaxed) + charge > self.capacity
-            && !std::ptr::eq(self.lru.next, self.lru.as_mut())
-        {
-            let old_ptr = self.lru.next;
-            self.table.remove((*old_ptr).hash, (*old_ptr).get_key());
-            self.lru_remove(old_ptr);
-            let (key, value) = self.clear_handle(old_ptr);
-            last_reference_list.push((key, value));
+        unsafe {
+            // TODO: may want to optimize by only loading at the beginning and storing at the end for
+            // only once.
+            while self.usage.load(Ordering::Relaxed) + charge > self.capacity
+                && !std::ptr::eq(self.lru.next, self.lru.as_mut())
+            {
+                let old_ptr = self.lru.next;
+                self.table.remove((*old_ptr).hash, (*old_ptr).get_key());
+                self.lru_remove(old_ptr);
+                let (key, value) = self.clear_handle(old_ptr);
+                last_reference_list.push((key, value));
+            }
         }
     }
 
     /// Clear a currently used handle and recycle it if possible
     unsafe fn clear_handle(&mut self, h: *mut LruHandle<K, T>) -> (K, T) {
-        debug_assert!(!h.is_null());
-        debug_assert!((*h).kv.is_some());
-        #[cfg(debug_assertions)]
-        assert!(!(*h).is_in_lru());
-        debug_assert!(!(*h).is_in_cache());
-        debug_assert!(!(*h).has_refs());
-        self.usage.fetch_sub((*h).charge, Ordering::Relaxed);
-        let (key, value) = (*h).take_kv();
-        self.try_recycle_handle_object(h);
-        (key, value)
+        unsafe {
+            debug_assert!(!h.is_null());
+            debug_assert!((*h).kv.is_some());
+            #[cfg(debug_assertions)]
+            assert!(!(*h).is_in_lru());
+            debug_assert!(!(*h).is_in_cache());
+            debug_assert!(!(*h).has_refs());
+            self.usage.fetch_sub((*h).charge, Ordering::Relaxed);
+            let (key, value) = (*h).take_kv();
+            self.try_recycle_handle_object(h);
+            (key, value)
+        }
     }
 
     /// Try to recycle a handle object if the object pool is not full.
     ///
     /// The handle should already cleared its kv.
     unsafe fn try_recycle_handle_object(&mut self, h: *mut LruHandle<K, T>) {
-        let mut node = Box::from_raw(h);
-        if self.object_pool.len() < self.object_pool.capacity() {
-            node.next_hash = null_mut();
-            node.next = null_mut();
-            node.prev = null_mut();
-            debug_assert!(node.kv.is_none());
-            self.object_pool.push(node);
+        unsafe {
+            let mut node = Box::from_raw(h);
+            if self.object_pool.len() < self.object_pool.capacity() {
+                node.next_hash = null_mut();
+                node.next = null_mut();
+                node.prev = null_mut();
+                debug_assert!(node.kv.is_none());
+                self.object_pool.push(node);
+            }
         }
     }
 
@@ -518,82 +550,91 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         priority: CachePriority,
         last_reference_list: &mut Vec<(K, T)>,
     ) -> *mut LruHandle<K, T> {
-        self.evict_from_lru(charge, last_reference_list);
+        unsafe {
+            self.evict_from_lru(charge, last_reference_list);
 
-        let mut handle = if let Some(mut h) = self.object_pool.pop() {
-            h.init(key, value, hash, charge);
-            h
-        } else {
-            Box::new(LruHandle::new(key, value, hash, charge))
-        };
-        if priority == CachePriority::High {
-            handle.set_high_priority(true);
-        }
-        let ptr = Box::into_raw(handle);
-        let old = self.table.insert(hash, ptr);
-        if !old.is_null() {
-            if let Some(data) = self.try_remove_cache_handle(old) {
-                last_reference_list.push(data);
+            let mut handle = match self.object_pool.pop() {
+                Some(mut h) => {
+                    h.init(key, value, hash, charge);
+                    h
+                }
+                _ => Box::new(LruHandle::new(key, value, hash, charge)),
+            };
+            if priority == CachePriority::High {
+                handle.set_high_priority(true);
             }
+            let ptr = Box::into_raw(handle);
+            let old = self.table.insert(hash, ptr);
+            if !old.is_null() {
+                if let Some(data) = self.try_remove_cache_handle(old) {
+                    last_reference_list.push(data);
+                }
+            }
+            self.usage.fetch_add(charge, Ordering::Relaxed);
+            (*ptr).add_ref();
+            ptr
         }
-        self.usage.fetch_add(charge, Ordering::Relaxed);
-        (*ptr).add_ref();
-        ptr
     }
 
     /// Release the usage on a handle.
     ///
     /// Return: `Some(value)` if the handle is released, and `None` if the value is still in use.
     unsafe fn release(&mut self, h: *mut LruHandle<K, T>) -> Option<(K, T)> {
-        debug_assert!(!h.is_null());
-        // The handle should not be in lru before calling this method.
-        #[cfg(debug_assertions)]
-        assert!(!(*h).is_in_lru());
-        let last_reference = (*h).unref();
-        // If the handle is still referenced by someone else, do nothing and return.
-        if !last_reference {
-            return None;
-        }
-
-        // Keep the handle in lru list if it is still in the cache and the cache is not over-sized.
-        if (*h).is_in_cache() {
-            if self.usage.load(Ordering::Relaxed) <= self.capacity {
-                self.lru_insert(h);
+        unsafe {
+            debug_assert!(!h.is_null());
+            // The handle should not be in lru before calling this method.
+            #[cfg(debug_assertions)]
+            assert!(!(*h).is_in_lru());
+            let last_reference = (*h).unref();
+            // If the handle is still referenced by someone else, do nothing and return.
+            if !last_reference {
                 return None;
             }
-            // Remove the handle from table.
-            self.table.remove((*h).hash, (*h).get_key());
+
+            // Keep the handle in lru list if it is still in the cache and the cache is not over-sized.
+            if (*h).is_in_cache() {
+                if self.usage.load(Ordering::Relaxed) <= self.capacity {
+                    self.lru_insert(h);
+                    return None;
+                }
+                // Remove the handle from table.
+                self.table.remove((*h).hash, (*h).get_key());
+            }
+
+            // Since the released handle was previously used externally, it must not be in LRU, and we
+            // don't need to remove it from lru.
+            #[cfg(debug_assertions)]
+            assert!(!(*h).is_in_lru());
+
+            let (key, value) = self.clear_handle(h);
+            Some((key, value))
         }
-
-        // Since the released handle was previously used externally, it must not be in LRU, and we
-        // don't need to remove it from lru.
-        #[cfg(debug_assertions)]
-        assert!(!(*h).is_in_lru());
-
-        let (key, value) = self.clear_handle(h);
-        Some((key, value))
     }
 
     unsafe fn lookup(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
-        let e = self.table.lookup(hash, key);
-        if !e.is_null() {
-            // If the handle previously has not ref, it must exist in the lru. And therefore we are
-            // safe to remove it from lru.
-            if !(*e).has_refs() {
-                self.lru_remove(e);
+        unsafe {
+            let e = self.table.lookup(hash, key);
+            if !e.is_null() {
+                // If the handle previously has not ref, it must exist in the lru. And therefore we are
+                // safe to remove it from lru.
+                if !(*e).has_refs() {
+                    self.lru_remove(e);
+                }
+                (*e).add_ref();
             }
-            (*e).add_ref();
+            e
         }
-        e
     }
 
     /// Erase a key from the cache.
     unsafe fn erase(&mut self, hash: u64, key: &K) -> Option<(K, T)> {
-        let h = self.table.remove(hash, key);
-        if !h.is_null() {
-            self.try_remove_cache_handle(h)
-        } else {
-            None
+        unsafe {
+            let h = self.table.remove(hash, key);
+            if !h.is_null() {
+                self.try_remove_cache_handle(h)
+            } else {
+                None
+            }
         }
     }
 
@@ -601,25 +642,29 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     ///
     /// This method can only be called on the handle that just removed from the hash table.
     unsafe fn try_remove_cache_handle(&mut self, h: *mut LruHandle<K, T>) -> Option<(K, T)> {
-        debug_assert!(!h.is_null());
-        if !(*h).has_refs() {
-            // Since the handle is just removed from the hash table, it should either be in lru or
-            // referenced externally. Since we have checked that it is not referenced externally, it
-            // must be in the LRU, and therefore we are safe to call `lru_remove`.
-            self.lru_remove(h);
-            let (key, value) = self.clear_handle(h);
-            return Some((key, value));
+        unsafe {
+            debug_assert!(!h.is_null());
+            if !(*h).has_refs() {
+                // Since the handle is just removed from the hash table, it should either be in lru or
+                // referenced externally. Since we have checked that it is not referenced externally, it
+                // must be in the LRU, and therefore we are safe to call `lru_remove`.
+                self.lru_remove(h);
+                let (key, value) = self.clear_handle(h);
+                return Some((key, value));
+            }
+            None
         }
-        None
     }
 
     // Clears the content of the cache.
     // This method is safe to use only if no cache entries are referenced outside.
     unsafe fn clear(&mut self) {
-        while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
-            let handle = self.lru.next;
-            // `listener` should not be triggered here, for it doesn't listen to `clear`.
-            self.erase((*handle).hash, (*handle).get_key());
+        unsafe {
+            while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
+                let handle = self.lru.next;
+                // `listener` should not be triggered here, for it doesn't listen to `clear`.
+                self.erase((*handle).hash, (*handle).get_key());
+            }
         }
     }
 
@@ -746,22 +791,26 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 
     unsafe fn release(&self, handle: *mut LruHandle<K, T>) {
-        debug_assert!(!handle.is_null());
-        let data = {
-            let mut shard = self.shards[self.shard((*handle).hash)].lock();
-            shard.release(handle)
-        };
-        // do not deallocate data with holding mutex.
-        if let Some((key, value)) = data
-            && let Some(listener) = &self.listener
-        {
-            listener.on_release(key, value);
+        unsafe {
+            debug_assert!(!handle.is_null());
+            let data = {
+                let mut shard = self.shards[self.shard((*handle).hash)].lock();
+                shard.release(handle)
+            };
+            // do not deallocate data with holding mutex.
+            if let Some((key, value)) = data
+                && let Some(listener) = &self.listener
+            {
+                listener.on_release(key, value);
+            }
         }
     }
 
     unsafe fn inc_reference(&self, handle: *mut LruHandle<K, T>) {
-        let _shard = self.shards[self.shard((*handle).hash)].lock();
-        (*handle).refs += 1;
+        unsafe {
+            let _shard = self.shards[self.shard((*handle).hash)].lock();
+            (*handle).refs += 1;
+        }
     }
 
     pub fn insert(

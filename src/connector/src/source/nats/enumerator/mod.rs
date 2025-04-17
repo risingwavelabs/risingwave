@@ -17,8 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_common::bail;
 
-use super::source::{NatsOffset, NatsSplit};
 use super::NatsProperties;
+use super::source::{NatsOffset, NatsSplit};
 use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 

@@ -14,14 +14,14 @@
 
 use std::sync::Arc;
 
+use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::services::Gcs;
-use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{MediaType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+use crate::object::object_metrics::ObjectStoreMetrics;
 
 impl OpendalObjectStore {
     /// create opendal gcs engine.

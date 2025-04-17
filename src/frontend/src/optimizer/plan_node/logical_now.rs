@@ -17,7 +17,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 
 use super::generic::{self, GenericPlanRef, Mode};
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, LogicalValues,
     PlanBase, PlanRef, PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream,

@@ -29,16 +29,16 @@ use std::sync::Arc;
 
 use clap::Parser;
 use foyer::{Engine, HybridCacheBuilder};
-use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
+use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig,
+    NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
     GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl, USE_TRACE,
 };
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, FakeRemoteTableAccessor,
@@ -70,7 +70,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     // disable runtime tracing when replaying
-    std::env::set_var(USE_TRACE, "false");
+    unsafe { std::env::set_var(USE_TRACE, "false") };
     run_replay(args).await.unwrap();
 }
 
@@ -87,7 +87,7 @@ async fn run_replay(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay + use<>> {
     let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
     let system_params_reader =

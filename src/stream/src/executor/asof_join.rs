@@ -338,6 +338,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             "Join",
         );
         pin_mut!(aligned_stream);
+        let actor_id = self.ctx.id;
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
         let first_epoch = barrier.epoch;
@@ -357,26 +358,30 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         let left_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
         let right_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let barrier_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                "barrier",
+            ]);
 
         let left_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
 
         let right_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let mut start_time = Instant::now();
 
@@ -447,17 +452,24 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
-                    self.flush_data(barrier.epoch).await?;
+                    let (left_post_commit, right_post_commit) =
+                        self.flush_data(barrier.epoch).await?;
+
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
-                            self.watermark_buffers
-                                .values_mut()
-                                .for_each(|buffers| buffers.clear());
-                            // self.inequality_watermarks.fill(None);
-                        }
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
+                    right_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+                    if left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .unwrap_or(false)
+                    {
+                        self.watermark_buffers
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
                     }
 
                     // Report metrics of cached join rows/entries
@@ -470,19 +482,24 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
                     barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
-                    yield Message::Barrier(barrier);
                 }
             }
             start_time = Instant::now();
         }
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<(
+        JoinHashMapPostCommit<'_, K, S>,
+        JoinHashMapPostCommit<'_, K, S>,
+    )> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush(epoch).await?;
-        self.side_r.ht.flush(epoch).await?;
-        Ok(())
+        let left = self.side_l.ht.flush(epoch).await?;
+        let right = self.side_r.ht.flush(epoch).await?;
+        Ok((left, right))
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
@@ -743,7 +760,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 let (row_to_delete_r, row_to_insert_r) =
                     if let Some(pks) = right_inequality_index.get(&inequal_key) {
                         assert!(!pks.is_empty());
-                        let row_pk = side_match.ht.serialize_pk_from_row(row);
+                        let row_pk = side_update.ht.serialize_pk_from_row(row);
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 // If there are multiple rows match the inequality key in the right table, we use one with smallest pk.
@@ -1013,11 +1030,7 @@ mod tests {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::for_test(123),

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(unfulfilled_lint_expectations)]
+#![allow(clippy::doc_overindented_list_items)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -23,15 +25,17 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
+use event_recovery::RecoveryEvent;
 use plan_common::AdditionalColumn;
 pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::meta::event_log::event_recovery;
+use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -93,6 +97,9 @@ pub mod monitor_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/serverless_backfill_controller.rs")]
+pub mod serverless_backfill_controller;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/frontend_service.rs")]
 pub mod frontend_service;
@@ -179,6 +186,9 @@ pub mod telemetry_serde;
 #[rustfmt::skip]
 #[path = "secret.serde.rs"]
 pub mod secret_serde;
+#[rustfmt::skip]
+#[path = "serverless_backfill_controller.serde.rs"]
+pub mod serverless_backfill_controller_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]
@@ -276,14 +286,85 @@ impl meta::table_fragments::ActorStatus {
 impl common::WorkerNode {
     pub fn is_streaming_schedulable(&self) -> bool {
         let property = self.property.as_ref();
-        property.map_or(false, |p| p.is_streaming)
-            && !property.map_or(false, |p| p.is_unschedulable)
+        property.is_some_and(|p| p.is_streaming) && !property.is_some_and(|p| p.is_unschedulable)
     }
 }
 
 impl common::ActorLocation {
     pub fn from_worker(worker_node_id: u32) -> Option<Self> {
         Some(Self { worker_node_id })
+    }
+}
+
+impl meta::event_log::EventRecovery {
+    pub fn event_type(&self) -> &str {
+        match self.recovery_event.as_ref() {
+            Some(RecoveryEvent::DatabaseStart(_)) => "DATABASE_RECOVERY_START",
+            Some(RecoveryEvent::DatabaseSuccess(_)) => "DATABASE_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::DatabaseFailure(_)) => "DATABASE_RECOVERY_FAILURE",
+            Some(RecoveryEvent::GlobalStart(_)) => "GLOBAL_RECOVERY_START",
+            Some(RecoveryEvent::GlobalSuccess(_)) => "GLOBAL_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::GlobalFailure(_)) => "GLOBAL_RECOVERY_FAILURE",
+            None => "UNKNOWN_RECOVERY_EVENT",
+        }
+    }
+
+    pub fn database_recovery_start(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseStart(
+                event_recovery::DatabaseRecoveryStart { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_failure(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseFailure(
+                event_recovery::DatabaseRecoveryFailure { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_success(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseSuccess(
+                event_recovery::DatabaseRecoverySuccess { database_id },
+            )),
+        }
+    }
+
+    pub fn global_recovery_start(reason: String) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalStart(
+                event_recovery::GlobalRecoveryStart { reason },
+            )),
+        }
+    }
+
+    pub fn global_recovery_success(
+        reason: String,
+        duration_secs: f32,
+        running_database_ids: Vec<u32>,
+        recovering_database_ids: Vec<u32>,
+    ) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalSuccess(
+                event_recovery::GlobalRecoverySuccess {
+                    reason,
+                    duration_secs,
+                    running_database_ids,
+                    recovering_database_ids,
+                },
+            )),
+        }
+    }
+
+    pub fn global_recovery_failure(reason: String, error: String) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalFailure(
+                event_recovery::GlobalRecoveryFailure { reason, error },
+            )),
+        }
     }
 }
 
@@ -384,24 +465,24 @@ impl stream_plan::Dispatcher {
     }
 }
 
-impl meta::table_fragments::Fragment {
-    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
-        self.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as _;
-                let strategy = d.as_strategy();
-                (fragment_id, strategy)
-            })
-            .collect()
-    }
-}
-
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
+    }
+}
+
+impl stream_plan::PbStreamScanType {
+    pub fn is_reschedulable(&self) -> bool {
+        match self {
+            // todo: should this be true?
+            PbStreamScanType::UpstreamOnly => false,
+            PbStreamScanType::ArrangementBackfill => true,
+            PbStreamScanType::CrossDbSnapshotBackfill => true,
+            // todo: true when stable
+            PbStreamScanType::SnapshotBackfill => false,
+            _ => false,
+        }
     }
 }
 
@@ -435,6 +516,7 @@ impl std::fmt::Debug for data::DataType {
             interval_type,
             field_type,
             field_names,
+            field_ids,
             type_name,
             // currently all data types are nullable
             is_nullable: _,
@@ -460,6 +542,9 @@ impl std::fmt::Debug for data::DataType {
         if !self.field_names.is_empty() {
             s.field("field_names", field_names);
         }
+        if !self.field_ids.is_empty() {
+            s.field("field_ids", field_ids);
+        }
         s.finish()
     }
 }
@@ -480,13 +565,12 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             column_type,
             column_id,
             name,
-            field_descs,
-            type_name,
             description,
             additional_column_type,
             additional_column,
             generated_or_default_column,
             version,
+            nullable,
         } = self;
 
         let mut s = f.debug_struct("ColumnDesc");
@@ -496,12 +580,6 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
             s.field("column_type", &"Unknown");
         }
         s.field("column_id", column_id).field("name", name);
-        if !self.field_descs.is_empty() {
-            s.field("field_descs", field_descs);
-        }
-        if !self.type_name.is_empty() {
-            s.field("type_name", type_name);
-        }
         if let Some(description) = description {
             s.field("description", description);
         }
@@ -519,13 +597,62 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
         if let Some(generated_or_default_column) = generated_or_default_column {
             s.field("generated_or_default_column", &generated_or_default_column);
         }
+        s.field("nullable", nullable);
         s.finish()
+    }
+}
+
+impl expr::UserDefinedFunction {
+    pub fn name_in_runtime(&self) -> Option<&str> {
+        if self.version() < expr::UdfExprVersion::NameInRuntime {
+            if self.language == "rust" || self.language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. The real bound function name should be the same
+                // as `name`.
+                Some(&self.name)
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                self.identifier.as_deref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            self.identifier.as_deref()
+        }
+    }
+}
+
+impl expr::UserDefinedFunctionMetadata {
+    pub fn name_in_runtime(&self) -> Option<&str> {
+        if self.version() < expr::UdfExprVersion::NameInRuntime {
+            if self.language == "rust" || self.language == "wasm" {
+                // The `identifier` value of Rust and WASM UDF before `NameInRuntime`
+                // is not used any more. And unfortunately, we don't have the original name
+                // in `PbUserDefinedFunctionMetadata`, so we need to extract the name from
+                // the old `identifier` value (e.g. `foo()->int32`).
+                let old_identifier = self
+                    .identifier
+                    .as_ref()
+                    .expect("Rust/WASM UDF must have identifier");
+                Some(
+                    old_identifier
+                        .split_once("(")
+                        .expect("the old identifier must contain `(`")
+                        .0,
+                )
+            } else {
+                // `identifier`s of other UDFs already mean `name_in_runtime` before `NameInRuntime`.
+                self.identifier.as_deref()
+            }
+        } else {
+            // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
+            self.identifier.as_deref()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{data_type, DataType};
+    use crate::data::{DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 

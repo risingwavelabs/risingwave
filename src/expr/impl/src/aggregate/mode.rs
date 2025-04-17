@@ -21,7 +21,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{
     AggCall, AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
-use risingwave_expr::{build_aggregate, Result};
+use risingwave_expr::{Result, build_aggregate};
 
 #[build_aggregate("mode(any) -> any")]
 fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {

@@ -16,9 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{PbChangeLogDelta, PbGroupDeltas};
-use risingwave_pb::hummock::{group_delta, PbEpochNewChangeLog, PbLevel, PbSstableInfo};
+use risingwave_pb::hummock::{PbLevel, PbSstableInfo, group_delta};
 
-use crate::change_log::{TableChangeLog, TableChangeLogCommon};
 use crate::compaction_group::StateTableId;
 use crate::level::Level;
 use crate::sstable_info::SstableInfo;
@@ -50,31 +49,11 @@ pub fn refill_version(
             .table_infos
             .retain(|t| t.table_ids.contains(&table_id));
     }
-    version
-        .table_change_log
-        .retain(|t, _| t.table_id == table_id);
-    for t in version.table_change_log.values_mut() {
-        refill_table_change_log(t, sst_id_to_info);
-    }
 }
 
 fn refill_level(level: &mut Level, sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>) {
     for s in &mut level.table_infos {
         refill_sstable_info(s, sst_id_to_info);
-    }
-}
-
-fn refill_table_change_log(
-    table_change_log: &mut TableChangeLog,
-    sst_id_to_info: &HashMap<HummockSstableId, SstableInfo>,
-) {
-    for c in table_change_log.iter_mut() {
-        for s in &mut c.old_value {
-            refill_sstable_info(s, sst_id_to_info);
-        }
-        for s in &mut c.new_value {
-            refill_sstable_info(s, sst_id_to_info);
-        }
     }
 }
 
@@ -106,29 +85,8 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version.table_watermarks.clone(),
-            table_change_log: version
-                .table_change_log
-                .iter()
-                .filter_map(|(table_id, change_log)| {
-                    if !time_travel_table_ids.contains(&table_id.table_id()) {
-                        return None;
-                    }
-                    debug_assert!(change_log.iter().all(|d| {
-                        d.new_value.iter().chain(d.old_value.iter()).all(|s| {
-                            s.table_ids
-                                .iter()
-                                .any(|tid| time_travel_table_ids.contains(tid))
-                        })
-                    }));
-                    let incomplete_table_change_log = change_log
-                        .iter()
-                        .map(|e| PbEpochNewChangeLog::from(e).into());
-                    Some((
-                        *table_id,
-                        TableChangeLogCommon::new(incomplete_table_change_log),
-                    ))
-                })
-                .collect(),
+            // time travel metadata doesn't include table change log
+            table_change_log: HashMap::default(),
             state_table_info: version.state_table_info.clone(),
         }
     }
@@ -189,16 +147,18 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
                     if !time_travel_table_ids.contains(&table_id.table_id()) {
                         return None;
                     }
-                    debug_assert!(log_delta
-                        .new_log
-                        .new_value
-                        .iter()
-                        .chain(log_delta.new_log.old_value.iter())
-                        .all(|s| {
-                            s.table_ids
-                                .iter()
-                                .any(|tid| time_travel_table_ids.contains(tid))
-                        }));
+                    debug_assert!(
+                        log_delta
+                            .new_log
+                            .new_value
+                            .iter()
+                            .chain(log_delta.new_log.old_value.iter())
+                            .all(|s| {
+                                s.table_ids
+                                    .iter()
+                                    .any(|tid| time_travel_table_ids.contains(tid))
+                            })
+                    );
 
                     Some((*table_id, PbChangeLogDelta::from(log_delta).into()))
                 })

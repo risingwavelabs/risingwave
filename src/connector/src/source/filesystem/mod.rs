@@ -13,10 +13,9 @@
 // limitations under the License.
 
 pub use opendal_source::GcsProperties;
-pub use s3::{S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
+pub use s3::{LEGACY_S3_CONNECTOR, LegacyFsSplit, LegacyS3Properties, LegacyS3SplitEnumerator};
 pub mod file_common;
 pub mod nd_streaming;
-pub use file_common::{FsPage, FsPageItem, FsSplit, OpendalFsSplit};
+pub use file_common::{FsPage, FsPageItem, OpendalFsSplit};
 pub mod opendal_source;
 mod s3;
-pub mod s3_v2;

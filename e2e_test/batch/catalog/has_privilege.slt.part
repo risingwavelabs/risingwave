@@ -110,7 +110,7 @@ f
 query I
 SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
 ----
-t
+f
 
 query I
 SELECT has_table_privilege('test_user', 'foo_view'::regclass, 'INSERT');
@@ -238,6 +238,31 @@ query I
 SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');
 ----
 f
+
+statement error
+SELECT has_function_privilege('test_user', 'invalid_func()', 'EXECUTE');
+
+statement ok
+CREATE FUNCTION foo_func(INT) returns varchar language sql as $$select 'foo(INT)'$$;
+
+query I
+SELECT has_function_privilege('test_user', 'foo_func(int)', 'EXECUTE');
+----
+f
+
+statement ok
+GRANT EXECUTE ON FUNCTION foo_func(int) TO test_user;
+
+query I
+SELECT has_function_privilege('test_user', 'foo_func(int)', 'EXECUTE');
+----
+t
+
+statement ok
+REVOKE EXECUTE ON FUNCTION foo_func(int) FROM test_user;
+
+statement ok
+DROP FUNCTION foo_func(int);
 
 statement ok
 DROP SOURCE foo_source;

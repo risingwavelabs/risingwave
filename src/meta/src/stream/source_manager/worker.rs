@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::WithPropertiesExt;
+#[cfg(not(debug_assertions))]
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
 
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
+
+// The key used to load `SplitImpl` directly from source properties.
+// When this key is present, the enumerator will only return the given ones
+// instead of fetching them from the external source.
+// Only valid in debug builds - will return an error in release builds.
+const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
 pub struct SharedSplitMap {
     pub splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -37,7 +46,9 @@ pub struct ConnectorSourceWorker {
     metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
     fail_cnt: u32,
-    source_is_up: LabelGuardedIntGauge<2>,
+    source_is_up: LabelGuardedIntGauge,
+
+    debug_splits: Option<Vec<SplitImpl>>,
 }
 
 fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
@@ -48,8 +59,24 @@ fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<Connect
     Ok(properties)
 }
 fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
-    let options_with_secret =
-        WithOptionsSecResolved::new(source.with_properties.clone(), source.secret_refs.clone());
+    let options_with_secret = WithOptionsSecResolved::new(
+        {
+            let mut with_properties = source.with_properties.clone();
+            let _removed = with_properties.remove(DEBUG_SPLITS_KEY);
+
+            #[cfg(not(debug_assertions))]
+            {
+                if _removed.is_some() {
+                    return Err(ConnectorError::from(anyhow::anyhow!(
+                        "`debug_splits` is not allowed in release mode"
+                    )));
+                }
+            }
+
+            with_properties
+        },
+        source.secret_refs.clone(),
+    );
     let mut properties = ConnectorProperties::extract(options_with_secret, true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -71,6 +98,10 @@ pub async fn create_source_worker(
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
     let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+    let sync_call_timeout = source
+        .with_properties
+        .get_sync_call_timeout()
+        .unwrap_or(DEFAULT_SOURCE_TICK_TIMEOUT);
     let handle = {
         let mut worker = ConnectorSourceWorker::create(
             source,
@@ -82,12 +113,8 @@ pub async fn create_source_worker(
         .await?;
 
         // if fail to fetch meta info, will refuse to create source
-
-        // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
-        // in kafka
-        tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+        tokio::time::timeout(sync_call_timeout, worker.tick())
             .await
-            .ok()
             .with_context(|| {
                 format!(
                     "failed to fetch meta info for source {}, timeout {:?}",
@@ -220,6 +247,38 @@ impl ConnectorSourceWorker {
             connector_properties,
             fail_cnt: 0,
             source_is_up,
+            debug_splits: {
+                let debug_splits = source.with_properties.get(DEBUG_SPLITS_KEY);
+                #[cfg(not(debug_assertions))]
+                {
+                    if debug_splits.is_some() {
+                        return Err(ConnectorError::from(anyhow::anyhow!(
+                            "`debug_splits` is not allowed in release mode"
+                        ))
+                        .into());
+                    }
+                    None
+                }
+
+                #[cfg(debug_assertions)]
+                {
+                    use risingwave_common::types::JsonbVal;
+                    if let Some(debug_splits) = debug_splits {
+                        let mut splits = Vec::new();
+                        let debug_splits_value =
+                            jsonbb::serde_json::from_str::<serde_json::Value>(debug_splits)
+                                .context("failed to parse split impl")?;
+                        for split_impl_value in debug_splits_value.as_array().unwrap() {
+                            splits.push(SplitImpl::restore_from_json(JsonbVal::from(
+                                split_impl_value.clone(),
+                            ))?);
+                        }
+                        Some(splits)
+                    } else {
+                        None
+                    }
+                }
+            },
         })
     }
 
@@ -272,10 +331,18 @@ impl ConnectorSourceWorker {
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };
-        let splits = self.enumerator.list_splits().await.inspect_err(|_| {
-            source_is_up(0);
-            self.fail_cnt += 1;
-        })?;
+
+        let splits = {
+            if let Some(debug_splits) = &self.debug_splits {
+                debug_splits.clone()
+            } else {
+                self.enumerator.list_splits().await.inspect_err(|_| {
+                    source_is_up(0);
+                    self.fail_cnt += 1;
+                })?
+            }
+        };
+
         source_is_up(1);
         self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;

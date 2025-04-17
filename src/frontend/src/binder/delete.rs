@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -71,8 +73,17 @@ impl Binder {
     ) -> Result<BoundDelete> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         let schema_name = schema_name.as_deref();
+        let table = self.bind_table(schema_name, &table_name)?;
 
-        let table_catalog = self.resolve_dml_table(schema_name, &table_name, false)?;
+        let table_catalog = &table.table_catalog;
+        Self::check_for_dml(table_catalog, false)?;
+        self.check_privilege(
+            PbObject::TableId(table_catalog.id.table_id),
+            table_catalog.database_id,
+            AclMode::Delete,
+            table_catalog.owner,
+        )?;
+
         if !returning_items.is_empty() && table_catalog.has_generated_column() {
             return Err(RwError::from(ErrorCode::BindError(
                 "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
@@ -82,7 +93,6 @@ impl Binder {
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let table = self.bind_table(schema_name, &table_name, None)?;
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let returning = !returning_list.is_empty();
         let delete = BoundDelete {

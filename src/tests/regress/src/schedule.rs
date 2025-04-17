@@ -19,13 +19,13 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tracing::{debug, error, info};
 
 use crate::schedule::TestResult::{Different, Same};
-use crate::{init_env, DatabaseMode, FileManager, Opts, Psql};
+use crate::{DatabaseMode, FileManager, Opts, Psql, init_env};
 
 /// Result of each test case.
 #[derive(PartialEq)]

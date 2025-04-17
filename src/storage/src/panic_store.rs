@@ -18,8 +18,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 
 use crate::error::StorageResult;
 use crate::store::*;
@@ -29,35 +29,34 @@ use crate::store::*;
 #[derive(Clone, Default)]
 pub struct PanicStateStore;
 
+impl StateStoreGet for PanicStateStore {
+    fn on_key_value<O: Send + 'static>(
+        &self,
+        _key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+        _on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>> {
+        async { panic!("should not read from PanicStateStore") }
+    }
+}
+
 impl StateStoreRead for PanicStateStore {
     type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
-    #[allow(clippy::unused_async)]
-    async fn get_keyed_row(
-        &self,
-        _key: TableKey<Bytes>,
-        _epoch: u64,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
-        panic!("should not read from the state store!");
-    }
-
-    #[allow(clippy::unused_async)]
     async fn iter(
         &self,
         _key_range: TableKeyRange,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Self::Iter> {
         panic!("should not read from the state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn rev_iter(
         &self,
         _key_range: TableKeyRange,
-        _epoch: u64,
+
         _read_options: ReadOptions,
     ) -> StorageResult<Self::RevIter> {
         panic!("should not read from the state store!");
@@ -86,16 +85,6 @@ impl LocalStateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
     type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
-    #[allow(clippy::unused_async)]
-    async fn get(
-        &self,
-        _key: TableKey<Bytes>,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
-        panic!("should not operate on the panic state store!");
-    }
-
-    #[allow(clippy::unused_async)]
     async fn iter(
         &self,
         _key_range: TableKeyRange,
@@ -104,7 +93,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn rev_iter(
         &self,
         _key_range: TableKeyRange,
@@ -126,20 +114,10 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
 
-    fn epoch(&self) -> u64 {
-        panic!("should not operate on the panic state store!");
-    }
-
-    fn is_dirty(&self) -> bool {
-        panic!("should not operate on the panic state store!");
-    }
-
-    #[allow(clippy::unused_async)]
     async fn init(&mut self, _epoch: InitOptions) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
@@ -148,12 +126,11 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!")
     }
 
-    #[allow(clippy::unused_async)]
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 
-    fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -168,8 +145,8 @@ impl LocalStateStore for PanicStateStore {
 
 impl StateStore for PanicStateStore {
     type Local = Self;
+    type ReadSnapshot = Self;
 
-    #[allow(clippy::unused_async)]
     async fn try_wait_epoch(
         &self,
         _epoch: HummockReadEpoch,
@@ -178,9 +155,16 @@ impl StateStore for PanicStateStore {
         panic!("should not wait epoch from the panic state store!");
     }
 
-    #[allow(clippy::unused_async)]
     async fn new_local(&self, _option: NewLocalOptions) -> Self::Local {
         panic!("should not call new local from the panic state store");
+    }
+
+    async fn new_read_snapshot(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: NewReadSnapshotOptions,
+    ) -> StorageResult<Self::ReadSnapshot> {
+        panic!()
     }
 }
 

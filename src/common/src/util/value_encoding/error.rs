@@ -42,6 +42,6 @@ pub enum ValueEncodingError {
         #[backtrace]
         crate::array::ArrayError,
     ),
-    #[error("Invalid flag: {0}")]
+    #[error("Invalid flag: {0:b}")]
     InvalidFlag(u8),
 }

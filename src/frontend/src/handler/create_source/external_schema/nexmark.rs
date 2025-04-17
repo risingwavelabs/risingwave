@@ -32,7 +32,7 @@ pub fn check_nexmark_schema(
             return Err(RwError::from(ProtocolError(format!(
                 "unsupported table type for nexmark source: {}",
                 t
-            ))))
+            ))));
         }
     };
 
@@ -59,7 +59,13 @@ pub fn check_nexmark_schema(
         })
         .collect_vec();
 
-    if expected != user_defined {
+    let schema_eq = expected.len() == user_defined.len()
+        && expected
+            .iter()
+            .zip_eq_fast(user_defined.iter())
+            .all(|((name1, type1), (name2, type2))| name1 == name2 && type1.equals_datatype(type2));
+
+    if !schema_eq {
         let cmp = pretty_assertions::Comparison::new(&expected, &user_defined);
         return Err(RwError::from(ProtocolError(format!(
             "The schema of the nexmark source must specify all columns in order:\n{cmp}",

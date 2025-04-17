@@ -19,12 +19,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use futures::future::Shared;
 use futures::FutureExt;
+use futures::future::Shared;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
-use risingwave_backup::{meta_snapshot_v1, meta_snapshot_v2, MetaSnapshotId};
+use risingwave_backup::{MetaSnapshotId, meta_snapshot_v1, meta_snapshot_v2};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
@@ -34,8 +34,8 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use thiserror_ext::AsReport;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
 use crate::hummock::HummockError;
+use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
 
 pub type BackupReaderRef = Arc<BackupReader>;
 

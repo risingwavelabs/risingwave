@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::error::RwError;
-use crate::expr::{default_rewrite_expr, Expr, ExprImpl, ExprRewriter, Literal};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal, default_rewrite_expr};
 
 pub(crate) struct ConstEvalRewriter {
     pub(crate) error: Option<RwError>,
@@ -32,7 +32,9 @@ impl ExprRewriter for ConstEvalRewriter {
                 }
             }
         } else if let ExprImpl::Parameter(_) = expr {
-            unreachable!("Parameter should not appear here. It will be replaced by a literal before this step.")
+            unreachable!(
+                "Parameter should not appear here. It will be replaced by a literal before this step."
+            )
         } else {
             default_rewrite_expr(self, expr)
         }

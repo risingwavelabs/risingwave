@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use educe::Educe;
+use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -24,13 +25,13 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::GenericPlanNode;
+use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
-use crate::TableCatalog;
 
 /// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]
@@ -130,6 +131,11 @@ impl TableScan {
             .iter()
             .map(|&i| self.get_table_columns()[i].name.clone())
             .collect()
+    }
+
+    pub(crate) fn out_fields(&self) -> FixedBitSet {
+        let out_fields_vec = self.output_col_idx.clone();
+        FixedBitSet::from_iter(out_fields_vec)
     }
 
     pub(crate) fn order_names(&self) -> Vec<String> {

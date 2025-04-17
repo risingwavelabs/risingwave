@@ -13,7 +13,7 @@
 // limitations under the License.
 pub mod utils;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_batch::task::ShutdownToken;
 use risingwave_batch_executors::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
 use risingwave_common::enable_jemalloc;

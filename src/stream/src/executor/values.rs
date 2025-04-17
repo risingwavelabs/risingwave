@@ -150,11 +150,13 @@ mod tests {
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{ActorContext, AddMutation, Barrier, Execute, Mutation};
-    use crate::task::{CreateMviewProgressReporter, LocalBarrierManager};
+    use crate::task::CreateMviewProgressReporter;
+    use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
     #[tokio::test]
     async fn test_values() {
-        let barrier_manager = LocalBarrierManager::for_test();
+        let test_env = LocalBarrierTestEnv::for_test().await;
+        let barrier_manager = test_env.local_barrier_manager.clone();
         let progress = CreateMviewProgressReporter::for_test(barrier_manager);
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
@@ -189,10 +191,12 @@ mod tests {
             ActorContext::for_test(actor_id),
             schema,
             progress,
-            vec![exprs
-                .into_iter()
-                .map(NonStrictExpression::for_test)
-                .collect()],
+            vec![
+                exprs
+                    .into_iter()
+                    .map(NonStrictExpression::for_test)
+                    .collect(),
+            ],
             barrier_receiver,
         );
         let mut values_executor = Box::new(values_executor_struct).execute();

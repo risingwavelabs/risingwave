@@ -26,6 +26,7 @@ CREATE SINK sink1 from s1 WITH (
     create_table_if_not_exists = 'true',
     commit_checkpoint_interval = 1,
     primary_key = 'i1,i2',
+    partition_by = 'i1'
 );
 
 statement ok

@@ -1,0 +1,89 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+insert into t1 values (1, 2, 3), (2, 3, 4), (1, 2, 9);
+
+statement ok
+insert into t2 values (1, NULL, 8), (1, 3, 4), (1, 2, 5), (1, 2, 6);
+
+# asof inner join
+query IIIIII
+SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 order by t1.v1, t1.v3;
+----
+1 2 3 1 3 4
+1 2 9 1 3 4
+
+# asof left join
+query IIIIII
+SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 order by t1.v1, t1.v3;
+----
+1 2 3 1 3 4
+1 2 9 1 3 4
+2 3 4 NULL NULL NULL
+
+# asof left join
+query IIIIII
+SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 > t2.v2 order by t1.v1, t1.v3;
+----
+1 2 3 NULL NULL NULL
+1 2 9 NULL NULL NULL
+2 3 4 NULL NULL NULL
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+# AsOf lookup join. Query results should be the same as the above asof join queries.
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create index t2_v1_v2 on t2 (v1, v2) distributed by (v1);
+
+statement ok
+insert into t1 values (1, 2, 3), (2, 3, 4), (1, 2, 9);
+
+statement ok
+insert into t2 values (1, NULL, 8), (1, 3, 4), (1, 2, 5), (1, 2, 6);
+
+# asof inner lookupjoin
+query IIIIII
+SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 order by t1.v1, t1.v3;
+----
+1 2 3 1 3 4
+1 2 9 1 3 4
+
+# asof left lookup join
+query IIIIII
+SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2 order by t1.v1, t1.v3;
+----
+1 2 3 1 3 4
+1 2 9 1 3 4
+2 3 4 NULL NULL NULL
+
+# asof left lookup join
+query IIIIII
+SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 > t2.v2 order by t1.v1, t1.v3;
+----
+1 2 3 NULL NULL NULL
+1 2 9 NULL NULL NULL
+2 3 4 NULL NULL NULL
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

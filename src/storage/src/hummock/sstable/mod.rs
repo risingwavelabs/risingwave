@@ -29,7 +29,7 @@ mod xor_filter;
 pub use bloom::BloomFilterBuilder;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
-    BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder, XorFilterReader,
+    BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder, XorFilterReader,
 };
 pub mod builder;
 pub use builder::*;
@@ -484,11 +484,11 @@ impl SstableIteratorReadOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hummock::HummockValue;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of,
     };
     use crate::hummock::test_utils::gen_test_sstable_data;
-    use crate::hummock::HummockValue;
 
     #[test]
     fn test_sstable_meta_enc_dec() {

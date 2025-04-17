@@ -28,7 +28,7 @@ pub use json_parser::*;
 pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
+use risingwave_common::catalog::{CDC_TABLE_NAME_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{DatumCow, DatumRef};
@@ -39,13 +39,13 @@ use thiserror_ext::AsReport;
 pub use self::mysql::{mysql_datum_to_rw_datum, mysql_row_to_owned_row};
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
-pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
-pub use self::unified::json::{JsonAccess, TimestamptzHandling};
+pub use self::sql_server::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 pub use self::unified::Access;
+pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
-use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
@@ -76,8 +76,8 @@ mod utils;
 
 use access_builder::{AccessBuilder, AccessBuilderImpl};
 pub use config::*;
-use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
+use debezium::schema_change::SchemaChangeEnvelope;
 pub use unified::{AccessError, AccessResult};
 
 /// The meta data of the original message for a row writer.
@@ -113,7 +113,7 @@ impl<'a> MessageMeta<'a> {
             SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
-                    TABLE_NAME_COLUMN_NAME,
+                    CDC_TABLE_NAME_COLUMN_NAME,
                     "unexpected cdc meta column name"
                 );
                 Some(cdc_meta.full_table_name.as_str().into())
@@ -458,8 +458,9 @@ impl ByteStreamSourceParserImpl {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
-            (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
-                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
+            (ProtocolProperties::DebeziumMongo, EncodingProperties::MongoJson(props)) => {
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx, props.clone())
+                    .map(Self::DebeziumMongoJson)
             }
             (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
                 CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)

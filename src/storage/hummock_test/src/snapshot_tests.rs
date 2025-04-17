@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,27 +11,29 @@ use std::collections::HashSet;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::CacheHint;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
-use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::StateStore;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
-    StateStoreRead, TryWaitEpochOptions, WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, SealCurrentEpochOptions, TryWaitEpochOptions,
 };
-use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_bytes, with_hummock_storage, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_bytes, with_hummock_storage};
 
 macro_rules! assert_count_range_scan {
     (
@@ -125,22 +126,16 @@ async fn test_snapshot_inner(
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
-            ],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                StorageValue::new_put("test"),
+            ),
+        ])
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
@@ -168,26 +163,20 @@ async fn test_snapshot_inner(
     assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 2, epoch1, false);
 
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
-                    StorageValue::new_delete(),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
-            ],
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                StorageValue::new_delete(),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                StorageValue::new_put("test"),
+            ),
+        ])
         .await
         .unwrap();
     let epoch3 = epoch2.next_epoch();
@@ -223,26 +212,20 @@ async fn test_snapshot_inner(
     );
 
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
-                    StorageValue::new_delete(),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
-                    StorageValue::new_delete(),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
-                    StorageValue::new_delete(),
-                ),
-            ],
-            WriteOptions {
-                epoch: epoch3,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                StorageValue::new_delete(),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                StorageValue::new_delete(),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                StorageValue::new_delete(),
+            ),
+        ])
         .await
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
@@ -305,30 +288,24 @@ async fn test_snapshot_range_scan_inner(
     local.init_for_test(epoch).await.unwrap();
 
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
-            ],
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                StorageValue::new_put("test"),
+            ),
+        ])
         .await
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());

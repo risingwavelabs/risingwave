@@ -17,16 +17,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
 use url::Url;
 
-use super::{risingwave_cmd, ExecuteContext, Task};
+use super::{ExecuteContext, Task, risingwave_cmd};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name, is_env_set};
 use crate::{
-    add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
-    MetaNodeConfig,
+    Application, HummockInMemoryStrategy, MetaBackend, MetaNodeConfig, add_hummock_backend,
+    add_tempo_endpoint,
 };
 
 /// URL for connecting to the SQL meta store, retrieved from the env var `RISEDEV_SQL_ENDPOINT`.
@@ -107,7 +107,7 @@ impl MetaNodeService {
                 return Err(anyhow!(
                     "unexpected prometheus config {:?}, only 1 instance is supported",
                     config.provide_prometheus
-                ))
+                ));
             }
         }
 
@@ -115,14 +115,15 @@ impl MetaNodeService {
 
         match &config.meta_backend {
             MetaBackend::Memory => {
-                cmd.arg("--backend")
-                    .arg("sql")
-                    .arg("--sql-endpoint")
-                    .arg("sqlite::memory:");
+                cmd.arg("--backend").arg("mem");
             }
             MetaBackend::Sqlite => {
                 let sqlite_config = config.provide_sqlite_backend.as_ref().unwrap();
-                assert_eq!(sqlite_config.len(), 1);
+                assert_eq!(
+                    sqlite_config.len(),
+                    1,
+                    "should have exactly 1 sqlite config"
+                );
                 is_persistent_meta_store = true;
 
                 let prefix_data = env::var("PREFIX_DATA")?;
@@ -198,41 +199,19 @@ impl MetaNodeService {
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
 
-        let (is_shared_backend, is_persistent_backend) = match (
-            config.enable_in_memory_kv_state_backend,
-            provide_minio.as_slice(),
-            provide_aws_s3.as_slice(),
-            provide_opendal.as_slice(),
-        ) {
-            (true, [], [], []) => {
-                cmd.arg("--state-store").arg("in-memory");
-                (false, false)
-            }
-            (true, _, _, _) => {
-                return Err(anyhow!(
-                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
-                ));
-            }
-            (_, provide_minio, provide_aws_s3, provide_opendal) => add_hummock_backend(
-                &config.id,
-                provide_opendal,
-                provide_minio,
-                provide_aws_s3,
-                hummock_in_memory_strategy,
-                cmd,
-            )?,
-        };
+        let (is_shared_backend, is_persistent_backend) = add_hummock_backend(
+            &config.id,
+            provide_opendal,
+            provide_minio,
+            provide_aws_s3,
+            hummock_in_memory_strategy,
+            cmd,
+        )?;
 
         if (provide_compute_node.len() > 1 || !provide_compactor.is_empty()) && !is_shared_backend {
-            if config.enable_in_memory_kv_state_backend {
-                // Using a non-shared backend with multiple compute nodes will be problematic for
-                // state sharing like scaling. However, for distributed end-to-end tests with
-                // in-memory state store, this is acceptable.
-            } else {
-                return Err(anyhow!(
-                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node or compactor-enabled configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
-                ));
-            }
+            return Err(anyhow!(
+                "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node or compactor-enabled configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
+            ));
         }
 
         let provide_compactor = config.provide_compactor.as_ref().unwrap();

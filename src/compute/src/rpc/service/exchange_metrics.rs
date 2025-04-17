@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
-use prometheus::{register_int_counter_vec_with_registry, Registry};
+use prometheus::{Registry, register_int_counter_vec_with_registry};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]

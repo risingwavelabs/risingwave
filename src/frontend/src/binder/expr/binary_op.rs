@@ -186,7 +186,7 @@ impl Binder {
                         return Err(ErrorCode::BindError(format!(
                             "operator not implemented yet: {t} || {t}"
                         ))
-                        .into())
+                        .into());
                     }
 
                     // string concatenation

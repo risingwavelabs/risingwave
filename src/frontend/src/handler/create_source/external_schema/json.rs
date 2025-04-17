@@ -31,10 +31,10 @@ pub async fn extract_json_table_schema(
         None => Ok(None),
         Some((schema_location, use_schema_registry)) => {
             let schema_registry_auth = use_schema_registry.then(|| {
-                let auth = SchemaRegistryAuth::from(&*format_encode_options);
-                try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
-                try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
-                auth
+                let config: SchemaRegistryConfig =
+                    SchemaRegistryConfig::from(&*format_encode_options);
+                try_consume_schema_registry_config_from_options(format_encode_options);
+                config
             });
             Ok(Some(
                 fetch_json_schema_and_map_to_columns(
@@ -45,7 +45,7 @@ pub async fn extract_json_table_schema(
                 .await?
                 .into_iter()
                 .map(|col| ColumnCatalog {
-                    column_desc: col.into(),
+                    column_desc: ColumnDesc::from_field_without_column_id(&col),
                     is_hidden: false,
                 })
                 .collect_vec(),

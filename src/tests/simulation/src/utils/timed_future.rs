@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::pin::{pin, Pin};
+use std::pin::{Pin, pin};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 

@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Assertions;
 public class TestCursor {
 
     public static void createTable() throws SQLException {
-        try (Connection connection = TestUtils.establishConnection()) {
+        try (Connection connection = TestUtils.establishExtendedConnection()) {
             String createTableSQL = "CREATE TABLE test_table (" +
                     "id INT PRIMARY KEY, " +
                     "trading_date DATE, " +
@@ -25,7 +25,7 @@ public class TestCursor {
 
     public static void dropTable() throws SQLException {
         String dropSourceQuery = "DROP TABLE test_table;";
-        try (Connection connection = TestUtils.establishConnection()) {
+        try (Connection connection = TestUtils.establishExtendedConnection()) {
             Statement statement = connection.createStatement();
             statement.executeUpdate(dropSourceQuery);
             System.out.println("Table test_table dropped successfully.");
@@ -34,7 +34,7 @@ public class TestCursor {
 
 
     public static void readWithExtendedCursor() throws SQLException {
-        try (Connection connection = TestUtils.establishConnection()) {
+        try (Connection connection = TestUtils.establishExtendedConnection()) {
             connection.setAutoCommit(false);
             Statement statement = connection.createStatement();
             statement.execute("START TRANSACTION ISOLATION LEVEL REPEATABLE READ");
@@ -60,10 +60,45 @@ public class TestCursor {
         }
     }
 
+    public static void readWithExtendedSubscriptionCursor() throws SQLException {
+        try (Connection connection = TestUtils.establishExtendedConnection()) {
+            connection.setAutoCommit(false);
+            Statement statement = connection.createStatement();
+            statement.execute("START TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+            statement.execute("CREATE SUBSCRIPTION sub FROM public.test_table WITH(retention = '1d')");
+
+            String declareCursorSql = "DECLARE c1 SUBSCRIPTION CURSOR FOR sub FULL";
+            PreparedStatement pstmt = connection.prepareStatement(declareCursorSql);
+            pstmt.execute();
+
+            statement.execute("FETCH 100 FROM c1");
+            ResultSet resultSet = statement.getResultSet();
+
+            while (resultSet != null && resultSet.next()) {
+                Assertions.assertEquals(resultSet.getInt("id"), 1);
+                Assertions.assertEquals(resultSet.getString("trading_date"), "2024-07-10");
+                Assertions.assertEquals(resultSet.getInt("volume"), 23);
+            }
+
+            statement.execute("CLOSE c1");
+            statement.execute("COMMIT");
+            statement.execute("DROP SUBSCRIPTION sub");
+
+            System.out.println("Data in table read with cursor successfully.");
+        }
+    }
+
     @Test
     public void testCursor() throws SQLException {
         createTable();
         readWithExtendedCursor();
+        dropTable();
+    }
+
+    @Test
+    public void testSubscriptionCursor() throws SQLException {
+        createTable();
+        readWithExtendedSubscriptionCursor();
         dropTable();
     }
 }

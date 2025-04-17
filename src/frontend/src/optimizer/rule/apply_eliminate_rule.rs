@@ -19,9 +19,9 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::plan_visitor::PlanCorrelatedIdFinder;
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Eliminate `LogicalApply` if we can't find its `correlated_id` in its RHS.

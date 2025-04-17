@@ -235,8 +235,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [Field($4, 0:Int32), Field($4, 1:Int32), $2] }
-      └─BatchProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, $expr10011::Struct(StructType { field_names: ["v1", "v2"], field_types: [Int32, Int32] }) as $expr1] }
+      └─BatchProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, $expr10011::Struct(StructType { fields: [("v1", Int32), ("v2", Int32)] }) as $expr1] }
         └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
           ├─BatchExchange { order: [], dist: Single }
           │ └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
-          └─BatchValues { rows: [['(666.66,777)':Struct(StructType { field_names: [], field_types: [Decimal, Int32] })]] }
+          └─BatchValues { rows: [['(666.66,777)':Struct(StructType { fields: [("f1", Decimal), ("f2", Int32)] })]] }

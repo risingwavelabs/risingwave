@@ -19,10 +19,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::GroupDelta;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -34,12 +34,12 @@ use tokio::sync::OnceCell;
 
 use super::CompactionGroupStatistic;
 use crate::hummock::compaction::compaction_config::{
-    validate_compaction_config, CompactionConfigBuilder,
+    CompactionConfigBuilder, validate_compaction_config,
 };
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
-use crate::hummock::manager::{commit_multi_var, HummockManager};
+use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_group_id;
@@ -114,7 +114,7 @@ impl HummockManager {
     ) -> Result<Vec<StateTableId>> {
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
-            if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
+            if internal_tables.extract_if(.., |t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
@@ -206,6 +206,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
@@ -247,25 +248,27 @@ impl HummockManager {
                             }
                         };
 
-                    let group_delta = GroupDelta::GroupConstruct(PbGroupConstruct {
+                    let group_delta = GroupDelta::GroupConstruct(Box::new(PbGroupConstruct {
                         group_config: Some(config),
                         group_id,
                         ..Default::default()
-                    });
+                    }));
 
                     group_deltas.push(group_delta);
                 }
             }
-            assert!(new_version_delta
-                .state_table_info_delta
-                .insert(
-                    TableId::new(*table_id),
-                    PbStateTableInfoDelta {
-                        committed_epoch,
-                        compaction_group_id: *raw_group_id,
-                    }
-                )
-                .is_none());
+            assert!(
+                new_version_delta
+                    .state_table_info_delta
+                    .insert(
+                        TableId::new(*table_id),
+                        PbStateTableInfoDelta {
+                            committed_epoch,
+                            compaction_group_id: *raw_group_id,
+                        }
+                    )
+                    .is_none()
+            );
         }
         new_version_delta.pre_apply();
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
@@ -299,6 +302,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
@@ -605,6 +609,21 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::MaxOverlappingLevelSize(c) => {
                 target.max_overlapping_level_size = Some(*c);
             }
+            MutableConfig::SstAllowedTrivialMoveMaxCount(c) => {
+                target.sst_allowed_trivial_move_max_count = Some(*c);
+            }
+            MutableConfig::EmergencyLevel0SstFileCount(c) => {
+                target.emergency_level0_sst_file_count = Some(*c);
+            }
+            MutableConfig::EmergencyLevel0SubLevelPartition(c) => {
+                target.emergency_level0_sub_level_partition = Some(*c);
+            }
+            MutableConfig::Level0StopWriteThresholdMaxSstCount(c) => {
+                target.level0_stop_write_threshold_max_sst_count = Some(*c);
+            }
+            MutableConfig::Level0StopWriteThresholdMaxSize(c) => {
+                target.level0_stop_write_threshold_max_size = Some(*c);
+            }
         }
     }
 }
@@ -693,14 +712,13 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
-    use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::controller::SqlMetaStore;
     use crate::hummock::commit_multi_var;
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::model::StreamJobFragments;
+    use crate::model::{Fragment, StreamJobFragments};
 
     #[tokio::test]
     async fn test_inner() {

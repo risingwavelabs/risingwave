@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, Merge};
+use crate::PlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, BatchValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionModeDecider {}

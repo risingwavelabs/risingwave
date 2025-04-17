@@ -19,10 +19,10 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
-    ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
-    StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
+    BatchGroupTopN, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, PredicatePushdownContext,
+    RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
+    gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -58,7 +58,6 @@ impl PlanTreeNodeUnary for LogicalDedup {
         Self::new(input, self.dedup_cols().to_vec())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,

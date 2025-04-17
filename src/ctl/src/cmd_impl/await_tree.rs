@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::monitor_service::StackTraceResponse;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
+use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
+use rw_diagnose_tools::await_tree::AnalyzeSummary;
 
 use crate::CtlContext;
 
-pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> anyhow::Result<()> {
     let mut all = StackTraceResponse::default();
 
     let meta_client = context.meta_client().await?;
@@ -30,11 +32,19 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
         .await?;
     let clients = ComputeClientPool::adhoc();
 
+    let req = StackTraceRequest {
+        actor_traces_format: match actor_traces_format.as_deref() {
+            Some("text") => ActorTracesFormat::Text as i32,
+            Some("json") | None => ActorTracesFormat::Json as i32,
+            _ => return Err(anyhow::anyhow!("Invalid actor traces format")),
+        },
+    };
+
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let response = client.stack_trace().await?;
+        let response = client.stack_trace(req).await?;
         all.merge_other(response);
     }
 
@@ -45,7 +55,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     for compactor in compactor_nodes {
         let addr: HostAddr = compactor.get_host().unwrap().into();
         let client = CompactorClient::new(addr).await?;
-        let response = client.stack_trace().await?;
+        let response = client.stack_trace(req).await?;
         all.merge_other(response);
     }
 
@@ -54,9 +64,40 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
         && all.compaction_task_traces.is_empty()
         && all.inflight_barrier_traces.is_empty()
     {
-        println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
+        eprintln!("No traces found. No actors are running, or `--async-stack-trace` not set?");
     }
     println!("{}", all.output());
 
     Ok(())
+}
+
+pub async fn bottleneck_detect(context: &CtlContext, path: Option<String>) -> anyhow::Result<()> {
+    let summary = if let Some(path) = path {
+        rw_diagnose_tools::await_tree::bottleneck_detect_from_file(&path)?
+    } else {
+        bottleneck_detect_real_time(context).await?
+    };
+    println!("{}", summary);
+    Ok(())
+}
+
+async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<AnalyzeSummary> {
+    let meta_client = context.meta_client().await?;
+
+    let compute_nodes = meta_client
+        .list_worker_nodes(Some(WorkerType::ComputeNode))
+        .await?;
+    let clients = ComputeClientPool::adhoc();
+
+    // request for json actor traces
+    let req = StackTraceRequest::default();
+
+    let mut summary = AnalyzeSummary::new();
+    for cn in compute_nodes {
+        let client = clients.get(&cn).await?;
+        let response = client.stack_trace(req).await?;
+        let partial_summary = AnalyzeSummary::from_traces(&response.actor_traces)?;
+        summary.merge_other(&partial_summary);
+    }
+    Ok(summary)
 }

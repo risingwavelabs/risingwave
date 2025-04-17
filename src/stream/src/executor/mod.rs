@@ -37,13 +37,12 @@ use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
-use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessage, PbUpdateMutation,
-    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation,
+    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
+    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -55,8 +54,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
-pub mod agg_common;
-pub mod aggregation;
+pub mod aggregate;
 pub mod asof_join;
 mod backfill;
 mod barrier_recv;
@@ -67,10 +65,10 @@ mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
+pub mod eowc;
 pub mod error;
 mod expand;
 mod filter;
-mod hash_agg;
 pub mod hash_join;
 mod hop_window;
 mod join;
@@ -82,17 +80,12 @@ mod nested_loop_temporal_join;
 mod no_op;
 mod now;
 mod over_window;
-mod project;
-mod project_set;
+pub mod project;
 mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
-mod simple_agg;
 mod sink;
-mod sort;
-mod sort_buffer;
 pub mod source;
-mod stateless_simple_agg;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
@@ -110,6 +103,7 @@ mod row_merge;
 
 #[cfg(test)]
 mod integration_tests;
+mod sync_kv_log_store;
 pub mod test_utils;
 mod utils;
 
@@ -131,7 +125,6 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
-pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
@@ -144,16 +137,13 @@ pub use nested_loop_temporal_join::NestedLoopTemporalJoinExecutor;
 pub use no_op::NoOpExecutor;
 pub use now::*;
 pub use over_window::*;
-pub use project::ProjectExecutor;
-pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use row_merge::RowMergeExecutor;
-pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
-pub use sort::*;
-pub use stateless_simple_agg::StatelessSimpleAggExecutor;
+pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
+pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
@@ -169,10 +159,11 @@ use self::barrier_align::AlignedMessageStream;
 
 pub type MessageStreamItemInner<M> = StreamExecutorResult<MessageInner<M>>;
 pub type MessageStreamItem = MessageStreamItemInner<BarrierMutationType>;
-pub type DispatcherMessageStreamItem = MessageStreamItemInner<()>;
+pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -192,6 +183,20 @@ pub struct ExecutorInfo {
 
     /// Identity of the executor.
     pub identity: String,
+
+    /// The executor id of the executor.
+    pub id: u64,
+}
+
+impl ExecutorInfo {
+    pub fn new(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            identity,
+            id,
+        }
+    }
 }
 
 /// [`Execute`] describes the methods an executor should implement to handle control messages.
@@ -387,7 +392,11 @@ impl Barrier {
     /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
-            .map_or(false, |actors| actors.contains(&actor_id))
+            .is_some_and(|actors| actors.contains(&actor_id))
+    }
+
+    pub fn is_checkpoint(&self) -> bool {
+        self.kind == BarrierKind::Checkpoint
     }
 
     /// Get the initial split assignments for the actor with `actor_id`.
@@ -512,14 +521,8 @@ impl Barrier {
     /// Whether this barrier requires the executor to pause its data stream on startup.
     pub fn is_pause_on_startup(&self) -> bool {
         match self.mutation.as_deref() {
-            Some(
-                  Mutation::Update { .. } // new actors for scaling
-                | Mutation::Add(AddMutation { pause: true, .. }) // new streaming job, or recovery
-            ) => true,
-            Some(Mutation::AddAndUpdate(AddMutation { pause, ..}, _)) => {
-                assert!(pause);
-                true
-            },
+            Some(Mutation::Add(AddMutation { pause, .. }))
+            | Some(Mutation::AddAndUpdate(AddMutation { pause, .. }, _)) => *pause,
             _ => false,
         }
     }
@@ -741,7 +744,9 @@ impl Mutation {
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
+            PbMutation::Stop(stop) => {
+                Mutation::Stop(HashSet::from_iter(stop.actors.iter().cloned()))
+            }
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update
@@ -853,11 +858,14 @@ impl Mutation {
                     .collect(),
             },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
-                [BarrierMutation {
-                    mutation: Some(add),
-                }, BarrierMutation {
-                    mutation: Some(update),
-                }] => {
+                [
+                    BarrierMutation {
+                        mutation: Some(add),
+                    },
+                    BarrierMutation {
+                        mutation: Some(update),
+                    },
+                ] => {
                     let Mutation::Add(add_mutation) = Mutation::from_protobuf(add)? else {
                         unreachable!();
                     };
@@ -1047,6 +1055,28 @@ impl<M> MessageInner<M> {
 pub type Message = MessageInner<BarrierMutationType>;
 pub type DispatcherMessage = MessageInner<()>;
 
+/// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
+/// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
+#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+pub enum MessageBatchInner<M> {
+    Chunk(StreamChunk),
+    BarrierBatch(Vec<BarrierInner<M>>),
+    Watermark(Watermark),
+}
+pub type MessageBatch = MessageBatchInner<BarrierMutationType>;
+pub type DispatcherBarriers = Vec<DispatcherBarrier>;
+pub type DispatcherMessageBatch = MessageBatchInner<()>;
+
+impl From<DispatcherMessage> for DispatcherMessageBatch {
+    fn from(m: DispatcherMessage) -> Self {
+        match m {
+            DispatcherMessage::Chunk(c) => Self::Chunk(c),
+            DispatcherMessage::Barrier(b) => Self::BarrierBatch(vec![b]),
+            DispatcherMessage::Watermark(w) => Self::Watermark(w),
+        }
+    }
+}
+
 impl From<StreamChunk> for Message {
     fn from(chunk: StreamChunk) -> Self {
         Message::Chunk(chunk)
@@ -1082,37 +1112,48 @@ impl Message {
     }
 }
 
-impl DispatcherMessage {
-    pub fn to_protobuf(&self) -> PbStreamMessage {
+impl DispatcherMessageBatch {
+    pub fn to_protobuf(&self) -> PbStreamMessageBatch {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
-                StreamMessage::StreamChunk(prost_stream_chunk)
+                StreamMessageBatch::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
-            Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
+            Self::BarrierBatch(barrier_batch) => StreamMessageBatch::BarrierBatch(BarrierBatch {
+                barriers: barrier_batch.iter().map(|b| b.to_protobuf()).collect(),
+            }),
+            Self::Watermark(watermark) => StreamMessageBatch::Watermark(watermark.to_protobuf()),
         };
-        PbStreamMessage {
-            stream_message: Some(prost),
+        PbStreamMessageBatch {
+            stream_message_batch: Some(prost),
         }
     }
 
-    pub fn from_protobuf(prost: &PbStreamMessage) -> StreamExecutorResult<Self> {
-        let res = match prost.get_stream_message()? {
-            StreamMessage::StreamChunk(chunk) => Self::Chunk(StreamChunk::from_protobuf(chunk)?),
-            StreamMessage::Barrier(barrier) => Self::Barrier(
-                DispatcherBarrier::from_protobuf_inner(barrier, |mutation| {
-                    if mutation.is_some() {
-                        if cfg!(debug_assertions) {
-                            panic!("should not receive message of barrier with mutation");
-                        } else {
-                            warn!(?barrier, "receive message of barrier with mutation");
-                        }
-                    }
-                    Ok(())
-                })?,
-            ),
-            StreamMessage::Watermark(watermark) => {
+    pub fn from_protobuf(prost: &PbStreamMessageBatch) -> StreamExecutorResult<Self> {
+        let res = match prost.get_stream_message_batch()? {
+            StreamMessageBatch::StreamChunk(chunk) => {
+                Self::Chunk(StreamChunk::from_protobuf(chunk)?)
+            }
+            StreamMessageBatch::BarrierBatch(barrier_batch) => {
+                let barriers = barrier_batch
+                    .barriers
+                    .iter()
+                    .map(|barrier| {
+                        DispatcherBarrier::from_protobuf_inner(barrier, |mutation| {
+                            if mutation.is_some() {
+                                if cfg!(debug_assertions) {
+                                    panic!("should not receive message of barrier with mutation");
+                                } else {
+                                    warn!(?barrier, "receive message of barrier with mutation");
+                                }
+                            }
+                            Ok(())
+                        })
+                    })
+                    .try_collect()?;
+                Self::BarrierBatch(barriers)
+            }
+            StreamMessageBatch::Watermark(watermark) => {
                 Self::Watermark(Watermark::from_protobuf(watermark)?)
             }
         };

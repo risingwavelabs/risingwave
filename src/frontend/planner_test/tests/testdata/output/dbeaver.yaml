@@ -41,71 +41,54 @@
     WHERE dep.refobjid=$1
     ORDER BY type
   batch_plan: |-
-    BatchExchange { order: [$expr4 ASC], dist: Single }
-    └─BatchSort { order: [$expr4 ASC] }
-      └─BatchHashAgg { group_key: [null:Varchar, null:Int32, null:Int32, $expr1, rw_columns.name, '':Varchar, $expr4, $expr5, $expr6, $expr7], aggs: [] }
-        └─BatchExchange { order: [], dist: HashShard(null:Varchar, null:Int32, null:Int32, $expr1, rw_columns.name, '':Varchar, $expr4, $expr5, $expr6, $expr7) }
-          └─BatchProject { exprs: [null:Varchar, null:Int32, null:Int32, $expr1, rw_columns.name, '':Varchar, Case(IsNotNull($expr1), ConcatOp($expr1, Coalesce(null:Int16::Varchar, '':Varchar)), IsNotNull(null:Int32), 'T':Varchar, IsNotNull(pg_type.oid), 'y':Varchar, IsNotNull(rw_schemas.id), 'n':Varchar, IsNotNull(null:Int32), 'p':Varchar, IsNotNull(null:Int32), 'l':Varchar, IsNotNull(null:Int32), 'R':Varchar, IsNotNull(pg_constraint.oid), ConcatOp('C':Varchar, pg_constraint.contype), IsNotNull(null:Int32), 'A':Varchar, '':Varchar) as $expr4, Coalesce(rw_tables.name, rw_tables.name, rw_tables.name) as $expr5, Case((IsNotNull(rw_tables.name) AND IsNotNull(rw_columns.name)), ConcatOp(ConcatOp(rw_tables.name, '.':Varchar), rw_columns.name), Coalesce(rw_tables.name, pg_constraint.conname, null:Varchar, null:Varchar, pg_type.typname, null:Varchar, null:Varchar, rw_schemas.name)) as $expr6, Coalesce(rw_schemas.name, rw_schemas.name, rw_schemas.name, rw_schemas.name, rw_schemas.name, rw_schemas.name) as $expr7] }
-            └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_columns.relation_id AND null:Int16 = $expr3, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, rw_tables.name, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.id, rw_schemas.name, null:Int32, rw_columns.name] }
+    BatchExchange { order: [$expr3 ASC], dist: Single }
+    └─BatchSort { order: [$expr3 ASC] }
+      └─BatchHashAgg { group_key: [null:Varchar, null:Int32, null:Int32, pg_class.relkind, rw_columns.name, '':Varchar, $expr3, $expr4, $expr5, $expr6], aggs: [] }
+        └─BatchExchange { order: [], dist: HashShard(null:Varchar, null:Int32, null:Int32, pg_class.relkind, rw_columns.name, '':Varchar, $expr3, $expr4, $expr5, $expr6) }
+          └─BatchProject { exprs: [null:Varchar, null:Int32, null:Int32, pg_class.relkind, rw_columns.name, '':Varchar, Case(IsNotNull(pg_class.relkind), ConcatOp(pg_class.relkind, Coalesce(null:Int16::Varchar, '':Varchar)), IsNotNull(null:Int32), 'T':Varchar, IsNotNull(pg_type.oid), 'y':Varchar, IsNotNull(rw_schemas.id), 'n':Varchar, IsNotNull(null:Int32), 'p':Varchar, IsNotNull(null:Int32), 'l':Varchar, IsNotNull(null:Int32), 'R':Varchar, IsNotNull(pg_constraint.oid), ConcatOp('C':Varchar, pg_constraint.contype), IsNotNull(null:Int32), 'A':Varchar, '':Varchar) as $expr3, Coalesce(pg_class.relname, pg_class.relname, pg_class.relname) as $expr4, Case((IsNotNull(pg_class.relname) AND IsNotNull(rw_columns.name)), ConcatOp(ConcatOp(pg_class.relname, '.':Varchar), rw_columns.name), Coalesce(pg_class.relname, pg_constraint.conname, null:Varchar, null:Varchar, pg_type.typname, null:Varchar, null:Varchar, rw_schemas.name)) as $expr5, Coalesce(rw_schemas.name, rw_schemas.name, rw_schemas.name, rw_schemas.name, rw_schemas.name, rw_schemas.name) as $expr6] }
+            └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_columns.relation_id AND null:Int16 = $expr2, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, pg_class.relname, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.id, rw_schemas.name, null:Int32, rw_columns.name] }
               ├─BatchExchange { order: [], dist: HashShard(null:Int32, null:Int16) }
               │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = null:Int32, output: all }
               │   ├─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_schemas.id, output: all }
               │   │ ├─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = null:Int32, output: all }
               │   │ │ ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-              │   │ │ │ └─BatchHashJoin { type: LeftOuter, predicate: rw_tables.schema_id = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, rw_tables.name, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name] }
-              │   │ │ │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
-              │   │ │ │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_tables.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, rw_tables.name, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_tables.schema_id] }
+              │   │ │ │ └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relnamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, pg_class.relname, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name] }
+              │   │ │ │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+              │   │ │ │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = pg_class.oid, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, pg_class.relname, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, pg_class.relnamespace] }
               │   │ │ │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = null:Int32, output: all }
               │   │ │ │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-              │   │ │ │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.connamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, rw_tables.name, rw_schemas.name] }
+              │   │ │ │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.connamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.contype, pg_class.relname, rw_schemas.name] }
               │   │ │ │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(pg_constraint.connamespace) }
-              │   │ │ │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.conrelid = rw_tables.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.connamespace, pg_constraint.contype, rw_tables.name] }
+              │   │ │ │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.conrelid = pg_class.oid, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name, pg_constraint.oid, pg_constraint.conname, pg_constraint.connamespace, pg_constraint.contype, pg_class.relname] }
               │   │ │ │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
               │   │ │ │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = pg_constraint.oid, output: all }
               │   │ │ │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-              │   │ │ │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_type.typnamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name] }
+              │   │ │ │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_type.typnamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name, pg_type.oid, pg_type.typname, rw_schemas.name] }
               │   │ │ │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(pg_type.typnamespace) }
               │   │ │ │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = pg_type.oid, output: all }
               │   │ │ │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-              │   │ │ │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: rw_tables.schema_id = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_schemas.name] }
-              │   │ │ │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_tables.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, rw_tables.name, rw_tables.schema_id] }
+              │   │ │ │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relnamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, rw_schemas.name] }
+              │   │ │ │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+              │   │ │ │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = pg_class.oid, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name, null:Int32, null:Varchar, pg_class.relname, pg_class.relnamespace] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = null:Int32, output: all }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name] }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name, null:Int32, null:Varchar, rw_schemas.name] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = null:Int32, output: all }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: rw_tables.schema_id = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, $expr1, rw_columns.name, rw_schemas.name] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_columns.relation_id AND null:Int16 = $expr2, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, rw_tables.schema_id, $expr1, rw_columns.name] }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relnamespace = rw_schemas.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relkind, rw_columns.name, rw_schemas.name] }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_columns.relation_id AND null:Int16 = $expr1, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relnamespace, pg_class.relkind, rw_columns.name] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32, null:Int16) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = rw_tables.id, output: [null:Int32, null:Int32, null:Int16, null:Varchar, rw_tables.name, rw_tables.schema_id, $expr1] }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchHashJoin { type: LeftOuter, predicate: null:Int32 = pg_class.oid, output: [null:Int32, null:Int32, null:Int16, null:Varchar, pg_class.relname, pg_class.relnamespace, pg_class.relkind] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchValues { rows: [] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_tables.id) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │       └─BatchUnion { all: true }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_tables.id, rw_tables.name, 'table':Varchar, rw_tables.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_system_tables.id, rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_sources.id, rw_sources.name, 'source':Varchar, rw_sources.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_indexes.id, rw_indexes.name, 'index':Varchar, rw_indexes.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_subscriptions.id, rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_materialized_views.id, rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         └─BatchProject { exprs: [rw_views.id, rw_views.name, 'view':Varchar, rw_views.schema_id] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │           └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr2) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr2] }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relkind], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr1) }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr1] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │       └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         └─BatchScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
@@ -116,16 +99,8 @@
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │     └─BatchValues { rows: [] }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_tables.id) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │     └─BatchUnion { all: true }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id], distribution: Single }
-              │   │ │ │   │   │   │   │   │   │   │   │   │       └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+              │   │ │ │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
               │   │ │ │   │   │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_type.oid) }
@@ -134,30 +109,14 @@
               │   │ │ │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_constraint.oid) }
               │   │ │ │   │   │   │   │   │     └─BatchScan { table: pg_constraint, columns: [pg_constraint.oid, pg_constraint.conname, pg_constraint.connamespace, pg_constraint.contype, pg_constraint.conrelid], distribution: Single }
-              │   │ │ │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_tables.id) }
-              │   │ │ │   │   │   │   │     └─BatchUnion { all: true }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name], distribution: Single }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name], distribution: Single }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name], distribution: Single }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name], distribution: Single }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name], distribution: Single }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name], distribution: Single }
-              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name], distribution: Single }
-              │   │ │ │   │   │   │   │       └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name], distribution: Single }
+              │   │ │ │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+              │   │ │ │   │   │   │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname], distribution: Single }
               │   │ │ │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
               │   │ │ │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │     └─BatchValues { rows: [] }
-              │   │ │ │   │   └─BatchExchange { order: [], dist: HashShard(rw_tables.id) }
-              │   │ │ │   │     └─BatchUnion { all: true }
-              │   │ │ │   │       ├─BatchScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id], distribution: Single }
-              │   │ │ │   │       ├─BatchScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id], distribution: Single }
-              │   │ │ │   │       ├─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id], distribution: Single }
-              │   │ │ │   │       ├─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.schema_id], distribution: Single }
-              │   │ │ │   │       ├─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id], distribution: Single }
-              │   │ │ │   │       ├─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id], distribution: Single }
-              │   │ │ │   │       ├─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id], distribution: Single }
-              │   │ │ │   │       └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id], distribution: Single }
+              │   │ │ │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+              │   │ │ │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
               │   │ │ │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
               │   │ │ │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ └─BatchExchange { order: [], dist: HashShard(null:Int32) }
@@ -166,7 +125,7 @@
               │   │   └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │     └─BatchValues { rows: [] }
-              └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr3) }
-                └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr3] }
+              └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr2) }
+                └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr2] }
                   └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
                     └─BatchScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }

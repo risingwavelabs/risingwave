@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
@@ -21,13 +21,14 @@ use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 
 use super::utils::get_kafka_topic;
 use super::{DebeziumProps, TimestamptzHandling};
+use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
-use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
-use crate::source::{extract_source_struct, SourceColumnDesc, SourceEncode, SourceFormat};
-use crate::WithOptionsSecResolved;
+use crate::schema::schema_registry::SchemaRegistryConfig;
+use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
+use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
 
 /// Note: this is created in `SourceReader::build_stream`
 #[derive(Debug, Clone, Default)]
@@ -60,7 +61,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
-    MongoJson,
+    MongoJson(MongoProperties),
     Bytes(BytesProperties),
     Parquet,
     Native,
@@ -169,7 +170,9 @@ impl SpecificParserConfig {
                 } else if info.use_schema_registry {
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
+                        client_config: SchemaRegistryConfig::from(
+                            &format_encode_options_with_secret,
+                        ),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
                         topic: get_kafka_topic(&options_with_secret)?.clone(),
@@ -204,32 +207,32 @@ impl SpecificParserConfig {
 
                 let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),
-                    use_schema_registry: info.use_schema_registry,
-                    row_schema_location: info.row_schema_location.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                        .unwrap(),
                     key_message_name: info.key_message_name.clone(),
                     messages_as_jsonb,
                     ..Default::default()
                 };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
-                if info.use_schema_registry {
-                    config
-                        .topic
-                        .clone_from(get_kafka_topic(&options_with_secret)?);
-                    config.client_config =
-                        SchemaRegistryAuth::from(&format_encode_options_with_secret);
+                config.schema_location = if info.use_schema_registry {
+                    SchemaLocation::Confluent {
+                        urls: info.row_schema_location.clone(),
+                        client_config: SchemaRegistryConfig::from(
+                            &format_encode_options_with_secret,
+                        ),
+                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
+                            .unwrap(),
+                        topic: get_kafka_topic(&options_with_secret)?.clone(),
+                    }
                 } else {
-                    config.aws_auth_props = Some(
-                        serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(format_encode_options_with_secret.clone())
-                                .unwrap(),
-                        )
-                        .map_err(|e| anyhow::anyhow!(e))?,
-                    );
-                }
+                    SchemaLocation::File {
+                        url: info.row_schema_location.clone(),
+                        aws_auth_props: Some(
+                            serde_json::from_value::<AwsAuthProps>(
+                                serde_json::to_value(format_encode_options_with_secret.clone())
+                                    .unwrap(),
+                            )
+                            .map_err(|e| anyhow::anyhow!(e))?,
+                        ),
+                    }
+                };
                 EncodingProperties::Protobuf(config)
             }
             (SourceFormat::Debezium, SourceEncode::Avro) => {
@@ -242,7 +245,9 @@ impl SpecificParserConfig {
                     key_record_name: info.key_message_name.clone(),
                     schema_location: SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
+                        client_config: SchemaRegistryConfig::from(
+                            &format_encode_options_with_secret,
+                        ),
                         name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                             .unwrap(),
                         topic: get_kafka_topic(&options_with_secret).unwrap().clone(),
@@ -264,10 +269,8 @@ impl SpecificParserConfig {
                 )?,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
-                EncodingProperties::Json(JsonProperties {
-                    use_schema_registry: false,
-                    timestamptz_handling: None,
-                })
+                let props = MongoProperties::from(&format_encode_options_with_secret);
+                EncodingProperties::MongoJson(props)
             }
             (SourceFormat::Plain, SourceEncode::Bytes) => {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
@@ -304,7 +307,7 @@ pub enum SchemaLocation {
     /// <https://docs.confluent.io/platform/current/schema-registry/index.html>
     Confluent {
         urls: String,
-        client_config: SchemaRegistryAuth,
+        client_config: SchemaRegistryConfig,
         name_strategy: PbSchemaRegistryNameStrategy,
         topic: String,
     },
@@ -330,15 +333,9 @@ impl Default for SchemaLocation {
 
 #[derive(Debug, Default, Clone)]
 pub struct ProtobufProperties {
+    pub schema_location: SchemaLocation,
     pub message_name: String,
-    pub use_schema_registry: bool,
-    pub row_schema_location: String,
-    pub aws_auth_props: Option<AwsAuthProps>,
-    pub client_config: SchemaRegistryAuth,
-    pub enable_upsert: bool,
-    pub topic: String,
     pub key_message_name: Option<String>,
-    pub name_strategy: PbSchemaRegistryNameStrategy,
     pub messages_as_jsonb: HashSet<String>,
 }
 
@@ -357,4 +354,23 @@ pub struct JsonProperties {
 #[derive(Debug, Default, Clone)]
 pub struct BytesProperties {
     pub column_name: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct MongoProperties {
+    pub strong_schema: bool,
+}
+
+impl MongoProperties {
+    pub fn new(strong_schema: bool) -> Self {
+        Self { strong_schema }
+    }
+}
+impl From<&BTreeMap<String, String>> for MongoProperties {
+    fn from(config: &BTreeMap<String, String>) -> Self {
+        let strong_schema = config
+            .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
+            .is_some_and(|k| k.eq_ignore_ascii_case("true"));
+        Self { strong_schema }
+    }
 }

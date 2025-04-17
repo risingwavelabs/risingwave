@@ -54,9 +54,9 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::{pin_mut, StreamExt};
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use futures::{StreamExt, pin_mut};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;

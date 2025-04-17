@@ -149,6 +149,10 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
+    pub frontend: FrontendConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
     pub streaming: StreamingConfig,
 
     #[serde(default)]
@@ -159,6 +163,10 @@ pub struct RwConfig {
     #[educe(Debug(ignore))]
     #[config_doc(nested)]
     pub system: SystemConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub udf: UdfConfig,
 
     #[serde(flatten)]
     #[config_doc(omitted)]
@@ -414,14 +422,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
+    /// The interval of the periodic scheduling compaction group split job.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
+    /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
+    /// The threshold of each dimension of the compaction group after merging. When the dimension * `compaction_group_merge_dimension_threshold` >= limit, the merging job will be rejected.
+    #[serde(default = "default::meta::compaction_group_merge_dimension_threshold")]
+    pub compaction_group_merge_dimension_threshold: f64,
 
     #[serde(default)]
     #[config_doc(nested)]
@@ -545,6 +559,21 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub stream_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct RpcClientConfig {
+    #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -630,6 +659,36 @@ pub struct BatchConfig {
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
     pub enable_spill: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct FrontendConfig {
+    /// Total memory constraints for running queries.
+    #[serde(default = "default::frontend::max_total_query_size_bytes")]
+    pub max_total_query_size_bytes: u64,
+
+    /// A query of size under this threshold will never be rejected due to memory constraints.
+    #[serde(default = "default::frontend::min_single_query_size_bytes")]
+    pub min_single_query_size_bytes: u64,
+
+    /// A query of size exceeding this threshold will always be rejected due to memory constraints.
+    #[serde(default = "default::frontend::max_single_query_size_bytes")]
+    pub max_single_query_size_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct UdfConfig {
+    /// Allow embedded Python UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_python_udf")]
+    pub enable_embedded_python_udf: bool,
+
+    /// Allow embedded JS UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_javascript_udf")]
+    pub enable_embedded_javascript_udf: bool,
+
+    /// Allow embedded WASM UDFs to be created.
+    #[serde(default = "default::udf::enable_embedded_wasm_udf")]
+    pub enable_embedded_wasm_udf: bool,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1164,10 +1223,33 @@ pub struct StreamingDeveloperConfig {
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
 
+    /// The maximum number of consecutive barriers allowed in a message when sent between actors.
+    #[serde(default = "default::developer::stream_max_barrier_batch_size")]
+    pub max_barrier_batch_size: u32,
+
     /// Configure the system-wide cache row cardinality of hash join.
     /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
+
+    /// Enable / Disable profiling stats used by `EXPLAIN ANALYZE`
+    #[serde(default = "default::developer::enable_explain_analyze_stats")]
+    pub enable_explain_analyze_stats: bool,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
+
+    /// `IcebergListExecutor`: The interval in seconds for Iceberg source to list new files.
+    #[serde(default = "default::developer::iceberg_list_interval_sec")]
+    pub iceberg_list_interval_sec: u64,
+
+    /// `IcebergFetchExecutor`: The number of files the executor will fetch concurrently in a batch.
+    #[serde(default = "default::developer::iceberg_fetch_batch_size")]
+    pub iceberg_fetch_batch_size: u64,
+
+    /// `IcebergSink`: The size of the cache for positional delete in the sink.
+    #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
+    pub iceberg_sink_positional_delete_cache_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1184,6 +1266,12 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_output_channel_size")]
     pub output_channel_size: usize,
 
+    #[serde(default = "default::developer::batch_receiver_channel_size")]
+    pub receiver_channel_size: usize,
+
+    #[serde(default = "default::developer::batch_root_stage_channel_size")]
+    pub root_stage_channel_size: usize,
+
     /// The size of a chunk produced by `RowSeqScanExecutor`
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
@@ -1192,6 +1280,9 @@ pub struct BatchDeveloperConfig {
     /// If not specified, the value of `server.connection_pool_size` will be used.
     #[serde(default = "default::developer::batch_exchange_connection_pool_size")]
     exchange_connection_pool_size: Option<u16>,
+
+    #[serde(default)]
+    pub compute_client_config: RpcClientConfig,
 }
 
 macro_rules! define_system_config {
@@ -1636,6 +1727,10 @@ pub mod default {
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
         }
+
+        pub fn compaction_group_merge_dimension_threshold() -> f64 {
+            1.2
+        }
     }
 
     pub mod server {
@@ -1850,7 +1945,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            2
+            10
         }
     }
 
@@ -1920,7 +2015,7 @@ pub mod default {
         }
 
         pub fn recover_mode() -> RecoverMode {
-            RecoverMode::None
+            RecoverMode::Quiet
         }
 
         pub fn runtime_config() -> RuntimeOptions {
@@ -1985,6 +2080,14 @@ pub mod default {
             64
         }
 
+        pub fn batch_receiver_channel_size() -> usize {
+            1000
+        }
+
+        pub fn batch_root_stage_channel_size() -> usize {
+            100
+        }
+
         pub fn batch_chunk_size() -> usize {
             1024
         }
@@ -2029,6 +2132,10 @@ pub mod default {
 
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
+        }
+
+        pub fn stream_max_barrier_batch_size() -> u32 {
+            1024
         }
 
         pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
@@ -2151,6 +2258,26 @@ pub mod default {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
         }
+
+        pub fn enable_explain_analyze_stats() -> bool {
+            true
+        }
+
+        pub fn rpc_client_connect_timeout_secs() -> u64 {
+            5
+        }
+
+        pub fn iceberg_list_interval_sec() -> u64 {
+            1
+        }
+
+        pub fn iceberg_fetch_batch_size() -> u64 {
+            1024
+        }
+
+        pub fn iceberg_sink_positional_delete_cache_size() -> usize {
+            1024
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -2192,6 +2319,34 @@ pub mod default {
         }
     }
 
+    pub mod frontend {
+        pub fn max_total_query_size_bytes() -> u64 {
+            1024 * 1024 * 1024
+        }
+
+        pub fn min_single_query_size_bytes() -> u64 {
+            1024 * 1024
+        }
+
+        pub fn max_single_query_size_bytes() -> u64 {
+            1024 * 1024 * 1024
+        }
+    }
+
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool {
+            false
+        }
+
+        pub fn enable_embedded_javascript_udf() -> bool {
+            true
+        }
+
+        pub fn enable_embedded_wasm_udf() -> bool {
+            true
+        }
+    }
+
     pub mod compaction_config {
         const MB: u64 = 1024 * 1024;
         const GB: u64 = 1024 * 1024 * 1024;
@@ -2215,6 +2370,11 @@ pub mod default {
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 64;
+        const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
+        const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -2296,6 +2456,26 @@ pub mod default {
 
         pub fn max_overlapping_level_size() -> u64 {
             256 * MB
+        }
+
+        pub fn sst_allowed_trivial_move_max_count() -> u32 {
+            DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT
+        }
+
+        pub fn emergency_level0_sst_file_count() -> u32 {
+            DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT
+        }
+
+        pub fn emergency_level0_sub_level_partition() -> u32 {
+            DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION
+        }
+
+        pub fn level0_stop_write_threshold_max_sst_count() -> u32 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT
+        }
+
+        pub fn level0_stop_write_threshold_max_size() -> u64 {
+            DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE
         }
     }
 
@@ -2676,6 +2856,24 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
     #[serde(default = "default::compaction_config::max_level")]
     pub max_level: u32,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_min_size")]
+    pub sst_allowed_trivial_move_min_size: u64,
+    #[serde(default = "default::compaction_config::sst_allowed_trivial_move_max_count")]
+    pub sst_allowed_trivial_move_max_count: u32,
+    #[serde(default = "default::compaction_config::max_l0_compact_level_count")]
+    pub max_l0_compact_level_count: u32,
+    #[serde(default = "default::compaction_config::disable_auto_group_scheduling")]
+    pub disable_auto_group_scheduling: bool,
+    #[serde(default = "default::compaction_config::max_overlapping_level_size")]
+    pub max_overlapping_level_size: u64,
+    #[serde(default = "default::compaction_config::emergency_level0_sst_file_count")]
+    pub emergency_level0_sst_file_count: u32,
+    #[serde(default = "default::compaction_config::emergency_level0_sub_level_partition")]
+    pub emergency_level0_sub_level_partition: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_sst_count")]
+    pub level0_stop_write_threshold_max_sst_count: u32,
+    #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_size")]
+    pub level0_stop_write_threshold_max_size: u64,
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.

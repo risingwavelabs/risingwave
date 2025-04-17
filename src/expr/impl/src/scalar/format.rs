@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 use risingwave_common::row::Row;
 use risingwave_common::types::{ScalarRefImpl, ToText};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 use super::string::quote_ident;
 
@@ -58,13 +58,13 @@ fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Resu
                         _ => {
                             return Err(ExprError::UnsupportedFunction(
                                 "unsupported data for specifier type 'I'".to_owned(),
-                            ))
+                            ));
                         }
                     },
                     SpecifierType::SqlLiteral => {
                         return Err(ExprError::UnsupportedFunction(
                             "unsupported specifier type 'L'".to_owned(),
-                        ))
+                        ));
                     }
                 }
             }

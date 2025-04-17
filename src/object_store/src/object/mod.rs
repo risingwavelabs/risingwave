@@ -31,7 +31,7 @@ pub mod opendal_engine;
 pub use opendal_engine::*;
 
 pub mod s3;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::stream::BoxStream;
 use futures::{Future, StreamExt};
 pub use risingwave_common::config::ObjectStoreConfig;
@@ -45,7 +45,7 @@ pub mod prefix;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use thiserror_ext::AsReport;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 #[cfg(madsim)]
 use self::sim::SimObjectStore;
@@ -408,7 +408,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
         let res = self
             .inner
             .write_bytes(data)
-            .verbose_instrument_await(operation_type_str)
+            .instrument_await(operation_type_str.verbose())
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
@@ -434,7 +434,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
             self.inner
                 .finish()
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
@@ -487,7 +487,7 @@ impl MonitoredStreamingReader {
         let future = async {
             self.inner
                 .next()
-                .verbose_instrument_await(self.operation_type_str)
+                .instrument_await(self.operation_type_str.verbose())
                 .await
         };
         let res = match self.streaming_read_timeout.as_ref() {
@@ -595,7 +595,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .upload(path, obj.clone())
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -628,7 +628,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .streaming_upload(path)
-            .verbose_instrument_await(operation_type_str)
+            .instrument_await(operation_type_str.verbose())
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
@@ -653,7 +653,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .read(path, range.clone())
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -707,7 +707,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .streaming_read(path, range.clone())
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -745,7 +745,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .metadata(path)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -776,7 +776,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .delete(path)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -807,7 +807,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .delete_objects(paths)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -843,7 +843,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let builder = || async {
             self.inner
                 .list(prefix, start_after.clone(), limit)
-                .verbose_instrument_await(operation_type_str)
+                .instrument_await(operation_type_str.verbose())
                 .await
         };
 
@@ -998,7 +998,9 @@ pub async fn build_remote_object_store(
             tracing::error!("The s3 compatible mode has been unified with s3.");
             tracing::error!("If you want to use s3 compatible storage, please set your access_key, secret_key and region to the environment variable AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
             set your endpoint to the environment variable RW_S3_ENDPOINT.");
-            panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
+            panic!(
+                "Passing s3-compatible is not supported, please modify the environment variable and pass in s3."
+            );
         }
         minio if minio.starts_with("minio://") => {
             if config.s3.developer.use_opendal {
@@ -1018,17 +1020,29 @@ pub async fn build_remote_object_store(
         }
         "memory" => {
             if ident == "Meta Backup" {
-                tracing::warn!("You're using in-memory remote object store for {}. This is not recommended for production environment.", ident);
+                tracing::warn!(
+                    "You're using in-memory remote object store for {}. This is not recommended for production environment.",
+                    ident
+                );
             } else {
-                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+                tracing::warn!(
+                    "You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.",
+                    ident
+                );
             }
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics, config))
         }
         "memory-shared" => {
             if ident == "Meta Backup" {
-                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in production environment.", ident);
+                tracing::warn!(
+                    "You're using shared in-memory remote object store for {}. This should never be used in production environment.",
+                    ident
+                );
             } else {
-                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+                tracing::warn!(
+                    "You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.",
+                    ident
+                );
             }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
         }
@@ -1049,7 +1063,7 @@ pub async fn build_remote_object_store(
 fn get_retry_strategy(
     config: &ObjectStoreConfig,
     operation_type: OperationType,
-) -> impl Iterator<Item = Duration> {
+) -> impl Iterator<Item = Duration> + use<> {
     let attempts = get_retry_attempts_by_type(config, operation_type);
     ExponentialBackoff::from_millis(config.retry.req_backoff_interval_ms)
         .max_delay(Duration::from_millis(config.retry.req_backoff_max_delay_ms))

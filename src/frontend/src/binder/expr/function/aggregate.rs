@@ -15,14 +15,14 @@
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
 use risingwave_sqlparser::ast::{self, FunctionArgExpr};
 
+use crate::Binder;
 use crate::binder::Clause;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{AggCall, ExprImpl, Literal, OrderBy};
 use crate::utils::Condition;
-use crate::Binder;
 
 impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
@@ -38,7 +38,7 @@ impl Binder {
                         "aggregate functions are not allowed in {}",
                         clause
                     ))
-                    .into())
+                    .into());
                 }
                 Clause::Having | Clause::Filter | Clause::GroupBy => {}
             }
@@ -182,7 +182,7 @@ impl Binder {
                         return Err(ErrorCode::InvalidInputSyntax(
                             "invalid direct args for approx_percentile aggregation".to_owned(),
                         )
-                        .into())
+                        .into());
                     }
                 }
             }
@@ -191,7 +191,7 @@ impl Binder {
                     "invalid direct args or within group argument for `{}` aggregation",
                     kind
                 ))
-                .into())
+                .into());
             }
         }
 
@@ -263,7 +263,9 @@ impl Binder {
             // restrict arguments[1..] to be constant because we don't support multiple distinct key
             // indices for now
             if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
-                bail_not_implemented!("non-constant arguments other than the first one for DISTINCT aggregation is not supported now");
+                bail_not_implemented!(
+                    "non-constant arguments other than the first one for DISTINCT aggregation is not supported now"
+                );
             }
 
             // restrict ORDER BY to align with PG, which says:

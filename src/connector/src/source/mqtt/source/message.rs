@@ -14,8 +14,8 @@
 
 use rumqttc::v5::mqttbytes::v5::Publish;
 
-use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
+use crate::source::base::SourceMessage;
 
 #[derive(Clone, Debug)]
 pub struct MqttMessage {

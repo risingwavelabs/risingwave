@@ -75,10 +75,11 @@ It will run RisingWave with corresponding (object) storage products.
 
 ## Published images
 
-- `latest` on GHCR (latest nightly build): `ghcr.io/risingwavelabs/risingwave:latest`
-- `latest` on Docker Hub (latest release): `risingwavelabs/risingwave:latest`
+- `nightly`, latest nightly build
+- `latest`, latest stable version
 - Other tags available on both GHCR and Docker Hub:
   - `nightly-yyyyMMdd`, e.g., `nightly-20230108`
+  - `vX.Y.Z-alpha.yyyyMMdd`, e.g., `v2.3.0-alpha.20250301`
   - `vX.Y.Z`, e.g., `v0.1.15`
 
 ## Build the images

@@ -40,8 +40,8 @@ use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, RangeInclusive};
 
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
+use risingwave_pb::common::buffer::CompressionType;
 use rw_iter_util::ZipEqFast;
 
 #[derive(Default, Debug, Clone, EstimateSize)]
@@ -347,9 +347,11 @@ impl Bitmap {
     ///
     /// Index must be in range.
     pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
-        match &self.bits {
-            None => self.count_ones != 0,
-            Some(bits) => bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0,
+        unsafe {
+            match &self.bits {
+                None => self.count_ones != 0,
+                Some(bits) => bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0,
+            }
         }
     }
 
@@ -476,7 +478,7 @@ impl<'b> BitAnd<&'b Bitmap> for &Bitmap {
         assert_eq!(self.num_bits, rhs.num_bits);
         let (lbits, rbits) = match (&self.bits, &rhs.bits) {
             _ if self.count_ones == 0 || rhs.count_ones == 0 => {
-                return Bitmap::zeros(self.num_bits)
+                return Bitmap::zeros(self.num_bits);
             }
             (_, None) => return self.clone(),
             (None, _) => return rhs.clone(),
@@ -654,7 +656,7 @@ impl FromIterator<Option<bool>> for Bitmap {
 
 impl Bitmap {
     pub fn to_protobuf(&self) -> PbBuffer {
-        let body_len = (self.num_bits + 7) / 8 + 1;
+        let body_len = self.num_bits.div_ceil(8) + 1;
         let mut body = Vec::with_capacity(body_len);
         body.push((self.num_bits % 8) as u8);
         match &self.bits {
@@ -667,7 +669,10 @@ impl Bitmap {
             }
             Some(bits) => {
                 body.extend_from_slice(unsafe {
-                    std::slice::from_raw_parts(bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
+                    std::slice::from_raw_parts(
+                        bits.as_ptr() as *const u8,
+                        self.num_bits.div_ceil(8),
+                    )
                 });
             }
         }

@@ -31,7 +31,7 @@ impl VnodeWatermarkCompactionPicker {
     }
 
     /// The current implementation only picks trivial reclaim task for the bottommost level.
-    /// Must modify [`crate::hummock::compaction::CompactStatus::is_trivial_reclaim`], if nontrivial reclaim is supported in the future.
+    /// Must modify `is_trivial_reclaim`, if non-trivial reclaim is supported in the future.
     pub fn pick_compaction(
         &mut self,
         levels: &Levels,
@@ -101,7 +101,7 @@ fn should_delete_key_by_watermark(
     let Some(w) = watermark.vnode_watermarks.get(&vnode) else {
         return false;
     };
-    watermark.direction.filter_by_watermark(key, w)
+    watermark.direction.key_filter_by_watermark(key, w)
 }
 
 #[cfg(test)]

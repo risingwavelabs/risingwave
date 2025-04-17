@@ -78,6 +78,7 @@ mod string;
 mod string_to_array;
 mod substr;
 mod timestamptz;
+pub use timestamptz::{time_zone_err, timestamptz_interval_add_internal};
 mod to_char;
 mod to_jsonb;
 mod vnode;

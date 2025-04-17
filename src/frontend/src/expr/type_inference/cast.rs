@@ -131,11 +131,7 @@ pub type CastResult<T = ()> = Result<T, CastError>;
 /// Returns `Ok` if `ok` is true, otherwise returns a placeholder [`CastError`] to be further
 /// wrapped with a more informative context in [`cast`].
 fn canbo(ok: bool) -> CastResult {
-    if ok {
-        Ok(())
-    } else {
-        bail_cast_error!()
-    }
+    if ok { Ok(()) } else { bail_cast_error!() }
 }
 /// Equivalent to `canbo(false)`.
 fn cannot() -> CastResult {
@@ -206,13 +202,12 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
                         Ok(())
                     } else {
                         cast(src_ty, dst_ty, allows).map_err(|inner| {
-                            let cast_from = (!src_name.is_empty())
-                                .then(|| format!(" struct field \"{}\"", src_name))
-                                .unwrap_or_default();
-                            let cast_to = (!dst_name.is_empty())
-                                .then(|| format!(" to struct field \"{}\"", dst_name))
-                                .unwrap_or_default();
-                            cast_error!(source = inner, "cannot cast{}{}", cast_from, cast_to)
+                            cast_error!(
+                                source = inner,
+                                "cannot cast struct field \"{}\" to struct field \"{}\"",
+                                src_name,
+                                dst_name
+                            )
                         })
                     }
                 },
@@ -345,8 +340,8 @@ mod tests {
     use super::*;
 
     fn gen_cast_table(allows: CastContext) -> Vec<String> {
-        use itertools::Itertools as _;
         use DataType as T;
+        use itertools::Itertools as _;
         let all_types = &[
             T::Boolean,
             T::Int16,

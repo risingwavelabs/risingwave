@@ -20,19 +20,19 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
-use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::oneshot::Sender;
 
 use self::notifier::Notifier;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamJobFragments};
+use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
 mod checkpoint;
 mod command;
 mod complete_task;
 mod context;
+mod edge_builder;
 mod info;
 mod manager;
 mod notifier;
@@ -105,6 +105,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     state_table_committed_epochs: HashMap<TableId, u64>,
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
     stream_actors: HashMap<ActorId, StreamActor>,
+    fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
@@ -120,11 +121,14 @@ impl BarrierWorkerRuntimeInfoSnapshot {
     ) -> MetaResult<()> {
         {
             for fragment in database_info.fragment_infos() {
-                for (actor_id, worker_id) in &fragment.actors {
-                    if !active_streaming_nodes.current().contains_key(worker_id) {
+                for (actor_id, actor) in &fragment.actors {
+                    if !active_streaming_nodes
+                        .current()
+                        .contains_key(&actor.worker_id)
+                    {
                         return Err(anyhow!(
                             "worker_id {} of actor {} do not exist",
-                            worker_id,
+                            actor.worker_id,
                             actor_id
                         )
                         .into());
@@ -191,6 +195,7 @@ struct DatabaseRuntimeInfoSnapshot {
     state_table_committed_epochs: HashMap<TableId, u64>,
     subscription_info: InflightSubscriptionInfo,
     stream_actors: HashMap<ActorId, StreamActor>,
+    fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
 }

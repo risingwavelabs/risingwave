@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalIntersect, PlanTreeNode};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalIntersect, PlanTreeNode};
 
 pub struct IntersectMergeRule {}
 impl Rule for IntersectMergeRule {

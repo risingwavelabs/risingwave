@@ -24,12 +24,12 @@ use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_expr::expr_context::expr_context_scope;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
-use risingwave_pb::PbFieldNotFound;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
@@ -40,8 +40,8 @@ use crate::error::{BatchError, Result, SharedResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
-use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::BatchTaskContext;
+use crate::task::channel::{ChanReceiverImpl, ChanSenderImpl, create_output_channel};
 
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 pub const TASK_STATUS_BUFFER_SIZE: usize = 2;
@@ -412,8 +412,17 @@ impl BatchTaskExecution {
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         let this = self.clone();
-        async fn notify_panic(this: &BatchTaskExecution, state_tx: Option<&mut StateReporter>) {
-            let err_str = "execution panic".into();
+        async fn notify_panic(
+            this: &BatchTaskExecution,
+            state_tx: Option<&mut StateReporter>,
+            message: Option<&str>,
+        ) {
+            let err_str = if let Some(message) = message {
+                format!("execution panic: {}", message)
+            } else {
+                "execution panic".into()
+            };
+
             if let Err(e) = this
                 .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str))
                 .await
@@ -451,8 +460,9 @@ impl BatchTaskExecution {
                 .rw_catch_unwind()
                 .await
             {
-                error!("Batch task {:?} panic: {:?}", task_id, error);
-                notify_panic(&this, state_tx.as_mut()).await;
+                let message = panic_message::get_panic_message(&error);
+                error!(?task_id, error = message, "Batch task panic");
+                notify_panic(&this, state_tx.as_mut(), message).await;
             }
         };
 

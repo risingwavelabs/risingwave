@@ -57,7 +57,10 @@ pub async fn regress_main() -> i32 {
             0
         }
         Err(e) => {
-            error!("Risingwave regress test failed: {:?}. Please ensure that your psql version is larger than 14.1", e);
+            error!(
+                "Risingwave regress test failed: {:?}. Please ensure that your psql version is larger than 14.1",
+                e
+            );
             1
         }
     }

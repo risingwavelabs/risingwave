@@ -16,6 +16,7 @@
 #![feature(let_chains)]
 #![feature(try_blocks)]
 #![feature(register_tool)]
+#![feature(if_let_guard)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
 
@@ -26,6 +27,8 @@ pub mod kafka;
 pub mod nexmark;
 pub mod slt;
 pub mod utils;
+
+mod parse;
 
 risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();

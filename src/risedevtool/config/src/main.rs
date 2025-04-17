@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
-use enum_iterator::{all, Sequence};
+use enum_iterator::{Sequence, all};
 use fs_err::OpenOptions;
 use itertools::Itertools;
 
@@ -74,10 +74,7 @@ pub enum Components {
     HummockTrace,
     Coredump,
     NoBacktrace,
-    ExternalUdf,
-    WasmUdf,
-    JsUdf,
-    PythonUdf,
+    Udf,
 }
 
 impl Components {
@@ -99,10 +96,7 @@ impl Components {
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
             Self::NoBacktrace => "[Runtime] Disable backtrace",
-            Self::ExternalUdf => "[Build] Enable external UDF",
-            Self::WasmUdf => "[Build] Enable Wasm UDF",
-            Self::JsUdf => "[Build] Enable JS UDF",
-            Self::PythonUdf => "[Build] Enable Python UDF",
+            Self::Udf => "[Build] Enable UDF",
         }
         .into()
     }
@@ -201,10 +195,7 @@ As a result, RisingWave will dump the core on panics.
 With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
                 "
             }
-            Self::ExternalUdf => "Required if you want to support external UDF.",
-            Self::WasmUdf => "Required if you want to support WASM UDF.",
-            Self::JsUdf => "Required if you want to support JS UDF.",
-            Self::PythonUdf => "Required if you want to support Python UDF.",
+            Self::Udf => "Required if you want to support UDF.",
         }
         .into()
     }
@@ -227,10 +218,7 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
-            "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
-            "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
-            "ENABLE_JS_UDF" => Some(Self::JsUdf),
-            "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
+            "ENABLE_UDF" => Some(Self::Udf),
             _ => None,
         }
     }
@@ -253,10 +241,7 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
             Self::NoBacktrace => "DISABLE_BACKTRACE",
-            Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
-            Self::WasmUdf => "ENABLE_WASM_UDF",
-            Self::JsUdf => "ENABLE_JS_UDF",
-            Self::PythonUdf => "ENABLE_PYTHON_UDF",
+            Self::Udf => "ENABLE_UDF",
         }
         .into()
     }
@@ -317,40 +302,43 @@ fn main() -> Result<()> {
     let file_path = opts.file;
 
     let chosen = {
-        if let Ok(file) = OpenOptions::new().read(true).open(&file_path) {
-            let reader = BufReader::new(file);
-            let mut enabled = vec![];
-            for line in reader.lines() {
-                let line = line?;
-                if line.trim().is_empty() || line.trim().starts_with('#') {
-                    continue;
-                }
-                let Some((component, val)) = line.split_once('=') else {
-                    println!("invalid config line {}, discarded", line);
-                    continue;
-                };
-                if component == "RISEDEV_CONFIGURED" {
-                    continue;
-                }
-                match Components::from_env(component) {
-                    Some(component) => {
-                        if val == "true" {
-                            enabled.push(component);
-                        }
-                    }
-                    None => {
-                        println!("unknown configure {}, discarded", component);
+        match OpenOptions::new().read(true).open(&file_path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                let mut enabled = vec![];
+                for line in reader.lines() {
+                    let line = line?;
+                    if line.trim().is_empty() || line.trim().starts_with('#') {
                         continue;
                     }
+                    let Some((component, val)) = line.split_once('=') else {
+                        println!("invalid config line {}, discarded", line);
+                        continue;
+                    };
+                    if component == "RISEDEV_CONFIGURED" {
+                        continue;
+                    }
+                    match Components::from_env(component) {
+                        Some(component) => {
+                            if val == "true" {
+                                enabled.push(component);
+                            }
+                        }
+                        None => {
+                            println!("unknown configure {}, discarded", component);
+                            continue;
+                        }
+                    }
                 }
+                enabled
             }
-            enabled
-        } else {
-            println!(
-                "RiseDev component config not found, generating {}",
-                file_path
-            );
-            Components::default_enabled().to_vec()
+            _ => {
+                println!(
+                    "RiseDev component config not found, generating {}",
+                    file_path
+                );
+                Components::default_enabled().to_vec()
+            }
         }
     };
 

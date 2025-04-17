@@ -47,10 +47,18 @@ pub fn new_spinner() -> ProgressBar {
     let pb = ProgressBar::new(0);
     pb.set_style(
         ProgressStyle::default_spinner()
-            .template("{spinner} {prefix}: {msg}")
+            .template("🟡 {prefix}: {msg}")
             .unwrap(),
     );
     pb
+}
+
+pub fn begin_spin(pb: &ProgressBar) {
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} {prefix}: {msg}")
+            .unwrap(),
+    );
 }
 
 pub fn complete_spin(pb: &ProgressBar) {
@@ -98,7 +106,7 @@ pub fn risedev_cmd() -> &'static str {
     RISEDEV_CMD.as_str()
 }
 
-pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display {
+pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display + use<> {
     console::style(format!("{} {}", risedev_cmd(), subcmd))
         .blue()
         .bold()

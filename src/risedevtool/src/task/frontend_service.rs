@@ -14,12 +14,12 @@
 
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
-use super::{risingwave_cmd, ExecuteContext, Task};
+use super::{ExecuteContext, Task, risingwave_cmd};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_tempo_endpoint, FrontendConfig};
+use crate::{FrontendConfig, add_tempo_endpoint};
 
 pub struct FrontendService {
     config: FrontendConfig,

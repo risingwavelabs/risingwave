@@ -22,13 +22,13 @@ pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 fn inner(tokens: TokenStream) -> TokenStream {
-    match gen(tokens) {
+    match r#gen(tokens) {
         Ok(tokens) => tokens,
         Err(err) => err.to_compile_error(),
     }
 }
 
-fn gen(tokens: TokenStream) -> Result<TokenStream> {
+fn r#gen(tokens: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = syn::parse2(tokens)?;
 
     let ident = &input.ident;
@@ -127,7 +127,7 @@ fn get_primary_key(input: &syn::DeriveInput) -> Option<Vec<usize>> {
             struct_
                 .fields
                 .iter()
-                .position(|f| f.ident.as_ref().map_or(false, |i| i == name))
+                .position(|f| f.ident.as_ref().is_some_and(|i| i == name))
                 .expect("primary key not found")
         };
         return Some(
@@ -204,7 +204,7 @@ mod tests {
     fn do_test(code: &str, expected_path: &str) {
         let input: TokenStream = str::parse(code).unwrap();
 
-        let output = super::gen(input).unwrap();
+        let output = super::r#gen(input).unwrap();
 
         let output = pretty_print(output);
 

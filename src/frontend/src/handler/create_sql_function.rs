@@ -18,14 +18,14 @@ use either::Either;
 use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::{DataType, StructType};
+use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
-use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
 use crate::binder::UdfContext;
 use crate::expr::{Expr, ExprImpl, Literal};
-use crate::{bind_data_type, Binder};
+use crate::{Binder, bind_data_type};
 
 /// The error type for hint display
 /// Currently we will try invalid parameter first
@@ -152,7 +152,7 @@ pub async fn handle_create_sql_function(
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
         Some(FunctionDefinition::Identifier(_)) => {
-            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into())
+            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into());
         }
         None => {
             if params.return_.is_none() {
@@ -201,7 +201,7 @@ pub async fn handle_create_sql_function(
             return Err(ErrorCode::InvalidParameterValue(
                 "return type must be specified".to_owned(),
             )
-            .into())
+            .into());
         }
     };
 
@@ -321,7 +321,7 @@ pub async fn handle_create_sql_function(
     }
 
     // Create the actual function, will be stored in function catalog
-    let function = Function {
+    let function = PbFunction {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
@@ -332,12 +332,14 @@ pub async fn handle_create_sql_function(
         return_type: Some(return_type.into()),
         language,
         runtime: None,
-        identifier: None,
+        name_in_runtime: None, // None for SQL UDF
         body: Some(body),
         compressed_binary: None,
         link: None,
         owner: session.user_id(),
         always_retry_on_network_error: false,
+        is_async: None,
+        is_batched: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

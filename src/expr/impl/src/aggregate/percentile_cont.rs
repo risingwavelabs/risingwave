@@ -19,7 +19,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
-use risingwave_expr::{build_aggregate, Result};
+use risingwave_expr::{Result, build_aggregate};
 
 /// Computes the continuous percentile, a value corresponding to the specified fraction within the
 /// ordered set of aggregated argument values. This will interpolate between adjacent input items if

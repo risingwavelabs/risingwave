@@ -16,13 +16,15 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
+use risingwave_pb::plan_common::AsOfJoinDesc;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, to_pb_time_travel_as_of, Distill};
-use super::{generic, ExprRewritable};
+use super::utils::{Distill, childless_record, to_pb_time_travel_as_of};
+use super::{ExprRewritable, generic};
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -30,7 +32,6 @@ use crate::optimizer::plan_node::{
     ToDistributedBatch, ToLocalBatch, TryToBatchPb,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -57,6 +58,8 @@ pub struct BatchLookupJoin {
     distributed_lookup: bool,
 
     as_of: Option<AsOf>,
+    // `AsOf` join description
+    asof_desc: Option<AsOfJoinDesc>,
 }
 
 impl BatchLookupJoin {
@@ -68,6 +71,7 @@ impl BatchLookupJoin {
         lookup_prefix_len: usize,
         distributed_lookup: bool,
         as_of: Option<AsOf>,
+        asof_desc: Option<AsOfJoinDesc>,
     ) -> Self {
         // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
         // lookup.
@@ -84,6 +88,7 @@ impl BatchLookupJoin {
             lookup_prefix_len,
             distributed_lookup,
             as_of,
+            asof_desc,
         }
     }
 
@@ -163,6 +168,7 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
             self.lookup_prefix_len,
             self.distributed_lookup,
             self.as_of.clone(),
+            self.asof_desc,
         )
     }
 }
@@ -238,6 +244,7 @@ impl TryToBatchPb for BatchLookupJoin {
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
                 as_of: to_pb_time_travel_as_of(&self.as_of)?,
+                asof_desc: self.asof_desc,
             })
         } else {
             NodeBody::LocalLookupJoin(LocalLookupJoinNode {
@@ -271,6 +278,7 @@ impl TryToBatchPb for BatchLookupJoin {
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
                 as_of: to_pb_time_travel_as_of(&self.as_of)?,
+                asof_desc: self.asof_desc,
             })
         })
     }

@@ -35,8 +35,8 @@ use static_assertions::const_assert_eq;
 
 use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
-    DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
-    Time, Timestamp, Timestamptz, F32, F64,
+    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
+    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;
@@ -320,8 +320,8 @@ pub trait HashKeySer<'a>: ScalarRef<'a> {
     /// Returns the estimated serialized size for this scalar.
     fn estimated_size(self) -> usize {
         Self::exact_size().unwrap_or(1) // use a default size of 1 if not known
-                                        // this should never happen in practice as we always
-                                        // implement one of these two methods
+        // this should never happen in practice as we always
+        // implement one of these two methods
     }
 }
 
@@ -643,7 +643,7 @@ mod tests {
         DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I32ArrayBuilder, I64Array,
         TimeArray, TimestampArray, Utf8Array,
     };
-    use crate::hash::{HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized};
+    use crate::hash::{HashKey, Key16, Key32, Key64, Key128, Key256, KeySerialized};
     use crate::test_utils::rand_array::seed_rand_array_ref;
     use crate::types::Datum;
 

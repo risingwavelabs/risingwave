@@ -17,9 +17,10 @@
 //!
 //! To add a new system parameter:
 //! - Add a new field to [`PbSystemParams`] in `meta.proto`.
-//! - Add a new entry to `for_all_undeprecated_params` in this file.
+//! - Add a new entry to `for_all_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
+pub mod adaptive_parallelism_strategy;
 pub mod common;
 pub mod diff;
 pub mod local_manager;
@@ -34,6 +35,7 @@ use risingwave_license::{LicenseKey, LicenseKeyRef};
 use risingwave_pb::meta::PbSystemParams;
 
 use self::diff::SystemParamsDiff;
+pub use crate::system_param::adaptive_parallelism_strategy::AdaptiveParallelismStrategy;
 
 pub type SystemParamsError = String;
 
@@ -91,7 +93,10 @@ macro_rules! for_all_params {
             { enable_tracing,                           bool,                           Some(false),                    true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,                           None,                           false,  "Whether to split object prefix.", },
             { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },
-            { time_travel_retention_ms,                 u64,                            Some(600000_u64),              true,   "The data retention period for time travel.", },
+            { time_travel_retention_ms,                 u64,                            Some(600000_u64),               true,   "The data retention period for time travel.", },
+            { adaptive_parallelism_strategy,            risingwave_common::system_param::AdaptiveParallelismStrategy,   Some(Default::default()),       true,   "The strategy for Adaptive Parallelism.", },
+            { per_database_isolation,                   bool,                           Some(true),                     true,   "Whether per database isolation is enabled", },
+            { enforce_secret_on_cloud,                  bool,                           Some(false),                    true,   "Whether to enforce secret on cloud.", },
         }
     };
 }
@@ -462,6 +467,9 @@ mod tests {
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
             (LICENSE_KEY_KEY, "foo"),
             (TIME_TRAVEL_RETENTION_MS_KEY, "0"),
+            (ADAPTIVE_PARALLELISM_STRATEGY_KEY, "Auto"),
+            (PER_DATABASE_ISOLATION_KEY, "true"),
+            (ENFORCE_SECRET_ON_CLOUD_KEY, "false"),
             ("a_deprecated_param", "foo"),
         ];
 

@@ -16,8 +16,8 @@ use std::alloc::{Allocator, Global};
 use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use risingwave_common::lru::{LruCache, RandomState};
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -102,9 +102,13 @@ where
         old_val
     }
 
-    // TODO(MrCroxx): REMOVE ME!!!
-    pub fn push(&mut self, k: K, v: V) -> Option<V> {
-        self.put(k, v)
+    pub fn remove(&mut self, k: &K) -> Option<V> {
+        let key_size = k.estimated_size();
+        let old_val = self.inner.remove(k);
+        if let Some(old_val) = &old_val {
+            self.reporter.dec(key_size + old_val.estimated_size());
+        }
+        old_val
     }
 
     pub fn get_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
@@ -224,14 +228,14 @@ impl<V: EstimateSize> DerefMut for MutGuard<'_, V> {
 }
 
 struct HeapSizeReporter {
-    metrics: LabelGuardedIntGauge<3>,
+    metrics: LabelGuardedIntGauge,
     heap_size: usize,
     last_reported: usize,
 }
 
 impl HeapSizeReporter {
     fn new(
-        heap_size_metrics: LabelGuardedIntGauge<3>,
+        heap_size_metrics: LabelGuardedIntGauge,
         heap_size: usize,
         last_reported: usize,
     ) -> Self {

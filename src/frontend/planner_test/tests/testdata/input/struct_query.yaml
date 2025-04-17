@@ -390,3 +390,15 @@
     select CASE WHEN false THEN ROW(0, INTERVAL '1') WHEN true THEN ROW(1.1, INTERVAL '1') ELSE ROW(1, INTERVAL '1') END;
   expected_outputs:
   - logical_plan
+- name: struct column insert field number mismatches 1
+  sql: |
+    create table t (v struct<a int, b int>);
+    insert into t values (ROW(1, 2, 3));
+  expected_outputs:
+  - binder_error
+- name: struct column insert field number mismatches 2
+  sql: |
+    create table t (v struct<a int, b int>);
+    insert into t values (ROW(1));
+  expected_outputs:
+  - binder_error

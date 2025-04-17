@@ -22,9 +22,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use futures::future::BoxFuture;
+use criterion::{Criterion, criterion_group, criterion_main};
 use futures::FutureExt;
+use futures::future::BoxFuture;
 #[cfg(target_os = "macos")]
 use libc::F_NOCACHE;
 use tempfile::TempDir;
@@ -84,7 +84,9 @@ fn gen_test_payload() -> Vec<u8> {
     ret
 }
 
-fn gen_tokio_files(path: &Path) -> impl IntoIterator<Item = impl Future<Output = tokio::fs::File>> {
+fn gen_tokio_files(
+    path: &Path,
+) -> impl IntoIterator<Item = impl Future<Output = tokio::fs::File> + use<>> + use<> {
     let path = path.to_path_buf();
     (0..BENCH_SIZE).map(move |i| {
         let file_path = path.join(format!("{}.txt", i));
@@ -199,7 +201,7 @@ fn criterion_tokio(c: &mut Criterion) {
     });
 }
 
-fn gen_std_files(path: &Path) -> impl IntoIterator<Item = std::fs::File> {
+fn gen_std_files(path: &Path) -> impl IntoIterator<Item = std::fs::File> + use<> {
     let path = path.to_path_buf();
     (0..BENCH_SIZE).map(move |i| {
         let file_path = path.join(format!("{}.txt", i));

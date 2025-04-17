@@ -19,13 +19,13 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
+use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
-use crate::TableCatalog;
 
 /// [`Join`] combines two relations according to some condition.
 ///
@@ -517,7 +517,7 @@ pub fn push_down_into_join(
             // Do not push now on to the on, it will be pulled up into a filter instead.
             let on = Condition {
                 conjunctions: conjunctions
-                    .extract_if(|expr| expr.count_nows() == 0)
+                    .extract_if(.., |expr| expr.count_nows() == 0)
                     .collect(),
             };
             predicate.conjunctions = conjunctions;
@@ -567,7 +567,7 @@ fn push_down_to_inputs(
         Condition { conjunctions }.split(left_col_num, right_col_num)
     } else {
         let temporal_filter_cons = conjunctions
-            .extract_if(|e| e.count_nows() != 0)
+            .extract_if(.., |e| e.count_nows() != 0)
             .collect_vec();
         let (left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
@@ -600,14 +600,23 @@ fn push_down_to_inputs(
 pub fn can_push_left_from_filter(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
+        JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
     )
 }
 
 pub fn can_push_right_from_filter(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
+        JoinType::Inner
+            | JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::AsofInner
     )
 }
 
@@ -621,13 +630,21 @@ pub fn can_push_on_from_filter(ty: JoinType) -> bool {
 pub fn can_push_left_from_on(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
+        JoinType::Inner
+            | JoinType::RightOuter
+            | JoinType::LeftSemi
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
     )
 }
 
 pub fn can_push_right_from_on(ty: JoinType) -> bool {
     matches!(
         ty,
-        JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
+        JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightSemi
+            | JoinType::AsofInner
+            | JoinType::AsofLeftOuter
     )
 }

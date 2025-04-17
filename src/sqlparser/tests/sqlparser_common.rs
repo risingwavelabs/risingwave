@@ -255,10 +255,12 @@ fn parse_select_all() {
 #[test]
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("syntax error at or near DISTINCT at line 1, column 12"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("syntax error at or near DISTINCT at line 1, column 12")
+    );
 }
 
 #[test]
@@ -316,10 +318,8 @@ fn parse_column_aliases() {
     let sql = "SELECT a.col + 1 AS newname FROM foo AS a";
     let select = verified_only_select(sql);
     if let SelectItem::ExprWithAlias {
-        expr: Expr::BinaryOp {
-            ref op, ref right, ..
-        },
-        ref alias,
+        expr: Expr::BinaryOp { op, right, .. },
+        alias,
     } = only(&select.projection)
     {
         assert_eq!(&BinaryOperator::Plus, op);
@@ -336,10 +336,14 @@ fn parse_column_aliases() {
 #[test]
 fn test_eof_after_as() {
     let res = parse_sql_statements("SELECT foo AS");
-    assert!(format!("{}", res.unwrap_err()).contains("expected an identifier after AS, found: EOF"));
+    assert!(
+        format!("{}", res.unwrap_err()).contains("expected an identifier after AS, found: EOF")
+    );
 
     let res = parse_sql_statements("SELECT 1 FROM foo AS");
-    assert!(format!("{}", res.unwrap_err()).contains("expected an identifier after AS, found: EOF"));
+    assert!(
+        format!("{}", res.unwrap_err()).contains("expected an identifier after AS, found: EOF")
+    );
 }
 
 #[test]
@@ -1118,8 +1122,7 @@ fn parse_select_group_by() {
 
 #[test]
 fn parse_select_group_by_grouping_sets() {
-    let sql =
-        "SELECT brand, size, sum(sales) FROM items_sold GROUP BY size, GROUPING SETS ((brand), (size), ())";
+    let sql = "SELECT brand, size, sum(sales) FROM items_sold GROUP BY size, GROUPING SETS ((brand), (size), ())";
     let select = verified_only_select(sql);
     assert_eq!(
         vec![
@@ -1441,16 +1444,18 @@ fn parse_create_table() {
     }
 
     let res = parse_sql_statements("CREATE TABLE t (a int NOT NULL GARBAGE)");
-    assert!(res
-        .unwrap_err()
-        .to_string()
-        .contains("expected \',\' or \')\' after column definition, found: GARBAGE"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("expected \',\' or \')\' after column definition, found: GARBAGE")
+    );
 
     let res = parse_sql_statements("CREATE TABLE t (a int NOT NULL CONSTRAINT foo)");
-    assert!(res
-        .unwrap_err()
-        .to_string()
-        .contains("expected constraint details after CONSTRAINT <name>"));
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("expected constraint details after CONSTRAINT <name>")
+    );
 }
 
 #[test]
@@ -1795,8 +1800,10 @@ fn parse_bad_constraint() {
 
     let res = parse_sql_statements("CREATE TABLE tab (foo int,");
 
-    assert!(format!("{}", res.unwrap_err())
-        .contains("expected column name or constraint definition, found: EOF"));
+    assert!(
+        format!("{}", res.unwrap_err())
+            .contains("expected column name or constraint definition, found: EOF")
+    );
 }
 
 fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
@@ -1915,8 +1922,7 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let expected =
-        "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT, found: )";
+    let expected = "sql parser error: expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT or DURATION_SECS, found: )";
     let actual = res.unwrap_err().to_string();
     assert!(
         actual.contains(expected),
@@ -2137,8 +2143,7 @@ fn parse_aggregate_with_filter() {
 
 #[test]
 fn parse_aggregate_with_within_group() {
-    let sql =
-        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY a DESC NULLS FIRST) FILTER (WHERE b > 0) FROM foo";
+    let sql = "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY a DESC NULLS FIRST) FILTER (WHERE b > 0) FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
@@ -2328,7 +2333,9 @@ fn parse_literal_interval() {
     );
 
     let result = parse_sql_statements("SELECT INTERVAL '1' SECOND TO SECOND");
-    assert!(format!("{}", result.unwrap_err()).contains("expected end of statement, found: SECOND"));
+    assert!(
+        format!("{}", result.unwrap_err()).contains("expected end of statement, found: SECOND")
+    );
 
     let result = parse_sql_statements("SELECT INTERVAL '10' HOUR (1) TO HOUR (2)");
     assert!(format!("{}", result.unwrap_err()).contains("expected end of statement, found: ("));
@@ -2730,14 +2737,15 @@ fn parse_natural_join() {
     );
 
     let sql = "SELECT * FROM t1 natural";
-    assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
-        .contains("expected a join type after NATURAL, found: EOF"));
+    assert!(
+        format!("{}", parse_sql_statements(sql).unwrap_err(),)
+            .contains("expected a join type after NATURAL, found: EOF")
+    );
 }
 
 #[test]
 fn parse_complex_join() {
-    let sql =
-    "SELECT c1, c2 FROM t1, t4 JOIN t2 ON t2.c = t1.c LEFT JOIN t3 USING(q, c) WHERE t4.c = t1.c";
+    let sql = "SELECT c1, c2 FROM t1, t4 JOIN t2 ON t2.c = t1.c LEFT JOIN t3 USING(q, c) WHERE t4.c = t1.c";
     verified_only_select(sql);
 }
 
@@ -2795,7 +2803,9 @@ fn parse_join_syntax_variants() {
     );
 
     let res = parse_sql_statements("SELECT * FROM a OUTER JOIN b ON 1");
-    assert!(format!("{}", res.unwrap_err()).contains("expected LEFT, RIGHT, or FULL, found: OUTER"));
+    assert!(
+        format!("{}", res.unwrap_err()).contains("expected LEFT, RIGHT, or FULL, found: OUTER")
+    );
 }
 
 #[test]
@@ -2834,7 +2844,7 @@ fn parse_ctes() {
     let sql = &format!("SELECT ({})", with);
     let select = verified_only_select(sql);
     match expr_from_projection(only(&select.projection)) {
-        Expr::Subquery(ref subquery) => {
+        Expr::Subquery(subquery) => {
             assert_ctes_in_select(&cte_sqls, subquery.as_ref());
         }
         _ => panic!("expected subquery"),
@@ -2915,7 +2925,7 @@ fn parse_recursive_cte() {
             name: Ident::new_unchecked("nums"),
             columns: vec![Ident::new_unchecked("val")],
         },
-        cte_inner: CteInner::Query(cte_query),
+        cte_inner: CteInner::Query(Box::new(cte_query)),
     };
     assert_eq!(with.cte_tables.first().unwrap(), &expected);
 }
@@ -2982,7 +2992,9 @@ fn parse_union() {
     verified_stmt("SELECT 1 UNION (SELECT 2 ORDER BY 1 LIMIT 1)");
     verified_stmt("SELECT 1 UNION SELECT 2 INTERSECT SELECT 3"); // Union[1, Intersect[2,3]]
     verified_stmt("SELECT foo FROM tab UNION SELECT bar FROM TAB");
-    verified_stmt("(SELECT * FROM new EXCEPT SELECT * FROM old) UNION ALL (SELECT * FROM old EXCEPT SELECT * FROM new) ORDER BY 1");
+    verified_stmt(
+        "(SELECT * FROM new EXCEPT SELECT * FROM old) UNION ALL (SELECT * FROM old EXCEPT SELECT * FROM new) ORDER BY 1",
+    );
 }
 
 #[test]
@@ -3370,7 +3382,7 @@ fn parse_create_table_on_conflict_with_version_column() {
         } => {
             assert_eq!("t", name.to_string());
             assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
-            assert_eq!(with_version_column, Some("v2".to_owned()));
+            assert_eq!(with_version_column.unwrap().real_value(), "v2");
         }
         _ => unreachable!(),
     }
@@ -3447,12 +3459,16 @@ fn parse_drop_table() {
     };
 
     let sql = "DROP TABLE";
-    assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
-        .contains("expected identifier, found: EOF"));
+    assert!(
+        format!("{}", parse_sql_statements(sql).unwrap_err(),)
+            .contains("expected identifier, found: EOF")
+    );
 
     let sql = "DROP TABLE IF EXISTS foo CASCADE RESTRICT";
-    assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
-        .contains("expected end of statement, found: RESTRICT"));
+    assert!(
+        format!("{}", parse_sql_statements(sql).unwrap_err(),)
+            .contains("expected end of statement, found: RESTRICT")
+    );
 }
 
 #[test]
@@ -3597,7 +3613,9 @@ fn parse_fetch() {
         },
         _ => panic!("Test broke"),
     }
-    let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 FETCH FIRST 2 ROWS ONLY) OFFSET 2 FETCH FIRST 2 ROWS ONLY");
+    let ast = verified_query(
+        "SELECT foo FROM (SELECT * FROM bar OFFSET 2 FETCH FIRST 2 ROWS ONLY) OFFSET 2 FETCH FIRST 2 ROWS ONLY",
+    );
     assert_eq!(ast.offset, Some("2".to_owned()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     match ast.body {
@@ -3674,13 +3692,17 @@ fn lateral_derived() {
 
     let sql = "SELECT * FROM customer LEFT JOIN LATERAL generate_series(1, customer.id)";
     let res = parse_sql_statements(sql);
-    assert!(format!("{}", res.unwrap_err())
-        .contains("expected subquery after LATERAL, found: generate_series"));
+    assert!(
+        format!("{}", res.unwrap_err())
+            .contains("expected subquery after LATERAL, found: generate_series")
+    );
 
     let sql = "SELECT * FROM a LEFT JOIN LATERAL (b CROSS JOIN c)";
     let res = parse_sql_statements(sql);
-    assert!(format!("{}", res.unwrap_err())
-        .contains("expected SELECT, VALUES, or a subquery in the query body, found: b"));
+    assert!(
+        format!("{}", res.unwrap_err())
+            .contains("expected SELECT, VALUES, or a subquery in the query body, found: b")
+    );
 }
 
 #[test]

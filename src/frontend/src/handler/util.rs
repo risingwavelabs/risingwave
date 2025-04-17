@@ -30,23 +30,24 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{
-    write_date_time_tz, DataType, Interval, ScalarRefImpl, Timestamptz,
+    DataType, Interval, ScalarRefImpl, Timestamptz, write_date_time_tz,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
 use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
-    CompatibleFormatEncode, Expr, FormatEncodeOptions, Ident, ObjectName, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
+    CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
-use crate::session::{current, SessionImpl};
+use crate::session::{SessionImpl, current};
 use crate::{Binder, HashSet, TableCatalog};
 
 pin_project! {
@@ -206,7 +207,9 @@ impl CompatibleFormatEncode {
         match self {
             CompatibleFormatEncode::RowFormat(inner) => {
                 // TODO: should be warning
-                current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
+                current::notice_to_user(
+                    "RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.",
+                );
                 inner.into_format_encode_v2()
             }
             CompatibleFormatEncode::V2(inner) => inner,
@@ -238,22 +241,6 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
         offset: None,
         fetch: None,
     }
-}
-
-pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
-    let mut query = gen_query_from_table_name(from_name);
-    query.order_by = pk_names
-        .into_iter()
-        .map(|pk| {
-            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
-            OrderByExpr {
-                expr,
-                asc: None,
-                nulls_first: None,
-            }
-        })
-        .collect();
-    query
 }
 
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
@@ -294,6 +281,7 @@ fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
     match connection_type {
         PbConnectionType::Kafka => KAFKA_CONNECTOR,
         PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
+        PbConnectionType::Elasticsearch => ES_SINK,
         _ => unreachable!(),
     }
 }

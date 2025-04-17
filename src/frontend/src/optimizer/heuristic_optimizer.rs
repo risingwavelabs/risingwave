@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
 
 use itertools::Itertools;
 
 use super::ApplyResult;
-use crate::error::Result;
-use crate::optimizer::plan_node::PlanTreeNode;
-use crate::optimizer::rule::BoxedRule;
-use crate::optimizer::PlanRef;
 #[cfg(debug_assertions)]
 use crate::Explain;
+use crate::error::Result;
+use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::rule::BoxedRule;
 
 /// Traverse order of [`HeuristicOptimizer`]
 pub enum ApplyOrder {
@@ -102,13 +102,15 @@ impl<'a> HeuristicOptimizer<'a> {
     #[cfg(debug_assertions)]
     pub fn check_equivalent_plan(rule_desc: &str, input_plan: &PlanRef, output_plan: &PlanRef) {
         if !input_plan.schema().type_eq(output_plan.schema()) {
-            panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
-                   rule_desc,
-                   input_plan.schema(),
-                   input_plan.explain_to_string(),
-                   output_plan.schema(),
-                   output_plan.explain_to_string(),
-                   output_plan.ctx().sql());
+            panic!(
+                "{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
+                rule_desc,
+                input_plan.schema(),
+                input_plan.explain_to_string(),
+                output_plan.schema(),
+                output_plan.explain_to_string(),
+                output_plan.ctx().sql()
+            );
         }
     }
 }

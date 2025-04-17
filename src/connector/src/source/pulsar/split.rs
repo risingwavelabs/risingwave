@@ -16,8 +16,8 @@ use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
-use crate::source::pulsar::topic::Topic;
 use crate::source::pulsar::PulsarEnumeratorOffset;
+use crate::source::pulsar::topic::Topic;
 use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]

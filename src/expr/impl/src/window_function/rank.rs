@@ -16,12 +16,12 @@ use std::marker::PhantomData;
 
 use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
-use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedVecDeque;
+use risingwave_expr::Result;
 use risingwave_expr::window_function::{
     StateEvictHint, StateKey, StatePos, WindowFuncCall, WindowState,
 };
-use risingwave_expr::Result;
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;

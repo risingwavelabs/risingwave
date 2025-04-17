@@ -15,8 +15,8 @@
 use std::str::FromStr;
 
 use chrono::{Datelike, NaiveTime, Timelike};
-use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_common::types::{Date, Decimal, F64, Interval, Time, Timestamp, Timestamptz};
+use risingwave_expr::{ExprError, Result, function};
 
 use self::Unit::*;
 use crate::scalar::timestamptz::time_zone_err;

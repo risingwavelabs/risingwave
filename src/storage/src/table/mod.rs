@@ -20,17 +20,17 @@ use std::ops::Deref;
 use futures::{Stream, StreamExt};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::hash::VirtualNode;
+pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_hummock_sdk::key::TableKey;
 
+use crate::StateStoreIter;
 use crate::error::StorageResult;
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::store::{ChangeLogValue, StateStoreIterExt, StateStoreReadLogItem};
-use crate::StateStoreIter;
 
 pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;

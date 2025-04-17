@@ -20,7 +20,6 @@
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
 #![feature(iterator_try_collect)]
-#![feature(hash_extract_if)]
 #![feature(try_blocks)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
@@ -31,26 +30,38 @@
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
-use std::iter::repeat;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
+pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
+pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
+use error::Result;
+pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
 use futures::{Stream, StreamExt};
+pub use hummock_meta_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+};
+pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;
-use rand::prelude::SliceRandom;
+use rand::prelude::IndexedRandom;
+use risingwave_common::config::RpcClientConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
+use rw_futures_util::await_future_with_monitor_error_stream;
+pub use sink_coordinate_client::CoordinatorStreamHandle;
+pub use stream_client::{
+    StreamClient, StreamClientPool, StreamClientPoolRef, StreamingControlHandle,
+};
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 
 pub mod error;
-
-use error::Result;
 
 mod channel;
 mod compactor_client;
@@ -62,28 +73,20 @@ mod meta_client;
 mod sink_coordinate_client;
 mod stream_client;
 
-pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
-pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
-pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
-pub use hummock_meta_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
-};
-pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
-use rw_futures_util::await_future_with_monitor_error_stream;
-pub use sink_coordinate_client::CoordinatorStreamHandle;
-pub use stream_client::{
-    StreamClient, StreamClientPool, StreamClientPoolRef, StreamingControlHandle,
-};
-
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
-    async fn new_client(host_addr: HostAddr) -> Result<Self>;
+    async fn new_client(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self>;
 
-    async fn new_clients(host_addr: HostAddr, size: usize) -> Result<Arc<Vec<Self>>> {
-        try_join_all(repeat(host_addr).take(size).map(Self::new_client))
-            .await
-            .map(Arc::new)
+    async fn new_clients(
+        host_addr: HostAddr,
+        size: usize,
+        opts: &RpcClientConfig,
+    ) -> Result<Arc<Vec<Self>>> {
+        try_join_all(
+            std::iter::repeat_n(host_addr, size).map(|host_addr| Self::new_client(host_addr, opts)),
+        )
+        .await
+        .map(Arc::new)
     }
 }
 
@@ -92,6 +95,8 @@ pub struct RpcClientPool<S> {
     connection_pool_size: u16,
 
     clients: Cache<HostAddr, Arc<Vec<S>>>,
+
+    opts: RpcClientConfig,
 }
 
 impl<S> std::fmt::Debug for RpcClientPool<S> {
@@ -113,10 +118,11 @@ where
 {
     /// Create a new pool with the given `connection_pool_size`, which is the number of
     /// connections to each node that will be reused.
-    pub fn new(connection_pool_size: u16) -> Self {
+    pub fn new(connection_pool_size: u16, opts: RpcClientConfig) -> Self {
         Self {
             connection_pool_size,
             clients: Cache::new(u64::MAX),
+            opts,
         }
     }
 
@@ -127,7 +133,7 @@ where
 
     /// Create a pool for ad-hoc usage, where the number of connections to each node is 1.
     pub fn adhoc() -> Self {
-        Self::new(1)
+        Self::new(1, RpcClientConfig::default())
     }
 
     /// Gets the RPC client for the given node. If the connection is not established, a
@@ -153,11 +159,11 @@ where
             .clients
             .try_get_with(
                 addr.clone(),
-                S::new_clients(addr.clone(), self.connection_pool_size as usize),
+                S::new_clients(addr.clone(), self.connection_pool_size as usize, &self.opts),
             )
             .await
             .with_context(|| format!("failed to create RPC client to {addr}"))?
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .unwrap()
             .clone())
     }

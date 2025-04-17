@@ -14,13 +14,19 @@
 
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
-use crate::barrier::{BarrierKind, Command, TracedEpoch};
-use crate::controller::fragment::InflightFragmentInfo;
+use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
+use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::model::{ActorId, FragmentId, SubscriptionId};
 
 #[derive(Debug, Clone)]
@@ -39,8 +45,13 @@ impl BarrierInfo {
 #[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
     NewFragment(TableId, InflightFragmentInfo),
+    ReplaceNodeUpstream(
+        /// old `fragment_id` -> new `fragment_id`
+        HashMap<FragmentId, FragmentId>,
+    ),
     Reschedule {
-        new_actors: HashMap<ActorId, WorkerId>,
+        new_actors: HashMap<ActorId, InflightActorInfo>,
+        actor_update_vnode_bitmap: HashMap<ActorId, Bitmap>,
         to_remove: HashSet<ActorId>,
     },
     RemoveFragment,
@@ -62,6 +73,20 @@ impl InflightStreamingJobInfo {
     pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
         self.fragment_infos.values()
     }
+
+    pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
+    type Item = &'a InflightFragmentInfo;
+
+    type IntoIter = impl Iterator<Item = &'a InflightFragmentInfo> + 'a;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.fragment_infos()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -81,6 +106,26 @@ impl InflightDatabaseInfo {
 
     pub fn contains_job(&self, job_id: TableId) -> bool {
         self.jobs.contains_key(&job_id)
+    }
+
+    pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
+        let job_id = self.fragment_location[&fragment_id];
+        self.jobs
+            .get(&job_id)
+            .expect("should exist")
+            .fragment_infos
+            .get(&fragment_id)
+            .expect("should exist")
+    }
+
+    fn fragment_mut(&mut self, fragment_id: FragmentId) -> &mut InflightFragmentInfo {
+        let job_id = self.fragment_location[&fragment_id];
+        self.jobs
+            .get_mut(&job_id)
+            .expect("should exist")
+            .fragment_infos
+            .get_mut(&fragment_id)
+            .expect("should exist")
     }
 }
 
@@ -171,24 +216,159 @@ impl InflightDatabaseInfo {
                             .try_insert(fragment_id, job_id)
                             .expect("non duplicate");
                     }
-                    CommandFragmentChanges::Reschedule { new_actors, .. } => {
-                        let job_id = self.fragment_location[&fragment_id];
-                        let info = self
-                            .jobs
-                            .get_mut(&job_id)
-                            .expect("should exist")
-                            .fragment_infos
-                            .get_mut(&fragment_id)
-                            .expect("should exist");
+                    CommandFragmentChanges::Reschedule {
+                        new_actors,
+                        actor_update_vnode_bitmap,
+                        ..
+                    } => {
+                        let info = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
-                        for (actor_id, node_id) in &new_actors {
-                            assert!(actors.insert(*actor_id as _, *node_id as _).is_none());
+                        for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
+                            actors
+                                .get_mut(&actor_id)
+                                .expect("should exist")
+                                .vnode_bitmap = Some(new_vnodes);
+                        }
+                        for (actor_id, actor) in new_actors {
+                            actors
+                                .try_insert(actor_id as _, actor)
+                                .expect("non-duplicate");
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}
+                    CommandFragmentChanges::ReplaceNodeUpstream(replace_map) => {
+                        let mut remaining_fragment_ids: HashSet<_> =
+                            replace_map.keys().cloned().collect();
+                        let info = self.fragment_mut(fragment_id);
+                        visit_stream_node_mut(&mut info.nodes, |node| {
+                            if let NodeBody::Merge(m) = node
+                                && let Some(new_upstream_fragment_id) =
+                                    replace_map.get(&m.upstream_fragment_id)
+                            {
+                                if !remaining_fragment_ids.remove(&m.upstream_fragment_id) {
+                                    if cfg!(debug_assertions) {
+                                        panic!(
+                                            "duplicate upstream fragment: {:?} {:?}",
+                                            m, replace_map
+                                        );
+                                    } else {
+                                        warn!(?m, ?replace_map, "duplicate upstream fragment");
+                                    }
+                                }
+                                m.upstream_fragment_id = *new_upstream_fragment_id;
+                            }
+                        });
+                        if cfg!(debug_assertions) {
+                            assert!(
+                                remaining_fragment_ids.is_empty(),
+                                "non-existing fragment to replace: {:?} {:?} {:?}",
+                                remaining_fragment_ids,
+                                info.nodes,
+                                replace_map
+                            );
+                        } else {
+                            warn!(?remaining_fragment_ids, node = ?info.nodes, ?replace_map, "non-existing fragment to replace");
+                        }
+                    }
                 }
             }
         }
+    }
+
+    pub(super) fn build_edge(
+        &self,
+        command: Option<&Command>,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Option<FragmentEdgeBuildResult> {
+        let (info, replace_job) = match command {
+            None => {
+                return None;
+            }
+            Some(command) => match command {
+                Command::Flush
+                | Command::Pause
+                | Command::Resume
+                | Command::DropStreamingJobs { .. }
+                | Command::MergeSnapshotBackfillStreamingJobs(_)
+                | Command::RescheduleFragment { .. }
+                | Command::SourceChangeSplit(_)
+                | Command::Throttle(_)
+                | Command::CreateSubscription { .. }
+                | Command::DropSubscription { .. } => {
+                    return None;
+                }
+                Command::CreateStreamingJob { info, job_type, .. } => {
+                    let replace_job = match job_type {
+                        CreateStreamingJobType::Normal
+                        | CreateStreamingJobType::SnapshotBackfill(_) => None,
+                        CreateStreamingJobType::SinkIntoTable(replace_job) => Some(replace_job),
+                    };
+                    (Some(info), replace_job)
+                }
+                Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job)),
+            },
+        };
+        // `existing_fragment_ids` consists of
+        //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
+        //  - keys of `replace_job.upstream_fragment_downstreams`, which are the `fragment_id` of upstream fragment of replace_job,
+        // if the upstream fragment previously exists
+        //  - keys of `replace_upstream`, which are the `fragment_id` of downstream fragments that will update their upstream fragments.
+        let existing_fragment_ids = info
+            .into_iter()
+            .flat_map(|info| info.upstream_fragment_downstreams.keys())
+            .chain(replace_job.into_iter().flat_map(|replace_job| {
+                replace_job
+                    .upstream_fragment_downstreams
+                    .keys()
+                    .filter(|fragment_id| {
+                        info.map(|info| {
+                            !info
+                                .stream_job_fragments
+                                .fragments
+                                .contains_key(fragment_id)
+                        })
+                        .unwrap_or(true)
+                    })
+                    .chain(replace_job.replace_upstream.keys())
+            }))
+            .cloned();
+        let new_fragment_infos = info
+            .into_iter()
+            .flat_map(|info| info.stream_job_fragments.new_fragment_info())
+            .chain(
+                replace_job
+                    .into_iter()
+                    .flat_map(|replace_job| replace_job.new_fragments.new_fragment_info()),
+            )
+            .collect_vec();
+        let mut builder = FragmentEdgeBuilder::new(
+            existing_fragment_ids
+                .map(|fragment_id| self.fragment(fragment_id))
+                .chain(new_fragment_infos.iter().map(|(_, info)| info)),
+            control_stream_manager,
+        );
+        if let Some(info) = info {
+            builder.add_relations(&info.upstream_fragment_downstreams);
+            builder.add_relations(&info.stream_job_fragments.downstreams);
+        }
+        if let Some(replace_job) = replace_job {
+            builder.add_relations(&replace_job.upstream_fragment_downstreams);
+            builder.add_relations(&replace_job.new_fragments.downstreams);
+        }
+        if let Some(replace_job) = replace_job {
+            for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {
+                for (original_upstream_fragment_id, new_upstream_fragment_id) in
+                    fragment_replacement
+                {
+                    builder.replace_upstream(
+                        *fragment_id,
+                        *original_upstream_fragment_id,
+                        *new_upstream_fragment_id,
+                    );
+                }
+            }
+        }
+        Some(builder.build())
     }
 }
 
@@ -268,6 +448,7 @@ impl InflightDatabaseInfo {
                             self.jobs.remove(&job_id).expect("should exist");
                         }
                     }
+                    CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
                 }
             }
         }
@@ -304,11 +485,12 @@ impl InflightFragmentInfo {
         infos: impl IntoIterator<Item = &Self>,
     ) -> HashMap<WorkerId, HashSet<ActorId>> {
         let mut ret: HashMap<_, HashSet<_>> = HashMap::new();
-        for (actor_id, worker_id) in infos.into_iter().flat_map(|info| info.actors.iter()) {
-            assert!(ret
-                .entry(*worker_id as WorkerId)
-                .or_default()
-                .insert(*actor_id as _))
+        for (actor_id, actor) in infos.into_iter().flat_map(|info| info.actors.iter()) {
+            assert!(
+                ret.entry(actor.worker_id)
+                    .or_default()
+                    .insert(*actor_id as _)
+            )
         }
         ret
     }
@@ -326,7 +508,7 @@ impl InflightFragmentInfo {
             fragment
                 .actors
                 .values()
-                .any(|location| (*location as WorkerId) == worker_id)
+                .any(|actor| (actor.worker_id) == worker_id)
         })
     }
 }
@@ -334,6 +516,13 @@ impl InflightFragmentInfo {
 impl InflightDatabaseInfo {
     pub fn contains_worker(&self, worker_id: WorkerId) -> bool {
         InflightFragmentInfo::contains_worker(self.fragment_infos(), worker_id)
+    }
+
+    pub(crate) fn workers(&self) -> HashSet<WorkerId> {
+        self.fragment_infos()
+            .flat_map(|info| info.actors.values())
+            .map(|actor| actor.worker_id)
+            .collect()
     }
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {

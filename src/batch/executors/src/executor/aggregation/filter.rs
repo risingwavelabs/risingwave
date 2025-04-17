@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_expr::Result;
 use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::expr::Expression;
-use risingwave_expr::Result;
 
 /// A special aggregator that filters out rows that do not satisfy the given _condition_
 /// and feeds the rows that satisfy to the _inner_ aggregator.
@@ -74,8 +74,8 @@ impl AggregateFunction for Filter {
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
-    use risingwave_expr::expr::{build_from_pretty, ExpressionBoxExt, LiteralExpression};
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
+    use risingwave_expr::expr::{ExpressionBoxExt, LiteralExpression, build_from_pretty};
 
     use super::*;
 

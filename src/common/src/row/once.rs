@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{assert_row, Row};
+use super::{Row, assert_row};
 use crate::types::{DatumRef, ToDatumRef};
 
 /// Row for the [`once`] function.

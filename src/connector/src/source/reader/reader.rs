@@ -16,20 +16,21 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_nats::jetstream::consumer::AckPolicy;
-use futures::stream::pending;
 use futures::StreamExt;
+use futures::stream::pending;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use thiserror_ext::AsReport as _;
 
+use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
-    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
-    DEFAULT_REFRESH_INTERVAL_SEC,
+    DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
+    OpendalSource,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
@@ -37,7 +38,6 @@ use crate::source::{
     CreateSplitReaderOpt, CreateSplitReaderResult, SourceColumnDesc, SourceContext,
     WaitCheckpointTask,
 };
-use crate::WithOptionsSecResolved;
 
 #[derive(Clone, Debug)]
 pub struct SourceReader {
@@ -198,13 +198,12 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
     loop {
         let matcher = lister.get_matcher();
         let mut object_metadata_iter = lister.list().await?;
-
         while let Some(list_res) = object_metadata_iter.next().await {
             match list_res {
                 Ok(res) => {
                     if matcher
                         .as_ref()
-                        .map(|m| m.matches(&res.name))
+                        .map(|m| m.matches(&res.name) || m.to_string() == res.name)
                         .unwrap_or(true)
                     {
                         yield res

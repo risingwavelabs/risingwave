@@ -22,11 +22,11 @@ use parking_lot::RwLock;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
-use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_storage::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
 use risingwave_storage::hummock::iterator::test_utils::{
@@ -34,9 +34,9 @@ use risingwave_storage::hummock::iterator::test_utils::{
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::version::{
-    read_filter_for_version, HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
+    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate, read_filter_for_version,
 };
-use risingwave_storage::hummock::test_utils::gen_dummy_batch;
+use risingwave_storage::hummock::test_utils::*;
 
 use crate::test_utils::prepare_first_valid_version;
 

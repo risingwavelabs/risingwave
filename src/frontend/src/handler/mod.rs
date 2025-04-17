@@ -52,6 +52,7 @@ mod alter_streaming_rate_limit;
 mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
+pub mod alter_table_drop_connector;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -90,6 +91,7 @@ pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
 pub mod explain;
+pub mod explain_analyze_stream_job;
 pub mod extended_handle;
 pub mod fetch_cursor;
 mod flush;
@@ -263,6 +265,17 @@ pub async fn handle(
             analyze,
             options,
         } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        Statement::ExplainAnalyzeStreamJob {
+            target,
+            duration_secs,
+        } => {
+            explain_analyze_stream_job::handle_explain_analyze_stream_job(
+                handler_args,
+                target,
+                duration_secs,
+            )
+            .await
+        }
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
@@ -378,7 +391,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_column.map(|x| x.real_value()),
                     engine,
                 )
                 .await;
@@ -395,7 +408,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column,
+                with_version_column.map(|x| x.real_value()),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
@@ -407,9 +420,16 @@ pub async fn handle(
             db_name,
             if_not_exists,
             owner,
+            resource_group,
         } => {
-            create_database::handle_create_database(handler_args, db_name, if_not_exists, owner)
-                .await
+            create_database::handle_create_database(
+                handler_args,
+                db_name,
+                if_not_exists,
+                owner,
+                resource_group,
+            )
+            .await
         }
         Statement::CreateSchema {
             schema_name,
@@ -436,7 +456,12 @@ pub async fn handle(
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
-        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::Describe { name, kind } => match kind {
+            DescribeKind::Fragments => {
+                describe::handle_describe_fragments(handler_args, name).await
+            }
+            DescribeKind::Plain => describe::handle_describe(handler_args, name),
+        },
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,
@@ -644,515 +669,448 @@ pub async fn handle(
             )
             .await
         }
-        Statement::AlterDatabase {
-            name,
-            operation: AlterDatabaseOperation::RenameDatabase { database_name },
-        } => alter_rename::handle_rename_database(handler_args, name, database_name).await,
-        Statement::AlterDatabase {
-            name,
-            operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
-        } => {
-            alter_owner::handle_alter_owner(
-                handler_args,
-                name,
-                new_owner_name,
-                StatementType::ALTER_DATABASE,
-            )
-            .await
-        }
-        Statement::AlterSchema {
-            name,
-            operation: AlterSchemaOperation::RenameSchema { schema_name },
-        } => alter_rename::handle_rename_schema(handler_args, name, schema_name).await,
-        Statement::AlterSchema {
-            name,
-            operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
-        } => {
-            alter_owner::handle_alter_owner(
-                handler_args,
-                name,
-                new_owner_name,
-                StatementType::ALTER_SCHEMA,
-            )
-            .await
-        }
-        Statement::AlterSchema {
-            name,
-            operation: AlterSchemaOperation::SwapRenameSchema { target_schema },
-        } => {
-            alter_swap_rename::handle_swap_rename(
-                handler_args,
-                name,
-                target_schema,
-                StatementType::ALTER_SCHEMA,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation:
-                operation @ (AlterTableOperation::AddColumn { .. }
-                | AlterTableOperation::DropColumn { .. }),
-        } => alter_table_column::handle_alter_table_column(handler_args, name, operation).await,
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::RenameTable { table_name },
-        } => {
-            alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
-                .await
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::ChangeOwner { new_owner_name },
-        } => {
-            alter_owner::handle_alter_owner(
-                handler_args,
-                name,
-                new_owner_name,
-                StatementType::ALTER_TABLE,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation:
-                AlterTableOperation::SetParallelism {
-                    parallelism,
-                    deferred,
-                },
-        } => {
-            alter_parallelism::handle_alter_parallelism(
-                handler_args,
-                name,
-                parallelism,
-                StatementType::ALTER_TABLE,
-                deferred,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetSchema { new_schema_name },
-        } => {
-            alter_set_schema::handle_alter_set_schema(
-                handler_args,
-                name,
-                new_schema_name,
-                StatementType::ALTER_TABLE,
-                None,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::RefreshSchema,
-        } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetSourceRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                handler_args,
-                PbThrottleTarget::TableWithSource,
-                name,
-                rate_limit,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetDmlRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                handler_args,
-                PbThrottleTarget::TableDml,
-                name,
-                rate_limit,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetBackfillRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                handler_args,
-                PbThrottleTarget::CdcTable,
-                name,
-                rate_limit,
-            )
-            .await
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SwapRenameTable { target_table },
-        } => {
-            alter_swap_rename::handle_swap_rename(
-                handler_args,
-                name,
-                target_table,
-                StatementType::ALTER_TABLE,
-            )
-            .await
-        }
-        Statement::AlterIndex {
-            name,
-            operation: AlterIndexOperation::RenameIndex { index_name },
-        } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
-        Statement::AlterIndex {
-            name,
-            operation:
-                AlterIndexOperation::SetParallelism {
-                    parallelism,
-                    deferred,
-                },
-        } => {
-            alter_parallelism::handle_alter_parallelism(
-                handler_args,
-                name,
-                parallelism,
-                StatementType::ALTER_INDEX,
-                deferred,
-            )
-            .await
-        }
-        Statement::AlterView {
-            materialized,
-            name,
-            operation: AlterViewOperation::RenameView { view_name },
-        } => {
-            if materialized {
-                alter_rename::handle_rename_table(
-                    handler_args,
-                    TableType::MaterializedView,
-                    name,
-                    view_name,
-                )
-                .await
-            } else {
-                alter_rename::handle_rename_view(handler_args, name, view_name).await
+        Statement::AlterDatabase { name, operation } => match operation {
+            AlterDatabaseOperation::RenameDatabase { database_name } => {
+                alter_rename::handle_rename_database(handler_args, name, database_name).await
             }
-        }
-        Statement::AlterView {
-            materialized,
-            name,
-            operation:
-                AlterViewOperation::SetParallelism {
-                    parallelism,
-                    deferred,
-                },
-        } if materialized => {
-            alter_parallelism::handle_alter_parallelism(
-                handler_args,
-                name,
-                parallelism,
-                StatementType::ALTER_MATERIALIZED_VIEW,
-                deferred,
-            )
-            .await
-        }
-        Statement::AlterView {
-            materialized,
-            name,
-            operation:
-                AlterViewOperation::SetResourceGroup {
-                    resource_group,
-                    deferred,
-                },
-        } if materialized => {
-            alter_resource_group::handle_alter_resource_group(
-                handler_args,
-                name,
-                resource_group,
-                StatementType::ALTER_MATERIALIZED_VIEW,
-                deferred,
-            )
-            .await
-        }
-        Statement::AlterView {
-            materialized,
-            name,
-            operation: AlterViewOperation::ChangeOwner { new_owner_name },
-        } => {
-            if materialized {
+            AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
                 alter_owner::handle_alter_owner(
                     handler_args,
                     name,
                     new_owner_name,
-                    StatementType::ALTER_MATERIALIZED_VIEW,
+                    StatementType::ALTER_DATABASE,
                 )
                 .await
-            } else {
+            }
+        },
+        Statement::AlterSchema { name, operation } => match operation {
+            AlterSchemaOperation::RenameSchema { schema_name } => {
+                alter_rename::handle_rename_schema(handler_args, name, schema_name).await
+            }
+            AlterSchemaOperation::ChangeOwner { new_owner_name } => {
                 alter_owner::handle_alter_owner(
                     handler_args,
                     name,
                     new_owner_name,
-                    StatementType::ALTER_VIEW,
+                    StatementType::ALTER_SCHEMA,
                 )
                 .await
             }
-        }
-        Statement::AlterView {
-            materialized,
-            name,
-            operation: AlterViewOperation::SetSchema { new_schema_name },
-        } => {
-            if materialized {
+            AlterSchemaOperation::SwapRenameSchema { target_schema } => {
+                alter_swap_rename::handle_swap_rename(
+                    handler_args,
+                    name,
+                    target_schema,
+                    StatementType::ALTER_SCHEMA,
+                )
+                .await
+            }
+        },
+        Statement::AlterTable { name, operation } => match operation {
+            AlterTableOperation::AddColumn { .. }
+            | AlterTableOperation::DropColumn { .. }
+            | AlterTableOperation::AlterColumn { .. } => {
+                alter_table_column::handle_alter_table_column(handler_args, name, operation).await
+            }
+            AlterTableOperation::RenameTable { table_name } => {
+                alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
+                    .await
+            }
+            AlterTableOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
+            }
+            AlterTableOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_TABLE,
+                    deferred,
+                )
+                .await
+            }
+            AlterTableOperation::SetSchema { new_schema_name } => {
                 alter_set_schema::handle_alter_set_schema(
                     handler_args,
                     name,
                     new_schema_name,
-                    StatementType::ALTER_MATERIALIZED_VIEW,
-                    None,
-                )
-                .await
-            } else {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_VIEW,
+                    StatementType::ALTER_TABLE,
                     None,
                 )
                 .await
             }
-        }
+            AlterTableOperation::RefreshSchema => {
+                alter_table_with_sr::handle_refresh_schema(handler_args, name).await
+            }
+            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::TableWithSource,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+            AlterTableOperation::DropConnector => {
+                alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name)
+                    .await
+            }
+            AlterTableOperation::SetDmlRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::TableDml,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+            AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::CdcTable,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+            AlterTableOperation::SwapRenameTable { target_table } => {
+                alter_swap_rename::handle_swap_rename(
+                    handler_args,
+                    name,
+                    target_table,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
+            }
+            AlterTableOperation::AddConstraint { .. }
+            | AlterTableOperation::DropConstraint { .. }
+            | AlterTableOperation::RenameColumn { .. }
+            | AlterTableOperation::ChangeColumn { .. }
+            | AlterTableOperation::RenameConstraint { .. } => {
+                bail_not_implemented!(
+                    "Unhandled statement: {}",
+                    Statement::AlterTable { name, operation }
+                )
+            }
+        },
+        Statement::AlterIndex { name, operation } => match operation {
+            AlterIndexOperation::RenameIndex { index_name } => {
+                alter_rename::handle_rename_index(handler_args, name, index_name).await
+            }
+            AlterIndexOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
+        },
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetBackfillRateLimit { rate_limit },
-        } if materialized => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                handler_args,
-                PbThrottleTarget::Mv,
-                name,
-                rate_limit,
-            )
-            .await
-        }
-        Statement::AlterView {
-            materialized,
-            name,
-            operation: AlterViewOperation::SwapRenameView { target_view },
+            operation,
         } => {
             let statement_type = if materialized {
                 StatementType::ALTER_MATERIALIZED_VIEW
             } else {
                 StatementType::ALTER_VIEW
             };
-            alter_swap_rename::handle_swap_rename(handler_args, name, target_view, statement_type)
-                .await
-        }
-        Statement::AlterSink {
-            name,
-            operation: AlterSinkOperation::RenameSink { sink_name },
-        } => alter_rename::handle_rename_sink(handler_args, name, sink_name).await,
-
-        Statement::AlterSink {
-            name,
-            operation: AlterSinkOperation::ChangeOwner { new_owner_name },
-        } => {
-            alter_owner::handle_alter_owner(
-                handler_args,
-                name,
-                new_owner_name,
-                StatementType::ALTER_SINK,
-            )
-            .await
-        }
-        Statement::AlterSink {
-            name,
-            operation: AlterSinkOperation::SetSchema { new_schema_name },
-        } => {
-            alter_set_schema::handle_alter_set_schema(
-                handler_args,
-                name,
-                new_schema_name,
-                StatementType::ALTER_SINK,
-                None,
-            )
-            .await
-        }
-        Statement::AlterSink {
-            name,
-            operation:
-                AlterSinkOperation::SetParallelism {
+            match operation {
+                AlterViewOperation::RenameView { view_name } => {
+                    if materialized {
+                        alter_rename::handle_rename_table(
+                            handler_args,
+                            TableType::MaterializedView,
+                            name,
+                            view_name,
+                        )
+                        .await
+                    } else {
+                        alter_rename::handle_rename_view(handler_args, name, view_name).await
+                    }
+                }
+                AlterViewOperation::SetParallelism {
                     parallelism,
                     deferred,
-                },
-        } => {
-            alter_parallelism::handle_alter_parallelism(
-                handler_args,
-                name,
-                parallelism,
-                StatementType::ALTER_SINK,
-                deferred,
-            )
-            .await
+                } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET PARALLELISM");
+                    }
+                    alter_parallelism::handle_alter_parallelism(
+                        handler_args,
+                        name,
+                        parallelism,
+                        statement_type,
+                        deferred,
+                    )
+                    .await
+                }
+                AlterViewOperation::SetResourceGroup {
+                    resource_group,
+                    deferred,
+                } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET RESOURCE GROUP");
+                    }
+                    alter_resource_group::handle_alter_resource_group(
+                        handler_args,
+                        name,
+                        resource_group,
+                        statement_type,
+                        deferred,
+                    )
+                    .await
+                }
+                AlterViewOperation::ChangeOwner { new_owner_name } => {
+                    alter_owner::handle_alter_owner(
+                        handler_args,
+                        name,
+                        new_owner_name,
+                        statement_type,
+                    )
+                    .await
+                }
+                AlterViewOperation::SetSchema { new_schema_name } => {
+                    alter_set_schema::handle_alter_set_schema(
+                        handler_args,
+                        name,
+                        new_schema_name,
+                        statement_type,
+                        None,
+                    )
+                    .await
+                }
+                AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET BACKFILL RATE LIMIT");
+                    }
+                    alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                        handler_args,
+                        PbThrottleTarget::Mv,
+                        name,
+                        rate_limit,
+                    )
+                    .await
+                }
+                AlterViewOperation::SwapRenameView { target_view } => {
+                    alter_swap_rename::handle_swap_rename(
+                        handler_args,
+                        name,
+                        target_view,
+                        statement_type,
+                    )
+                    .await
+                }
+            }
         }
-        Statement::AlterSink {
-            name,
-            operation: AlterSinkOperation::SwapRenameSink { target_sink },
-        } => {
-            alter_swap_rename::handle_swap_rename(
-                handler_args,
-                name,
-                target_sink,
-                StatementType::ALTER_SINK,
-            )
-            .await
-        }
-        Statement::AlterSink {
-            name,
-            operation: AlterSinkOperation::SetSinkRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                handler_args,
-                PbThrottleTarget::Sink,
-                name,
-                rate_limit,
-            )
-            .await
-        }
-        Statement::AlterSubscription {
-            name,
-            operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
-        } => alter_rename::handle_rename_subscription(handler_args, name, subscription_name).await,
-        Statement::AlterSubscription {
-            name,
-            operation: AlterSubscriptionOperation::ChangeOwner { new_owner_name },
-        } => {
-            alter_owner::handle_alter_owner(
-                handler_args,
-                name,
-                new_owner_name,
-                StatementType::ALTER_SUBSCRIPTION,
-            )
-            .await
-        }
-        Statement::AlterSubscription {
-            name,
-            operation: AlterSubscriptionOperation::SetSchema { new_schema_name },
-        } => {
-            alter_set_schema::handle_alter_set_schema(
-                handler_args,
-                name,
-                new_schema_name,
-                StatementType::ALTER_SUBSCRIPTION,
-                None,
-            )
-            .await
-        }
-        Statement::AlterSubscription {
-            name,
-            operation:
-                AlterSubscriptionOperation::SwapRenameSubscription {
-                    target_subscription,
-                },
-        } => {
-            alter_swap_rename::handle_swap_rename(
-                handler_args,
-                name,
-                target_subscription,
-                StatementType::ALTER_SUBSCRIPTION,
-            )
-            .await
-        }
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::RenameSource { source_name },
-        } => alter_rename::handle_rename_source(handler_args, name, source_name).await,
-        Statement::AlterSource {
-            name,
-            operation: operation @ AlterSourceOperation::AddColumn { .. },
-        } => alter_source_column::handle_alter_source_column(handler_args, name, operation).await,
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::ChangeOwner { new_owner_name },
-        } => {
-            alter_owner::handle_alter_owner(
-                handler_args,
-                name,
-                new_owner_name,
-                StatementType::ALTER_SOURCE,
-            )
-            .await
-        }
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::SetSchema { new_schema_name },
-        } => {
-            alter_set_schema::handle_alter_set_schema(
-                handler_args,
-                name,
-                new_schema_name,
-                StatementType::ALTER_SOURCE,
-                None,
-            )
-            .await
-        }
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::FormatEncode { format_encode },
-        } => {
-            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, format_encode)
+        Statement::AlterSink { name, operation } => match operation {
+            AlterSinkOperation::RenameSink { sink_name } => {
+                alter_rename::handle_rename_sink(handler_args, name, sink_name).await
+            }
+            AlterSinkOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_SINK,
+                )
                 .await
-        }
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::RefreshSchema,
-        } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::SetSourceRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                handler_args,
-                PbThrottleTarget::Source,
-                name,
-                rate_limit,
-            )
-            .await
-        }
-        Statement::AlterSource {
-            name,
-            operation: AlterSourceOperation::SwapRenameSource { target_source },
-        } => {
-            alter_swap_rename::handle_swap_rename(
-                handler_args,
-                name,
-                target_source,
-                StatementType::ALTER_SOURCE,
-            )
-            .await
-        }
+            }
+            AlterSinkOperation::SetSchema { new_schema_name } => {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_SINK,
+                    None,
+                )
+                .await
+            }
+            AlterSinkOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SINK,
+                    deferred,
+                )
+                .await
+            }
+            AlterSinkOperation::SwapRenameSink { target_sink } => {
+                alter_swap_rename::handle_swap_rename(
+                    handler_args,
+                    name,
+                    target_sink,
+                    StatementType::ALTER_SINK,
+                )
+                .await
+            }
+            AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::Sink,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+        },
+        Statement::AlterSubscription { name, operation } => match operation {
+            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                alter_rename::handle_rename_subscription(handler_args, name, subscription_name)
+                    .await
+            }
+            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_SUBSCRIPTION,
+                )
+                .await
+            }
+            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_SUBSCRIPTION,
+                    None,
+                )
+                .await
+            }
+            AlterSubscriptionOperation::SwapRenameSubscription {
+                target_subscription,
+            } => {
+                alter_swap_rename::handle_swap_rename(
+                    handler_args,
+                    name,
+                    target_subscription,
+                    StatementType::ALTER_SUBSCRIPTION,
+                )
+                .await
+            }
+        },
+        Statement::AlterSource { name, operation } => match operation {
+            AlterSourceOperation::RenameSource { source_name } => {
+                alter_rename::handle_rename_source(handler_args, name, source_name).await
+            }
+            AlterSourceOperation::AddColumn { .. } => {
+                alter_source_column::handle_alter_source_column(handler_args, name, operation).await
+            }
+            AlterSourceOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
+            }
+            AlterSourceOperation::SetSchema { new_schema_name } => {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_SOURCE,
+                    None,
+                )
+                .await
+            }
+            AlterSourceOperation::FormatEncode { format_encode } => {
+                alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, format_encode)
+                    .await
+            }
+            AlterSourceOperation::RefreshSchema => {
+                alter_source_with_sr::handler_refresh_schema(handler_args, name).await
+            }
+            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::Source,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+            AlterSourceOperation::SwapRenameSource { target_source } => {
+                alter_swap_rename::handle_swap_rename(
+                    handler_args,
+                    name,
+                    target_source,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
+            }
+            AlterSourceOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SOURCE,
+                    deferred,
+                )
+                .await
+            }
+        },
         Statement::AlterFunction {
             name,
             args,
-            operation: AlterFunctionOperation::SetSchema { new_schema_name },
-        } => {
-            alter_set_schema::handle_alter_set_schema(
-                handler_args,
-                name,
-                new_schema_name,
-                StatementType::ALTER_FUNCTION,
-                args,
-            )
-            .await
-        }
-        Statement::AlterConnection {
-            name,
-            operation: AlterConnectionOperation::SetSchema { new_schema_name },
-        } => {
-            alter_set_schema::handle_alter_set_schema(
-                handler_args,
-                name,
-                new_schema_name,
-                StatementType::ALTER_CONNECTION,
-                None,
-            )
-            .await
-        }
+            operation,
+        } => match operation {
+            AlterFunctionOperation::SetSchema { new_schema_name } => {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_FUNCTION,
+                    args,
+                )
+                .await
+            }
+        },
+        Statement::AlterConnection { name, operation } => match operation {
+            AlterConnectionOperation::SetSchema { new_schema_name } => {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_CONNECTION,
+                    None,
+                )
+                .await
+            }
+            AlterConnectionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_CONNECTION,
+                )
+                .await
+            }
+        },
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
@@ -1161,6 +1119,19 @@ pub async fn handle(
             with_options,
             operation,
         } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
+        Statement::AlterFragment {
+            fragment_id,
+            operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                &handler_args.session,
+                PbThrottleTarget::Fragment,
+                fragment_id,
+                rate_limit,
+                StatementType::SET_VARIABLE,
+            )
+            .await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }

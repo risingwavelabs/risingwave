@@ -100,6 +100,8 @@ message StreamSourceInfo {
 message WebhookSourceInfo {
   secret.SecretRef secret_ref = 1;
   expr.ExprNode signature_expr = 2;
+  // Return until the data is persisted in the storage layer or not. Default is true.
+  bool wait_for_persistence = 3;
 }
 
 message Source {
@@ -247,6 +249,7 @@ message ConnectionParams {
     CONNECTION_TYPE_KAFKA = 1;
     CONNECTION_TYPE_ICEBERG = 2;
     CONNECTION_TYPE_SCHEMA_REGISTRY = 3;
+    CONNECTION_TYPE_ELASTICSEARCH = 4;
   }
 
   ConnectionType connection_type = 1;
@@ -324,7 +327,8 @@ message Function {
   data.DataType return_type = 6;
   string language = 7;
   optional string link = 8;
-  optional string identifier = 10;
+  // The function name in the runtime / on the remote side that is bound to the UDF created in RisingWave.
+  optional string name_in_runtime = 10;
   // The source code of the function.
   optional string body = 14;
   // The zstd-compressed binary of the function.
@@ -334,6 +338,9 @@ message Function {
   optional string runtime = 18;
   reserved 19;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 20;
+  optional bool is_batched = 21;
 
   oneof kind {
     ScalarFunction scalar = 11;

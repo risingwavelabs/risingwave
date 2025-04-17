@@ -17,12 +17,12 @@ use std::hash::Hash;
 
 use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::EstimateSize;
 use thiserror_ext::AsReport;
 
 use super::{
-    Datum, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum, F64,
+    Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
 use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
 use crate::util::iter_util::ZipEqDebug;
@@ -569,54 +569,79 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
 }
 
 impl ToSql for JsonbVal {
-    accepts!(JSONB);
+    accepts!(JSON, JSONB);
 
     to_sql_checked!();
 
     fn to_sql(
         &self,
-        _ty: &Type,
+        ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
         Self: Sized,
     {
-        out.put_u8(1);
+        if matches!(*ty, Type::JSONB) {
+            out.put_u8(1);
+        }
         write!(out, "{}", self.0).unwrap();
         Ok(IsNull::No)
     }
 }
 
 impl<'a> FromSql<'a> for JsonbVal {
+    accepts!(JSON, JSONB);
+
     fn from_sql(
-        _ty: &Type,
+        ty: &Type,
         mut raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        if raw.is_empty() || raw.get_u8() != 1 {
-            return Err("invalid jsonb encoding".into());
-        }
-        Ok(JsonbVal::from(Value::from_text(raw)?))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::JSONB)
+        Ok(match *ty {
+            // Here we allow mapping JSON of pg to JSONB of rw. But please note the JSONB and JSON have different behaviors in postgres.
+            // An example of different semantics for duplicated keys in an object:
+            // test=# select jsonb_each('{"foo": 1, "bar": 2, "foo": 3}');
+            //  jsonb_each
+            //  ------------
+            //   (bar,2)
+            //   (foo,3)
+            //  (2 rows)
+            // test=# select json_each('{"foo": 1, "bar": 2, "foo": 3}');
+            //   json_each
+            //  -----------
+            //   (foo,1)
+            //   (bar,2)
+            //   (foo,3)
+            //  (3 rows)
+            Type::JSON => JsonbVal::from(Value::from_text(raw)?),
+            Type::JSONB => {
+                if raw.is_empty() || raw.get_u8() != 1 {
+                    return Err("invalid jsonb encoding".into());
+                }
+                JsonbVal::from(Value::from_text(raw)?)
+            }
+            _ => {
+                bail_not_implemented!("the JsonbVal's postgres decoding for {ty} is unsupported")
+            }
+        })
     }
 }
 
 impl ToSql for JsonbRef<'_> {
-    accepts!(JSONB);
+    accepts!(JSON, JSONB);
 
     to_sql_checked!();
 
     fn to_sql(
         &self,
-        _ty: &Type,
+        ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
         Self: Sized,
     {
-        out.put_u8(1);
+        if matches!(*ty, Type::JSONB) {
+            out.put_u8(1);
+        }
         write!(out, "{}", self.0).unwrap();
         Ok(IsNull::No)
     }

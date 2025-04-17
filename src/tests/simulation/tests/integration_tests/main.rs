@@ -18,16 +18,15 @@
 //! for the rationale behind this approach.
 
 #![feature(stmt_expr_attributes)]
-#![feature(extract_if)]
 
 mod backfill_tests;
 mod batch;
+mod compaction;
+mod default_parallelism;
+mod license_cpu_limit;
 mod recovery;
 mod scale;
 mod sink;
 mod storage;
 mod throttle;
-
-mod compaction;
-mod default_parallelism;
 mod utils;

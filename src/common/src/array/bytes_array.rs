@@ -16,8 +16,8 @@ use std::iter;
 use std::mem::size_of;
 
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
+use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
@@ -38,9 +38,11 @@ impl Array for BytesArray {
     type RefItem<'a> = &'a [u8];
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
-        let begin = *self.offset.get_unchecked(idx) as usize;
-        let end = *self.offset.get_unchecked(idx + 1) as usize;
-        self.data.get_unchecked(begin..end)
+        unsafe {
+            let begin = *self.offset.get_unchecked(idx) as usize;
+            let end = *self.offset.get_unchecked(idx + 1) as usize;
+            self.data.get_unchecked(begin..end)
+        }
     }
 
     fn len(&self) -> usize {

@@ -17,7 +17,7 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
 use await_tree::InstrumentAwait;
-use prometheus::{exponential_buckets, Registry};
+use prometheus::{Registry, exponential_buckets};
 use risingwave_common::array::arrow::arrow_schema_udf::{Fields, Schema, SchemaRef};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfFromArrow, UdfToArrow};
 use risingwave_common::array::{Array, ArrayRef, DataChunk};
@@ -30,8 +30,8 @@ use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::sig::{UdfImpl, UdfKind, UdfOptions};
-use crate::{bail, ExprError, Result};
+use crate::sig::{BuildOptions, UdfImpl, UdfKind};
+use crate::{ExprError, Result, bail};
 
 #[derive(Debug)]
 pub struct UserDefinedFunction {
@@ -168,23 +168,32 @@ impl Build for UserDefinedFunction {
     ) -> Result<Self> {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
-        let identifier = udf.get_identifier()?;
+        let name = udf.get_name();
+        let arg_types = udf.arg_types.iter().map(|t| t.into()).collect::<Vec<_>>();
 
         let language = udf.language.as_str();
         let runtime = udf.runtime.as_deref();
         let link = udf.link.as_deref();
 
+        let name_in_runtime = udf
+            .name_in_runtime()
+            .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
+
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
-        let runtime = build_fn(UdfOptions {
+        let runtime = build_fn(BuildOptions {
             kind: UdfKind::Scalar,
             body: udf.body.as_deref(),
             compressed_binary: udf.compressed_binary.as_deref(),
             link: udf.link.as_deref(),
-            identifier,
+            name_in_runtime,
             arg_names: &udf.arg_names,
+            arg_types: &arg_types,
             return_type: &return_type,
             always_retry_on_network_error: udf.always_retry_on_network_error,
+            language,
+            is_async: udf.is_async,
+            is_batched: udf.is_batched,
         })
         .context("failed to build UDF runtime")?;
 
@@ -202,7 +211,7 @@ impl Build for UserDefinedFunction {
         let metrics = GLOBAL_METRICS.with_label_values(
             link.unwrap_or(""),
             language,
-            identifier,
+            name,
             // batch query does not have a fragment_id
             &FRAGMENT_ID::try_with(ToOwned::to_owned)
                 .unwrap_or(0)
@@ -211,12 +220,12 @@ impl Build for UserDefinedFunction {
 
         Ok(Self {
             children: udf.children.iter().map(build_child).try_collect()?,
-            arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
+            arg_types,
             return_type,
             arg_schema,
             runtime,
             arrow_convert,
-            span: format!("udf_call({})", identifier).into(),
+            span: await_tree::span!("udf_call({})", name),
             metrics,
         })
     }
@@ -226,43 +235,43 @@ impl Build for UserDefinedFunction {
 #[derive(Debug, Clone)]
 struct MetricsVec {
     /// Number of successful UDF calls.
-    success_count: LabelGuardedIntCounterVec<4>,
+    success_count: LabelGuardedIntCounterVec,
     /// Number of failed UDF calls.
-    failure_count: LabelGuardedIntCounterVec<4>,
+    failure_count: LabelGuardedIntCounterVec,
     /// Total number of retried UDF calls.
-    retry_count: LabelGuardedIntCounterVec<4>,
+    retry_count: LabelGuardedIntCounterVec,
     /// Input chunk rows of UDF calls.
-    input_chunk_rows: LabelGuardedHistogramVec<4>,
+    input_chunk_rows: LabelGuardedHistogramVec,
     /// The latency of UDF calls in seconds.
-    latency: LabelGuardedHistogramVec<4>,
+    latency: LabelGuardedHistogramVec,
     /// Total number of input rows of UDF calls.
-    input_rows: LabelGuardedIntCounterVec<4>,
+    input_rows: LabelGuardedIntCounterVec,
     /// Total number of input bytes of UDF calls.
-    input_bytes: LabelGuardedIntCounterVec<4>,
+    input_bytes: LabelGuardedIntCounterVec,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: LabelGuardedIntGaugeVec<5>,
+    memory_usage_bytes: LabelGuardedIntGaugeVec,
 }
 
 /// Monitor metrics for UDF.
 #[derive(Debug, Clone)]
 struct Metrics {
     /// Number of successful UDF calls.
-    success_count: LabelGuardedIntCounter<4>,
+    success_count: LabelGuardedIntCounter,
     /// Number of failed UDF calls.
-    failure_count: LabelGuardedIntCounter<4>,
+    failure_count: LabelGuardedIntCounter,
     /// Total number of retried UDF calls.
     #[allow(dead_code)]
-    retry_count: LabelGuardedIntCounter<4>,
+    retry_count: LabelGuardedIntCounter,
     /// Input chunk rows of UDF calls.
-    input_chunk_rows: LabelGuardedHistogram<4>,
+    input_chunk_rows: LabelGuardedHistogram,
     /// The latency of UDF calls in seconds.
-    latency: LabelGuardedHistogram<4>,
+    latency: LabelGuardedHistogram,
     /// Total number of input rows of UDF calls.
-    input_rows: LabelGuardedIntCounter<4>,
+    input_rows: LabelGuardedIntCounter,
     /// Total number of input bytes of UDF calls.
-    input_bytes: LabelGuardedIntCounter<4>,
+    input_bytes: LabelGuardedIntCounter,
     /// Total memory usage of UDF runtime in bytes.
-    memory_usage_bytes: LabelGuardedIntGauge<5>,
+    memory_usage_bytes: LabelGuardedIntGauge,
 }
 
 /// Global UDF metrics.
@@ -348,15 +357,15 @@ impl MetricsVec {
         &self,
         link: &str,
         language: &str,
-        identifier: &str,
+        name: &str,
         fragment_id: &str,
     ) -> Metrics {
         // generate an unique id for each instance
         static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(0);
         let instance_id = NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed).to_string();
 
-        let labels = &[link, language, identifier, fragment_id];
-        let labels5 = &[link, language, identifier, fragment_id, &instance_id];
+        let labels = &[link, language, name, fragment_id];
+        let labels5 = &[link, language, name, fragment_id, &instance_id];
 
         Metrics {
             success_count: self.success_count.with_guarded_label_values(labels),

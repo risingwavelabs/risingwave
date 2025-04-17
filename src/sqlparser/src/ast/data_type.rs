@@ -17,7 +17,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{display_comma_separated, Ident, ObjectName};
+use crate::ast::{Ident, ObjectName, display_comma_separated};
 
 /// SQL data types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

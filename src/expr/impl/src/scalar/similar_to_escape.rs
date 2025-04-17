@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 // escape `similar-to` pattern to POSIX regex pattern
 // Adapted from:

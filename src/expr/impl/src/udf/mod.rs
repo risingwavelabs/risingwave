@@ -19,17 +19,17 @@ use anyhow::{Context as _, Result};
 use futures_util::stream::BoxStream;
 use risingwave_common::array::arrow::arrow_array_udf::{ArrayRef, BooleanArray, RecordBatch};
 use risingwave_expr::sig::{
-    CreateFunctionOptions, CreateFunctionOutput, UdfImpl, UdfImplDescriptor, UDF_IMPLS,
+    CreateFunctionOutput, CreateOptions, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
 };
 
-#[cfg(feature = "external-udf")]
+#[cfg(feature = "udf")]
 #[cfg(not(madsim))]
 mod external;
-#[cfg(feature = "python-udf")]
+#[cfg(feature = "udf")]
 mod python;
-#[cfg(feature = "js-udf")]
+#[cfg(feature = "udf")]
 mod quickjs;
-#[cfg(feature = "wasm-udf")]
+#[cfg(feature = "udf")]
 mod wasm;
 
 /// Download wasm binary from a link.

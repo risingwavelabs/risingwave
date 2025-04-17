@@ -22,8 +22,8 @@ mod tests {
     use risingwave_common::hash::{ActorMapping, VirtualNode};
 
     use crate::model::ActorId;
-    use crate::stream::scale::rebalance_actor_vnode;
     use crate::stream::CustomActorInfo;
+    use crate::stream::scale::rebalance_actor_vnode;
 
     fn simulated_parallelism(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT_FOR_TEST];

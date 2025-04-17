@@ -22,11 +22,11 @@
 risingwave_expr_impl::enable!();
 
 use criterion::async_executor::FuturesExecutor;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::aggregate::{build_append_only, AggCall, PbAggKind};
+use risingwave_expr::aggregate::{AggCall, PbAggKind, build_append_only};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_pb::expr::expr_node::PbType;

@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use futures::executor::block_on;
-use petgraph::dot::{Config, Dot};
 use petgraph::Graph;
+use petgraph::dot::{Config, Dot};
 use pgwire::pg_server::SessionId;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -28,18 +28,18 @@ use risingwave_pb::batch_plan::{TaskId as PbTaskId, TaskOutputId as PbTaskOutput
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::{RwLock, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{Instrument, debug, error, info, warn};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
-use crate::scheduler::distributed::query::QueryMessage::Stage;
-use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
-use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
+use crate::scheduler::distributed::query::QueryMessage::Stage;
+use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
+use crate::scheduler::plan_fragmenter::{Query, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID, StageId};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -73,6 +73,7 @@ pub struct QueryExecution {
     /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
+    #[expect(dead_code)]
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
@@ -328,7 +329,10 @@ impl QueryRunner {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
-                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                        tracing::trace!(
+                            "Query {:?} has scheduled all of its stages that have table scan (iterator creation).",
+                            self.query.query_id
+                        );
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
@@ -470,8 +474,8 @@ pub(crate) mod tests {
         WorkerNodeManager, WorkerNodeSelector,
     };
     use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, StreamJobStatus,
-        DEFAULT_SUPER_USER_ID,
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, DEFAULT_SUPER_USER_ID, Engine,
+        StreamJobStatus,
     };
     use risingwave_common::hash::{VirtualNode, VnodeCount, WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::types::DataType;
@@ -480,12 +484,13 @@ pub(crate) mod tests {
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
 
+    use crate::TableCatalog;
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
     use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch, generic,
     };
     use crate::optimizer::property::{Cardinality, Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
@@ -496,7 +501,6 @@ pub(crate) mod tests {
     };
     use crate::session::SessionImpl;
     use crate::utils::Condition;
-    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -512,20 +516,22 @@ pub(crate) mod tests {
             HashMap::from([(query_id, query_execution.clone())]),
         )));
 
-        assert!(query_execution
-            .start(
-                ExecutionContext::new(SessionImpl::mock().into(), None).into(),
-                worker_node_selector,
-                ReadSnapshot::ReadUncommitted
-                    .batch_query_epoch(&HashSet::from_iter([0.into()]))
-                    .unwrap(),
-                compute_client_pool,
-                catalog_reader,
-                query_execution_info,
-                Arc::new(DistributedQueryMetrics::for_test()),
-            )
-            .await
-            .is_err());
+        assert!(
+            query_execution
+                .start(
+                    ExecutionContext::new(SessionImpl::mock().into(), None).into(),
+                    worker_node_selector,
+                    ReadSnapshot::ReadUncommitted
+                        .batch_query_epoch(&HashSet::from_iter([0.into()]))
+                        .unwrap(),
+                    compute_client_pool,
+                    catalog_reader,
+                    query_execution_info,
+                    Arc::new(DistributedQueryMetrics::for_test()),
+                )
+                .await
+                .is_err()
+        );
     }
 
     pub async fn create_query() -> Query {
@@ -542,20 +548,22 @@ pub(crate) mod tests {
 
         let table_catalog: TableCatalog = TableCatalog {
             id: table_id,
+            schema_id: 0,
+            database_id: 0,
             associated_source_id: None,
             name: "test".to_owned(),
             dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    column_desc: ColumnDesc::named("a", 0.into(), DataType::Int32),
                     is_hidden: false,
                 },
                 ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    column_desc: ColumnDesc::named("b", 1.into(), DataType::Float64),
                     is_hidden: false,
                 },
                 ColumnCatalog {
-                    column_desc: ColumnDesc::new_atomic(DataType::Int64, "c", 2),
+                    column_desc: ColumnDesc::named("c", 2.into(), DataType::Int64),
                     is_hidden: false,
                 },
             ],
@@ -657,7 +665,7 @@ pub(crate) mod tests {
         let eq_join_predicate =
             EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
         let hash_join_node: PlanRef =
-            BatchHashJoin::new(logical_join_node, eq_join_predicate).into();
+            BatchHashJoin::new(logical_join_node, eq_join_predicate, None).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),

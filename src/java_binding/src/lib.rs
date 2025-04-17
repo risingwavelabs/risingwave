@@ -22,14 +22,14 @@ use std::ops::Deref;
 use anyhow::anyhow;
 use cfg_or_panic::cfg_or_panic;
 use jni::objects::JByteArray;
-use jni::sys::{jint, JNI_VERSION_1_2};
+use jni::sys::{JNI_VERSION_1_2, jint};
 use jni::{JNIEnv, JavaVM};
 use prost::Message;
 use risingwave_common::error::AsReport;
 use risingwave_jni_core::jvm_runtime::{jvm_env, register_java_binding_native_methods};
 use risingwave_jni_core::{
-    execute_and_catch, gen_class_name, to_guarded_slice, EnvParam, JavaBindingIterator, Pointer,
-    JAVA_BINDING_ASYNC_RUNTIME,
+    EnvParam, JAVA_BINDING_ASYNC_RUNTIME, JavaBindingIterator, Pointer, execute_and_catch,
+    gen_class_name, to_guarded_slice,
 };
 
 use crate::hummock_iterator::new_hummock_java_binding_iter;
@@ -63,7 +63,7 @@ fn register_hummock_java_binding_native_methods(
     Ok(())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(non_snake_case)]
 pub extern "system" fn JNI_OnLoad(jvm: JavaVM, _reserved: *mut c_void) -> jint {
     let result: Result<(), jni::errors::Error> = try {
@@ -78,7 +78,7 @@ pub extern "system" fn JNI_OnLoad(jvm: JavaVM, _reserved: *mut c_void) -> jint {
 }
 
 #[cfg_or_panic(not(madsim))]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "system" fn Java_com_risingwave_java_binding_HummockIterator_iteratorNewHummock<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,

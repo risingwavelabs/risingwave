@@ -15,14 +15,14 @@
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
-use rand::distributions::Alphanumeric;
-use rand::prelude::SliceRandom;
 use rand::Rng;
+use rand::distr::Alphanumeric;
+use rand::prelude::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
 
-use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;
+use crate::sql_gen::expr::typed_null;
 
 impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates integer scalar expression.
@@ -31,11 +31,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
     pub(super) fn gen_range_scalar(
         &mut self,
         typ: &DataType,
-        start: isize,
-        end: isize,
+        start: i64,
+        end: i64,
     ) -> Option<Expr> {
         use DataType as T;
-        let value = self.rng.gen_range(start..end).to_string();
+        let value = self.rng.random_range(start..end).to_string();
         match *typ {
             T::Int64 => Some(Expr::TypedString {
                 data_type: AstDataType::BigInt,
@@ -58,7 +58,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // NOTE(kwannoel): Since this generates many invalid queries,
         // its probability should be set to low, e.g. 0.02.
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7327
-        if self.rng.gen_bool(0.0) {
+        if self.rng.random_bool(0.0) {
             // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
             // expressions. For instance agg calls such as `max(NULL)` may be generated,
             // and coerced to VARCHAR, where we require a `NULL::int` instead.
@@ -71,15 +71,15 @@ impl<R: Rng> SqlGenerator<'_, R> {
         match *typ {
             T::Int64 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::BigInt,
-                value: self.gen_int(i64::MIN as isize, i64::MAX as isize),
+                value: self.gen_int(i64::MIN as _, i64::MAX as _),
             })),
             T::Int32 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::Int,
-                value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
+                value: self.gen_int(i32::MIN as _, i32::MAX as _),
             })),
             T::Int16 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::SmallInt,
-                value: self.gen_int(i16::MIN as isize, i16::MAX as isize),
+                value: self.gen_int(i16::MIN as _, i16::MAX as _),
             })),
             T::Varchar => Expr::Cast {
                 // since we are generating random scalar literal, we should cast it to avoid unknown type
@@ -99,7 +99,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 data_type: AstDataType::Real,
                 value: self.gen_float(),
             })),
-            T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
+            T::Boolean => Expr::Value(Value::Boolean(self.rng.random_bool(0.5))),
             T::Date => Expr::TypedString {
                 data_type: AstDataType::Date,
                 value: self.gen_temporal_scalar(typ),
@@ -121,7 +121,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 value: self.gen_temporal_scalar(typ),
             })),
             T::List(ref ty) => {
-                let n = self.rng.gen_range(1..=4);
+                let n = self.rng.random_range(1..=4);
                 Expr::Array(Array {
                     elem: self.gen_simple_scalar_list(ty, n),
                     named: true,
@@ -144,17 +144,17 @@ impl<R: Rng> SqlGenerator<'_, R> {
         (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }
 
-    fn gen_int(&mut self, min: isize, max: isize) -> String {
+    fn gen_int(&mut self, min: i64, max: i64) -> String {
         // NOTE: Reduced chance for extreme values,
         // since these tend to generate invalid expressions.
-        let n = match self.rng.gen_range(1..=100) {
+        let n = match self.rng.random_range(1..=100) {
             1..=5 => 0,
             6..=10 => 1,
             11..=15 => max,
             16..=20 => min,
-            21..=25 => self.rng.gen_range(min + 1..0),
-            26..=30 => self.rng.gen_range(1000..max),
-            31..=100 => self.rng.gen_range(2..1000),
+            21..=25 => self.rng.random_range(min + 1..0),
+            26..=30 => self.rng.random_range(1000..max),
+            31..=100 => self.rng.random_range(2..1000),
             _ => unreachable!(),
         };
         n.to_string()
@@ -163,14 +163,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_float(&mut self) -> String {
         // NOTE: Reduced chance for extreme values,
         // since these tend to generate invalid expressions.
-        let n = match self.rng.gen_range(1..=100) {
+        let n = match self.rng.random_range(1..=100) {
             1..=5 => 0.0,
             6..=10 => 1.0,
             11..=15 => i32::MAX as f64,
             16..=20 => i32::MIN as f64,
-            21..=25 => self.rng.gen_range(i32::MIN + 1..0) as f64,
-            26..=30 => self.rng.gen_range(1000..i32::MAX) as f64,
-            31..=100 => self.rng.gen_range(2..1000) as f64,
+            21..=25 => self.rng.random_range(i32::MIN + 1..0) as f64,
+            26..=30 => self.rng.random_range(1000..i32::MAX) as f64,
+            31..=100 => self.rng.random_range(2..1000) as f64,
             _ => unreachable!(),
         };
         n.to_string()
@@ -185,9 +185,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let week = 7 * day;
         let choices = [0, 1, minute, hour, day, week];
 
-        let secs = match self.rng.gen_range(1..=100) {
+        let secs = match self.rng.random_range(1..=100) {
             1..=30 => *choices.choose(&mut self.rng).unwrap(),
-            31..=100 => self.rng.gen_range(2..100) as u64,
+            31..=100 => self.rng.random_range(2..100) as u64,
             _ => unreachable!(),
         };
 
@@ -198,12 +198,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
             // T::Timestamptz => {
             //     let timestamp = tm.format("%Y-%m-%d %H:%M:%S");
-            //     let timezone = self.rng.gen_range(0..=15);
+            //     let timezone = self.rng.random_range(0..=15);
             //     format!("{}+{}", timestamp, timezone)
             // }
             T::Time => tm.format("%T").to_string(),
             T::Interval => {
-                if self.rng.gen_bool(0.5) {
+                if self.rng.random_bool(0.5) {
                     (-(secs as i64)).to_string()
                 } else {
                     secs.to_string()

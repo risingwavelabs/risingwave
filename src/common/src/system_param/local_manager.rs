@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use risingwave_pb::meta::SystemParams;
-use tokio::sync::watch::{channel, Receiver, Sender};
+use tokio::sync::watch::{Receiver, Sender, channel};
 
 use super::common::CommonHandler;
 use super::diff::SystemParamsDiff;

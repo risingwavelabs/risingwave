@@ -1,0 +1,73 @@
+control substitution on
+
+system ok
+rpk topic delete 'test_debug_splits' || true;
+
+system ok
+rpk topic create test_debug_splits -p 2
+
+system ok
+cat <<EOF | rpk topic produce test_debug_splits -p 0
+{"x":1}
+{"x":3}
+{"x":5}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce test_debug_splits -p 1
+{"x":2}
+{"x":4}
+{"x":6}
+EOF
+
+statement ok
+create table all_splits(x int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_debug_splits',
+  debug_splits = '[{"split_info": {"partition": 0, "start_offset": -1, "stop_offset": null, "topic": "test_debug_splits"}, "split_type": "kafka"},{"split_info": {"partition": 1, "start_offset": -1, "stop_offset": null, "topic": "test_debug_splits"}, "split_type": "kafka"}]'
+) format plain encode json;
+
+statement ok
+create table one_split(x int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_debug_splits',
+  debug_splits = '[{"split_info": {"partition": 0, "start_offset": -1, "stop_offset": null, "topic": "test_debug_splits"}, "split_type": "kafka"}]'
+) format plain encode json;
+
+# only change the topic name to non-exist inside debug_splits
+statement ok
+create table one_split_err(x int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_debug_splits',
+  debug_splits = '[{"split_info": {"partition": 0, "start_offset": -1, "stop_offset": null, "topic": "test_debug_splits_non_exist"}, "split_type": "kafka"}]'
+) format plain encode json;
+
+sleep 1s
+
+query I
+select count(*) from all_splits;
+----
+6
+
+query I
+select count(*) from one_split;
+----
+3
+
+# should not crash
+query I
+select count(*) from one_split_err;
+----
+0
+
+statement ok
+drop table all_splits;
+
+statement ok
+drop table one_split;
+
+statement ok
+drop table one_split_err;
+
+system ok
+rpk topic delete 'test_debug_splits'

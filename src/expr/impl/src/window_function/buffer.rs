@@ -518,9 +518,7 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
             // same session. Otherwise, we can safely say it's saturated.
             self.latest_session
                 .as_ref()
-                .map_or(false, |LatestSession { start_idx, .. }| {
-                    window.left_idx < *start_idx
-                })
+                .is_some_and(|LatestSession { start_idx, .. }| window.left_idx < *start_idx)
         }
     }
 
@@ -557,9 +555,9 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
                 )
                 .expect("no reason to fail here");
 
-                if let Some(LatestSession {
+                if let Some(&mut LatestSession {
                     ref start_idx,
-                    minimal_next_start,
+                    ref mut minimal_next_start,
                 }) = self.latest_session.as_mut()
                 {
                     if &appended_key.order_key >= minimal_next_start {
@@ -934,11 +932,13 @@ mod tests {
         );
 
         buffer.append(1, "hello");
-        assert!(buffer
-            .curr_window_values()
-            .cloned()
-            .collect_vec()
-            .is_empty());
+        assert!(
+            buffer
+                .curr_window_values()
+                .cloned()
+                .collect_vec()
+                .is_empty()
+        );
         buffer.append(2, "world");
         let _ = buffer.slide();
         assert_eq!(
@@ -1050,10 +1050,12 @@ mod tests {
         let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![key(15), key(16)]);
         assert!(buffer.curr_key().is_none());
-        assert!(buffer
-            .curr_window_values()
-            .cloned()
-            .collect_vec()
-            .is_empty());
+        assert!(
+            buffer
+                .curr_window_values()
+                .cloned()
+                .collect_vec()
+                .is_empty()
+        );
     }
 }

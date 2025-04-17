@@ -14,19 +14,20 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::lock_api::RwLock;
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
-    HummockContextId, HummockVersionId,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockVersionId,
+    version_archive_dir, version_checkpoint_path,
 };
 use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
@@ -37,16 +38,17 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventRequest,
 };
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
+use crate::MetaResult;
+use crate::hummock::CompactorManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
-use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -70,9 +72,38 @@ mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 use compaction::*;
-pub use compaction::{check_cg_write_limit, WriteLimitType};
+pub use compaction::{GroupState, GroupStateValidator};
 pub(crate) use utils::*;
 
+struct TableCommittedEpochNotifiers {
+    txs: HashMap<TableId, Vec<UnboundedSender<u64>>>,
+}
+
+impl TableCommittedEpochNotifiers {
+    fn notify_deltas(&mut self, deltas: &[HummockVersionDelta]) {
+        self.txs.retain(|table_id, txs| {
+            let mut is_dropped = false;
+            let mut committed_epoch = None;
+            for delta in deltas {
+                if delta.removed_table_ids.contains(table_id) {
+                    is_dropped = true;
+                    break;
+                }
+                if let Some(info) = delta.state_table_info_delta.get(table_id) {
+                    committed_epoch = Some(info.committed_epoch);
+                }
+            }
+            if is_dropped {
+                false
+            } else if let Some(committed_epoch) = committed_epoch {
+                txs.retain(|tx| tx.send(committed_epoch).is_ok());
+                !txs.is_empty()
+            } else {
+                true
+            }
+        })
+    }
+}
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -101,6 +132,7 @@ pub struct HummockManager {
     pause_version_checkpoint: AtomicBool,
     table_write_throughput_statistic_manager:
         parking_lot::RwLock<TableWriteThroughputStatisticManager>,
+    table_committed_epoch_notifiers: parking_lot::Mutex<TableCommittedEpochNotifiers>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -120,7 +152,7 @@ pub struct HummockManager {
 
 pub type HummockManagerRef = Arc<HummockManager>;
 
-use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
+use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
 
 macro_rules! start_measure_real_process_timer {
@@ -291,6 +323,11 @@ impl HummockManager {
             pause_version_checkpoint: AtomicBool::new(false),
             table_write_throughput_statistic_manager: parking_lot::RwLock::new(
                 TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+            ),
+            table_committed_epoch_notifiers: parking_lot::Mutex::new(
+                TableCommittedEpochNotifiers {
+                    txs: Default::default(),
+                },
             ),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
@@ -503,6 +540,25 @@ impl HummockManager {
     pub fn metadata_manager_ref(&self) -> &MetadataManager {
         &self.metadata_manager
     }
+
+    pub async fn subscribe_table_committed_epoch(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<(u64, UnboundedReceiver<u64>)> {
+        let version = self.versioning.read().await;
+        if let Some(epoch) = version.current_version.table_committed_epoch(table_id) {
+            let (tx, rx) = unbounded_channel();
+            self.table_committed_epoch_notifiers
+                .lock()
+                .txs
+                .entry(table_id)
+                .or_default()
+                .push(tx);
+            Ok((epoch, rx))
+        } else {
+            Err(anyhow!("table {} not exist", table_id).into())
+        }
+    }
 }
 
 async fn write_exclusive_cluster_id(
@@ -514,6 +570,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
+    tracing::info!("try reading cluster_id");
     match object_store.read(&cluster_id_full_path, ..).await {
         Ok(stored_cluster_id) => {
             let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
@@ -529,6 +586,7 @@ async fn write_exclusive_cluster_id(
         }
         Err(e) => {
             if e.is_object_not_found_error() {
+                tracing::info!("cluster_id not found, writing cluster_id");
                 object_store
                     .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
                     .await?;

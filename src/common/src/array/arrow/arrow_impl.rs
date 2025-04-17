@@ -42,18 +42,19 @@
 
 use std::fmt::Write;
 
-use arrow_53_schema::TimeUnit;
 use arrow_array::array;
 use arrow_array::cast::AsArray;
 use arrow_buffer::OffsetBuffer;
+use arrow_schema::TimeUnit;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
+use super::arrow_schema::IntervalUnit;
 // This is important because we want to use the arrow version specified by the outer mod.
-use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema, ArrowIntervalType};
+use super::{ArrowIntervalType, arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 // Other import should always use the absolute path.
 use crate::array::*;
-use crate::types::*;
+use crate::types::{DataType as RwDataType, *};
 use crate::util::iter_util::ZipEqFast;
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
@@ -541,7 +542,7 @@ pub trait FromArrow {
             t => {
                 return Err(ArrayError::from_arrow(format!(
                     "unsupported arrow data type: {t:?}"
-                )))
+                )));
             }
         })
     }
@@ -1415,6 +1416,78 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
             .map(|i| i.as_ref().map(|v| v.as_scalar_ref()))
             .collect()
     }
+}
+
+/// This function checks whether the schema of a Parquet file matches the user defined schema.
+/// It handles the following special cases:
+/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `TimeStamp` type.
+/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `TimeStamptz` type.
+/// - Since RisingWave does not have an `UInt` type:
+///   - Arrow's `UInt8` matches with RisingWave's `Int16`.
+///   - Arrow's `UInt16` matches with RisingWave's `Int32`.
+///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
+///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
+/// - Arrow's `Float16` matches with RisingWave's `Float32`.
+pub fn is_parquet_schema_match_source_schema(
+    arrow_data_type: &arrow_schema::DataType,
+    rw_data_type: &crate::types::DataType,
+) -> bool {
+    matches!(
+        (arrow_data_type, rw_data_type),
+        (arrow_schema::DataType::Boolean, RwDataType::Boolean)
+            | (
+                arrow_schema::DataType::Int8
+                    | arrow_schema::DataType::Int16
+                    | arrow_schema::DataType::UInt8,
+                RwDataType::Int16
+            )
+            | (
+                arrow_schema::DataType::Int32 | arrow_schema::DataType::UInt16,
+                RwDataType::Int32
+            )
+            | (
+                arrow_schema::DataType::Int64 | arrow_schema::DataType::UInt32,
+                RwDataType::Int64
+            )
+            | (
+                arrow_schema::DataType::UInt64 | arrow_schema::DataType::Decimal128(_, _),
+                RwDataType::Decimal
+            )
+            | (arrow_schema::DataType::Decimal256(_, _), RwDataType::Int256)
+            | (
+                arrow_schema::DataType::Float16 | arrow_schema::DataType::Float32,
+                RwDataType::Float32
+            )
+            | (arrow_schema::DataType::Float64, RwDataType::Float64)
+            | (
+                arrow_schema::DataType::Timestamp(_, None),
+                RwDataType::Timestamp
+            )
+            | (
+                arrow_schema::DataType::Timestamp(_, Some(_)),
+                RwDataType::Timestamptz
+            )
+            | (arrow_schema::DataType::Date32, RwDataType::Date)
+            | (
+                arrow_schema::DataType::Time32(_) | arrow_schema::DataType::Time64(_),
+                RwDataType::Time
+            )
+            | (
+                arrow_schema::DataType::Interval(IntervalUnit::MonthDayNano),
+                RwDataType::Interval
+            )
+            | (
+                arrow_schema::DataType::Utf8 | arrow_schema::DataType::LargeUtf8,
+                RwDataType::Varchar
+            )
+            | (
+                arrow_schema::DataType::Binary | arrow_schema::DataType::LargeBinary,
+                RwDataType::Bytea
+            )
+            | (arrow_schema::DataType::List(_), RwDataType::List(_))
+            | (arrow_schema::DataType::Struct(_), RwDataType::Struct(_))
+            | (arrow_schema::DataType::Map(_, _), RwDataType::Map(_))
+    )
 }
 
 #[cfg(test)]

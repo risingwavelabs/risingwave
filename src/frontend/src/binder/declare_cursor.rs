@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_sqlparser::ast::Ident;
+use risingwave_sqlparser::ast::{Ident, ObjectName, Since};
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::BoundQuery;
@@ -29,4 +29,11 @@ impl RewriteExprsRecursive for BoundDeclareCursor {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter) {
         self.query.rewrite_exprs_recursive(rewriter);
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundDeclareSubscriptionCursor {
+    pub cursor_name: Ident,
+    pub subscription_name: ObjectName,
+    pub rw_timestamp: Since,
 }

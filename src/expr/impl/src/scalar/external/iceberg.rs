@@ -20,14 +20,14 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use iceberg::spec::{PrimitiveType, Transform, Type as IcebergType};
-use iceberg::transform::{create_transform_function, BoxedTransformFunction};
-use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
+use iceberg::transform::{BoxedTransformFunction, create_transform_function};
+use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::{build_function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, build_function};
 use thiserror_ext::AsReport;
 
 pub struct IcebergTransform {
@@ -104,7 +104,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         ExprError::InvalidParam {
             name: "input type in iceberg_transform",
             reason: format!(
-                "Failed to convert input type to icelake type, got error: {}",
+                "Failed to convert input type to iceberg type, got error: {}",
                 err.as_report()
             )
             .into(),
@@ -128,7 +128,7 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
     .map_err(|err| ExprError::InvalidParam {
         name: "return type in iceberg_transform",
         reason: format!(
-            "Failed to convert return type to icelake type, got error: {}",
+            "Failed to convert return type to iceberg type, got error: {}",
             err.as_report()
         )
         .into(),

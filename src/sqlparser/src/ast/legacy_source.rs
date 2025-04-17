@@ -20,11 +20,11 @@ use std::fmt;
 use itertools::Itertools as _;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use winnow::PResult;
+use winnow::ModalResult;
 
 use crate::ast::{
-    display_separated, AstString, Encode, Format, FormatEncodeOptions, Ident, ObjectName, ParseTo,
-    SqlOption, Value,
+    AstString, Encode, Format, FormatEncodeOptions, Ident, ObjectName, ParseTo, SqlOption, Value,
+    display_separated,
 };
 use crate::keywords::Keyword;
 use crate::parser::{Parser, StrError};
@@ -65,7 +65,7 @@ impl From<FormatEncodeOptions> for CompatibleFormatEncode {
     }
 }
 
-pub fn parse_format_encode(p: &mut Parser<'_>) -> PResult<CompatibleFormatEncode> {
+pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEncode> {
     if let Some(schema_v2) = p.parse_schema()? {
         if schema_v2.key_encode.is_some() {
             parser_err!("key encode clause is not supported in source schema");
@@ -290,7 +290,7 @@ pub struct ProtobufSchema {
 }
 
 impl ParseTo for ProtobufSchema {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
@@ -328,7 +328,7 @@ pub struct AvroSchema {
 }
 
 impl ParseTo for AvroSchema {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
@@ -375,7 +375,7 @@ impl fmt::Display for DebeziumAvroSchema {
 }
 
 impl ParseTo for DebeziumAvroSchema {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(
             [
                 Keyword::ROW,
@@ -413,7 +413,7 @@ pub fn get_delimiter(chars: &str) -> Result<u8, StrError> {
 }
 
 impl ParseTo for CsvInfo {
-    fn parse_to(p: &mut Parser<'_>) -> PResult<Self> {
+    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
         impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
         impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
         impl_parse_to!(delimiter: AstString, p);
@@ -427,14 +427,14 @@ impl ParseTo for CsvInfo {
 
 impl fmt::Display for CsvInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v: Vec<String> = vec![];
         if !self.has_header {
-            v.push(format!(
-                "{}",
-                display_separated(&[Keyword::WITHOUT, Keyword::HEADER], " ")
-            ));
+            write!(f, "WITHOUT HEADER ")?;
         }
-        impl_fmt_display!(delimiter, v, self);
-        v.iter().join(" ").fmt(f)
+        write!(
+            f,
+            "DELIMITED BY {}",
+            AstString((self.delimiter as char).to_string())
+        )?;
+        Ok(())
     }
 }

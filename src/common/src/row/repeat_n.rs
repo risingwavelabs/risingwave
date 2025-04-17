@@ -59,7 +59,7 @@ impl<D: ToDatumRef> Row for RepeatN<D> {
 
     #[inline]
     fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-        std::iter::repeat(self.datum.to_datum_ref()).take(self.n)
+        std::iter::repeat_n(self.datum.to_datum_ref(), self.n)
     }
 }
 

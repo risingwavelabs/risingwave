@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 use crate::PlanRef;
+use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 
 /// Merge chaining `LogicalOverWindow`s with same `PARTITION BY` and `ORDER BY`.
 /// Should be applied after `OverWindowSplitRule`.

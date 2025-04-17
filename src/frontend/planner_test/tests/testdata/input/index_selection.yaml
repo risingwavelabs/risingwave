@@ -460,3 +460,48 @@
     select * from t order by ts;
   expected_outputs:
     - batch_plan
+- name: topn index selection + limit pushdown
+  sql: |
+      create table t1 (a int, b int);
+      create index idx1 on t1(a);
+      select * from t1 order by a limit 10
+  expected_outputs:
+  - batch_plan
+- name: topn index selection + limit pushdown fails due to b desc != b asc
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a, b desc);
+    select * from t1 order by a, b limit 10
+  expected_outputs:
+    - batch_plan
+- name: topn index selection + limit pushdown with point get
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a, b desc);
+    select * from t1 where a = 1 order by b desc limit 10
+  expected_outputs:
+    - batch_plan
+- name: topn index selection + limit pushdown with multi point get
+  sql: |
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a, c, b desc);
+    select * from t1 where c = 1 and a = 2 order by b desc limit 10
+  expected_outputs:
+  - batch_plan
+- name: topn index selection + limit pushdown with multi point get + unindexed point get
+  sql: |
+    create table t1 (a int, b int, c int, d int);
+    create index idx1 on t1(a, c, b desc);
+    select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
+  expected_outputs:
+    - batch_plan
+- name: topn index selection + limit pushdown with multi index
+  sql: |
+    create table t1 (a int, b int, c int, d int);
+    create index idx1 on t1(a, b);
+    create index idx2 on t1(a, c, b desc);
+    create index idx3 on t1(a, c, d, b desc);
+    create index idx4 on t1(b, a desc);
+    select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
+  expected_outputs:
+    - batch_plan

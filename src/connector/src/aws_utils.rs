@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use aws_config::timeout::TimeoutConfig;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use url::Url;

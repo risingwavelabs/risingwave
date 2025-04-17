@@ -25,7 +25,7 @@ risingwave_variables = { workspace = true }
 rlimit = "0.10"
 rustls = "0.23.5"
 # Explicitly specify the tokio version used in RisingWave runtime
-rw-tokio = { version = "=1.40.0", package = "tokio" }
+rw-tokio = { version = "=1.44.0", package = "tokio" }
 thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -57,7 +57,7 @@ opentelemetry_sdk = { workspace = true, features = [
 ] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
 fastrace = "0.7"
-fastrace-opentelemetry = "0.7"
+fastrace-opentelemetry = "0.10"
 
 [lints]
 workspace = true

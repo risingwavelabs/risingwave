@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bae::FromAttributes;
+use proc_macro_error::{ResultExt, abort};
 use proc_macro2::TokenStream;
-use proc_macro_error::{abort, ResultExt};
 use quote::quote;
 use syn::DeriveInput;
 

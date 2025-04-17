@@ -24,16 +24,16 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
+use risingwave_common::catalog::Field;
 use risingwave_connector_codec::JsonSchema;
-use risingwave_pb::plan_common::ColumnDesc;
 
 use super::utils::{bytes_from_url, get_kafka_topic};
-use super::{JsonProperties, SchemaRegistryAuth};
+use super::{JsonProperties, SchemaRegistryConfig};
 use crate::error::ConnectorResult;
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
-use crate::schema::schema_registry::{handle_sr_list, Client};
+use crate::parser::unified::AccessImpl;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::schema::schema_registry::{Client, handle_sr_list};
 
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
@@ -44,7 +44,11 @@ pub struct JsonAccessBuilder {
 
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         // XXX: When will we enter this branch?
         if payload.is_empty() {
             self.value = Some("{}".into());
@@ -80,12 +84,12 @@ impl JsonAccessBuilder {
 
 pub async fn fetch_json_schema_and_map_to_columns(
     schema_location: &str,
-    schema_registry_auth: Option<SchemaRegistryAuth>,
+    schema_registry_auth: Option<SchemaRegistryConfig>,
     props: &BTreeMap<String, String>,
-) -> ConnectorResult<Vec<ColumnDesc>> {
+) -> ConnectorResult<Vec<Field>> {
     let url = handle_sr_list(schema_location)?;
-    let json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
-        let client = Client::new(url, &schema_registry_auth)?;
+    let mut json_schema = if let Some(schema_registry_auth) = schema_registry_auth {
+        let client = Client::new(url.clone(), &schema_registry_auth)?;
         let topic = get_kafka_topic(props)?;
         let schema = client
             .get_schema_by_subject(&format!("{}-value", topic))
@@ -96,7 +100,10 @@ pub async fn fetch_json_schema_and_map_to_columns(
         let bytes = bytes_from_url(url, None).await?;
         JsonSchema::parse_bytes(&bytes)?
     };
-    json_schema.json_schema_to_columns().map_err(Into::into)
+    json_schema
+        .json_schema_to_columns(url.first().unwrap().clone())
+        .await
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -108,7 +115,7 @@ mod tests {
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, ScalarImpl, StructType, ToOwnedDatum};
     use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
     use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnKey};
 
@@ -287,30 +294,28 @@ mod tests {
     #[tokio::test]
     async fn test_json_parse_struct() {
         let descs = vec![
-            ColumnDesc::new_struct(
+            ColumnDesc::named(
                 "data",
-                0,
-                "",
-                vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 1),
-                    ColumnDesc::new_atomic(DataType::Varchar, "id", 2),
-                    ColumnDesc::new_atomic(DataType::Varchar, "text", 3),
-                    ColumnDesc::new_atomic(DataType::Varchar, "lang", 4),
-                ],
+                0.into(),
+                DataType::from(StructType::new([
+                    ("created_at", DataType::Timestamp),
+                    ("id", DataType::Varchar),
+                    ("text", DataType::Varchar),
+                    ("lang", DataType::Varchar),
+                ])),
             ),
-            ColumnDesc::new_struct(
+            ColumnDesc::named(
                 "author",
-                5,
-                "",
-                vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 6),
-                    ColumnDesc::new_atomic(DataType::Varchar, "id", 7),
-                    ColumnDesc::new_atomic(DataType::Varchar, "name", 8),
-                    ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
-                ],
+                5.into(),
+                DataType::from(StructType::new([
+                    ("created_at", DataType::Timestamp),
+                    ("id", DataType::Varchar),
+                    ("name", DataType::Varchar),
+                    ("username", DataType::Varchar),
+                ])),
             ),
-            ColumnDesc::new_atomic(DataType::Varchar, "I64CastToVarchar", 10),
-            ColumnDesc::new_atomic(DataType::Int64, "VarcharCastToI64", 11),
+            ColumnDesc::named("I64CastToVarchar", 10.into(), DataType::Varchar),
+            ColumnDesc::named("VarcharCastToI64", 11.into(), DataType::Int64),
         ]
         .iter()
         .map(SourceColumnDesc::from)
@@ -366,14 +371,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parse_struct_from_string() {
-        let descs = vec![ColumnDesc::new_struct(
+        let descs = vec![ColumnDesc::named(
             "struct",
-            0,
-            "",
-            vec![
-                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
-                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
-            ],
+            0.into(),
+            DataType::from(StructType::new([
+                ("varchar", DataType::Varchar),
+                ("boolean", DataType::Boolean),
+            ])),
         )]
         .iter()
         .map(SourceColumnDesc::from)
@@ -403,14 +407,13 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_json_parse_struct_missing_field_warning() {
-        let descs = vec![ColumnDesc::new_struct(
+        let descs = vec![ColumnDesc::named(
             "struct",
-            0,
-            "",
-            vec![
-                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
-                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
-            ],
+            0.into(),
+            DataType::from(StructType::new([
+                ("varchar", DataType::Varchar),
+                ("boolean", DataType::Boolean),
+            ])),
         )]
         .iter()
         .map(SourceColumnDesc::from)
@@ -456,7 +459,6 @@ mod tests {
             name: "rw_key".into(),
             data_type: DataType::Bytea,
             column_id: 2.into(),
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: true,
             is_hidden_addition_col: false,

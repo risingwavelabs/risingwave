@@ -15,7 +15,7 @@
 use std::fmt::Write;
 
 use risingwave_common::array::ListRef;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Returns the length of an array.
 ///

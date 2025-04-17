@@ -18,18 +18,18 @@ use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::MemoryContext;
-use risingwave_common::row::{repeat_n, RowExt};
+use risingwave_common::row::{RowExt, repeat_n};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{
-    build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
+    BoxedExpression, Expression, build_from_prost as expr_build_from_prost,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
-use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
+use crate::executor::join::{JoinType, concatenate, convert_row_to_chunk};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -116,6 +116,9 @@ impl NestedLoopJoinExecutor {
             JoinType::RightSemi => Self::do_right_semi_anti_join::<false>,
             JoinType::RightAnti => Self::do_right_semi_anti_join::<true>,
             JoinType::FullOuter => Self::do_full_outer_join,
+            JoinType::AsOfInner | JoinType::AsOfLeftOuter => {
+                unimplemented!("AsOf join is not supported in NestedLoopJoinExecutor")
+            }
         };
 
         #[for_await]
@@ -519,10 +522,10 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
 
-    use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
-    use crate::executor::join::JoinType;
-    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+    use crate::executor::join::JoinType;
+    use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
+    use crate::executor::test_utils::{MockExecutor, diff_executor_output};
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;

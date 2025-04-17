@@ -62,9 +62,21 @@ INSERT INTO test SELECT
   null as v23;
 "
 
+statement ok
+create source mysql_cdc_source with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '$RISEDEV_MYSQL_USER',
+  password = '$MYSQL_PWD',
+  database.name = 'tvf',
+);
 
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
+----
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+
+query
+select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
 1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
 
@@ -162,3 +174,6 @@ mysql -e "
 USE tvf;
 DROP DATABASE tvf;
 "
+
+statement ok
+drop source mysql_cdc_source;

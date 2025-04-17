@@ -54,11 +54,11 @@ mod utils;
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use expr_mutator::ExprMutator;
-pub use expr_rewriter::{default_rewrite_expr, ExprRewriter};
-pub use expr_visitor::{default_visit_expr, ExprVisitor};
-pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
+pub use expr_rewriter::{ExprRewriter, default_rewrite_expr};
+pub use expr_visitor::{ExprVisitor, default_visit_expr};
+pub use function_call::{FunctionCall, FunctionCallDisplay, is_row_function};
 pub use function_call_with_lambda::FunctionCallWithLambda;
-pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use input_ref::{InputRef, InputRefDisplay, input_ref_to_column_indices};
 pub use literal::Literal;
 pub use now::{InlineNowProcTime, Now, NowProcTimeFinder};
 pub use parameter::Parameter;
@@ -432,7 +432,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, Now}
+impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, UserDefinedFunction, Now}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InequalityInputPair {
@@ -880,8 +880,8 @@ impl ExprImpl {
                             // Currently we will return `None` for non-literal because the result of the expression might be '1 day'. However, there will definitely exist false positives such as '1 second + 1 second'.
                             // We will treat the expression as an input offset when rhs is `null`.
                             if rhs.return_type() == DataType::Interval
-                                && rhs.as_literal().map_or(true, |literal| {
-                                    literal.get_data().as_ref().map_or(false, |scalar| {
+                                && rhs.as_literal().is_none_or(|literal| {
+                                    literal.get_data().as_ref().is_some_and(|scalar| {
                                         let interval = scalar.as_interval();
                                         interval.months() != 0 || interval.days() != 0
                                     })

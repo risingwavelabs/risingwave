@@ -21,13 +21,15 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::{MqttCommon, MqttQualityOfService};
-use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
+use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 
 pub const MQTT_CONNECTOR: &str = "mqtt";
 
@@ -56,6 +58,15 @@ pub struct MqttProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for MqttProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            MqttCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl SourceProperties for MqttProperties {

@@ -16,14 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceClient;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::Endpoint;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Response;
+use tonic::transport::Endpoint;
 
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::Result;
@@ -37,10 +37,10 @@ const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 10;
 struct FrontendClient(FrontendServiceClient<Channel>);
 
 impl FrontendClient {
-    async fn new(host_addr: HostAddr) -> Result<Self> {
+    async fn new(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .connect_timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))
             .monitored_connect(
                 "grpc-frontend-client",
                 TcpConfig {
@@ -63,8 +63,8 @@ pub type FrontendClientPoolRef = Arc<FrontendClientPool>;
 
 #[async_trait]
 impl RpcClient for FrontendRetryClient {
-    async fn new_client(host_addr: HostAddr) -> Result<Self> {
-        Self::new(host_addr).await
+    async fn new_client(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
+        Self::new(host_addr, opts).await
     }
 }
 
@@ -74,8 +74,8 @@ pub struct FrontendRetryClient {
 }
 
 impl FrontendRetryClient {
-    async fn new(host_addr: HostAddr) -> Result<Self> {
-        let client = FrontendClient::new(host_addr).await?;
+    async fn new(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
+        let client = FrontendClient::new(host_addr, opts).await?;
         Ok(Self { client })
     }
 

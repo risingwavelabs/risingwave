@@ -17,6 +17,7 @@ use crate::executor::prelude::*;
 mod epoch_check;
 mod epoch_provide;
 mod schema_check;
+mod stream_node_metrics;
 mod trace;
 mod update_check;
 
@@ -27,6 +28,8 @@ pub struct WrapperExecutor {
     actor_ctx: ActorContextRef,
 
     enable_executor_row_count: bool,
+
+    enable_explain_analyze_stats: bool,
 }
 
 impl WrapperExecutor {
@@ -34,11 +37,14 @@ impl WrapperExecutor {
         input: Executor,
         actor_ctx: ActorContextRef,
         enable_executor_row_count: bool,
+        enable_explain_analyze_stats: bool,
     ) -> Self {
         Self {
             input,
             actor_ctx,
             enable_executor_row_count,
+            enable_explain_analyze_stats: enable_explain_analyze_stats
+                && cfg!(all(not(test), not(madsim))),
         }
     }
 
@@ -55,6 +61,7 @@ impl WrapperExecutor {
 
     fn wrap(
         enable_executor_row_count: bool,
+        enable_explain_analyze_stats: bool,
         info: Arc<ExecutorInfo>,
         actor_ctx: ActorContextRef,
         stream: impl MessageStream + 'static,
@@ -73,7 +80,20 @@ impl WrapperExecutor {
         let stream = epoch_provide::epoch_provide(stream);
 
         // Trace
-        let stream = trace::trace(enable_executor_row_count, info.clone(), actor_ctx, stream);
+        let stream = trace::trace(
+            enable_executor_row_count,
+            info.clone(),
+            actor_ctx.clone(),
+            stream,
+        );
+
+        // operator-level metrics
+        let stream = stream_node_metrics::stream_node_metrics(
+            info.clone(),
+            enable_explain_analyze_stats,
+            stream,
+            actor_ctx.clone(),
+        );
 
         if cfg!(debug_assertions) {
             Self::wrap_debug(info, stream).boxed()
@@ -88,6 +108,7 @@ impl Execute for WrapperExecutor {
         let info = Arc::new(self.input.info().clone());
         Self::wrap(
             self.enable_executor_row_count,
+            self.enable_explain_analyze_stats,
             info,
             self.actor_ctx,
             self.input.execute(),
@@ -99,6 +120,7 @@ impl Execute for WrapperExecutor {
         let info = Arc::new(self.input.info().clone());
         Self::wrap(
             self.enable_executor_row_count,
+            self.enable_explain_analyze_stats,
             info,
             self.actor_ctx,
             self.input.execute_with_epoch(epoch),

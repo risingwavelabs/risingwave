@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("split_part(varchar, varchar, int4) -> varchar")]
 pub fn split_part(

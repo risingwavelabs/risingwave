@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
 either = "1"
@@ -21,9 +22,10 @@ linkme = { workspace = true }
 memcomparable = "0.2"
 mysql_async = { workspace = true }
 opendal = { workspace = true }
+panic-message = "0.3"
 parking_lot = { workspace = true }
 parquet = { workspace = true }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }

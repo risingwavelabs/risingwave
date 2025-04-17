@@ -81,7 +81,8 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
 #[async_trait]
 impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
@@ -91,7 +92,6 @@ impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
                 LogStoreReadItem::Barrier { .. } => {
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }
         }
     }

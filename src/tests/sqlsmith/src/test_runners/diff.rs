@@ -17,17 +17,14 @@
 use anyhow::bail;
 use itertools::Itertools;
 use rand::Rng;
-#[cfg(madsim)]
-use rand_chacha::ChaChaRng;
 use similar::{ChangeTag, TextDiff};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 use crate::test_runners::utils::{
-    create_base_tables, create_mviews, drop_mview_table, drop_tables, format_drop_mview,
+    Result, create_base_tables, create_mviews, drop_mview_table, drop_tables, format_drop_mview,
     generate_rng, populate_tables, run_query, run_query_inner, set_variable, update_base_tables,
-    Result,
 };
-use crate::{differential_sql_gen, Table};
+use crate::{Table, differential_sql_gen};
 
 /// Differential testing for batch and stream
 pub async fn run_differential_testing(

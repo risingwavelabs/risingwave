@@ -47,7 +47,7 @@ pub mod writer;
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use ::clickhouse::error::Error as ClickHouseError;
 use ::deltalake::DeltaTableError;
@@ -56,16 +56,18 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clickhouse::CLICKHOUSE_SINK;
 use decouple_checkpoint_log_sink::{
-    COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
-    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+    COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+    DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use deltalake::DELTALAKE_SINK;
+use futures::future::BoxFuture;
 use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
 use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::ActorId;
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
@@ -80,11 +82,13 @@ use risingwave_common::{
 };
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::error::RpcError;
+use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedReceiver;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
@@ -306,27 +310,27 @@ pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration: LabelGuardedHistogramVec<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounterVec<4>,
+    pub sink_commit_duration: LabelGuardedHistogramVec,
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec,
 
     // Log store writer metrics
-    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<3>,
-    pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_write_rows: LabelGuardedIntCounterVec,
 
     // Log store reader metrics
-    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
-    pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    pub log_store_read_bytes: LabelGuardedIntCounterVec<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_read_rows: LabelGuardedIntCounterVec,
+    pub log_store_read_bytes: LabelGuardedIntCounterVec,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec,
 
     // Iceberg metrics
-    pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
-    pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_write_bytes: LabelGuardedIntCounterVec<3>,
+    pub iceberg_write_qps: LabelGuardedIntCounterVec,
+    pub iceberg_write_latency: LabelGuardedHistogramVec,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
+    pub iceberg_partition_num: LabelGuardedIntGaugeVec,
+    pub iceberg_write_bytes: LabelGuardedIntCounterVec,
 }
 
 impl SinkMetrics {
@@ -488,12 +492,13 @@ pub struct SinkWriterParam {
     pub sink_id: SinkId,
     pub sink_name: String,
     pub connector: String,
+    pub streaming_config: StreamingConfig,
 }
 
 #[derive(Clone)]
 pub struct SinkWriterMetrics {
-    pub sink_commit_duration: LabelGuardedHistogram<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<4>,
+    pub sink_commit_duration: LabelGuardedHistogram,
+    pub connector_sink_rows_received: LabelGuardedIntCounter,
 }
 
 impl SinkWriterMetrics {
@@ -519,8 +524,8 @@ impl SinkWriterMetrics {
     #[cfg(test)]
     pub fn for_test() -> Self {
         Self {
-            sink_commit_duration: LabelGuardedHistogram::test_histogram(),
-            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            sink_commit_duration: LabelGuardedHistogram::test_histogram::<4>(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter::<4>(),
         }
     }
 }
@@ -583,6 +588,7 @@ impl SinkWriterParam {
             sink_id: SinkId::new(1),
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),
+            streaming_config: StreamingConfig::default(),
         }
     }
 }
@@ -611,7 +617,9 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                     if matches!(user_specified, SinkDecouple::Disable)
                         && commit_checkpoint_interval > 1
                     {
-                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
                     }
                 }
                 None => match user_specified {
@@ -643,13 +651,22 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
+
+    fn is_coordinated_sink(&self) -> bool {
+        false
+    }
+
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
 
-pub trait SinkLogReader: Send + Sized + 'static {
+pub trait SinkLogReader: Send {
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
     /// Emit the next item.
     ///
     /// The implementation should ensure that the future is cancellation safe.
@@ -662,27 +679,41 @@ pub trait SinkLogReader: Send + Sized + 'static {
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
 }
 
-impl<R: LogReader> SinkLogReader for R {
+impl<R: LogReader> SinkLogReader for &mut R {
     fn next_item(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_ {
-        <Self as LogReader>::next_item(self)
+        <R as LogReader>::next_item(*self)
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        <Self as LogReader>::truncate(self, offset)
+        <R as LogReader>::truncate(*self, offset)
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        <R as LogReader>::start_from(*self, start_offset)
     }
 }
 
 #[async_trait]
-pub trait LogSinker: 'static {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!>;
+pub trait LogSinker: 'static + Send {
+    // Note: Please rebuild the log reader's read stream before consuming the log store,
+    async fn consume_log_and_sink(self, log_reader: impl SinkLogReader) -> Result<!>;
 }
+pub type SinkCommittedEpochSubscriber = Arc<
+    dyn Fn(SinkId) -> BoxFuture<'static, Result<(u64, UnboundedReceiver<u64>)>>
+        + Send
+        + Sync
+        + 'static,
+>;
 
 #[async_trait]
 pub trait SinkCommitCoordinator {
-    /// Initialize the sink committer coordinator
-    async fn init(&mut self) -> Result<()>;
+    /// Initialize the sink committer coordinator, return the log store rewind start offset.
+    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
@@ -694,8 +725,8 @@ pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
 impl SinkCommitCoordinator for DummySinkCommitCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
@@ -715,8 +746,9 @@ impl SinkImpl {
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
 
+        let sink_type = sink_type.to_lowercase();
         match_sink_name_str!(
-            sink_type.to_lowercase().as_str(),
+            sink_type.as_str(),
             SinkType,
             Ok(SinkType::try_from(param)?.into()),
             |other| {
@@ -734,6 +766,10 @@ impl SinkImpl {
 
     pub fn is_blackhole(&self) -> bool {
         matches!(self, SinkImpl::BlackHole(_))
+    }
+
+    pub fn is_coordinated_sink(&self) -> bool {
+        dispatch_sink!(self, sink, sink.is_coordinated_sink())
     }
 }
 
@@ -785,6 +821,8 @@ pub enum SinkError {
     ),
     #[error("Encode error: {0}")]
     Encode(String),
+    #[error("Avro error: {0}")]
+    Avro(#[from] apache_avro::Error),
     #[error("Iceberg error: {0}")]
     Iceberg(
         #[source]
@@ -905,9 +943,9 @@ pub enum SinkError {
     ),
 }
 
-impl From<icelake::Error> for SinkError {
-    fn from(value: icelake::Error) -> Self {
-        SinkError::Iceberg(anyhow!(value))
+impl From<sea_orm::DbErr> for SinkError {
+    fn from(err: sea_orm::DbErr) -> Self {
+        SinkError::Iceberg(anyhow!(err))
     }
 }
 

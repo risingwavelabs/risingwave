@@ -158,11 +158,12 @@ impl<T> TableChangeLogCommon<T> {
         let start = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.last().expect("non-empty") < &epoch
         });
-        debug_assert!(self
-            .0
-            .range(start..)
-            .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
-            .is_sorted());
+        debug_assert!(
+            self.0
+                .range(start..)
+                .flat_map(|epoch_change_log| epoch_change_log.epochs.iter())
+                .is_sorted()
+        );
         let mut later_epochs = self
             .0
             .range(start..)

@@ -53,3 +53,26 @@ create table hubspot_sha256_v2 (
       , 'UTF8')
     ), 'hex')
 );
+
+statement ok
+create table test_primary_key (
+  data JSONB PRIMARY KEY
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'x-hub-signature',
+  'sha1=' || encode(hmac(test_secret, data, 'sha1'), 'hex')
+);
+
+statement ok
+create table validate_raw_string (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE AS secure_compare(
+  headers->>'x-hub-signature',
+  'sha1=' || encode(hmac('TEST_WEBHOOK', data, 'sha1'), 'hex')
+);
+
+statement error Adding/dropping a column of a table with webhook has not been implemented.
+ALTER TABLE github_hmac_sha1 ADD COLUMN new_col int;

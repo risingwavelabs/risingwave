@@ -21,7 +21,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::window_function::{
-    create_window_state, StateKey, WindowFuncCall, WindowStates,
+    StateKey, WindowFuncCall, WindowStates, create_window_state,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 

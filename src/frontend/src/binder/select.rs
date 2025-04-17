@@ -27,7 +27,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
 use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
-use crate::catalog::check_valid_column_name;
+use crate::catalog::check_column_name_not_reserved;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::CHANGELOG_OP;
@@ -321,7 +321,7 @@ impl Binder {
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    check_valid_column_name(&alias.real_value())?;
+                    check_column_name_not_reserved(&alias.real_value())?;
 
                     let expr = self.bind_expr(expr)?;
                     select_list.push(expr);
@@ -614,7 +614,7 @@ impl Binder {
                                         "DISTINCT ON \"{}\" is ambiguous",
                                         name.real_value()
                                     ))
-                                    .into())
+                                    .into());
                                 }
                                 _ => select_items[*index].clone(),
                             }
@@ -629,7 +629,7 @@ impl Binder {
                                     "Invalid ordinal number in DISTINCT ON: {}",
                                     number
                                 ))
-                                .into())
+                                .into());
                             }
                         },
                         expr => self.bind_expr(expr)?,
@@ -659,7 +659,7 @@ impl Binder {
                         return Err(ErrorCode::BindError(
                             "Only support column name in except list".into(),
                         )
-                        .into())
+                        .into());
                     }
                 }
             }

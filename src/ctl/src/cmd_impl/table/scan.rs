@@ -12,22 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
-use futures::{pin_mut, StreamExt};
+use anyhow::{Result, anyhow};
+use futures::{StreamExt, pin_mut};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
+use risingwave_storage::StateStore;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableDistribution;
-use risingwave_storage::StateStore;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_stream::common::table::state_table::StateTable;
 
-use crate::common::HummockServiceOpts;
 use crate::CtlContext;
+use crate::common::HummockServiceOpts;
 
 pub async fn get_table_catalog(meta: MetaClient, mv_name: String) -> Result<TableCatalog> {
     let mvs = meta.risectl_list_state_tables().await?;
@@ -72,13 +72,13 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
 pub fn make_storage_table<S: StateStore>(
     hummock: S,
     table: &TableCatalog,
-) -> Result<StorageTable<S>> {
+) -> Result<BatchTable<S>> {
     let output_columns_ids = table
         .columns()
         .iter()
         .map(|x| x.column_desc.column_id)
         .collect();
-    Ok(StorageTable::new_partial(
+    Ok(BatchTable::new_partial(
         hummock,
         output_columns_ids,
         Some(Bitmap::ones(table.vnode_count()).into()),

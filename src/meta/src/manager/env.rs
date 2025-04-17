@@ -17,7 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
+use risingwave_common::config::{
+    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig,
+};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
@@ -28,17 +30,17 @@ use risingwave_rpc_client::{
 };
 use sea_orm::EntityTrait;
 
+use crate::MetaResult;
+use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
 };
 use crate::controller::session_params::{SessionParamsController, SessionParamsControllerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
-use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
-use crate::manager::event_log::{start_event_log_manager, EventLogManagerRef};
+use crate::manager::event_log::{EventLogManagerRef, start_event_log_manager};
 use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
 use crate::model::ClusterId;
-use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
@@ -246,6 +248,8 @@ pub struct MetaOpts {
 
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
 
+    pub compaction_group_merge_dimension_threshold: f64,
+
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
@@ -256,6 +260,10 @@ pub struct MetaOpts {
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 
     pub license_key_path: Option<PathBuf>,
+
+    pub compute_client_config: RpcClientConfig,
+    pub stream_client_config: RpcClientConfig,
+    pub frontend_client_config: RpcClientConfig,
 }
 
 impl MetaOpts {
@@ -334,7 +342,11 @@ impl MetaOpts {
             table_stat_throuput_window_seconds_for_split: 60,
             table_stat_throuput_window_seconds_for_merge: 240,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
+            compaction_group_merge_dimension_threshold: 1.2,
             license_key_path: None,
+            compute_client_config: RpcClientConfig::default(),
+            stream_client_config: RpcClientConfig::default(),
+            frontend_client_config: RpcClientConfig::default(),
         }
     }
 }
@@ -347,8 +359,12 @@ impl MetaSrvEnv {
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
-        let frontend_client_pool = Arc::new(FrontendClientPool::new(1));
+        let stream_client_pool =
+            Arc::new(StreamClientPool::new(1, opts.stream_client_config.clone())); // typically no need for plural clients
+        let frontend_client_pool = Arc::new(FrontendClientPool::new(
+            1,
+            opts.frontend_client_config.clone(),
+        ));
         let event_log_manager = Arc::new(start_event_log_manager(
             opts.event_log_enabled,
             opts.event_log_channel_max_size,

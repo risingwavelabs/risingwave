@@ -23,14 +23,15 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
+use crate::OptimizerContextRef;
 use crate::binder::{BoundDistinct, BoundSelect};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
 };
-use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
     LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
@@ -38,7 +39,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
 use crate::utils::{Condition, IndexSet};
-use crate::OptimizerContextRef;
 
 impl Planner {
     pub(super) fn plan_select(

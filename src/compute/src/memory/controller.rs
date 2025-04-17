@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use risingwave_common::sequence::{Sequence, SEQUENCE_GLOBAL};
+use risingwave_common::sequence::{SEQUENCE_GLOBAL, Sequence};
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 

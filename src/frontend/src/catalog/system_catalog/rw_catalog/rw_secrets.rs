@@ -22,6 +22,7 @@ use crate::error::Result;
 struct RwSecret {
     #[primary_key]
     id: i32,
+    schema_id: i32,
     name: String,
     owner: i32,
     acl: Vec<String>,
@@ -36,6 +37,7 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
         .flat_map(|schema| {
             schema.iter_secret().map(|secret| RwSecret {
                 id: secret.id.secret_id() as i32,
+                schema_id: secret.schema_id as i32,
                 name: secret.name.clone(),
                 owner: secret.owner as i32,
                 acl: vec![],

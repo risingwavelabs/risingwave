@@ -21,8 +21,8 @@ use risingwave_pb::stream_plan::{PbNowModeGenerateSeries, PbNowModeUpdateCurrent
 
 use super::generic::{GenericPlanNode, Mode};
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill, TableCatalogBuilder};
-use super::{generic, ExprRewritable, PlanBase, StreamNode};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
+use super::{ExprRewritable, PlanBase, StreamNode, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::{Distribution, Monotonicity, MonotonicityMap, WatermarkColumns};

@@ -19,8 +19,8 @@ use anyhow::Result;
 use itertools::Itertools;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::ctl_ext::Fragment;
+use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
@@ -82,7 +82,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     let prev_worker = worker_map.get(&single_used_worker_id).unwrap();
     let host = prev_worker.clone().host.unwrap().host;
-    let host_name = format!("compute-{}", host.split('.').last().unwrap());
+    let host_name = format!("compute-{}", host.split('.').next_back().unwrap());
 
     let all_worker_slots = table_mat_fragment.all_worker_count();
     let used_worker_slots = table_mat_fragment.used_worker_count();

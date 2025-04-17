@@ -22,9 +22,9 @@ use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair
 use super::generic::{GenericPlanNode, Join};
 use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
-use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
+use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode, generic,
 };
 use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;

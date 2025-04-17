@@ -18,12 +18,11 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hashbrown = { workspace = true }
-iceberg = { workspace = true }
 itertools = { workspace = true }
 linkme = { workspace = true }
 mysql_async = { workspace = true }
 opendal = { workspace = true }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 rand = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -36,7 +35,6 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
-scopeguard = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -48,7 +46,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-postgres = "0.7"
-tokio-stream = { workspace = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
@@ -62,6 +59,7 @@ risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
+tokio-stream = { workspace = true }
 
 [[bench]]
 name = "filter"

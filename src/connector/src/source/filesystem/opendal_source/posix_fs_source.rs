@@ -15,9 +15,9 @@
 use std::marker::PhantomData;
 
 use anyhow::Context;
+use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Fs;
-use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::{OpendalSource, PosixFsProperties};

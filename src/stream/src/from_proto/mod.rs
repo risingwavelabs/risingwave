@@ -32,6 +32,7 @@ mod hash_join;
 mod hop_window;
 mod lookup;
 mod lookup_union;
+mod materialized_exprs;
 mod merge;
 mod mview;
 mod no_op;
@@ -58,6 +59,8 @@ mod row_merge;
 
 mod approx_percentile;
 
+mod sync_log_store;
+
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -82,6 +85,7 @@ use self::hash_join::*;
 use self::hop_window::*;
 use self::lookup::*;
 use self::lookup_union::*;
+use self::materialized_exprs::MaterializedExprsExecutorBuilder;
 pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
@@ -99,6 +103,7 @@ use self::source_backfill::*;
 use self::stateless_simple_agg::*;
 use self::stream_cdc_scan::*;
 use self::stream_scan::*;
+use self::sync_log_store::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
@@ -188,5 +193,7 @@ pub async fn create_executor(
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
         NodeBody::RowMerge => RowMergeExecutorBuilder,
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
+        NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
+        NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
     }
 }

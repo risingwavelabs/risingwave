@@ -17,10 +17,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use itertools::Itertools;
+use either::Either;
+use itertools::{Itertools, repeat_n};
 
 use super::DataType;
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::catalog::ColumnId;
+use crate::util::iter_util::ZipEqFast;
 
 /// A cheaply cloneable struct type.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,113 +30,174 @@ pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StructType")
-            .field("field_names", &self.0.field_names)
-            .field("field_types", &self.0.field_types)
-            .finish()
+        let alternate = f.alternate();
+
+        let mut d = f.debug_struct("StructType");
+        d.field("fields", &self.0.fields);
+        if let Some(ids) = &self.0.field_ids
+        // TODO: This is for making `EXPLAIN` output more concise, but it hurts the readability
+        // for testing and debugging. Avoid using `Debug` repr in `EXPLAIN` output instead.
+            && alternate
+        {
+            d.field("field_ids", ids);
+        }
+        d.finish()
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
-    /// Details about a struct type. There are 2 cases for a struct:
-    /// 1. `field_names.len() == field_types.len()`: it represents a struct with named fields,
-    ///     e.g. `STRUCT<i INT, j VARCHAR>`.
-    /// 2. `field_names.len() == 0`: it represents a struct with unnamed fields,
-    ///     e.g. `ROW(1, 2)`.
-    field_names: Box<[String]>,
-    field_types: Box<[DataType]>,
+    /// The name and data type of each field.
+    ///
+    /// If fields are unnamed, the names will be `f1`, `f2`, etc.
+    fields: Box<[(String, DataType)]>,
+
+    /// The ids of the fields. Used in serialization for nested-schema evolution purposes.
+    ///
+    /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
+    /// in a new version of the catalog that supports nested-schema evolution.
+    field_ids: Option<Box<[ColumnId]>>,
+
+    /// Whether the fields are unnamed.
+    is_unnamed: bool,
 }
 
 impl StructType {
     /// Creates a struct type with named fields.
     pub fn new(named_fields: impl IntoIterator<Item = (impl Into<String>, DataType)>) -> Self {
-        let iter = named_fields.into_iter();
-        let mut field_types = Vec::with_capacity(iter.size_hint().0);
-        let mut field_names = Vec::with_capacity(iter.size_hint().0);
-        for (name, ty) in iter {
-            field_names.push(name.into());
-            field_types.push(ty);
-        }
+        let fields = named_fields
+            .into_iter()
+            .map(|(name, ty)| (name.into(), ty))
+            .collect();
+
         Self(Arc::new(StructTypeInner {
-            field_types: field_types.into(),
-            field_names: field_names.into(),
+            fields,
+            field_ids: None,
+            is_unnamed: false,
         }))
     }
 
-    /// Creates a struct type with no fields.
+    /// Creates a struct type with no fields. This makes no sense in practice.
     #[cfg(test)]
     pub fn empty() -> Self {
+        Self::unnamed(Vec::new())
+    }
+
+    /// Creates a struct type with unnamed fields. The names will be assigned `f1`, `f2`, etc.
+    pub fn unnamed(fields: Vec<DataType>) -> Self {
+        let fields = fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, ty)| (format!("f{}", i + 1), ty))
+            .collect();
+
         Self(Arc::new(StructTypeInner {
-            field_types: Box::new([]),
-            field_names: Box::new([]),
+            fields,
+            field_ids: None,
+            is_unnamed: true,
         }))
     }
 
-    /// Creates a struct type with unnamed fields.
-    pub fn unnamed(fields: Vec<DataType>) -> Self {
-        Self(Arc::new(StructTypeInner {
-            field_types: fields.into(),
-            field_names: Box::new([]),
-        }))
+    /// Attaches given field ids to the struct type.
+    pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
+        let ids: Box<[ColumnId]> = ids.into_iter().collect();
+
+        assert_eq!(ids.len(), self.len(), "ids length mismatches");
+        assert!(
+            ids.iter().all(|id| *id != ColumnId::placeholder()),
+            "ids should not contain placeholder value"
+        );
+
+        let mut inner = Arc::unwrap_or_clone(self.0);
+        inner.field_ids = Some(ids);
+        Self(Arc::new(inner))
+    }
+
+    /// Whether the struct type has field ids.
+    ///
+    /// Note that this does not recursively check whether composite fields have ids.
+    pub fn has_ids(&self) -> bool {
+        self.0.field_ids.is_some()
+    }
+
+    /// Whether the fields are unnamed.
+    pub fn is_unnamed(&self) -> bool {
+        self.0.is_unnamed
     }
 
     /// Returns the number of fields.
     pub fn len(&self) -> usize {
-        self.0.field_types.len()
+        self.0.fields.len()
     }
 
     /// Returns `true` if there are no fields.
     pub fn is_empty(&self) -> bool {
-        self.0.field_types.is_empty()
+        self.0.fields.is_empty()
     }
 
     /// Gets an iterator over the names of the fields.
     ///
-    /// If the struct field is unnamed, the iterator returns **no names**.
+    /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
     pub fn names(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.0.field_names.iter().map(|s| s.as_str())
+        self.0.fields.iter().map(|(name, _)| name.as_str())
     }
 
     /// Gets an iterator over the types of the fields.
     pub fn types(&self) -> impl ExactSizeIterator<Item = &DataType> {
-        self.0.field_types.iter()
+        self.0.fields.iter().map(|(_, ty)| ty)
+    }
+
+    /// Gets the type of a field by index.
+    pub fn type_at(&self, index: usize) -> &DataType {
+        &self.0.fields[index].1
     }
 
     /// Gets an iterator over the fields.
     ///
-    /// If the struct field is unnamed, the iterator returns **empty strings**.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &DataType)> {
-        self.0
-            .field_names
-            .iter()
-            .map(|s| s.as_str())
-            .chain(std::iter::repeat("").take(self.0.field_types.len() - self.0.field_names.len()))
-            .zip_eq_debug(self.0.field_types.iter())
+    /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &DataType)> {
+        self.0.fields.iter().map(|(name, ty)| (name.as_str(), ty))
     }
 
-    /// Compares the datatype with another, ignoring nested field names and metadata.
+    /// Gets an iterator over the field ids.
+    ///
+    /// Returns `None` if they are not present. See documentation on the field `field_ids`
+    /// for the cases.
+    pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
+        self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
+    }
+
+    /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
+    pub fn ids_or_placeholder(&self) -> impl ExactSizeIterator<Item = ColumnId> + '_ {
+        match self.ids() {
+            Some(ids) => Either::Left(ids),
+            None => Either::Right(repeat_n(ColumnId::placeholder(), self.len())),
+        }
+    }
+
+    /// Compares the datatype with another, ignoring nested field names and ids.
     pub fn equals_datatype(&self, other: &StructType) -> bool {
-        if self.0.field_types.len() != other.0.field_types.len() {
+        if self.len() != other.len() {
             return false;
         }
-        (self.0.field_types.iter())
-            .zip_eq_fast(other.0.field_types.iter())
+
+        (self.types())
+            .zip_eq_fast(other.types())
             .all(|(a, b)| a.equals_datatype(b))
     }
 }
 
 impl Display for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.0.field_names.is_empty() {
+        if self.is_unnamed() {
+            // To be consistent with the return type of `ROW` in Postgres.
             write!(f, "record")
         } else {
             write!(
                 f,
                 "struct<{}>",
-                (self.0.field_types.iter())
-                    .zip_eq_fast(self.0.field_names.iter())
-                    .map(|(d, s)| format!("{} {}", s, d))
+                self.iter()
+                    .map(|(name, ty)| format!("{} {}", name, ty))
                     .join(", ")
             )
         }
@@ -151,19 +214,14 @@ impl FromStr for StructType {
         if !(s.starts_with("struct<") && s.ends_with('>')) {
             return Err(anyhow!("expect struct<...>"));
         };
-        let mut field_types = Vec::new();
-        let mut field_names = Vec::new();
+        let mut fields = Vec::new();
         for field in s[7..s.len() - 1].split(',') {
             let field = field.trim();
             let mut iter = field.split_whitespace();
-            let field_name = iter.next().unwrap();
-            let field_type = iter.next().unwrap();
-            field_names.push(field_name.to_owned());
-            field_types.push(DataType::from_str(field_type)?);
+            let field_name = iter.next().unwrap().to_owned();
+            let field_type = DataType::from_str(iter.next().unwrap())?;
+            fields.push((field_name, field_type));
         }
-        Ok(Self(Arc::new(StructTypeInner {
-            field_types: field_types.into(),
-            field_names: field_names.into(),
-        })))
+        Ok(Self::new(fields))
     }
 }

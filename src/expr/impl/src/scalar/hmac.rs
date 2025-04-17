@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use hmac::{Hmac, Mac};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use sha1::Sha1;
 use sha2::Sha256;
 

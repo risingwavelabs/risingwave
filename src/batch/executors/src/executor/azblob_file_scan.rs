@@ -17,7 +17,7 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{
-    extract_bucket_and_file_name, new_azblob_operator, read_parquet_file, FileScanBackend,
+    FileScanBackend, extract_bucket_and_file_name, new_azblob_operator, read_parquet_file,
 };
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -92,7 +92,8 @@ impl AzblobFileScanExecutor {
                 bucket.clone(),
             )?;
             let chunk_stream =
-                read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
+                read_parquet_file(op, file_name, None, None, self.batch_size, 0, None, None)
+                    .await?;
             #[for_await]
             for stream_chunk in chunk_stream {
                 let stream_chunk = stream_chunk?;

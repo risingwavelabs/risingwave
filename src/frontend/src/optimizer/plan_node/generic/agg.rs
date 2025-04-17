@@ -22,13 +22,14 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
-use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
+use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncBuilder};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as PbAggCallState};
+use risingwave_pb::stream_plan::{AggCallState as PbAggCallState, agg_call_state};
 
 use super::super::utils::TableCatalogBuilder;
-use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields, stream};
+use crate::TableCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -41,7 +42,6 @@ use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
     IndexSet,
 };
-use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
@@ -676,8 +676,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     table_builder.add_column(&Field {
                         data_type: DataType::Int64,
                         name: format!("count_for_agg_call_{}", call_index),
-                        sub_fields: vec![],
-                        type_name: String::default(),
                     });
                 }
                 table_builder

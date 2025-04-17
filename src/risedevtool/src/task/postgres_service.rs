@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::task::docker_service::{DockerService, DockerServiceConfig};
 use crate::PostgresConfig;
+use crate::task::docker_service::{DockerService, DockerServiceConfig};
 
 impl DockerServiceConfig for PostgresConfig {
     fn id(&self) -> String {

@@ -18,13 +18,13 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall};
-use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 /// Transform distinct aggregates to `LogicalAgg` -> `LogicalAgg` -> `Expand` -> `Input`.

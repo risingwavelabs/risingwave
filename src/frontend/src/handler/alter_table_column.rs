@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, Engine};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -26,11 +27,12 @@ use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
-use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
+};
 
-use super::create_source::{schema_has_schema_registry, SqlColumnStrategy};
-use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
-use super::util::SourceSchemaCompatExt;
+use super::create_source::SqlColumnStrategy;
+use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
@@ -39,6 +41,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
@@ -101,62 +104,53 @@ pub async fn get_replace_table_plan(
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
-    let Statement::CreateTable {
-        columns,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        wildcard_idx,
-        cdc_table_info,
-        format_encode,
-        include_column_options,
-        engine,
-        ..
-    } = new_definition
-    else {
-        panic!("unexpected statement type: {:?}", new_definition);
-    };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let engine = match engine {
-        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
-        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
-    };
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         old_catalog,
-        format_encode,
         handler_args.clone(),
+        new_definition,
         col_id_gen,
-        columns.clone(),
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
-        on_conflict,
-        with_version_column,
-        cdc_table_info,
-        include_column_options,
-        engine,
         sql_column_strategy,
     )
     .await?;
 
     // Calculate the mapping from the original columns to the new columns.
+    // This will be used to map the output of the table in the dispatcher to make
+    // existing downstream jobs work correctly.
     let col_index_mapping = ColIndexMapping::new(
         old_catalog
             .columns()
             .iter()
             .map(|old_c| {
                 table.columns.iter().position(|new_c| {
-                    new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
+                    let new_c = new_c.get_column_desc().unwrap();
+
+                    // We consider both the column ID and the data type.
+                    // If either of them does not match, we will treat it as a new column.
+                    //
+                    // TODO: Since we've succeeded in assigning column IDs in the step above,
+                    //       the new data type is actually _compatible_ with the old one.
+                    //       Theoretically, it's also possible to do some sort of mapping for
+                    //       the downstream job to work correctly. However, the current impl
+                    //       only supports simple column projection, which we may improve in
+                    //       future works.
+                    //       However, by treating it as a new column, we can at least reject
+                    //       the case where the column with type change is referenced by any
+                    //       downstream jobs (because the original column is considered dropped).
+                    let id_matches = || new_c.column_id == old_c.column_id().get_id();
+                    let type_matches = || {
+                        let original_data_type = old_c.data_type();
+                        let new_data_type = DataType::from(new_c.column_type.as_ref().unwrap());
+                        let matches = original_data_type == &new_data_type;
+                        if !matches {
+                            notice_to_user(format!("the data type of column \"{}\" has changed, treating as a new column", old_c.name()));
+                        }
+                        matches
+                    };
+
+                    id_matches() && type_matches()
                 })
             })
             .collect(),
@@ -258,33 +252,16 @@ pub async fn handle_alter_table_column(
         )));
     }
 
+    if original_catalog.webhook_info.is_some() {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Adding/dropping a column of a table with webhook has not been implemented.".to_owned(),
+        )));
+    }
+
     // Retrieve the original table definition and parse it to AST.
     let mut definition = original_catalog.create_sql_ast_purified()?;
-    let Statement::CreateTable {
-        columns,
-        format_encode,
-        ..
-    } = &mut definition
-    else {
+    let Statement::CreateTable { columns, .. } = &mut definition else {
         panic!("unexpected statement: {:?}", definition);
-    };
-
-    let format_encode = format_encode
-        .clone()
-        .map(|format_encode| format_encode.into_v2_with_warning());
-
-    let fail_if_has_schema_registry = || {
-        if let Some(format_encode) = &format_encode
-            && schema_has_schema_registry(format_encode)
-        {
-            // TODO(purify): we may support this.
-            Err(ErrorCode::NotSupported(
-                "alter table with schema registry".to_owned(),
-                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
-            ))
-        } else {
-            Ok(())
-        }
     };
 
     if !original_catalog.incoming_sinks.is_empty()
@@ -295,12 +272,27 @@ pub async fn handle_alter_table_column(
         ))?;
     }
 
-    match operation {
+    // The `sql_column_strategy` will be `FollowChecked` if the operation is `AddColumn`, and
+    // `FollowUnchecked` if the operation is `DropColumn`.
+    //
+    // Consider the following example:
+    // - There was a column `foo` and a generated column `gen` that references `foo`.
+    // - The external schema is updated to remove `foo`.
+    // - The user tries to drop `foo` from the table.
+    //
+    // Dropping `foo` directly will fail because `gen` references `foo`. However, dropping `gen`
+    // first will also be rejected because `foo` does not exist any more. Also, executing
+    // `REFRESH SCHEMA` will not help because it keeps the generated column. The user gets stuck.
+    //
+    // `FollowUnchecked` workarounds this issue. There are also some alternatives:
+    // - Allow dropping multiple columns at once.
+    // - Check against the persisted schema, instead of resolving again.
+    //
+    // Applied only to tables with schema registry.
+    let sql_column_strategy = match operation {
         AlterTableOperation::AddColumn {
             column_def: new_column,
         } => {
-            fail_if_has_schema_registry()?;
-
             // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
             // better error reporting.
             let new_column_name = new_column.name.real_value();
@@ -323,8 +315,24 @@ pub async fn handle_alter_table_column(
                 ))?
             }
 
+            if new_column
+                .options
+                .iter()
+                .any(|x| matches!(x.option, ColumnOption::NotNull))
+                && !new_column
+                    .options
+                    .iter()
+                    .any(|x| matches!(x.option, ColumnOption::DefaultValue(_)))
+            {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "alter table add NOT NULL columns must have default value".to_owned(),
+                ))?;
+            }
+
             // Add the new column to the table definition if it is not created by `create table (*)` syntax.
             columns.push(new_column);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         AlterTableOperation::DropColumn {
@@ -338,10 +346,6 @@ pub async fn handle_alter_table_column(
 
             // Check if the column to drop is referenced by any generated columns.
             for column in original_catalog.columns() {
-                if column_name.real_value() == column.name() && !column.is_generated() {
-                    fail_if_has_schema_registry()?;
-                }
-
                 if let Some(expr) = column.generated_expr() {
                     let expr = ExprImpl::from_expr_proto(expr)?;
                     let refs = expr.collect_input_refs(original_catalog.columns().len());
@@ -361,7 +365,7 @@ pub async fn handle_alter_table_column(
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
             let removed_column = columns
-                .extract_if(|c| c.name.real_value() == column_name)
+                .extract_if(.., |c| c.name.real_value() == column_name)
                 .at_most_one()
                 .ok()
                 .unwrap();
@@ -381,17 +385,44 @@ pub async fn handle_alter_table_column(
                     column_name, table_name
                 )))?
             }
+
+            SqlColumnStrategy::FollowUnchecked
+        }
+
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            let AlterColumnOperation::SetDataType {
+                data_type,
+                using: None,
+            } = op
+            else {
+                bail_not_implemented!(issue = 6903, "{op}");
+            };
+
+            // Locate the column by name and update its data type.
+            let column_name = column_name.real_value();
+            let column = columns
+                .iter_mut()
+                .find(|c| c.name.real_value() == column_name)
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "column \"{}\" of table \"{}\" does not exist",
+                        column_name, table_name
+                    ))
+                })?;
+
+            column.data_type = Some(data_type);
+
+            SqlColumnStrategy::FollowChecked
         }
 
         _ => unreachable!(),
     };
-
     let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
         &original_catalog,
-        SqlColumnStrategy::Follow,
+        sql_column_strategy,
     )
     .await?;
 
@@ -440,7 +471,9 @@ pub fn fetch_table_catalog_for_alter(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -491,7 +524,10 @@ mod tests {
         // Check the old columns and IDs are not changed.
         assert_eq!(columns["i"], altered_columns["i"]);
         assert_eq!(columns["r"], altered_columns["r"]);
-        assert_eq!(columns[ROWID_PREFIX], altered_columns[ROWID_PREFIX]);
+        assert_eq!(
+            columns[ROW_ID_COLUMN_NAME],
+            altered_columns[ROW_ID_COLUMN_NAME]
+        );
 
         // Check the version is updated.
         assert_eq!(

@@ -34,7 +34,7 @@ impl Binder {
             _ => {
                 return Err(
                     ErrorCode::InternalError(format!("Too many idents: {:?}", idents)).into(),
-                )
+                );
             }
         };
 

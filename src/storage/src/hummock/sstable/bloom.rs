@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use bytes::BufMut;
 
-use super::filter::FilterBuilder;
 use super::Sstable;
+use super::filter::FilterBuilder;
 use crate::hummock::MemoryLimiter;
 
 pub trait BitSlice {
@@ -164,7 +164,7 @@ impl FilterBuilder for BloomFilterBuilder {
         let k = k.clamp(1, 30);
         // For small len(keys), we set a minimum Bloom filter length to avoid high FPR
         let nbits = (self.key_hash_entries.len() * self.bits_per_key).max(64);
-        let nbytes = (nbits + 7) / 8;
+        let nbytes = nbits.div_ceil(8);
         // nbits is always multiplication of 8
         let nbits = nbytes * 8;
         let mut filter = Vec::with_capacity(nbytes + 1);

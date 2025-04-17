@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 
 use crate::executor::error::StreamExecutorError;
@@ -40,10 +40,7 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             if stale {
                 panic!(
                     "epoch check failed on {}: last epoch is {:?}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
-                    info.identity,
-                    last_epoch,
-                    new_epoch,
-                    b
+                    info.identity, last_epoch, new_epoch, b
                 );
             }
 
@@ -51,12 +48,9 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                 && !b.is_with_stop_mutation()
             {
                 assert_eq!(
-                    b.epoch.prev,
-                    last_epoch,
+                    b.epoch.prev, last_epoch,
                     "missing barrier: last barrier's epoch = {}, while current barrier prev={} curr={}",
-                    last_epoch,
-                    b.epoch.prev,
-                    b.epoch.curr
+                    last_epoch, b.epoch.prev, b.epoch.curr
                 );
             }
 

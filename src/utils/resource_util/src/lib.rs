@@ -35,8 +35,8 @@ mod runtime {
 
     use thiserror_ext::AsReport;
 
-    use super::util::parse_controller_enable_file_for_cgroup_v2;
     use super::CgroupVersion;
+    use super::util::parse_controller_enable_file_for_cgroup_v2;
     const DEFAULT_DOCKER_ENV_PATH: &str = "/.dockerenv";
     const DEFAULT_LINUX_IDENTIFIER: &str = "linux";
     const DEFAULT_IN_CONTAINER_ENV_VARIABLE: &str = "IN_CONTAINER";
@@ -332,12 +332,12 @@ pub mod cpu {
                     .map_err(|e| parse_error(limit_path, &cpu_limit_string, e))?;
                 Ok((cpu_quota as f32) / (cpu_period as f32))
             }
-            None => Err(
-                std::io::Error::new(
+            None => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Invalid format in Cgroup CPU interface file, path: {limit_path}, content: {cpu_limit_string}")
-                )
-            ),
+                format!(
+                    "Invalid format in Cgroup CPU interface file, path: {limit_path}, content: {cpu_limit_string}"
+                ),
+            )),
         }
     }
 }

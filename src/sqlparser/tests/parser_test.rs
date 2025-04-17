@@ -24,7 +24,7 @@ use std::fmt::{Display, Write as _};
 use std::fs::File;
 use std::io::Write;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use console::style;
 use libtest_mimic::{Arguments, Failed, Trial};
 use risingwave_sqlparser::ast::Statement;
@@ -180,7 +180,7 @@ fn main() {
         if !(entry
             .path()
             .extension()
-            .map_or(false, |p| p.eq_ignore_ascii_case("yaml")))
+            .is_some_and(|p| p.eq_ignore_ascii_case("yaml")))
         {
             continue;
         }

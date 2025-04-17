@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
+use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
-use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{MediaType, OpendalObjectStore};

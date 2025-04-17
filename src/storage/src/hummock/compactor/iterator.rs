@@ -15,16 +15,16 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 use std::time::Instant;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use fail::fail_point;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -131,7 +131,7 @@ impl SstableStreamIterator {
                 self.sstable_info.object_id,
                 &self.block_metas[self.block_idx..],
             )
-            .verbose_instrument_await("stream_iter_get_stream")
+            .instrument_await("stream_iter_get_stream".verbose())
             .await?;
         self.block_stream = Some(block_stream);
         Ok(())
@@ -312,7 +312,7 @@ impl SstableStreamIterator {
 
     pub fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     fn sst_debug_info(&self) -> String {
@@ -448,7 +448,7 @@ impl ConcatSstableIterator {
             let sstable = self
                 .sstable_store
                 .sstable(table_info, &mut self.stats)
-                .verbose_instrument_await("stream_iter_sstable")
+                .instrument_await("stream_iter_sstable".verbose())
                 .await?;
 
             let filter_key_range = match seek_key {
@@ -521,7 +521,7 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.sstable_iter.as_ref().is_some_and(|i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
@@ -724,19 +724,19 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey, FullKeyTracker};
+    use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, next_full_key, prev_full_key};
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 
+    use crate::hummock::BlockMeta;
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::{HummockIterator, MergeIterator};
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_info, test_key_of,
+        test_value_of,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::BlockMeta;
 
     #[tokio::test]
     async fn test_concat_iterator() {

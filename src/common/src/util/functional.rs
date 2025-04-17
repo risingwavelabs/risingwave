@@ -16,10 +16,6 @@
 pub impl<T: Eq> T {
     /// Check if `self` and `other` are equal, if so, return `self`, otherwise return the result of `f()`.
     fn same_or_else(self, other: T, f: impl FnOnce() -> T) -> T {
-        if self == other {
-            self
-        } else {
-            f()
-        }
+        if self == other { self } else { f() }
     }
 }

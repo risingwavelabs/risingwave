@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,24 +21,30 @@ use foyer::{
     CacheHint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
+use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{
+    EpochWithGap, HummockEpoch, HummockReadEpoch, HummockSstableObjectId,
+};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+    DEFAULT_RESTART_INTERVAL, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
 };
+use crate::StateStore;
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
+use crate::error::StorageResult;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferItem, SharedBufferValue,
 };
@@ -49,7 +56,7 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
-use crate::StateStoreIter;
+use crate::store::*;
 
 pub fn default_opts_for_test() -> StorageOpts {
     StorageOpts {
@@ -162,7 +169,14 @@ pub async fn gen_test_sstable_data(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
-    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts, table_id_to_vnode);
+    let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+    let mut b = SstableBuilder::for_test(
+        0,
+        mock_sst_writer(&opts),
+        opts,
+        table_id_to_vnode,
+        table_id_to_watermark_serde,
+    );
     for (key, value) in kv_iter {
         b.add_for_test(key.to_ref(), value.as_slice())
             .await
@@ -233,6 +247,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     table_id_to_vnode: HashMap<u32, usize>,
+    table_id_to_watermark_serde: HashMap<u32, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
 ) -> SstableInfo {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
@@ -246,6 +261,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
         FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     ));
 
     let mut b = SstableBuilder::<_, F>::new(
@@ -283,6 +299,10 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+
+    let table_id_to_watermark_serde =
+        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -290,6 +310,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         sstable_store.clone(),
         CachePolicy::NotFill,
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await;
 
@@ -310,9 +331,10 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
     table_ids: Vec<StateTableId>,
 ) -> (TableHolder, SstableInfo) {
     let table_id_to_vnode = table_ids
-        .into_iter()
-        .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+        .iter()
+        .map(|table_id| (*table_id, VirtualNode::COUNT_FOR_TEST))
         .collect();
+    let table_id_to_watermark_serde = table_ids.iter().map(|table_id| (*table_id, None)).collect();
 
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
@@ -321,6 +343,7 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
         sstable_store.clone(),
         CachePolicy::NotFill,
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await;
 
@@ -344,6 +367,10 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+
+    let table_id_to_watermark_serde =
+        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+
     gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
         opts,
         object_id,
@@ -351,6 +378,7 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
         sstable_store,
         CachePolicy::NotFill,
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await
 }
@@ -366,6 +394,10 @@ pub async fn gen_test_sstable_with_range_tombstone(
         TableId::default().table_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+
+    let table_id_to_watermark_serde =
+        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+
     gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -373,6 +405,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         sstable_store.clone(),
         CachePolicy::Fill(CacheHint::Normal),
         table_id_to_vnode,
+        table_id_to_watermark_serde,
     )
     .await
 }
@@ -448,4 +481,187 @@ where
         .build()
         .await
         .unwrap()
+}
+
+#[derive(Default, Clone)]
+pub struct StateStoreTestReadOptions {
+    pub table_id: TableId,
+    pub prefix_hint: Option<Bytes>,
+    pub prefetch_options: PrefetchOptions,
+    pub cache_policy: CachePolicy,
+    pub read_committed: bool,
+    pub retention_seconds: Option<u32>,
+    pub read_version_from_backup: bool,
+}
+
+impl StateStoreTestReadOptions {
+    fn get_read_epoch(&self, epoch: u64) -> HummockReadEpoch {
+        if self.read_version_from_backup {
+            HummockReadEpoch::Backup(epoch)
+        } else if self.read_committed {
+            HummockReadEpoch::Committed(epoch)
+        } else {
+            HummockReadEpoch::NoWait(epoch)
+        }
+    }
+}
+
+pub type ReadOptions = StateStoreTestReadOptions;
+
+impl From<StateStoreTestReadOptions> for crate::store::ReadOptions {
+    fn from(val: StateStoreTestReadOptions) -> crate::store::ReadOptions {
+        crate::store::ReadOptions {
+            prefix_hint: val.prefix_hint,
+            prefetch_options: val.prefetch_options,
+            cache_policy: val.cache_policy,
+            retention_seconds: val.retention_seconds,
+        }
+    }
+}
+
+pub trait StateStoreReadTestExt: StateStore {
+    /// Point gets a value from the state store.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// Both full key and the value are returned.
+    fn get_keyed_row(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<StateStoreKeyedRow>>;
+
+    /// Point gets a value from the state store.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// Only the value is returned.
+    fn get(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<Bytes>> {
+        self.get_keyed_row(key, epoch, read_options)
+            .map_ok(|v| v.map(|(_, v)| v))
+    }
+
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
+    fn iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, <<Self as StateStore>::ReadSnapshot as StateStoreRead>::Iter>;
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, <<Self as StateStore>::ReadSnapshot as StateStoreRead>::RevIter>;
+
+    fn scan(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        limit: Option<usize>,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Vec<StateStoreKeyedRow>>;
+}
+
+impl<S: StateStore> StateStoreReadTestExt for S {
+    async fn get_keyed_row(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        let snapshot = self
+            .new_read_snapshot(
+                read_options.get_read_epoch(epoch),
+                NewReadSnapshotOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        snapshot
+            .on_key_value(key, read_options.into(), |key, value| {
+                Ok((key.copy_into(), Bytes::copy_from_slice(value)))
+            })
+            .await
+    }
+
+    async fn iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<<<Self as StateStore>::ReadSnapshot as StateStoreRead>::Iter> {
+        let snapshot = self
+            .new_read_snapshot(
+                read_options.get_read_epoch(epoch),
+                NewReadSnapshotOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        snapshot.iter(key_range, read_options.into()).await
+    }
+
+    async fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<<<Self as StateStore>::ReadSnapshot as StateStoreRead>::RevIter> {
+        let snapshot = self
+            .new_read_snapshot(
+                read_options.get_read_epoch(epoch),
+                NewReadSnapshotOptions {
+                    table_id: read_options.table_id,
+                },
+            )
+            .await?;
+        snapshot.rev_iter(key_range, read_options.into()).await
+    }
+
+    async fn scan(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        limit: Option<usize>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Vec<StateStoreKeyedRow>> {
+        const MAX_INITIAL_CAP: usize = 1024;
+        let limit = limit.unwrap_or(usize::MAX);
+        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
+        let mut iter = self.iter(key_range, epoch, read_options).await?;
+        while let Some((key, value)) = iter.try_next().await? {
+            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
+        }
+        Ok(ret)
+    }
+}
+
+pub trait StateStoreGetTestExt: StateStoreGet {
+    fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> impl StorageFuture<'_, Option<Bytes>>;
+}
+
+impl<S: StateStoreGet> StateStoreGetTestExt for S {
+    async fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        self.on_key_value(key, read_options.into(), |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
+    }
 }

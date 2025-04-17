@@ -26,8 +26,7 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
-use crate::executor::HashAggExecutor;
+use crate::executor::aggregate::{AggExecutorArgs, HashAggExecutor, HashAggExecutorExtraArgs};
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     args: AggExecutorArgs<S, HashAggExecutorExtraArgs>,
@@ -83,7 +82,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         )
         .await;
         // disable sanity check so that old value is not required when updating states
-        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+        let intermediate_state_table = StateTable::from_table_catalog(
             node.get_intermediate_state_table().unwrap(),
             store.clone(),
             vnodes.clone(),

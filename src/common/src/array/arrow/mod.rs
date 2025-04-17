@@ -16,7 +16,7 @@
 // and the default From/To implementations.
 
 mod arrow_52;
-mod arrow_53;
+mod arrow_54;
 // These mods import mods above and may override some methods.
 mod arrow_deltalake;
 mod arrow_iceberg;
@@ -30,19 +30,20 @@ pub use reexport::*;
 /// `arrow` dependencies in their `Cargo.toml`. And they don't need to care about the version.
 mod reexport {
     pub use super::arrow_deltalake::{
+        FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
         arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,
         arrow_cast as arrow_cast_deltalake, arrow_schema as arrow_schema_deltalake,
-        FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
     };
     pub use super::arrow_iceberg::{
+        FromArrow as IcebergFromArrow, ToArrow as IcebergToArrow,
         arrow_array as arrow_array_iceberg, arrow_buffer as arrow_buffer_iceberg,
         arrow_cast as arrow_cast_iceberg, arrow_schema as arrow_schema_iceberg,
-        FromArrow as IcebergFromArrow, ToArrow as IcebergToArrow,
+        is_parquet_schema_match_source_schema,
     };
     pub use super::arrow_udf::{
-        arrow_array as arrow_array_udf, arrow_buffer as arrow_buffer_udf,
-        arrow_cast as arrow_cast_udf, arrow_schema as arrow_schema_udf, FromArrow as UdfFromArrow,
-        ToArrow as UdfToArrow,
+        FromArrow as UdfFromArrow, ToArrow as UdfToArrow, arrow_array as arrow_array_udf,
+        arrow_buffer as arrow_buffer_udf, arrow_cast as arrow_cast_udf,
+        arrow_schema as arrow_schema_udf,
     };
 }
 use crate::types::Interval;

@@ -14,13 +14,13 @@ use core::ops::RangeBounds;
 
 use winnow::combinator::{cut_err, delimited};
 use winnow::error::{ContextError, StrContext};
-use winnow::{PResult, Parser};
+use winnow::{ModalParser, ModalResult, Parser};
 
-use super::{token, TokenStream};
+use super::{TokenStream, token};
 use crate::tokenizer::Token;
 
 /// Consume a [number][Token::Number] from token.
-pub fn token_number<S>(input: &mut S) -> PResult<String>
+pub fn token_number<S>(input: &mut S) -> ModalResult<String>
 where
     S: TokenStream,
 {
@@ -37,7 +37,7 @@ where
 }
 
 /// Consume an unsigned literal integer/long
-pub fn literal_uint<S>(input: &mut S) -> PResult<u64>
+pub fn literal_uint<S>(input: &mut S) -> ModalResult<u64>
 where
     S: TokenStream,
 {
@@ -48,7 +48,7 @@ where
 }
 
 /// Consume an unsigned literal integer
-pub fn literal_u32<S>(input: &mut S) -> PResult<u32>
+pub fn literal_u32<S>(input: &mut S) -> ModalResult<u32>
 where
     S: TokenStream,
 {
@@ -59,7 +59,7 @@ where
 }
 
 /// Consume an literal integer
-pub fn literal_i64<S>(input: &mut S) -> PResult<i64>
+pub fn literal_i64<S>(input: &mut S) -> ModalResult<i64>
 where
     S: TokenStream,
 {
@@ -74,7 +74,7 @@ where
 /// The precision must be in the given range.
 pub fn precision_in_range<S>(
     range: impl RangeBounds<u64> + std::fmt::Debug,
-) -> impl Parser<S, u64, ContextError>
+) -> impl ModalParser<S, u64, ContextError>
 where
     S: TokenStream,
 {

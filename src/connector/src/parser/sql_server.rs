@@ -21,8 +21,8 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
-use tiberius::xml::XmlData;
 use tiberius::Row;
+use tiberius::xml::XmlData;
 use uuid::Uuid;
 
 use crate::parser::utils::log_error;
@@ -68,7 +68,7 @@ macro_rules! impl_chrono_tiberius_wrapper {
     ($wrapper_name:ident, $variant_name:ident, $chrono:ty) => {
         impl<'a> tiberius::IntoSql<'a> for $wrapper_name {
             fn into_sql(self) -> tiberius::ColumnData<'a> {
-                self.0 .0.into_sql()
+                self.0.0.into_sql()
             }
         }
 

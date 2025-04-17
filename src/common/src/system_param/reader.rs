@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
+use std::str::FromStr;
 
 use risingwave_license::LicenseKeyRef;
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{default, ParamValue};
+use super::{AdaptiveParallelismStrategy, ParamValue, default};
 use crate::for_all_params;
 
 /// Information about a system parameter.
@@ -139,6 +140,12 @@ where
         self.inner().barrier_interval_ms.unwrap()
     }
 
+    fn enforce_secret_on_cloud(&self) -> bool {
+        self.inner()
+            .enforce_secret_on_cloud
+            .unwrap_or_else(default::enforce_secret_on_cloud)
+    }
+
     fn checkpoint_frequency(&self) -> u64 {
         self.inner().checkpoint_frequency.unwrap()
     }
@@ -211,5 +218,19 @@ where
         self.inner()
             .time_travel_retention_ms
             .unwrap_or_else(default::time_travel_retention_ms)
+    }
+
+    fn adaptive_parallelism_strategy(&self) -> AdaptiveParallelismStrategy {
+        self.inner()
+            .adaptive_parallelism_strategy
+            .as_deref()
+            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
+            .unwrap_or(AdaptiveParallelismStrategy::Auto)
+    }
+
+    fn per_database_isolation(&self) -> <bool as ParamValue>::Borrowed<'_> {
+        self.inner()
+            .per_database_isolation
+            .unwrap_or_else(default::per_database_isolation)
     }
 }

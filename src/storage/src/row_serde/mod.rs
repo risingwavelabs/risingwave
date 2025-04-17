@@ -67,7 +67,7 @@ impl ColumnMapping {
 mod test {
     use std::fmt::Debug;
 
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -95,8 +95,6 @@ mod test {
                             data_type: Int64,
                             column_id: #2,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -104,13 +102,12 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                         ColumnDesc {
                             data_type: Int16,
                             column_id: #3,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -118,6 +115,7 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                     ],
                     [
@@ -143,8 +141,6 @@ mod test {
                             data_type: Int64,
                             column_id: #2,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -152,13 +148,12 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                         ColumnDesc {
                             data_type: Varchar,
                             column_id: #1,
                             name: "",
-                            field_descs: [],
-                            type_name: "",
                             generated_or_default_column: None,
                             description: None,
                             additional_column: AdditionalColumn {
@@ -166,6 +161,7 @@ mod test {
                             },
                             version: Pr13707,
                             system_column: None,
+                            nullable: true,
                         },
                     ],
                     [

@@ -15,7 +15,7 @@
 use anyhow::Context;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::{build_sink, Sink, SinkParam};
+use risingwave_connector::sink::{Sink, SinkParam, build_sink};
 use risingwave_pb::catalog::PbSink;
 
 use crate::MetaResult;

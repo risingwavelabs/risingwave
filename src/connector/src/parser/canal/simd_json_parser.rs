@@ -15,15 +15,15 @@
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 use simd_json::BorrowedValue;
+use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
+use crate::parser::unified::ChangeEventOperation;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{
     ByteStreamSourceParser, JsonProperties, ParserFormat, SourceStreamChunkRowWriter,
 };

@@ -16,11 +16,12 @@ use std::sync::{Arc, LazyLock};
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
-    Histogram, IntGauge, Registry,
+    Histogram, IntGauge, Registry, histogram_opts, register_histogram_with_registry,
+    register_int_counter_with_registry,
 };
-use risingwave_common::metrics::{LabelGuardedIntCounterVec, TrAdderGauge};
+use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_connector::source::iceberg::IcebergScanMetrics;
 
 /// Metrics for batch executor.
 /// Currently, it contains:
@@ -93,8 +94,8 @@ impl BatchMetricsInner {
         &self.batch_manager_metrics
     }
 
-    pub fn iceberg_scan_metrics(&self) -> &IcebergScanMetrics {
-        &self.iceberg_scan_metrics
+    pub fn iceberg_scan_metrics(&self) -> Arc<IcebergScanMetrics> {
+        self.iceberg_scan_metrics.clone()
     }
 
     pub fn for_test() -> BatchMetrics {
@@ -182,29 +183,3 @@ impl BatchSpillMetrics {
         Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone())
     }
 }
-
-#[derive(Clone)]
-pub struct IcebergScanMetrics {
-    pub iceberg_read_bytes: LabelGuardedIntCounterVec<1>,
-}
-
-impl IcebergScanMetrics {
-    fn new(registry: &Registry) -> Self {
-        let iceberg_read_bytes = register_guarded_int_counter_vec_with_registry!(
-            "iceberg_read_bytes",
-            "Total size of iceberg read requests",
-            &["table_name"],
-            registry
-        )
-        .unwrap();
-
-        Self { iceberg_read_bytes }
-    }
-
-    pub fn for_test() -> Arc<Self> {
-        Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone())
-    }
-}
-
-pub static GLOBAL_ICEBERG_SCAN_METRICS: LazyLock<IcebergScanMetrics> =
-    LazyLock::new(|| IcebergScanMetrics::new(&GLOBAL_METRICS_REGISTRY));

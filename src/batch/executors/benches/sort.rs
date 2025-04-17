@@ -16,7 +16,7 @@ pub mod utils;
 
 use std::sync::Arc;
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch_executors::executor::{BoxedExecutor, SortExecutor};
 use risingwave_common::enable_jemalloc;

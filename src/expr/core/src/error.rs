@@ -18,7 +18,7 @@ use risingwave_common::array::{ArrayError, ArrayRef};
 use risingwave_common::types::{DataType, DatumRef, ToText};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
-use thiserror_ext::AsReport;
+use thiserror_ext::{AsReport, ReportDebug};
 
 /// A specialized Result type for expression operations.
 pub type Result<T, E = ExprError> = std::result::Result<T, E>;
@@ -38,7 +38,7 @@ impl From<ContextUnavailable> for ExprError {
 }
 
 /// The error type for expression operations.
-#[derive(Error, Debug)]
+#[derive(Error, ReportDebug)]
 pub enum ExprError {
     /// A collection of multiple errors in batch evaluation.
     #[error("multiple errors:\n{1}")]
@@ -107,6 +107,14 @@ pub enum ExprError {
 
     #[error("too few arguments for format()")]
     TooFewArguments,
+
+    #[error(
+        "null value in column \"{col_name}\" of relation \"{table_name}\" violates not-null constraint"
+    )]
+    NotNullViolation {
+        col_name: Box<str>,
+        table_name: Box<str>,
+    },
 
     #[error("invalid state: {0}")]
     InvalidState(String),

@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use risingwave_common::array::Op;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -27,6 +26,7 @@ use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::monitor::GroupTopNMetrics;
 use crate::executor::prelude::*;
 
@@ -139,6 +139,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
 where
     TopNCache<WITH_TIES>: AppendOnlyTopNCacheTrait,
 {
+    type State = S;
+
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
@@ -167,7 +169,7 @@ where
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
-                self.caches.push(group_cache_key.clone(), topn_cache);
+                self.caches.put(group_cache_key.clone(), topn_cache);
             }
 
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
@@ -198,7 +200,10 @@ where
         Ok(chunk_builder.take())
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
         self.managed_state.flush(epoch).await
     }
 
@@ -206,11 +211,8 @@ where
         self.managed_state.try_flush().await
     }
 
-    fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let cache_may_stale = self.managed_state.update_vnode_bitmap(vnode_bitmap);
-        if cache_may_stale {
-            self.caches.clear();
-        }
+    fn clear_cache(&mut self) {
+        self.caches.clear();
     }
 
     fn evict(&mut self) {

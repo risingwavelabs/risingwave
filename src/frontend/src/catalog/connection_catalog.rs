@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::connection::Info;
-use risingwave_pb::catalog::{connection, PbConnection};
+use risingwave_pb::catalog::{PbConnection, connection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
 use crate::user::UserId;

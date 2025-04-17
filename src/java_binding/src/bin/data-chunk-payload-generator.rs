@@ -18,7 +18,7 @@ use std::io::Write;
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl, Timestamp, F32, F64};
+use risingwave_common::types::{DataType, F32, F64, ScalarImpl, Timestamp};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 fn build_row(index: usize) -> OwnedRow {

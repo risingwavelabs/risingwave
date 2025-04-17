@@ -22,7 +22,7 @@ use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
-use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
+use crate::types::{DatumRef, ToDatumRef, ToOwnedDatum, ToText, hash_datum};
 use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
@@ -141,7 +141,8 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         }
         for i in (0..this.len()).rev() {
             // compare from the end to the start, as it's more likely to have same prefix
-            if this.datum_at(i) != other.datum_at(i) {
+            // SAFETY: index is in bounds as we are iterating from 0 to len.
+            if unsafe { this.datum_at_unchecked(i) != other.datum_at_unchecked(i) } {
                 return false;
             }
         }
@@ -219,7 +220,7 @@ macro_rules! deref_forward_row {
         }
 
         unsafe fn datum_at_unchecked(&self, index: usize) -> crate::types::DatumRef<'_> {
-            (**self).datum_at_unchecked(index)
+            unsafe { (**self).datum_at_unchecked(index) }
         }
 
         fn len(&self) -> usize {
@@ -305,7 +306,7 @@ macro_rules! impl_slice_row {
 
         #[inline]
         unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-            self.get_unchecked(index).to_datum_ref()
+            unsafe { self.get_unchecked(index).to_datum_ref() }
         }
 
         #[inline]
@@ -342,9 +343,11 @@ impl<R: Row> Row for Option<R> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        match self {
-            Some(row) => row.datum_at_unchecked(index),
-            None => EMPTY.datum_at_unchecked(index),
+        unsafe {
+            match self {
+                Some(row) => row.datum_at_unchecked(index),
+                None => EMPTY.datum_at_unchecked(index),
+            }
         }
     }
 
@@ -396,7 +399,7 @@ impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        either::for_both!(self, row => row.datum_at_unchecked(index))
+        unsafe { either::for_both!(self, row => row.datum_at_unchecked(index)) }
     }
 
     fn len(&self) -> usize {
@@ -464,9 +467,9 @@ mod slice;
 pub use ::tinyvec::ArrayVec;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
-pub use empty::{empty, Empty};
-pub use once::{once, Once};
+pub use empty::{Empty, empty};
+pub use once::{Once, once};
 pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
-pub use repeat_n::{repeat_n, RepeatN};
+pub use repeat_n::{RepeatN, repeat_n};
 pub use slice::Slice;

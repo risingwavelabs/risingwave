@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::anyhow;
+use maplit::hashset;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use url::Url;
 use with_options::WithOptions;
 
@@ -26,6 +27,8 @@ use super::super::SinkError;
 use super::elasticsearch::ES_SINK;
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
 use super::opensearch::OPENSEARCH_SINK;
+use crate::connector_common::ElasticsearchConnection;
+use crate::error::ConnectorError;
 use crate::sink::Result;
 
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
@@ -46,10 +49,10 @@ pub struct ElasticSearchOpenSearchConfig {
     pub delimiter: Option<String>,
     /// The username of elasticsearch or openserach
     #[serde(rename = "username")]
-    pub username: String,
+    pub username: Option<String>,
     /// The username of elasticsearch or openserach
     #[serde(rename = "password")]
-    pub password: String,
+    pub password: Option<String>,
     /// It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
     #[serde(rename = "index_column")]
     pub index_column: Option<String>,
@@ -78,7 +81,12 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde(default = "default_concurrent_requests")]
     pub concurrent_requests: usize,
 
+    #[serde(default = "default_type")]
     pub r#type: String,
+}
+
+fn default_type() -> String {
+    "upsert".to_owned()
 }
 
 fn default_retry_on_conflict() -> i32 {
@@ -97,6 +105,30 @@ fn default_concurrent_requests() -> usize {
     1024
 }
 
+impl TryFrom<&ElasticsearchConnection> for ElasticSearchOpenSearchConfig {
+    type Error = ConnectorError;
+
+    fn try_from(value: &ElasticsearchConnection) -> std::result::Result<Self, Self::Error> {
+        let allowed_fields: HashSet<&str> = hashset!["url", "username", "password"]; // from ElasticsearchOpenSearchConfig
+
+        for k in value.0.keys() {
+            if !allowed_fields.contains(k.as_str()) {
+                return Err(ConnectorError::from(anyhow!(
+                    "Invalid field: {}, allowed fields: {:?}",
+                    k,
+                    allowed_fields
+                )));
+            }
+        }
+
+        let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
+            serde_json::to_value(value.0.clone()).unwrap(),
+        )
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
+}
+
 impl ElasticSearchOpenSearchConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
@@ -107,30 +139,54 @@ impl ElasticSearchOpenSearchConfig {
     }
 
     pub fn build_client(&self, connector: &str) -> Result<ElasticSearchOpenSearchClient> {
+        let check_username_password = || -> Result<()> {
+            if self.username.is_some() && self.password.is_none() {
+                return Err(SinkError::Config(anyhow!(
+                    "please set the password when the username is set."
+                )));
+            }
+            if self.username.is_none() && self.password.is_some() {
+                return Err(SinkError::Config(anyhow!(
+                    "please set the username when the password is set."
+                )));
+            }
+            Ok(())
+        };
         let url =
             Url::parse(&self.url).map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
         if connector.eq(ES_SINK) {
-            let transport = elasticsearch::http::transport::TransportBuilder::new(
+            let mut transport_builder = elasticsearch::http::transport::TransportBuilder::new(
                 elasticsearch::http::transport::SingleNodeConnectionPool::new(url),
-            )
-            .auth(elasticsearch::auth::Credentials::Basic(
-                self.username.clone(),
-                self.password.clone(),
-            ))
-            .build()
-            .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
+            );
+            if let Some(username) = &self.username
+                && let Some(password) = &self.password
+            {
+                transport_builder = transport_builder.auth(
+                    elasticsearch::auth::Credentials::Basic(username.clone(), password.clone()),
+                );
+            }
+            check_username_password()?;
+            let transport = transport_builder
+                .build()
+                .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
             let client = elasticsearch::Elasticsearch::new(transport);
             Ok(ElasticSearchOpenSearchClient::ElasticSearch(client))
         } else if connector.eq(OPENSEARCH_SINK) {
-            let transport = opensearch::http::transport::TransportBuilder::new(
+            let mut transport_builder = opensearch::http::transport::TransportBuilder::new(
                 opensearch::http::transport::SingleNodeConnectionPool::new(url),
-            )
-            .auth(opensearch::auth::Credentials::Basic(
-                self.username.clone(),
-                self.password.clone(),
-            ))
-            .build()
-            .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
+            );
+            if let Some(username) = &self.username
+                && let Some(password) = &self.password
+            {
+                transport_builder = transport_builder.auth(opensearch::auth::Credentials::Basic(
+                    username.clone(),
+                    password.clone(),
+                ));
+            }
+            check_username_password()?;
+            let transport = transport_builder
+                .build()
+                .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
             let client = opensearch::OpenSearch::new(transport);
             Ok(ElasticSearchOpenSearchClient::OpenSearch(client))
         } else {

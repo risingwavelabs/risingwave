@@ -17,8 +17,8 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
-use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
+use risingwave_expr::expr::NonStrictExpression;
 
 use crate::executor::prelude::*;
 

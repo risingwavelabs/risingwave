@@ -16,11 +16,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::{ExecuteContext, Task};
-use crate::util::stylized_risedev_subcmd;
 use crate::PubsubConfig;
+use crate::util::stylized_risedev_subcmd;
 
 pub struct PubsubService {
     config: PubsubConfig,

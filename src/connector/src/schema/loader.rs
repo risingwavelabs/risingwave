@@ -17,12 +17,12 @@ use std::collections::BTreeMap;
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 
 use super::schema_registry::{
-    get_subject_by_strategy, handle_sr_list, name_strategy_from_str, Client, Subject,
+    Client, Subject, get_subject_by_strategy, handle_sr_list, name_strategy_from_str,
 };
 use super::{
-    invalid_option_error, malformed_response_error, InvalidOptionError, MalformedResponseError,
-    SchemaFetchError, AWS_GLUE_SCHEMA_ARN_KEY, KEY_MESSAGE_NAME_KEY, MESSAGE_NAME_KEY,
-    NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
+    AWS_GLUE_SCHEMA_ARN_KEY, InvalidOptionError, KEY_MESSAGE_NAME_KEY, MESSAGE_NAME_KEY,
+    MalformedResponseError, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY, SchemaFetchError,
+    invalid_option_error, malformed_response_error,
 };
 use crate::connector_common::AwsAuthProps;
 

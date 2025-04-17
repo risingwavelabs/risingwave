@@ -15,10 +15,10 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalExcept, LogicalJoin, PlanTreeNode};
 use crate::optimizer::rule::IntersectToSemiJoinRule;
-use crate::optimizer::PlanRef;
 
 pub struct ExceptToAntiJoinRule {}
 impl Rule for ExceptToAntiJoinRule {

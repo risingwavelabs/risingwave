@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+cd "$(dirname "$0")"
+
 ./generate.sh
 
 echo "$(tput setaf 4)Upload dashboard to localhost:3001$(tput sgr0)"
@@ -16,6 +18,3 @@ for dashboard in "risingwave-user-dashboard.json" "risingwave-dev-dashboard.json
 
   rm payload.txt
 done
-
-
-

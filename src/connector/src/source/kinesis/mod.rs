@@ -20,14 +20,16 @@ pub mod split;
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::connector_common::KinesisCommon;
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorError;
+use crate::source::SourceProperties;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
-use crate::source::SourceProperties;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
@@ -55,6 +57,15 @@ impl SourceProperties for KinesisProperties {
     type SplitReader = KinesisSplitReader;
 
     const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
+}
+
+impl EnforceSecret for KinesisProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        for prop in prop_iter {
+            KinesisCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl crate::source::UnknownFields for KinesisProperties {

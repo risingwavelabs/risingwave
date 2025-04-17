@@ -125,8 +125,8 @@ impl Array for JsonbArray {
     }
 
     fn to_protobuf(&self) -> PbArray {
-        use risingwave_pb::common::buffer::CompressionType;
         use risingwave_pb::common::Buffer;
+        use risingwave_pb::common::buffer::CompressionType;
 
         PbArray {
             null_bitmap: Some(self.null_bitmap().to_protobuf()),

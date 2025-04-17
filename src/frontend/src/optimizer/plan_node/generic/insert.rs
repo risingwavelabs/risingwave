@@ -20,10 +20,10 @@ use risingwave_common::catalog::{ColumnCatalog, Field, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]

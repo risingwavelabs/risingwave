@@ -26,7 +26,7 @@ use bytes::BytesMut;
 use chrono::{
     DateTime, Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
 };
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
@@ -254,9 +254,13 @@ enum ErrorKind {
     DateTime { secs: i64, nsecs: u32 },
     #[error("Can't cast string to date (expected format is YYYY-MM-DD)")]
     ParseDate,
-    #[error("Can't cast string to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)")]
+    #[error(
+        "Can't cast string to time (expected format is HH:MM:SS[.D+{{up to 6 digits}}][Z] or HH:MM)"
+    )]
     ParseTime,
-    #[error("Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)")]
+    #[error(
+        "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{{up to 9 digits}}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)"
+    )]
     ParseTimestamp,
 }
 
@@ -449,19 +453,19 @@ impl Time {
     pub fn with_nano(nano: u64) -> Result<Self> {
         let secs = (nano / 1_000_000_000) as u32;
         let nano = (nano % 1_000_000_000) as u32;
-        Self::with_secs_nano(secs, nano).map_err(Into::into)
+        Self::with_secs_nano(secs, nano)
     }
 
     pub fn with_micro(micro: u64) -> Result<Self> {
         let secs = (micro / 1_000_000) as u32;
         let nano = ((micro % 1_000_000) * 1_000) as u32;
-        Self::with_secs_nano(secs, nano).map_err(Into::into)
+        Self::with_secs_nano(secs, nano)
     }
 
     pub fn with_milli(milli: u32) -> Result<Self> {
         let secs = milli / 1_000;
         let nano = (milli % 1_000) * 1_000_000;
-        Self::with_secs_nano(secs, nano).map_err(Into::into)
+        Self::with_secs_nano(secs, nano)
     }
 
     pub fn from_hms_uncheck(hour: u32, min: u32, sec: u32) -> Self {

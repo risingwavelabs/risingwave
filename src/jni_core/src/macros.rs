@@ -279,40 +279,20 @@ macro_rules! gen_jni_type_sig {
 /// ```
 #[macro_export]
 macro_rules! cast_jvalue {
-    ({ boolean }, $value:expr) => {{
-        $value.z().expect("should be bool")
-    }};
-    ({ byte }, $value:expr) => {{
-        $value.b().expect("should be byte")
-    }};
-    ({ char }, $value:expr) => {{
-        $value.c().expect("should be char")
-    }};
-    ({ double }, $value:expr) => {{
-        $value.d().expect("should be double")
-    }};
-    ({ float }, $value:expr) => {{
-        $value.f().expect("should be float")
-    }};
-    ({ int }, $value:expr) => {{
-        $value.i().expect("should be int")
-    }};
-    ({ long }, $value:expr) => {{
-        $value.j().expect("should be long")
-    }};
-    ({ short }, $value:expr) => {{
-        $value.s().expect("should be short")
-    }};
-    ({ void }, $value:expr) => {{
-        $value.v().expect("should be void")
-    }};
+    ({ boolean }, $value:expr) => {{ $value.z().expect("should be bool") }};
+    ({ byte }, $value:expr) => {{ $value.b().expect("should be byte") }};
+    ({ char }, $value:expr) => {{ $value.c().expect("should be char") }};
+    ({ double }, $value:expr) => {{ $value.d().expect("should be double") }};
+    ({ float }, $value:expr) => {{ $value.f().expect("should be float") }};
+    ({ int }, $value:expr) => {{ $value.i().expect("should be int") }};
+    ({ long }, $value:expr) => {{ $value.j().expect("should be long") }};
+    ({ short }, $value:expr) => {{ $value.s().expect("should be short") }};
+    ({ void }, $value:expr) => {{ $value.v().expect("should be void") }};
     ({ byte[] }, $value:expr) => {{
         let obj = $value.l().expect("should be object");
         unsafe { jni::objects::JByteArray::from_raw(obj.into_raw()) }
     }};
-    ({ $($class:tt)+ }, $value:expr) => {{
-        $value.l().expect("should be object")
-    }};
+    ({ $($class:tt)+ }, $value:expr) => {{ $value.l().expect("should be object") }};
 }
 
 /// Cast a `JValueGen` to a concrete type by the given type
@@ -341,36 +321,18 @@ macro_rules! cast_jvalue {
 /// ```
 #[macro_export]
 macro_rules! to_jvalue {
-    ({ boolean $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Bool($value as _)
-    }};
-    ({ byte $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Byte($value as _)
-    }};
-    ({ char $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Char($value as _)
-    }};
-    ({ double $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Double($value as _)
-    }};
-    ({ float $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Float($value as _)
-    }};
-    ({ int $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Int($value as _)
-    }};
-    ({ long $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Long($value as _)
-    }};
-    ({ short $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Short($value as _)
-    }};
+    ({ boolean $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Bool($value as _) }};
+    ({ byte $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Byte($value as _) }};
+    ({ char $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Char($value as _) }};
+    ({ double $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Double($value as _) }};
+    ({ float $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Float($value as _) }};
+    ({ int $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Int($value as _) }};
+    ({ long $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Long($value as _) }};
+    ({ short $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Short($value as _) }};
     ({ void }, $value:expr) => {{
         compile_error! {concat! {"unlike to pass void value: ", stringify! {$value} }}
     }};
-    ({ $($class:ident)+ $([])? $($param_name:ident)? }, $value:expr) => {{
-        jni::objects::JValue::Object($value as _)
-    }};
+    ({ $($class:ident)+ $([])? $($param_name:ident)? }, $value:expr) => {{ jni::objects::JValue::Object($value as _) }};
 }
 
 /// Generate the jni signature of a given function
@@ -441,7 +403,7 @@ macro_rules! for_all_plain_native_methods {
     ($macro:path $(,$args:tt)*) => {
         $macro! {
             {
-                public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
+                public static native void tracingSlf4jEvent(String threadName, String name, int level, String message, String stackTrace);
 
                 public static native boolean tracingSlf4jEventEnabled(int level);
 
@@ -501,6 +463,8 @@ macro_rules! for_all_plain_native_methods {
                 public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
                 public static native boolean sendCdcSourceErrorToChannel(long channelPtr, String errorMsg);
+
+                public static native void cdcSourceSenderClose(long channelPtr);
 
                 public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
                     recvSinkWriterRequestFromChannel(long channelPtr);
@@ -900,7 +864,7 @@ mod tests {
         // This test shows the signature of all native methods
         let expected = expect_test::expect![[r#"
             [
-                tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
+                tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
                 defaultVnodeCount                        ()I,
                 iteratorNewStreamChunk                   (J)J,
@@ -930,6 +894,7 @@ mod tests {
                 iteratorGetArrayValue                    (JILjava/lang/Class;)Ljava/lang/Object;,
                 sendCdcSourceMsgToChannel                (J[B)Z,
                 sendCdcSourceErrorToChannel              (JLjava/lang/String;)Z,
+                cdcSourceSenderClose                     (J)V,
                 recvSinkWriterRequestFromChannel         (J)Lcom/risingwave/java/binding/JniSinkWriterStreamRequest;,
                 sendSinkWriterResponseToChannel          (J[B)Z,
                 sendSinkWriterErrorToChannel             (JLjava/lang/String;)Z,

@@ -33,8 +33,8 @@ fn string_agg(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_expr::Result;
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
 
     #[tokio::test]
     async fn test_string_agg_basic() -> Result<()> {

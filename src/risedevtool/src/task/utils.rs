@@ -16,7 +16,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
 use crate::util::is_env_set;
@@ -88,7 +88,7 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
             return Err(anyhow!(
                 "{} Tempo instance found in config, but only 1 is needed",
                 provide_tempo.len()
-            ))
+            ));
         }
     }
 
@@ -96,6 +96,7 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
 }
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
+// TODO: dead, remove this.
 pub enum HummockInMemoryStrategy {
     /// Enable isolated in-memory hummock. Used by single-node configuration.
     Isolated,
@@ -106,7 +107,7 @@ pub enum HummockInMemoryStrategy {
     Disallowed,
 }
 
-/// Add a hummock storage backend to the parameters. Returns whether this is a shared backend.
+/// Add a hummock storage backend to the parameters. Returns `(is_shared_backend, is_persistent_backend)`.
 pub fn add_hummock_backend(
     id: &str,
     provide_opendal: &[OpendalConfig],
@@ -115,22 +116,27 @@ pub fn add_hummock_backend(
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
 ) -> Result<(bool, bool)> {
-    let (is_shared_backend, is_persistent_backend) = match (provide_minio, provide_aws_s3, provide_opendal) {
-        ([], [], []) => {
-            match hummock_in_memory_strategy {
-                HummockInMemoryStrategy::Isolated => {
-                    cmd.arg("--state-store").arg("hummock+memory");
-                    (false, false)
-                }
-                HummockInMemoryStrategy::Shared => {
-                    cmd.arg("--state-store").arg("hummock+memory-shared");
-                    (true, false)
-                },
-                HummockInMemoryStrategy::Disallowed => return Err(anyhow!(
-                    "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
-                )),
+    let (is_shared_backend, is_persistent_backend) = match (
+        provide_minio,
+        provide_aws_s3,
+        provide_opendal,
+    ) {
+        ([], [], []) => match hummock_in_memory_strategy {
+            HummockInMemoryStrategy::Isolated => {
+                cmd.arg("--state-store").arg("hummock+memory");
+                (false, false)
             }
-        }
+            HummockInMemoryStrategy::Shared => {
+                cmd.arg("--state-store").arg("hummock+memory-shared");
+                (true, false)
+            }
+            HummockInMemoryStrategy::Disallowed => {
+                return Err(anyhow!(
+                    "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.",
+                    id
+                ));
+            }
+        },
         ([minio], [], []) => {
             cmd.arg("--state-store").arg(format!(
                 "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
@@ -148,36 +154,29 @@ pub fn add_hummock_backend(
             (true, true)
         }
         ([], [], [opendal]) => {
-            if opendal.engine == "hdfs"{
+            if opendal.engine == "hdfs" {
                 cmd.arg("--state-store")
-                .arg(format!("hummock+hdfs://{}", opendal.namenode));
-            }
-            else if opendal.engine == "gcs"{
+                    .arg(format!("hummock+hdfs://{}", opendal.namenode));
+            } else if opendal.engine == "gcs" {
                 cmd.arg("--state-store")
-                .arg(format!("hummock+gcs://{}", opendal.bucket));
-            }
-            else if opendal.engine == "obs"{
+                    .arg(format!("hummock+gcs://{}", opendal.bucket));
+            } else if opendal.engine == "obs" {
                 cmd.arg("--state-store")
-                .arg(format!("hummock+obs://{}", opendal.bucket));
-            }
-            else if opendal.engine == "oss"{
+                    .arg(format!("hummock+obs://{}", opendal.bucket));
+            } else if opendal.engine == "oss" {
                 cmd.arg("--state-store")
-                .arg(format!("hummock+oss://{}", opendal.bucket));
-            }
-            else if opendal.engine == "webhdfs"{
+                    .arg(format!("hummock+oss://{}", opendal.bucket));
+            } else if opendal.engine == "webhdfs" {
                 cmd.arg("--state-store")
-                .arg(format!("hummock+webhdfs://{}", opendal.namenode));
-            }
-            else if opendal.engine == "azblob"{
+                    .arg(format!("hummock+webhdfs://{}", opendal.namenode));
+            } else if opendal.engine == "azblob" {
                 cmd.arg("--state-store")
-                .arg(format!("hummock+azblob://{}", opendal.bucket));
-            }
-            else if opendal.engine == "fs"{
+                    .arg(format!("hummock+azblob://{}", opendal.bucket));
+            } else if opendal.engine == "fs" {
                 println!("using fs engine xxxx");
                 cmd.arg("--state-store")
-                .arg(format!("hummock+fs://{}", opendal.bucket));
-            }
-            else{
+                    .arg(format!("hummock+fs://{}", opendal.bucket));
+            } else {
                 unimplemented!()
             }
             (true, true)
@@ -188,7 +187,7 @@ pub fn add_hummock_backend(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",
                 other_minio.len(),
                 other_s3.len()
-            ))
+            ));
         }
     };
 

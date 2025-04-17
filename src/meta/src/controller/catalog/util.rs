@@ -373,7 +373,7 @@ impl CatalogController {
             .map(|(table_id, incoming_sinks)| {
                 let new_incoming_sinks = incoming_sinks
                     .into_inner()
-                    .extract_if(|id| table_sink_ids.contains(id))
+                    .extract_if(.., |id| table_sink_ids.contains(id))
                     .collect_vec();
                 (table_id, I32Array::from(new_incoming_sinks))
             })
@@ -392,11 +392,10 @@ impl CatalogController {
                 .exec(txn)
                 .await?;
 
-            let fragments: Vec<(FragmentId, I32Array, StreamNode, i32)> = Fragment::find()
+            let fragments: Vec<(FragmentId, StreamNode, i32)> = Fragment::find()
                 .select_only()
                 .columns(vec![
                     fragment::Column::FragmentId,
-                    fragment::Column::UpstreamFragmentId,
                     fragment::Column::StreamNode,
                     fragment::Column::FragmentTypeMask,
                 ])
@@ -405,33 +404,28 @@ impl CatalogController {
                 .all(txn)
                 .await?;
 
-            for (fragment_id, upstream_fragment_ids, stream_node, fragment_mask) in fragments {
-                let mut upstream_fragment_ids = upstream_fragment_ids.into_inner();
-
-                let dirty_upstream_fragment_ids = upstream_fragment_ids
-                    .extract_if(|id| !all_fragment_ids.contains(id))
-                    .collect_vec();
-
-                if !dirty_upstream_fragment_ids.is_empty() {
+            for (fragment_id, stream_node, fragment_mask) in fragments {
+                {
                     // dirty downstream should be materialize fragment of table
                     assert!(fragment_mask & FragmentTypeFlag::Mview as i32 > 0);
 
-                    tracing::info!(
-                        "cleaning dirty table sink fragment {:?} from downstream fragment {}",
-                        dirty_upstream_fragment_ids,
-                        fragment_id
-                    );
+                    let mut dirty_upstream_fragment_ids = HashSet::new();
 
                     let mut pb_stream_node = stream_node.to_protobuf();
 
                     visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             node.input.retain_mut(|input| {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
-                                    && all_fragment_ids
+                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body {
+                                    if all_fragment_ids
                                         .contains(&(merge_node.upstream_fragment_id as i32))
-                                {
-                                    true
+                                    {
+                                        true
+                                    } else {
+                                        dirty_upstream_fragment_ids
+                                            .insert(merge_node.upstream_fragment_id);
+                                        false
+                                    }
                                 } else {
                                     false
                                 }
@@ -440,11 +434,13 @@ impl CatalogController {
                         true
                     });
 
+                    tracing::info!(
+                        "cleaning dirty table sink fragment {:?} from downstream fragment {}",
+                        dirty_upstream_fragment_ids,
+                        fragment_id
+                    );
+
                     Fragment::update_many()
-                        .col_expr(
-                            fragment::Column::UpstreamFragmentId,
-                            I32Array::from(upstream_fragment_ids).into(),
-                        )
                         .col_expr(
                             fragment::Column::StreamNode,
                             StreamNode::from(&pb_stream_node).into(),
@@ -452,44 +448,6 @@ impl CatalogController {
                         .filter(fragment::Column::FragmentId.eq(fragment_id))
                         .exec(txn)
                         .await?;
-
-                    let actors: Vec<(ActorId, ActorUpstreamActors)> = Actor::find()
-                        .select_only()
-                        .columns(vec![
-                            actor::Column::ActorId,
-                            actor::Column::UpstreamActorIds,
-                        ])
-                        .filter(actor::Column::FragmentId.eq(fragment_id))
-                        .into_tuple()
-                        .all(txn)
-                        .await?;
-
-                    for (actor_id, upstream_actor_ids) in actors {
-                        let mut upstream_actor_ids = upstream_actor_ids.into_inner();
-
-                        let dirty_actor_upstreams = upstream_actor_ids
-                            .extract_if(|id, _| !all_fragment_ids.contains(id))
-                            .map(|(id, _)| id)
-                            .collect_vec();
-
-                        if !dirty_actor_upstreams.is_empty() {
-                            tracing::debug!(
-                                "cleaning dirty table sink fragment {:?} from downstream fragment {} actor {}",
-                                dirty_actor_upstreams,
-                                fragment_id,
-                                actor_id,
-                            );
-
-                            Actor::update_many()
-                                .col_expr(
-                                    actor::Column::UpstreamActorIds,
-                                    ActorUpstreamActors::from(upstream_actor_ids).into(),
-                                )
-                                .filter(actor::Column::ActorId.eq(actor_id))
-                                .exec(txn)
-                                .await?;
-                        }
-                    }
                 }
             }
         }

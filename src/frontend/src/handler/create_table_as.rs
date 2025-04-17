@@ -22,10 +22,12 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
 use crate::handler::create_table::{
-    gen_create_table_plan_without_source, ColumnIdGenerator, CreateTableProps,
+    ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
-use crate::{build_graph, Binder, OptimizerContext};
+use crate::stream_fragmenter::GraphJobType;
+use crate::{Binder, OptimizerContext, build_graph};
+
 pub async fn handle_create_as(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -70,17 +72,20 @@ pub async fn handle_create_as(
                 .schema()
                 .fields()
                 .iter()
-                .map(|field| {
-                    col_id_gen.generate(field).map(|id| ColumnCatalog {
-                        column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
-                        is_hidden: false,
-                    })
+                .map(|field| ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    is_hidden: false,
                 })
-                .try_collect()?
+                .collect()
         } else {
             unreachable!()
         }
     };
+
+    // Generate column id.
+    for c in &mut columns {
+        col_id_gen.generate(c)?;
+    }
 
     if column_defs.len() > columns.len() {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -122,7 +127,7 @@ pub async fn handle_create_as(
                 engine,
             },
         )?;
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
         (graph, None, table)
     };

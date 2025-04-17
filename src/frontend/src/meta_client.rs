@@ -18,8 +18,8 @@ use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -32,6 +32,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -90,7 +91,11 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
-    async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
+    async fn get_tables(
+        &self,
+        table_ids: &[u32],
+        include_dropped_table: bool,
+    ) -> Result<HashMap<u32, Table>>;
 
     /// Returns vector of (worker_id, min_pinned_version_id)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
@@ -130,6 +135,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
+
+    async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -216,8 +223,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(ddl_progress)
     }
 
-    async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
-        let tables = self.0.get_tables(table_ids).await?;
+    async fn get_tables(
+        &self,
+        table_ids: &[u32],
+        include_dropped_tables: bool,
+    ) -> Result<HashMap<u32, Table>> {
+        let tables = self.0.get_tables(table_ids, include_dropped_tables).await?;
         Ok(tables)
     }
 
@@ -312,5 +323,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_meta_store_endpoint(&self) -> Result<String> {
         self.0.get_meta_store_endpoint().await
+    }
+
+    async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
+        self.0.list_hosted_iceberg_tables().await
     }
 }

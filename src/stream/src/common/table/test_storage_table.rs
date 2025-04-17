@@ -14,18 +14,18 @@
 
 use std::collections::HashSet;
 
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::{self, OwnedRow, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
@@ -70,7 +70,7 @@ async fn test_storage_table_value_indices() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
@@ -118,7 +118,7 @@ async fn test_storage_table_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -210,7 +210,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state.init_epoch(epoch).await.unwrap();
 
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
@@ -237,7 +237,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -314,7 +314,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
             .await;
 
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
-    let table = StorageTable::for_test_with_partial_columns(
+    let table = BatchTable::for_test_with_partial_columns(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
@@ -346,7 +346,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -425,7 +425,7 @@ async fn test_batch_scan_with_value_indices() {
 
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
 
-    let table = StorageTable::for_test_with_partial_columns(
+    let table = BatchTable::for_test_with_partial_columns(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
@@ -463,7 +463,7 @@ async fn test_batch_scan_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table
@@ -529,7 +529,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
         .map(|i| ColumnId::from(*i as i32))
         .collect_vec();
 
-    let table = StorageTable::for_test_with_partial_columns(
+    let table = BatchTable::for_test_with_partial_columns(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
@@ -586,7 +586,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let chunk_size = 2;

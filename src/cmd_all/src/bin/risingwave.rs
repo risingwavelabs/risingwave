@@ -20,7 +20,7 @@ use std::ffi::OsString;
 use std::str::FromStr;
 
 use clap::error::Result as ClapResult;
-use clap::{command, ArgMatches, Args, Command, CommandFactory, FromArgMatches};
+use clap::{ArgMatches, Args, Command, CommandFactory, FromArgMatches, command};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
@@ -122,7 +122,7 @@ impl Component {
             Self::Frontend => frontend(parse_opts(matches)),
             Self::Compactor => compactor(parse_opts(matches)),
             Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => single_node(SingleNodeOpts::new_for_playground()),
+            Self::Playground => playground(),
             Self::Standalone => standalone(parse_opts(matches)),
             Self::SingleNode => single_node(parse_opts(matches)),
         }
@@ -238,7 +238,8 @@ fn standalone(opts: StandaloneOpts) -> ! {
 /// We will start a standalone instance, with all nodes in the same process.
 fn single_node(opts: SingleNodeOpts) -> ! {
     if env::var(TELEMETRY_CLUSTER_TYPE).is_err() {
-        env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE);
+        // safety: single-threaded now.
+        unsafe { env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_SINGLE_NODE) };
     }
     let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(opts);
     let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
@@ -248,13 +249,17 @@ fn single_node(opts: SingleNodeOpts) -> ! {
     risingwave_rt::main_okk(|shutdown| risingwave_cmd_all::standalone(opts, shutdown));
 }
 
+fn playground() -> ! {
+    single_node(SingleNodeOpts::new_for_playground());
+}
+
 #[cfg(test)]
 mod tests {
     use std::assert_matches::assert_matches;
 
     use clap::error::ErrorKind;
 
-    use super::{parse_args, Component};
+    use super::{Component, parse_args};
 
     #[test]
     fn test_basic() {

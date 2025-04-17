@@ -22,8 +22,8 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
-use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::HummockResult;
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::mem_table::ImmutableMemtable;
 use crate::store::SealCurrentEpochOptions;
 

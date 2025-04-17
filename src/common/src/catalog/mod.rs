@@ -33,13 +33,12 @@ use risingwave_pb::catalog::{
     StreamJobStatus as PbStreamJobStatus,
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
-pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, FieldLike, Schema};
+pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_test_utils};
 use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-use crate::types::DataType;
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -77,12 +76,15 @@ pub const SYSTEM_SCHEMAS: [&str; 3] = [
     INFORMATION_SCHEMA_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME,
 ];
+pub fn is_system_schema(schema_name: &str) -> bool {
+    SYSTEM_SCHEMAS.contains(&schema_name)
+}
 
 pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";
 
-// When there is no primary key specified while creating source, will use the
-// the message key as primary key in `BYTEA` type with this name.
-// Note: the field has version to track, please refer to `default_key_column_name_version_mapping`
+/// When there is no primary key specified while creating source, will use the
+/// the message key as primary key in `BYTEA` type with this name.
+/// Note: the field has version to track, please refer to [`default_key_column_name_version_mapping`]
 pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";
 
 pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &str {
@@ -94,21 +96,17 @@ pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &
 
 /// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
 /// can limit the timestamp range when querying it directly with batch query. The column type is
-/// [`DataType::Timestamptz`]. For more details, please refer to
+/// [`crate::types::DataType::Timestamptz`]. For more details, please refer to
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
+/// RisingWave iceberg table engine will create the column `_risingwave_iceberg_row_id` in the iceberg table.
+///
+/// Iceberg V3 spec use `_row_id` as a reserved column name for row lineage, so if the table without primary key,
+/// we can't use `_row_id` directly for iceberg, so use `_risingwave_iceberg_row_id` instead.
 pub const RISINGWAVE_ICEBERG_ROW_ID: &str = "_risingwave_iceberg_row_id";
-pub fn is_system_schema(schema_name: &str) -> bool {
-    SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
-}
 
-pub const ROWID_PREFIX: &str = "_row_id";
-
-pub fn is_row_id_column_name(name: &str) -> bool {
-    name.starts_with(ROWID_PREFIX)
-}
-
+pub const ROW_ID_COLUMN_NAME: &str = "_row_id";
 /// The column ID preserved for the row ID column.
 pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
 
@@ -117,77 +115,18 @@ pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
 /// All IDs of user-defined columns must be greater or equal to this value.
 pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
-/// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
-pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
-}
-
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
 pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
-pub fn rw_timestamp_column_desc() -> ColumnDesc {
-    ColumnDesc::named_with_system_column(
-        RW_TIMESTAMP_COLUMN_NAME,
-        RW_TIMESTAMP_COLUMN_ID,
-        DataType::Timestamptz,
-        SystemColumn::RwTimestamp,
-    )
-}
 
-pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
 pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";
 
-// The number of columns output by the cdc source job
-// see `debezium_cdc_source_schema()` for details
+pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
+/// The number of columns output by the cdc source job
+/// see [`ColumnCatalog::debezium_cdc_source_cols()`] for details
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
-pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
-
-pub fn is_offset_column_name(name: &str) -> bool {
-    name.starts_with(OFFSET_COLUMN_NAME)
-}
-/// Creates a offset column for storing upstream offset
-/// Used in cdc source currently
-pub fn offset_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        OFFSET_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Varchar,
-    )
-}
-
-/// A column to store the upstream table name of the cdc table
-pub fn cdc_table_name_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        TABLE_NAME_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Varchar,
-    )
-}
-
-pub fn iceberg_sequence_num_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Int64,
-    )
-}
-
-pub fn iceberg_file_path_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        ICEBERG_FILE_PATH_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Varchar,
-    )
-}
-
-pub fn iceberg_file_pos_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
-        ICEBERG_FILE_POS_COLUMN_NAME,
-        ColumnId::placeholder(),
-        DataType::Int64,
-    )
-}
+pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
@@ -536,6 +475,16 @@ pub enum ConflictBehavior {
     IgnoreConflict,
     DoUpdateIfNotNull,
 }
+
+#[macro_export]
+macro_rules! _checked_conflict_behaviors {
+    () => {
+        ConflictBehavior::Overwrite
+            | ConflictBehavior::IgnoreConflict
+            | ConflictBehavior::DoUpdateIfNotNull
+    };
+}
+pub use _checked_conflict_behaviors as checked_conflict_behaviors;
 
 impl ConflictBehavior {
     pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {

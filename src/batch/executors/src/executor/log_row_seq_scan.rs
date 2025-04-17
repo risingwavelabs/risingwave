@@ -27,13 +27,16 @@ use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use risingwave_pb::plan_common::StorageTableDesc;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::collect_data_chunk;
-use risingwave_storage::{dispatch_state_store, StateStore};
+use risingwave_storage::{StateStore, dispatch_state_store};
 
-use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use super::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ScanRange,
+};
+use crate::build_scan_range_from_pb;
 use crate::error::{BatchError, Result};
 use crate::monitor::BatchMetrics;
 
@@ -47,16 +50,17 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     /// None: Local mode don't record mertics.
     metrics: Option<BatchMetrics>,
 
-    table: StorageTable<S>,
+    table: BatchTable<S>,
     old_epoch: u64,
     new_epoch: u64,
     version_id: HummockVersionId,
     ordered: bool,
+    scan_range: ScanRange,
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
     pub fn new(
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
@@ -64,6 +68,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         identity: String,
         metrics: Option<BatchMetrics>,
         ordered: bool,
+        scan_range: ScanRange,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
@@ -80,6 +85,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             new_epoch,
             version_id,
             ordered,
+            scan_range,
         }
     }
 }
@@ -137,8 +143,14 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let old_epoch = old_epoch.epoch;
         let new_epoch = new_epoch.epoch;
 
+        let scan_range = log_store_seq_scan_node
+            .scan_range
+            .as_ref()
+            .map(|scan_range| build_scan_range_from_pb(scan_range, table_desc))
+            .unwrap_or_else(|| Ok(ScanRange::full()))?;
+
         dispatch_state_store!(source.context().state_store(), state_store, {
-            let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
+            let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
             Ok(Box::new(LogRowSeqScanExecutor::new(
                 table,
                 old_epoch,
@@ -148,6 +160,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
                 source.plan_node().get_identity().clone(),
                 metrics,
                 log_store_seq_scan_node.ordered,
+                scan_range,
             )))
         })
     }
@@ -178,6 +191,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             version_id,
             schema,
             ordered,
+            scan_range,
             ..
         } = *self;
         let table = std::sync::Arc::new(table);
@@ -198,6 +212,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             histogram,
             Arc::new(schema.clone()),
             ordered,
+            scan_range,
         );
         #[for_await]
         for chunk in stream {
@@ -208,7 +223,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
-        table: Arc<StorageTable<S>>,
+        table: Arc<BatchTable<S>>,
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
@@ -216,13 +231,18 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
         ordered: bool,
+        scan_range: ScanRange,
     ) {
+        let pk_prefix = scan_range.pk_prefix.clone();
+        let range_bounds = scan_range.convert_to_range_bounds(&table);
         // Range Scan.
         let iter = table
             .batch_iter_log_with_pk_bounds(
                 old_epoch,
                 HummockReadEpoch::BatchQueryCommitted(new_epoch, version_id),
                 ordered,
+                range_bounds,
+                pk_prefix,
             )
             .await?
             .flat_map(|r| {

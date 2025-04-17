@@ -129,12 +129,6 @@ impl TracedReadOptions {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
-pub struct TracedWriteOptions {
-    pub epoch: u64,
-    pub table_id: TracedTableId,
-}
-
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableOption {
     pub retention_seconds: Option<u32>,
 }
@@ -263,7 +257,7 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, bool)>,
     pub switch_op_consistency_level: Option<bool>,
 }
 

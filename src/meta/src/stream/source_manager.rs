@@ -22,34 +22,32 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
-    fill_adaptive_split, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
-    SplitId, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
+    SplitMetaData, fill_adaptive_split,
 };
-use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
-use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 pub use worker::create_source_worker;
-use worker::{create_source_worker_async, ConnectorSourceWorkerHandle};
+use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
-use crate::barrier::{BarrierScheduler, Command};
+use crate::MetaResult;
+use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::MetaResult;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
@@ -369,7 +367,7 @@ impl SourceManager {
         dropped_job_fragments: &StreamJobFragments,
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         split_assignment: SplitAssignment,
-        fragment_replacements: HashMap<FragmentId, FragmentId>,
+        replace_plan: &ReplaceStreamJobPlan,
     ) {
         // Extract the fragments that include source operators.
         let dropped_source_fragments = dropped_job_fragments.stream_source_fragments().clone();
@@ -379,8 +377,8 @@ impl SourceManager {
         let dropped_actors = dropped_source_fragments
             .values()
             .flatten()
-            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
-            .map(|actor| actor.get_actor_id())
+            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().actors.iter())
+            .map(|actor| actor.actor_id)
             .collect::<HashSet<_>>();
 
         self.apply_source_change(SourceChange::ReplaceJob {
@@ -388,7 +386,7 @@ impl SourceManager {
             dropped_actors,
             added_source_fragments,
             split_assignment,
-            fragment_replacements,
+            fragment_replacements: replace_plan.fragment_replacements(),
         })
         .await;
     }

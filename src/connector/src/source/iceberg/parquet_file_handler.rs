@@ -27,17 +27,17 @@ use iceberg::io::{
 };
 use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
+use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::{Azblob, Gcs, S3};
-use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
-use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
+use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, parquet_to_arrow_schema};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
-use risingwave_common::array::arrow::arrow_schema_udf::{DataType as ArrowDateType, IntervalUnit};
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ColumnId;
-use risingwave_common::types::DataType as RwDataType;
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -217,55 +217,64 @@ pub async fn list_data_directory(
     }
 }
 
-/// Extracts valid column indices from a Parquet file schema based on the user's requested schema.
+/// Extracts a suitable `ProjectionMask` from a Parquet file schema based on the user's requested schema.
 ///
-/// This function is used for column pruning of Parquet files. It calculates the intersection
-/// between the columns in the currently read Parquet file and the schema provided by the user.
-/// This is useful for reading a `RecordBatch` with the appropriate `ProjectionMask`, ensuring that
-/// only the necessary columns are read.
+/// This function is utilized for column pruning of Parquet files. It checks the user's requested schema
+/// against the schema of the currently read Parquet file. If the provided `columns` are `None`
+/// or if the Parquet file contains nested data types, it returns `ProjectionMask::all()`. Otherwise,
+/// it returns only the columns where both the data type and column name match the requested schema,
+/// facilitating efficient reading of the `RecordBatch`.
 ///
 /// # Parameters
-/// - `columns`: A vector of `Column` representing the user's requested schema.
+/// - `columns`: An optional vector of `Column` representing the user's requested schema.
 /// - `metadata`: A reference to `FileMetaData` containing the schema and metadata of the Parquet file.
 ///
 /// # Returns
-/// - A `ConnectorResult<Vec<usize>>`, which contains the indices of the valid columns in the
-///   Parquet file schema that match the requested schema. If an error occurs during processing,
-///   it returns an appropriate error.
-pub fn extract_valid_column_indices(
-    rw_columns: Vec<Column>,
+/// - A `ConnectorResult<ProjectionMask>`, which represents the valid columns in the Parquet file schema
+///   that correspond to the requested schema. If an error occurs during processing, it returns an
+///   appropriate error.
+pub fn get_project_mask(
+    columns: Option<Vec<Column>>,
     metadata: &FileMetaData,
-) -> ConnectorResult<Vec<usize>> {
-    let parquet_column_names = metadata
-        .schema_descr()
-        .columns()
-        .iter()
-        .map(|c| c.name())
-        .collect_vec();
+) -> ConnectorResult<ProjectionMask> {
+    match columns {
+        Some(rw_columns) => {
+            let root_column_names = metadata
+                .schema_descr()
+                .root_schema()
+                .get_fields()
+                .iter()
+                .map(|field| field.name())
+                .collect_vec();
 
-    let converted_arrow_schema =
-        parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
-            .map_err(anyhow::Error::from)?;
+            let converted_arrow_schema =
+                parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
+                    .map_err(anyhow::Error::from)?;
+            let valid_column_indices: Vec<usize> = rw_columns
+                .iter()
+                .filter_map(|column| {
+                    root_column_names
+                        .iter()
+                        .position(|&name| name == column.name)
+                        .and_then(|pos| {
+                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_iceberg::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
+                            let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
+                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                                Some(pos)
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .collect();
 
-    let valid_column_indices: Vec<usize> = rw_columns
-    .iter()
-    .filter_map(|column| {
-        parquet_column_names
-            .iter()
-            .position(|&name| name == column.name)
-            .and_then(|pos| {
-                let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field(pos).data_type();
-                let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
-
-                if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
-                    Some(pos)
-                } else {
-                    None
-                }
-            })
-    })
-    .collect();
-    Ok(valid_column_indices)
+            Ok(ProjectionMask::roots(
+                metadata.schema_descr(),
+                valid_column_indices,
+            ))
+        }
+        None => Ok(ProjectionMask::all()),
+    }
 }
 
 /// Reads a specified Parquet file and converts its content into a stream of chunks.
@@ -276,6 +285,12 @@ pub async fn read_parquet_file(
     parser_columns: Option<Vec<SourceColumnDesc>>,
     batch_size: usize,
     offset: usize,
+    file_source_input_row_count_metrics: Option<
+        LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
+    >,
+    parquet_source_skip_row_count_metrics: Option<
+        LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
+    >,
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
 > {
@@ -289,13 +304,7 @@ pub async fn read_parquet_file(
     let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
-    let projection_mask = match rw_columns {
-        Some(columns) => {
-            let column_indices = extract_valid_column_indices(columns, file_metadata)?;
-            ProjectionMask::leaves(file_metadata.schema_descr(), column_indices)
-        }
-        None => ProjectionMask::all(),
-    };
+    let projection_mask = get_project_mask(rw_columns, file_metadata)?;
 
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
     // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
@@ -318,25 +327,30 @@ pub async fn read_parquet_file(
             .enumerate()
             .map(|(index, field_ref)| {
                 let data_type = IcebergArrowConvert.type_from_field(field_ref).unwrap();
-                SourceColumnDesc::simple(
+                let column_desc = ColumnDesc::named(
                     field_ref.name().clone(),
-                    data_type,
                     ColumnId::new(index as i32),
-                )
+                    data_type,
+                );
+                SourceColumnDesc::from(&column_desc)
             })
             .collect(),
     };
     let parquet_parser = ParquetParser::new(columns, file_name, offset)?;
     let msg_stream: Pin<
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
-    > = parquet_parser.into_stream(record_batch_stream);
+    > = parquet_parser.into_stream(
+        record_batch_stream,
+        file_source_input_row_count_metrics,
+        parquet_source_skip_row_count_metrics,
+    );
     Ok(msg_stream)
 }
 
 pub async fn get_parquet_fields(
     op: Operator,
     file_name: String,
-) -> ConnectorResult<risingwave_common::array::arrow::arrow_schema_udf::Fields> {
+) -> ConnectorResult<risingwave_common::array::arrow::arrow_schema_iceberg::Fields> {
     let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
         .reader_with(&file_name)
         .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
@@ -352,74 +366,7 @@ pub async fn get_parquet_fields(
         file_metadata.key_value_metadata(),
     )
     .map_err(anyhow::Error::from)?;
-    let fields: risingwave_common::array::arrow::arrow_schema_udf::Fields =
+    let fields: risingwave_common::array::arrow::arrow_schema_iceberg::Fields =
         converted_arrow_schema.fields;
     Ok(fields)
-}
-
-/// This function checks whether the schema of a Parquet file matches the user defined schema.
-/// It handles the following special cases:
-/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `TimeStamp` type.
-/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `TimeStamptz` type.
-/// - Since RisingWave does not have an `UInt` type:
-///   - Arrow's `UInt8` matches with RisingWave's `Int16`.
-///   - Arrow's `UInt16` matches with RisingWave's `Int32`.
-///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
-///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
-/// - Arrow's `Float16` matches with RisingWave's `Float32`.
-fn is_parquet_schema_match_source_schema(
-    arrow_data_type: &ArrowDateType,
-    rw_data_type: &RwDataType,
-) -> bool {
-    matches!(
-        (arrow_data_type, rw_data_type),
-        (ArrowDateType::Boolean, RwDataType::Boolean)
-            | (
-                ArrowDateType::Int8 | ArrowDateType::Int16 | ArrowDateType::UInt8,
-                RwDataType::Int16
-            )
-            | (
-                ArrowDateType::Int32 | ArrowDateType::UInt16,
-                RwDataType::Int32
-            )
-            | (
-                ArrowDateType::Int64 | ArrowDateType::UInt32,
-                RwDataType::Int64
-            )
-            | (
-                ArrowDateType::UInt64 | ArrowDateType::Decimal128(_, _),
-                RwDataType::Decimal
-            )
-            | (ArrowDateType::Decimal256(_, _), RwDataType::Int256)
-            | (
-                ArrowDateType::Float16 | ArrowDateType::Float32,
-                RwDataType::Float32
-            )
-            | (ArrowDateType::Float64, RwDataType::Float64)
-            | (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp)
-            | (
-                ArrowDateType::Timestamp(_, Some(_)),
-                RwDataType::Timestamptz
-            )
-            | (ArrowDateType::Date32, RwDataType::Date)
-            | (
-                ArrowDateType::Time32(_) | ArrowDateType::Time64(_),
-                RwDataType::Time
-            )
-            | (
-                ArrowDateType::Interval(IntervalUnit::MonthDayNano),
-                RwDataType::Interval
-            )
-            | (
-                ArrowDateType::Utf8 | ArrowDateType::LargeUtf8,
-                RwDataType::Varchar
-            )
-            | (
-                ArrowDateType::Binary | ArrowDateType::LargeBinary,
-                RwDataType::Bytea
-            )
-            | (ArrowDateType::List(_), RwDataType::List(_))
-            | (ArrowDateType::Struct(_), RwDataType::Struct(_))
-            | (ArrowDateType::Map(_, _), RwDataType::Map(_))
-    )
 }

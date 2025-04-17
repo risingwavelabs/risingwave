@@ -92,7 +92,9 @@ impl Sink for OpenSearchSink {
                     if std::matches!(user_specified, SinkDecouple::Disable)
                         && commit_checkpoint_interval > 1
                     {
-                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
                     }
                 }
                 None => match user_specified {
@@ -123,9 +125,5 @@ impl Sink for OpenSearchSink {
             | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => Ok(true),
             risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => Ok(false),
         }
-    }
-
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }

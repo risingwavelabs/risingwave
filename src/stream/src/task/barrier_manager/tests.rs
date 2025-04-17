@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::{poll_fn, Future};
+use std::future::{Future, poll_fn};
 use std::iter::once;
 use std::pin::pin;
 use std::task::Poll;
 
-use futures::future::join_all;
 use futures::FutureExt;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
+use futures::future::join_all;
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 
 use super::*;
 use crate::task::barrier_test_utils::LocalBarrierTestEnv;

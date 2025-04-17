@@ -20,9 +20,10 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
+use risingwave_pb::connector_service::coordinate_response::StartCoordinationResponse;
 use risingwave_pb::connector_service::{
-    coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
-    SinkMetadata,
+    CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
+    coordinate_response,
 };
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
@@ -38,18 +39,21 @@ impl CoordinatorStreamHandle {
         mut client: SinkCoordinationRpcClient,
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
-    ) -> Result<Self, RpcError> {
-        Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
-            client.coordinate(ReceiverStream::new(rx)).await
-        })
-        .await
+    ) -> Result<(Self, Option<u64>), RpcError> {
+        let (instance, log_store_rewind_start_epoch) =
+            Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
+                client.coordinate(ReceiverStream::new(rx)).await
+            })
+            .await?;
+
+        Ok((instance, log_store_rewind_start_epoch))
     }
 
     pub async fn new_with_init_stream<F, St, Fut>(
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
         init_stream: F,
-    ) -> Result<Self, RpcError>
+    ) -> Result<(Self, Option<u64>), RpcError>
     where
         F: FnOnce(Receiver<CoordinateRequest>) -> Fut + Send,
         St: Stream<Item = Result<CoordinateResponse, Status>> + Send + Unpin + 'static,
@@ -76,10 +80,14 @@ impl CoordinatorStreamHandle {
             },
         )
         .await?;
+
         match first_response {
             CoordinateResponse {
-                msg: Some(coordinate_response::Msg::StartResponse(_)),
-            } => Ok(stream_handle),
+                msg:
+                    Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse {
+                        log_store_rewind_start_epoch,
+                    })),
+            } => Ok((stream_handle, log_store_rewind_start_epoch)),
             msg => Err(anyhow!("should get start response but get {:?}", msg).into()),
         }
     }
@@ -100,7 +108,7 @@ impl CoordinatorStreamHandle {
         }
     }
 
-    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<()> {
+    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<u64> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::UpdateVnodeRequest(
                 UpdateVnodeBitmapRequest {
@@ -109,14 +117,46 @@ impl CoordinatorStreamHandle {
             )),
         })
         .await?;
-        Ok(())
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg:
+                    Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse {
+                        log_store_rewind_start_epoch,
+                    })),
+            } => Ok(log_store_rewind_start_epoch
+                .ok_or_else(|| anyhow!("should get start epoch after update vnode bitmap"))?),
+            msg => Err(anyhow!("should get start response but get {:?}", msg)),
+        }
     }
 
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub async fn stop(mut self) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::Stop(true)),
         })
         .await?;
-        Ok(())
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::Stopped(_)),
+            } => Ok(()),
+            msg => Err(anyhow!("should get Stopped but get {:?}", msg)),
+        }
+    }
+
+    pub async fn align_initial_epoch(&mut self, initial_epoch: u64) -> anyhow::Result<u64> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::AlignInitialEpochRequest(
+                initial_epoch,
+            )),
+        })
+        .await?;
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::AlignInitialEpochResponse(epoch)),
+            } => Ok(epoch),
+            msg => Err(anyhow!(
+                "should get AlignInitialEpochResponse but get {:?}",
+                msg
+            )),
+        }
     }
 }

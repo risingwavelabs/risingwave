@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::raw::BoxedStaticFuture;
 use opendal::services::Memory;
@@ -29,8 +29,8 @@ use thiserror_ext::AsReport;
 
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    prefix, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, OperationType, StreamingUploader,
+    ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
 };
 
 /// Opendal object storage.
@@ -334,11 +334,11 @@ pub struct OpendalStreamingUploader {
     is_valid: bool,
 
     abort_on_err: bool,
+
+    upload_part_size: usize,
 }
 
 impl OpendalStreamingUploader {
-    const UPLOAD_BUFFER_SIZE: usize = 16 * 1024 * 1024;
-
     pub async fn new(
         op: Operator,
         path: String,
@@ -375,6 +375,7 @@ impl OpendalStreamingUploader {
             not_uploaded_len: 0,
             is_valid: true,
             abort_on_err: config.opendal_writer_abort_on_err,
+            upload_part_size: config.upload_part_size,
         })
     }
 
@@ -401,7 +402,7 @@ impl StreamingUploader for OpendalStreamingUploader {
         assert!(self.is_valid);
         self.not_uploaded_len += data.len();
         self.buf.push(data);
-        if self.not_uploaded_len >= Self::UPLOAD_BUFFER_SIZE {
+        if self.not_uploaded_len >= self.upload_part_size {
             self.flush().await?;
         }
         Ok(())
@@ -430,8 +431,9 @@ impl StreamingUploader for OpendalStreamingUploader {
         Ok(())
     }
 
+    // Not absolutely accurate. Some bytes may be in the infight request.
     fn get_memory_usage(&self) -> u64 {
-        Self::UPLOAD_BUFFER_SIZE as u64
+        self.not_uploaded_len as u64
     }
 }
 

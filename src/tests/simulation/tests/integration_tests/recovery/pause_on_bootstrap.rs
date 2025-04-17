@@ -92,7 +92,7 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     cluster.run(CREATE_2).await?;
     sleep(Duration::from_secs(10)).await;
     cluster.run(SELECT_2).await?.assert_result_eq("0"); // even there's no data from source, the aggregation
-                                                        // result will be 0 instead of empty or NULL
+    // result will be 0 instead of empty or NULL
 
     // `VALUES` should also be paused.
     tokio::time::timeout(Duration::from_secs(10), cluster.run(CREATE_VALUES))
@@ -149,8 +149,7 @@ async fn test_pause_on_bootstrap_resume_by_restart() -> Result<()> {
 // The idea is similar to `e2e_test/batch/transaction/now.slt`.
 async fn test_temporal_filter(resume_by: ResumeBy) -> Result<()> {
     const CREATE_TABLE: &str = "create table t (ts timestamp)";
-    const CREATE_TEMPORAL_FILTER: &str =
-        "create materialized view mv as select count(*) from t where ts at time zone 'utc' >= now()";
+    const CREATE_TEMPORAL_FILTER: &str = "create materialized view mv as select count(*) from t where ts at time zone 'utc' >= now()";
     const INSERT_TIMESTAMPS: &str = "
     insert into t select * from generate_series(
         now() at time zone 'utc' - interval '10' second,

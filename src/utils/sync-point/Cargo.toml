@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 futures-util = "0.3"
-spin = "0.9"
+spin = "0.10"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["sync", "time"] }
 

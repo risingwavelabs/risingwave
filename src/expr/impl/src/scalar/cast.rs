@@ -21,10 +21,10 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Int256, JsonbRef, MapRef, MapValue, ToText, F64};
+use risingwave_common::types::{F64, Int256, JsonbRef, MapRef, MapValue, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
+use risingwave_expr::{ExprError, Result, function};
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;
 
@@ -527,10 +527,9 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = OwnedRow::new(vec![input[i]
-                .as_ref()
-                .cloned()
-                .map(|str| str.to_scalar_value())]);
+            let row = OwnedRow::new(vec![
+                input[i].as_ref().cloned().map(|str| str.to_scalar_value()),
+            ]);
             let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);

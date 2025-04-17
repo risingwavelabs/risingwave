@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Replaces a substring of the given string with a new substring.
 ///

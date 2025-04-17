@@ -28,12 +28,12 @@ use risingwave_connector::source::cdc::{
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
 use super::GenericPlanNode;
+use crate::WithOptions;
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap, WatermarkColumns};
-use crate::WithOptions;
 
 /// [`CdcScan`] reads rows of a table from an external upstream database
 #[derive(Debug, Clone, Educe)]

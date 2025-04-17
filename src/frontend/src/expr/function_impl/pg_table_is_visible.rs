@@ -14,12 +14,12 @@
 
 use risingwave_common::acl::AclMode;
 use risingwave_common::session_config::SearchPath;
-use risingwave_expr::{capture_context, function, Result};
+use risingwave_expr::{Result, capture_context, function};
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER};
-use crate::catalog::system_catalog::is_system_catalog;
 use crate::catalog::CatalogReader;
+use crate::catalog::system_catalog::is_system_catalog;
 use crate::expr::function_impl::has_privilege::user_not_found_err;
 use crate::session::AuthContext;
 use crate::user::user_service::UserInfoReader;
@@ -57,8 +57,7 @@ fn pg_table_is_visible_impl(
         if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema) {
             if schema.contains_object(oid as u32) {
                 return if user_info.is_super
-                    || user_info
-                        .check_privilege(&GrantObject::SchemaId(schema.id()), AclMode::Usage)
+                    || user_info.has_privilege(&GrantObject::SchemaId(schema.id()), AclMode::Usage)
                 {
                     Ok(Some(true))
                 } else {

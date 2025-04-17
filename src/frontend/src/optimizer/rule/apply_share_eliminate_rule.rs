@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalApply, LogicalShare, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalApply, LogicalShare, PlanTreeNodeUnary};
 
 /// Eliminate `LogicalShare` for `LogicalApply`.
 pub struct ApplyShareEliminateRule {}

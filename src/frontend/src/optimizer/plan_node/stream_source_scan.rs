@@ -19,16 +19,16 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::PbStreamNode;
+use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 
 use super::stream::prelude::*;
 use super::utils::TableCatalogBuilder;
 use super::{PlanBase, PlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
-use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
+use crate::optimizer::plan_node::utils::{Distill, childless_record};
+use crate::optimizer::plan_node::{ExprRewritable, StreamNode, generic};
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -53,7 +53,7 @@ impl StreamSourceScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
-            core.catalog.as_ref().map_or(true, |s| s.append_only),
+            core.catalog.as_ref().is_none_or(|s| s.append_only),
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(),
@@ -85,14 +85,10 @@ impl StreamSourceScan {
         let key = Field {
             data_type: DataType::Varchar,
             name: "partition_id".to_owned(),
-            sub_fields: vec![],
-            type_name: "".to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
             name: "backfill_progress".to_owned(),
-            sub_fields: vec![],
-            type_name: "".to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);
@@ -184,6 +180,8 @@ impl ExprVisitable for StreamSourceScan {}
 
 impl StreamNode for StreamSourceScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
-        unreachable!("stream source scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!(
+            "stream source scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead."
+        )
     }
 }

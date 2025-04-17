@@ -58,7 +58,7 @@ message UpdateMutation {
     //   In this case, all the upstream actors should be removed and replaced by the `new` ones.
     optional uint32 new_upstream_fragment_id = 5;
     // Added upstream actors.
-    repeated uint32 added_upstream_actor_id = 3;
+    repeated common.ActorInfo added_upstream_actors = 3;
     // Removed upstream actors.
     // Note: this is empty for replace job.
     repeated uint32 removed_upstream_actor_id = 4;
@@ -171,6 +171,17 @@ message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
+    Watermark watermark = 3;
+  }
+}
+
+message StreamMessageBatch {
+  message BarrierBatch {
+    repeated Barrier barriers = 1;
+  }
+  oneof stream_message_batch {
+    data.StreamChunk stream_chunk = 1;
+    BarrierBatch barrier_batch = 2;
     Watermark watermark = 3;
   }
 }
@@ -356,9 +367,6 @@ enum AggNodeVersion {
 
   // https://github.com/risingwavelabs/risingwave/issues/13465#issuecomment-1821016508
   AGG_NODE_VERSION_ISSUE_13465 = 2;
-
-  // Used for test only.
-  AGG_NODE_VERSION_MAX = 2147483647;
 }
 
 message SimpleAggNode {
@@ -550,7 +558,9 @@ message MergeNode {
   //
   // `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
   // See `compose_fragment`.
-  repeated uint32 upstream_actor_id = 1;
+  // The field is deprecated because the upstream actor info is provided separately instead of
+  // injected here in the node.
+  repeated uint32 upstream_actor_id = 1 [deprecated = true];
   uint32 upstream_fragment_id = 2;
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
@@ -586,6 +596,9 @@ enum StreamScanType {
 
   // SnapshotBackfillExecutor
   STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL = 6;
+
+  // SnapshotBackfillExecutor
+  STREAM_SCAN_TYPE_CROSS_DB_SNAPSHOT_BACKFILL = 7;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -851,6 +864,18 @@ message RowMergeNode {
   catalog.ColIndexMapping rhs_mapping = 2;
 }
 
+message SyncLogStoreNode {
+  catalog.Table log_store_table = 1;
+  uint32 pause_duration_ms = 2;
+  uint32 buffer_size = 3;
+}
+
+message MaterializedExprsNode {
+  repeated expr.ExprNode exprs = 1;
+  catalog.Table state_table = 2;
+  optional uint32 state_clean_col_idx = 3;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -900,6 +925,8 @@ message StreamNode {
     GlobalApproxPercentileNode global_approx_percentile = 145;
     RowMergeNode row_merge = 146;
     AsOfJoinNode as_of_join = 147;
+    SyncLogStoreNode sync_log_store = 148;
+    MaterializedExprsNode materialized_exprs = 149;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -961,18 +988,12 @@ message Dispatcher {
 
 // A StreamActor is a running fragment of the overall stream graph,
 message StreamActor {
-  reserved 7;
-  reserved "colocated_upstream_actor_id";
+  reserved 3, 7, 6;
+  reserved "colocated_upstream_actor_id", "nodes", "upstream_actor_id";
 
   uint32 actor_id = 1;
   uint32 fragment_id = 2;
-  StreamNode nodes = 3;
   repeated Dispatcher dispatcher = 4;
-  // The actors that send messages to this actor.
-  // Note that upstream actor ids are also stored in the proto of merge nodes.
-  // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
-  // We duplicate the information here to ease the parsing logic in stream manager.
-  repeated uint32 upstream_actor_id = 6;
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
@@ -999,6 +1020,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
   // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
   FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
+  FRAGMENT_TYPE_FLAG_CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN = 8192;
 }
 
 // The streaming context associated with a stream plan

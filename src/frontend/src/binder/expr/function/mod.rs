@@ -18,11 +18,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
+use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
 use risingwave_sqlparser::parser::ParserError;
 
@@ -132,7 +134,10 @@ impl Binder {
                 scalar_as_agg,
                 "`AGGREGATE:` prefix is not allowed for `array_transform`"
             );
-            reject_syntax!(!arg_list.is_args_only(), "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list");
+            reject_syntax!(
+                !arg_list.is_args_only(),
+                "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list"
+            );
             reject_syntax!(
                 within_group.is_some(),
                 "`WITHIN GROUP` is not allowed in `array_transform` call"
@@ -176,6 +181,12 @@ impl Binder {
             ) {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
+                self.check_privilege(
+                    PbObject::FunctionId(func.id.function_id()),
+                    self.database_id,
+                    AclMode::Execute,
+                    func.owner,
+                )?;
 
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
@@ -209,6 +220,12 @@ impl Binder {
             ) {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
+            self.check_privilege(
+                PbObject::FunctionId(func.id.function_id()),
+                self.database_id,
+                AclMode::Execute,
+                func.owner,
+            )?;
             Some(func.clone())
         } else {
             None
@@ -223,10 +240,8 @@ impl Binder {
         {
             assert_ne!(udf.language, "sql", "SQL UDAF is not supported yet");
             Some(AggType::UserDefined(udf.as_ref().into()))
-        } else if let Ok(agg_type) = AggType::from_str(&func_name) {
-            Some(agg_type)
         } else {
-            None
+            AggType::from_str(&func_name).ok()
         };
 
         // try to bind it as a window function call
@@ -317,9 +332,14 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_postgres_query(args)
-                    .context("postgres_query error")?
-                    .into());
+                return Ok(TableFunction::new_postgres_query(
+                    &self.catalog,
+                    &self.db_name,
+                    self.bind_schema_path(schema_name.as_deref()),
+                    args,
+                )
+                .context("postgres_query error")?
+                .into());
             }
             // `mysql_query` table function
             if func_name.eq("mysql_query") {
@@ -328,9 +348,14 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_mysql_query(args)
-                    .context("mysql_query error")?
-                    .into());
+                return Ok(TableFunction::new_mysql_query(
+                    &self.catalog,
+                    &self.db_name,
+                    self.bind_schema_path(schema_name.as_deref()),
+                    args,
+                )
+                .context("mysql_query error")?
+                .into());
             }
             // UDTF
             if let Some(ref udf) = udf
@@ -390,13 +415,11 @@ impl Binder {
 
         let inner_ty = match bound_array.return_type() {
             DataType::List(ty) => *ty,
-            real_type => {
-                return Err(ErrorCode::BindError(format!(
+            real_type => return Err(ErrorCode::BindError(format!(
                 "The `array` argument for `array_transform` should be an array, but {} were got",
                 real_type
             ))
-                .into())
-            }
+            .into()),
         };
 
         let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {

@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::cast::str_to_bool;
-use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
+use risingwave_common::types::{DataType, Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 
 use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::{ParserFormat, SourceStreamChunkRowWriter};
-use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 macro_rules! parse {
     ($v:ident, $t:ty) => {
@@ -101,7 +101,7 @@ impl CsvParser {
             _ => {
                 return Err(AccessError::UnsupportedType {
                     ty: dtype.to_string(),
-                })
+                });
             }
         };
         Ok(Some(v))

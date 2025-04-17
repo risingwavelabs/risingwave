@@ -16,19 +16,19 @@ use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use foyer::CacheHint;
 use futures::pin_mut;
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::default_opts_for_test;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -90,13 +90,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     for batch in batches {
         runtime
-            .block_on(hummock_storage.ingest_batch(
-                batch,
-                WriteOptions {
-                    epoch,
-                    table_id: Default::default(),
-                },
-            ))
+            .block_on(hummock_storage.ingest_batch(batch))
             .unwrap();
     }
     hummock_storage.seal_current_epoch(HummockEpoch::MAX, SealCurrentEpochOptions::for_test());

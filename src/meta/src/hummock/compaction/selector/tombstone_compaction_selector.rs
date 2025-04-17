@@ -22,7 +22,7 @@ use crate::hummock::compaction::picker::{
     TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
 };
 use crate::hummock::compaction::selector::CompactionSelectorContext;
-use crate::hummock::compaction::{create_compaction_task, create_overlap_strategy, CompactionTask};
+use crate::hummock::compaction::{CompactionTask, create_compaction_task, create_overlap_strategy};
 
 #[derive(Default)]
 pub struct TombstoneCompactionSelector {

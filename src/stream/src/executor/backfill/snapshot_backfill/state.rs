@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem::replace;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
 use futures::TryFutureExt;
+use futures::future::try_join_all;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::must_match;
@@ -99,10 +99,10 @@ impl VnodeBackfillProgress {
             row_count,
             progress: if !is_finished {
                 EpochBackfillProgress::Consuming {
-                    latest_pk: row.slice(EXTRA_COLUMN_TYPES.len()..).to_owned_row(),
+                    latest_pk: row.slice(EXTRA_COLUMN_TYPES.len() - 1..).to_owned_row(),
                 }
             } else {
-                row.slice(EXTRA_COLUMN_TYPES.len()..)
+                row.slice(EXTRA_COLUMN_TYPES.len() - 1..)
                     .iter()
                     .enumerate()
                     .for_each(|(i, datum)| {
@@ -201,8 +201,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::StateStore;
 
-use crate::executor::prelude::StateTable;
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::StreamExecutorResult;
+use crate::executor::prelude::StateTable;
 
 pub(super) struct BackfillState<S: StateStore> {
     vnode_state: HashMap<VirtualNode, VnodeBackfillState>,
@@ -229,9 +230,11 @@ impl<S: StateStore> BackfillState<S> {
                 continue;
             };
             let progress = VnodeBackfillProgress::from_row(&progress_row, &pk_serde);
-            assert!(vnode_state
-                .insert(vnode, VnodeBackfillState::Committed(progress))
-                .is_none());
+            assert!(
+                vnode_state
+                    .insert(vnode, VnodeBackfillState::Committed(progress))
+                    .is_none()
+            );
         }
         let consumed_pk_rows = OwnedRow::new(vec![None; pk_serde.get_data_types().len()]);
         Ok(Self {
@@ -265,11 +268,17 @@ impl<S: StateStore> BackfillState<S> {
                 }
                 // sanity check
                 {
+                    assert!(
+                        prev_progress.epoch <= progress.epoch,
+                        "progress epoch regress from {} to {}",
+                        prev_progress.epoch,
+                        progress.epoch
+                    );
                     match &prev_progress.progress {
                         EpochBackfillProgress::Consuming { latest_pk: prev_pk } => {
-                            assert_eq!(prev_progress.epoch, progress.epoch);
-                            if let EpochBackfillProgress::Consuming { latest_pk: pk } =
-                                &progress.progress
+                            if prev_progress.epoch == progress.epoch
+                                && let EpochBackfillProgress::Consuming { latest_pk: pk } =
+                                    &progress.progress
                             {
                                 assert_eq!(pk.len(), self.pk_serde.get_data_types().len());
                                 assert!(prev_progress.row_count <= progress.row_count);
@@ -346,7 +355,10 @@ impl<S: StateStore> BackfillState<S> {
         })
     }
 
-    pub(super) async fn commit(&mut self, barrier_epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub(super) async fn commit(
+        &mut self,
+        barrier_epoch: EpochPair,
+    ) -> StreamExecutorResult<BackfillStatePostCommit<'_, S>> {
         for (vnode, state) in &self.vnode_state {
             match state {
                 VnodeBackfillState::New(progress) => {
@@ -362,38 +374,66 @@ impl<S: StateStore> BackfillState<S> {
                 VnodeBackfillState::Committed(_) => {}
             }
         }
-        self.state_table.commit(barrier_epoch).await?;
+        let post_commit = self.state_table.commit(barrier_epoch).await?;
         self.vnode_state
             .values_mut()
             .for_each(VnodeBackfillState::mark_committed);
-        Ok(())
+        Ok(BackfillStatePostCommit {
+            inner: post_commit,
+            vnode_state: &mut self.vnode_state,
+            pk_serde: &self.pk_serde,
+        })
+    }
+}
+
+#[must_use]
+pub(super) struct BackfillStatePostCommit<'a, S: StateStore> {
+    inner: StateTablePostCommit<'a, S>,
+    vnode_state: &'a mut HashMap<VirtualNode, VnodeBackfillState>,
+    pk_serde: &'a OrderedRowSerde,
+}
+
+impl<S: StateStore> BackfillStatePostCommit<'_, S> {
+    pub(super) async fn post_yield_barrier(
+        self,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
+    ) -> StreamExecutorResult<Option<Arc<Bitmap>>> {
+        let new_vnode_bitmap = if let Some(((new_vnode_bitmap, prev_vnode_bitmap, state), _)) =
+            self.inner.post_yield_barrier(new_vnode_bitmap).await?
+        {
+            Self::update_vnode_bitmap(&*state, self.vnode_state, self.pk_serde, prev_vnode_bitmap)
+                .await?;
+            Some(new_vnode_bitmap)
+        } else {
+            None
+        };
+        Ok(new_vnode_bitmap)
     }
 
-    pub(super) async fn update_vnode_bitmap(
-        &mut self,
-        new_vnode_bitmap: Arc<Bitmap>,
-        barrier_epoch: EpochPair,
+    async fn update_vnode_bitmap(
+        state_table: &StateTable<S>,
+        vnode_state: &mut HashMap<VirtualNode, VnodeBackfillState>,
+        pk_serde: &OrderedRowSerde,
+        prev_vnode_bitmap: Arc<Bitmap>,
     ) -> StreamExecutorResult<()> {
-        self.state_table
-            .try_wait_committed_epoch(barrier_epoch.prev)
-            .await?;
-        let (prev_vnode_bitmap, _) = self.state_table.update_vnode_bitmap(new_vnode_bitmap);
-        let committed_progress_rows = Self::load_vnode_progress_row(&self.state_table).await?;
+        let committed_progress_rows = BackfillState::load_vnode_progress_row(state_table).await?;
         let mut new_state = HashMap::new();
         for (vnode, progress_row) in committed_progress_rows {
             if let Some(progress_row) = progress_row {
-                let progress = VnodeBackfillProgress::from_row(&progress_row, &self.pk_serde);
-                assert!(new_state
-                    .insert(vnode, VnodeBackfillState::Committed(progress))
-                    .is_none());
+                let progress = VnodeBackfillProgress::from_row(&progress_row, pk_serde);
+                assert!(
+                    new_state
+                        .insert(vnode, VnodeBackfillState::Committed(progress))
+                        .is_none()
+                );
             }
 
             if prev_vnode_bitmap.is_set(vnode.to_index()) {
                 // if the vnode exist previously, the new state should be the same as the previous one
-                assert_eq!(self.vnode_state.get(&vnode), new_state.get(&vnode));
+                assert_eq!(vnode_state.get(&vnode), new_state.get(&vnode));
             }
         }
-        self.vnode_state = new_state;
+        *vnode_state = new_state;
         Ok(())
     }
 }

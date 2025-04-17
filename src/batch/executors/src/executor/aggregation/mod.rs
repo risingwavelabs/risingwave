@@ -20,8 +20,8 @@ mod filter;
 mod orderby;
 mod projection;
 
-use risingwave_expr::aggregate::{build_append_only, AggCall, BoxedAggregateFunction};
 use risingwave_expr::Result;
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 
 use self::distinct::Distinct;
 use self::filter::*;

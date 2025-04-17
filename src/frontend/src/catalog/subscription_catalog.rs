@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{TableId, UserId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::catalog::{OBJECT_ID_PLACEHOLDER, TableId, UserId};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::PbSubscription;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 
 use super::OwnedByUserCatalog;
+use crate::WithOptions;
 use crate::error::{ErrorCode, Result};
 use crate::handler::util::convert_interval_to_u64_seconds;
-use crate::WithOptions;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]

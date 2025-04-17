@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::future::{pending, poll_fn};
@@ -31,9 +32,10 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
+use risingwave_storage::store_impl::AsHummock;
 use thiserror_ext::AsReport;
 use tokio::select;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tonic::{Code, Status};
@@ -62,8 +64,8 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ReportDatabaseFailureResponse, ResetDatabaseResponse, Response, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
-    PbScoredError, StreamingControlStreamRequest, StreamingControlStreamResponse,
+    BarrierCompleteResponse, InjectBarrierRequest, PbScoredError, StreamingControlStreamRequest,
+    StreamingControlStreamResponse, streaming_control_stream_response,
 };
 
 use crate::executor::exchange::permit::Receiver;
@@ -231,6 +233,7 @@ pub(super) enum LocalActorOperation {
     },
     TakeReceiver {
         database_id: DatabaseId,
+        term_id: String,
         ids: UpDownActorIds,
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
@@ -302,19 +305,27 @@ pub(super) struct LocalBarrierWorker {
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
+
+    pub(super) term_id: String,
 }
 
 impl LocalBarrierWorker {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
+        term_id: String,
     ) -> Self {
-        let state = ManagedBarrierState::new(actor_manager.clone(), initial_partial_graphs);
+        let state = ManagedBarrierState::new(
+            actor_manager.clone(),
+            initial_partial_graphs,
+            term_id.clone(),
+        );
         Self {
             state,
             await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
+            term_id,
         }
     }
 
@@ -327,6 +338,9 @@ impl LocalBarrierWorker {
                 .map(|(database_id, status)| {
                     (*database_id, {
                         match status {
+                            DatabaseStatus::ReceivedExchangeRequest(_) => {
+                                ("ReceivedExchangeRequest".to_owned(), None)
+                            }
                             DatabaseStatus::Running(state) => {
                                 ("running".to_owned(), Some(state.to_debug_info()))
                             }
@@ -343,16 +357,6 @@ impl LocalBarrierWorker {
                 .collect(),
             has_control_stream_connected: self.control_stream_handle.connected(),
         }
-    }
-
-    pub(crate) fn get_or_insert_database_shared_context<'a>(
-        current_shared_context: &'a mut HashMap<DatabaseId, Arc<SharedContext>>,
-        database_id: DatabaseId,
-        actor_manager: &StreamActorManager,
-    ) -> &'a Arc<SharedContext> {
-        current_shared_context
-            .entry(database_id)
-            .or_insert_with(|| Arc::new(SharedContext::new(database_id, &actor_manager.env)))
     }
 
     async fn next_completed_epoch(
@@ -427,7 +431,8 @@ impl LocalBarrierWorker {
                                         DatabaseStatus::Running(database) => {
                                             !database.actor_states.is_empty()
                                         }
-                                        DatabaseStatus::Suspended(_) | DatabaseStatus::Resetting(_) => {
+                                        DatabaseStatus::Suspended(_) | DatabaseStatus::Resetting(_) |
+                                            DatabaseStatus::ReceivedExchangeRequest(_) => {
                                             false
                                         }
                                         DatabaseStatus::Unspecified => {
@@ -470,7 +475,6 @@ impl LocalBarrierWorker {
                 let database_id = DatabaseId::new(req.database_id);
                 let result: StreamResult<()> = try {
                     let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
-                    self.update_actor_info(database_id, req.broadcast_info.iter().cloned());
                     self.send_barrier(&barrier, req)?;
                 };
                 result.map_err(|e| (database_id, e))?;
@@ -507,17 +511,56 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::TakeReceiver {
                 database_id,
+                term_id,
                 ids,
                 result_sender,
             } => {
-                let _ = result_sender.send(
-                    LocalBarrierWorker::get_or_insert_database_shared_context(
-                        &mut self.state.current_shared_context,
-                        database_id,
-                        &self.actor_manager,
-                    )
-                    .take_receiver(ids),
-                );
+                let result = try {
+                    if self.term_id != term_id {
+                        warn!(
+                            ?ids,
+                            term_id,
+                            current_term_id = self.term_id,
+                            "take receiver on unmatched term_id"
+                        );
+                        Err(anyhow!(
+                            "take receiver {:?} on unmatched term_id {} to current term_id {}",
+                            ids,
+                            term_id,
+                            self.term_id
+                        ))?;
+                    }
+                    let result = match self.state.databases.entry(database_id) {
+                        Entry::Occupied(mut entry) => match entry.get_mut() {
+                            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
+                                pending_requests.push((ids, result_sender));
+                                return;
+                            }
+                            DatabaseStatus::Running(database) => database
+                                .local_barrier_manager
+                                .shared_context
+                                .take_receiver(ids),
+                            DatabaseStatus::Suspended(_) => {
+                                Err(anyhow!("database suspended").into())
+                            }
+                            DatabaseStatus::Resetting(_) => {
+                                Err(anyhow!("database resetting").into())
+                            }
+                            DatabaseStatus::Unspecified => {
+                                unreachable!()
+                            }
+                        },
+                        Entry::Vacant(entry) => {
+                            entry.insert(DatabaseStatus::ReceivedExchangeRequest(vec![(
+                                ids,
+                                result_sender,
+                            )]));
+                            return;
+                        }
+                    };
+                    result?
+                };
+                let _ = result_sender.send(result);
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
@@ -528,7 +571,7 @@ impl LocalBarrierWorker {
                     .unwrap();
                 let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
                 let _ = sender.send((
-                    database_state.current_shared_context.clone(),
+                    database_state.local_barrier_manager.shared_context.clone(),
                     database_state.local_barrier_manager.clone(),
                 ));
             }
@@ -572,14 +615,14 @@ impl LocalBarrierWorker {
 mod await_epoch_completed_future {
     use std::future::Future;
 
-    use futures::future::BoxFuture;
     use futures::FutureExt;
+    use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
-    use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
+    use crate::task::{BarrierCompleteResult, PartialGraphId, await_tree_key};
 
     pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
         + 'static;
@@ -625,7 +668,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -634,16 +677,16 @@ fn sync_epoch(
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
     let timer = streaming_metrics.barrier_sync_latency.start_timer();
-    let hummock = state_store.as_hummock().cloned();
+
+    let state_store = state_store.clone();
     let future = async move {
-        if let Some(hummock) = hummock {
+        dispatch_state_store!(state_store, hummock, {
             hummock.sync(vec![(prev_epoch, table_ids)]).await
-        } else {
-            Ok(SyncResult::default())
-        }
+        })
     };
+
     future
-        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+        .instrument_await(await_tree::span!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
             timer.observe_duration();
         })
@@ -840,27 +883,47 @@ impl LocalBarrierWorker {
     }
 
     fn add_partial_graph(&mut self, database_id: DatabaseId, partial_graph_id: PartialGraphId) {
-        let status = self.state.databases.entry(database_id).or_insert_with(|| {
-            DatabaseStatus::Running(DatabaseManagedBarrierState::new(
-                database_id,
-                self.actor_manager.clone(),
-                LocalBarrierWorker::get_or_insert_database_shared_context(
-                    &mut self.state.current_shared_context,
+        let status = match self.state.databases.entry(database_id) {
+            Entry::Occupied(entry) => {
+                let status = entry.into_mut();
+                if let DatabaseStatus::ReceivedExchangeRequest(pending_requests) = status {
+                    let database = DatabaseManagedBarrierState::new(
+                        database_id,
+                        self.term_id.clone(),
+                        self.actor_manager.clone(),
+                        vec![],
+                    );
+                    for (ids, result_sender) in pending_requests.drain(..) {
+                        let result = database
+                            .local_barrier_manager
+                            .shared_context
+                            .take_receiver(ids);
+                        let _ = result_sender.send(result);
+                    }
+                    *status = DatabaseStatus::Running(database);
+                }
+
+                status
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(DatabaseStatus::Running(DatabaseManagedBarrierState::new(
                     database_id,
-                    &self.actor_manager,
-                )
-                .clone(),
-                vec![],
-            ))
-        });
+                    self.term_id.clone(),
+                    self.actor_manager.clone(),
+                    vec![],
+                )))
+            }
+        };
         if let Some(state) = status.state_for_request() {
-            assert!(state
-                .graph_states
-                .insert(
-                    partial_graph_id,
-                    PartialGraphManagedBarrierState::new(&self.actor_manager)
-                )
-                .is_none());
+            assert!(
+                state
+                    .graph_states
+                    .insert(
+                        partial_graph_id,
+                        PartialGraphManagedBarrierState::new(&self.actor_manager)
+                    )
+                    .is_none()
+            );
         }
     }
 
@@ -895,7 +958,6 @@ impl LocalBarrierWorker {
                 }
             }
         }
-        self.state.current_shared_context.remove(&database_id);
         self.await_epoch_completed_futures.remove(&database_id);
         self.control_stream_handle.ack_reset_database(
             database_id,
@@ -968,6 +1030,7 @@ impl DatabaseManagedBarrierState {
 pub struct LocalBarrierManager {
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
     actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
+    pub shared_context: Arc<SharedContext>,
 }
 
 impl LocalBarrierWorker {
@@ -998,7 +1061,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, vec![]);
+        let worker = LocalBarrierWorker::new(actor_manager, vec![], "uninitialized".into());
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -1029,7 +1092,9 @@ impl<T> EventSender<T> {
 }
 
 impl LocalBarrierManager {
-    pub(super) fn new() -> (
+    pub(super) fn new(
+        shared_context: Arc<SharedContext>,
+    ) -> (
         Self,
         UnboundedReceiver<LocalBarrierEvent>,
         UnboundedReceiver<(ActorId, StreamError)>,
@@ -1040,6 +1105,7 @@ impl LocalBarrierManager {
             Self {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: err_tx,
+                shared_context,
             },
             event_rx,
             err_rx,
@@ -1149,19 +1215,6 @@ impl LocalBarrierManager {
         );
         EventSender(tx)
     }
-
-    pub fn for_test() -> Self {
-        let (tx, mut rx) = unbounded_channel();
-        let (failure_tx, failure_rx) = unbounded_channel();
-        let _join_handle = tokio::spawn(async move {
-            let _failure_rx = failure_rx;
-            while rx.recv().await.is_some() {}
-        });
-        Self {
-            barrier_event_sender: tx,
-            actor_failure_sender: failure_tx,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1174,10 +1227,10 @@ pub(crate) mod barrier_test_utils {
         InitRequest, PbDatabaseInitialPartialGraph, PbInitialPartialGraph,
     };
     use risingwave_pb::stream_service::{
-        streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-        StreamingControlStreamRequest, StreamingControlStreamResponse,
+        InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
+        streaming_control_stream_request, streaming_control_stream_response,
     };
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::sync::oneshot;
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tonic::Status;
@@ -1214,9 +1267,9 @@ pub(crate) mod barrier_test_utils {
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             subscriptions: vec![],
-                            actor_infos: vec![],
                         }],
                     }],
+                    term_id: "for_test".into(),
                 },
             });
 
@@ -1254,7 +1307,6 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                            broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],
                             subscriptions_to_remove: vec![],

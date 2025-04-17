@@ -9,25 +9,18 @@
 
 <div align="center">
 
-### 🌊 Reimagine real-time data engineering.
+### 🌊 Ride the Wave of Streaming Data.
 
 </div>
-
-<p align="center">&nbsp;&nbsp;&nbsp;📚&nbsp;
-  <a
-    href="https://docs.risingwave.com/"
-    target="_blank"
-  ><b>Documentation</b></a>&nbsp;&nbsp;&nbsp;🚀&nbsp;
-  <a
-    href="https://risingwave.com/slack"
-    target="_blank"
-  >
-    <b>Slack Community</b>
-  </a>
+<p align="center">
+  <a href="https://docs.risingwave.com/">Docs</a> | <a href="https://docs.risingwave.com/get-started/rw-benchmarks-stream-processing">Benchmarks</a> | <a href="https://docs.risingwave.com/demos/overview">Demos</a>
 </p>
+
+<p align="center">
+
 <div align="center">
   <a
-    href="https://risingwave.com/slack"
+    href="https://go.risingwave.com/slack"
     target="_blank"
   >
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
@@ -46,11 +39,11 @@
   </a>
 </div>
 
-RisingWave is a Postgres-compatible SQL database engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data.
+RisingWave is the world's most advanced event stream processing platform engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
 
-RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries in real-time, and <b>deliver</b> fresh, consistent results wherever needed.
+RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries at low latency, and <b>deliver</b> fresh, consistent results wherever needed.
 
-![RisingWave](./docs/dev/src/images/architecture_20240908.png)
+![RisingWave](./docs/dev/src/images/architecture_20250127.png)
 
 ## Try it out in 60 seconds
 
@@ -61,15 +54,41 @@ curl -L https://risingwave.com/sh | sh
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
-## When is RisingWave the perfect fit?
-RisingWave is the ideal solution for:
+## Not just a stream processor!
 
-* Managing real-time data sources like Kafka streams, database CDC, and more.
-* Executing complex, on-the-fly queries, including joins, aggregations, and time windowing.
-* Interactively and concurrently exploring consistent, up-to-the-moment results.
-* Seamlessly delivering results to downstream systems.
-* Processing both streaming and batch data with a unified codebase.
+RisingWave simplifies **end-to-end** development of real-time data pipelines and applications - going beyond traditional stream processors.
 
+Like other stream processors, RisingWave supports:
+
+* **Ingestion:** Ingest millions of events per second from streaming and batch sources.
+* **Stream processing:** Perform real-time incremental processing to join and analyze live data with historical tables.
+* **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg) or any destination.
+
+But RisingWave does more. It provides both **online and offline storage**:
+
+* **Online serving:** Row-based storage for ad-hoc point/range queries with single-digit millisecond latency.
+* **Offline persistence:** Apache Iceberg-based storage that persists streaming data at low cost, enabling open access by other query engines.
+
+## Key design decisions
+
+RisingWave is designed to be easier to use and more cost-efficient:
+
+### PostgreSQL compatibility
+
+* **Seamless integration:** Connects via the PostgreSQL wire protocol, working with psql, JDBC, and any Postgres tool.
+* **Expressive SQL:** Supports structured, semi-structured, and unstructured data with a familiar SQL dialect.
+* **No manual state tuning:** Eliminates complex state management configurations.
+
+### S3 as primary storage
+
+RisingWave stores tables, materialized views, and internal states of stream processing jobs in S3 (or equivalent object storage), providing:
+- **High performance:** Optimized for complex queries, including joins and time windowing.
+- **Fast recovery:** Restores from system failures within seconds.
+- **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.
+
+### Elastic disk cache
+
+Beyond caching hot data in memory, RisingWave supports [**elastic disk cache**](https://docs.risingwave.com/get-started/disk-cache), a powerful performance optimization that uses local disks or EBS for efficient data caching. This minimizes access to S3, lowering processing latency and cutting S3 access costs.
 
 ## In what use cases does RisingWave excel?
 RisingWave is particularly effective for the following use cases:

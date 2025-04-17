@@ -24,7 +24,7 @@ use super::{
     ValidationRuleType,
 };
 use crate::hummock::compaction::picker::TrivialMovePicker;
-use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
+use crate::hummock::compaction::{CompactionDeveloperConfig, create_overlap_strategy};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct IntraCompactionPicker {
@@ -267,51 +267,55 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let trivial_move_picker = TrivialMovePicker::new(0, 0, overlap_strategy.clone(), 0);
+            let trivial_move_picker = TrivialMovePicker::new(
+                0,
+                0,
+                overlap_strategy.clone(),
+                0,
+                self.config
+                    .sst_allowed_trivial_move_max_count
+                    .unwrap_or(compaction_config::sst_allowed_trivial_move_max_count())
+                    as usize,
+            );
 
-            let select_sst = trivial_move_picker.pick_trivial_move_sst(
+            if let Some(select_ssts) = trivial_move_picker.pick_multi_trivial_move_ssts(
                 &l0.sub_levels[idx + 1].table_infos,
                 &level.table_infos,
                 level_handlers,
                 stats,
-            );
+            ) {
+                let mut overlap = overlap_strategy.create_overlap_info();
+                select_ssts.iter().for_each(|ssts| overlap.update(ssts));
 
-            // only pick tables for trivial move
-            if select_sst.is_none() {
-                continue;
+                assert!(
+                    overlap
+                        .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
+                        .is_empty()
+                );
+
+                let select_input_size = select_ssts.iter().map(|sst| sst.sst_size).sum();
+                let total_file_count = select_ssts.len() as u64;
+                let input_levels = vec![
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: select_ssts,
+                    },
+                    InputLevel {
+                        level_idx: 0,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: vec![],
+                    },
+                ];
+                return Some(CompactionInput {
+                    input_levels,
+                    target_level: 0,
+                    target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count,
+                    ..Default::default()
+                });
             }
-
-            let select_sst = select_sst.unwrap();
-
-            // support trivial move cross multi sub_levels
-            let mut overlap = overlap_strategy.create_overlap_info();
-            overlap.update(&select_sst);
-
-            assert!(overlap
-                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                .is_empty());
-
-            let select_input_size = select_sst.sst_size;
-            let input_levels = vec![
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![select_sst],
-                },
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping,
-                    table_infos: vec![],
-                },
-            ];
-            return Some(CompactionInput {
-                input_levels,
-                target_level: 0,
-                target_sub_level_id: level.sub_level_id,
-                select_input_size,
-                total_file_count: 1,
-                ..Default::default()
-            });
         }
         None
     }
@@ -420,13 +424,13 @@ pub mod tests {
     use risingwave_hummock_sdk::level::Level;
 
     use super::*;
+    use crate::hummock::compaction::TierCompactionPicker;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
         generate_l0_overlapping_sublevels, generate_level, generate_table,
         push_table_level0_overlapping, push_tables_level0_nonoverlapping,
     };
-    use crate::hummock::compaction::TierCompactionPicker;
 
     fn create_compaction_picker_for_test() -> IntraCompactionPicker {
         let config = Arc::new(
@@ -510,9 +514,11 @@ pub mod tests {
         ret.add_pending_task(0, &mut levels_handler);
 
         push_table_level0_overlapping(&mut levels, generate_table(4, 1, 170, 180, 3));
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(
+            picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .is_none()
+        );
     }
 
     #[test]
@@ -753,9 +759,11 @@ pub mod tests {
             levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
             ..Default::default()
         };
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(
+            picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .is_none()
+        );
 
         // Cannot trivial move because latter sub-level is overlapping
         levels.l0.sub_levels[0].level_type = LevelType::Nonoverlapping;

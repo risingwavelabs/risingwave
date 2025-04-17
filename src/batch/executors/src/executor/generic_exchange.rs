@@ -21,8 +21,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use rw_futures_util::select_all;
@@ -98,8 +98,7 @@ impl CreateSource for DefaultCreateSource {
         } else {
             trace!(
                 "Exchange remotely from {} [{:?}]",
-                &peer_addr,
-                task_output_id,
+                &peer_addr, task_output_id,
             );
 
             let mask_failed_serving_worker = || {
@@ -112,8 +111,8 @@ impl CreateSource for DefaultCreateSource {
                                 worker
                                     .host
                                     .as_ref()
-                                    .map_or(false, |h| HostAddr::from(h) == peer_addr)
-                                    && worker.property.as_ref().map_or(false, |p| p.is_serving)
+                                    .is_some_and(|h| HostAddr::from(h) == peer_addr)
+                                    && worker.property.as_ref().is_some_and(|p| p.is_serving)
                             })
                     {
                         let duration = Duration::from_secs(std::cmp::max(
@@ -237,6 +236,8 @@ impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
         metrics: Option<BatchMetrics>,
     ) {
         let mut source = source_creator.create_source(context, &prost_source).await?;
+        // Release potential large objects in LocalExecutePlan early.
+        drop(prost_source);
         // create the collector
         let counter = metrics
             .as_ref()
@@ -276,8 +277,8 @@ mod tests {
         let mut proto_sources = vec![];
         let mut source_creators = vec![];
         for _ in 0..2 {
-            let mut rng = rand::thread_rng();
-            let i = rng.gen_range(1..=100000);
+            let mut rng = rand::rng();
+            let i = rng.random_range(1..=100000);
             let chunk = DataChunk::new(vec![I32Array::from_iter([i]).into_ref()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);

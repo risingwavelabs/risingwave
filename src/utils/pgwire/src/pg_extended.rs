@@ -17,11 +17,10 @@ use std::vec::IntoIter;
 use futures::stream::FusedStream;
 use futures::{StreamExt, TryStreamExt};
 use postgres_types::FromSql;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::Conn;
+use crate::pg_protocol::{PgByteStream, PgStream};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::{Format, Row};
 
@@ -45,10 +44,10 @@ where
     }
 
     /// Return indicate whether the result is consumed completely.
-    pub async fn consume<S: AsyncWrite + AsyncRead + Unpin>(
+    pub async fn consume<S: PgByteStream>(
         &mut self,
         row_limit: usize,
-        msg_stream: &mut Conn<S>,
+        msg_stream: &mut PgStream<S>,
     ) -> PsqlResult<bool> {
         for notice in self.result.notices() {
             msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
@@ -86,17 +85,18 @@ where
                         }
                     }
                 } else {
-                    self.row_cache = if let Some(rows) = self
+                    self.row_cache = match self
                         .result
                         .values_stream()
                         .try_next()
                         .await
                         .map_err(PsqlError::ExtendedExecuteError)?
                     {
-                        rows.into_iter()
-                    } else {
-                        query_end = true;
-                        break;
+                        Some(rows) => rows.into_iter(),
+                        _ => {
+                            query_end = true;
+                            break;
+                        }
                     };
                 }
             }

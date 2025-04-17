@@ -16,18 +16,18 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use risingwave_common::catalog::ConnectionId;
+pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::{
     PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
 use risingwave_connector::source::kafka::private_link::{
-    insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
+    PRIVATELINK_ENDPOINT_KEY, insert_privatelink_broker_rewrite_map,
 };
-pub use risingwave_connector::WithOptionsSecResolved;
-use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
     ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
@@ -36,14 +36,13 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::OverwriteOptions;
+use crate::Binder;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::handler::create_source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use crate::session::SessionImpl;
 use crate::telemetry::report_event;
-use crate::Binder;
 
-mod options {
-
+pub mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
@@ -53,6 +52,18 @@ pub struct WithOptions {
     inner: BTreeMap<String, String>,
     secret_ref: BTreeMap<String, SecretRefValue>,
     connection_ref: BTreeMap<String, ConnectionRefValue>,
+}
+
+impl GetKeyIter for WithOptions {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.inner.keys().map(|s| s.as_str())
+    }
+}
+
+impl Get for WithOptions {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.inner.get(key)
+    }
 }
 
 impl std::ops::Deref for WithOptions {
@@ -220,7 +231,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             } else {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(
                     "Private Link Service has been deprecated. Please create a new connection instead.".to_owned(),
-        )));
+                )));
             }
         };
 

@@ -22,10 +22,10 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_expr::Result;
 use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
-use risingwave_expr::Result;
 
 /// `ProjectionOrderBy` is a wrapper of `AggregateFunction` that sorts rows by given columns and
 /// then projects columns.

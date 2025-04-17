@@ -18,15 +18,15 @@ use std::time::Duration;
 
 use risingwave_batch::monitor::{
     GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
-    GLOBAL_ICEBERG_SCAN_METRICS,
 };
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
-    MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
+    AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
+    StorageMemoryConfig, load_config,
 };
+use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
@@ -40,10 +40,11 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
+use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
-use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -51,26 +52,27 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_storage::StateStoreImpl;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::hummock::compactor::{
-    new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
+    CompactionExecutor, CompactorContext, new_compaction_await_tree_reg_ref, start_compactor,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
-use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
-    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
     GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
+    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
 };
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
+use crate::ComputeNodeOpts;
 use crate::memory::config::{
-    batch_mem_limit, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+    MIN_COMPUTE_MEMORY_MB, batch_mem_limit, reserve_memory_bytes, storage_memory_config,
 };
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
@@ -81,7 +83,6 @@ use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
-use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
 ///
@@ -204,6 +205,7 @@ pub async fn compute_node_serve(
             .ok(),
     };
 
+    LicenseManager::get().refresh(system_params.license_key());
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
@@ -349,6 +351,7 @@ pub async fn compute_node_serve(
     // Initialize batch environment.
     let batch_client_pool = Arc::new(ComputeClientPool::new(
         config.batch_exchange_connection_pool_size(),
+        config.batch.developer.compute_client_config.clone(),
     ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
@@ -368,6 +371,7 @@ pub async fn compute_node_serve(
     // Initialize the streaming environment.
     let stream_client_pool = Arc::new(ComputeClientPool::new(
         config.streaming_exchange_connection_pool_size(),
+        config.streaming.developer.compute_client_config.clone(),
     ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),

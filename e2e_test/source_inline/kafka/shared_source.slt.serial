@@ -99,6 +99,10 @@ SET streaming_use_shared_source TO false;
 statement ok
 create materialized view mv_2 as select * from s0;
 
+statement ok
+SET streaming_use_shared_source TO true;
+
+
 sleep 2s
 
 query ?? rowsort
@@ -243,87 +247,6 @@ internal_table.mjs --name s0 --type source
 3,"{""split_info"": {""partition"": 3, ""start_offset"": 13, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
 
 
-# # Note: the parallelism depends on the risedev profile.
-# # So scale tests below are commented out.
-
-# query ???
-# select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
-# ----
-# mv_1	{MVIEW,SOURCE_SCAN}	5
-# mv_2	{MVIEW,SOURCE_SCAN}	5
-# s0	{SOURCE}	5
-
-
-# system ok
-# risectl meta source-split-info --ignore-id
-# ----
-# Table
-# 	Fragment (Source)
-# 		Actor (1 splits): [0]
-# 		Actor (1 splits): [2]
-# 		Actor (1 splits): [3]
-# 		Actor (1 splits): [1]
-# 		Actor (0 splits): []
-# Table
-# 	Fragment (SourceScan)
-# 		Actor (1 splits): [0] <- Upstream Actor #1055: [0]
-# 		Actor (1 splits): [2] <- Upstream Actor #1056: [2]
-# 		Actor (1 splits): [3] <- Upstream Actor #1057: [3]
-# 		Actor (1 splits): [1] <- Upstream Actor #1058: [1]
-# 		Actor (0 splits): [] <- Upstream Actor #1059: []
-# Table
-# 	Fragment (SourceScan)
-# 		Actor (1 splits): [0] <- Upstream Actor #1055: [0]
-# 		Actor (1 splits): [2] <- Upstream Actor #1056: [2]
-# 		Actor (1 splits): [3] <- Upstream Actor #1057: [3]
-# 		Actor (1 splits): [1] <- Upstream Actor #1058: [1]
-# 		Actor (0 splits): [] <- Upstream Actor #1059: []
-
-
-# # scale down
-# statement ok
-# ALTER MATERIALIZED VIEW mv_1 SET PARALLELISM TO 2;
-
-# # should have no effect, because of NoShuffle
-# # TODO: support ALTER SOURCE SET PARALLELISM, then we can
-# query ???
-# select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;
-# ----
-# mv_1	{MVIEW,SOURCE_SCAN}	5
-# mv_2	{MVIEW,SOURCE_SCAN}	5
-# s0	{SOURCE}	5
-
-# system ok
-# risectl meta source-split-info --ignore-id
-# ----
-# Table
-# 	Fragment (Source)
-# 		Actor (1 splits): [0]
-# 		Actor (1 splits): [2]
-# 		Actor (1 splits): [3]
-# 		Actor (1 splits): [1]
-# 		Actor (0 splits): []
-# Table
-# 	Fragment (SourceScan)
-# 		Actor (1 splits): [0] <- Upstream Actor #1055: [0]
-# 		Actor (1 splits): [2] <- Upstream Actor #1056: [2]
-# 		Actor (1 splits): [3] <- Upstream Actor #1057: [3]
-# 		Actor (1 splits): [1] <- Upstream Actor #1058: [1]
-# 		Actor (0 splits): [] <- Upstream Actor #1059: []
-# Table
-# 	Fragment (SourceScan)
-# 		Actor (1 splits): [0] <- Upstream Actor #1055: [0]
-# 		Actor (1 splits): [2] <- Upstream Actor #1056: [2]
-# 		Actor (1 splits): [3] <- Upstream Actor #1057: [3]
-# 		Actor (1 splits): [1] <- Upstream Actor #1058: [1]
-# 		Actor (0 splits): [] <- Upstream Actor #1059: []
-
-
-# # Manual test: change the parallelism of the compute node, kill and restart, and check
-# # risedev ctl meta source-split-info --ignore-id
-# # risedev psql -c "select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;"
-
-
 # Test: rate limit and resume won't lose data
 
 statement ok
@@ -370,3 +293,32 @@ drop source s0 cascade;
 
 statement ok
 drop source s_before_produce cascade;
+
+# test: scan.startup.mode=latest should not be blocked when there's no data to backfill
+# https://github.com/risingwavelabs/risingwave/issues/20083#issuecomment-2609422824
+statement ok
+create source s_latest (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'shared_source',
+  scan.startup.mode = 'latest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Note: batch kafka scan ignores scan.startup.mode
+query ? rowsort
+select count(*) from s_latest;
+----
+55
+
+statement ok
+create materialized view mv_latest as select * from s_latest;
+
+query ? rowsort
+select count(*) from mv_latest;
+----
+0
+
+statement ok
+drop source s_latest cascade;
+
+system ok
+rpk topic delete shared_source;

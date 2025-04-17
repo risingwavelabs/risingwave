@@ -23,18 +23,18 @@ use super::utils::impl_distill_by_unit;
 use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::Explain;
 use crate::error::Result;
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalProject, PlanTreeNode,
-    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalProject, PlanTreeNode,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext, generic,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
-use crate::Explain;
 
 /// `LogicalUnion` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
@@ -259,7 +259,7 @@ impl ToStream for LogicalUnion {
                 for (key, val) in max_types_counter {
                     let _ = types_offset.insert(key.clone(), offset);
                     offset += val;
-                    merged_stream_key_types.extend(std::iter::repeat(key.clone()).take(val));
+                    merged_stream_key_types.extend(std::iter::repeat_n(key.clone(), val));
                 }
 
                 (merged_stream_key_types, types_offset)

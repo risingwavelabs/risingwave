@@ -19,7 +19,7 @@ use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
 use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl};
 use thiserror_ext::AsReport;
-use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
+use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 
 use crate::error::ConnectorResult;
 

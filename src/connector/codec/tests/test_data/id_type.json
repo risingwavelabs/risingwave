@@ -1,0 +1,18 @@
+{
+    "definitions": {
+        "idType": {
+            "type": "string"
+        },
+        "recurrentType": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "$ref": "#/definitions/idType"
+                },
+                "next": {
+                    "$ref": "#/definitions/recurrentType"
+                }
+            }
+        }
+    }
+}

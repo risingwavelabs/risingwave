@@ -21,7 +21,7 @@ use anyhow::Result;
 
 use super::risingwave_cmd;
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_tempo_endpoint, CompactorConfig, ExecuteContext, Task};
+use crate::{CompactorConfig, ExecuteContext, Task, add_meta_node, add_tempo_endpoint};
 
 pub struct CompactorService {
     config: CompactorConfig,

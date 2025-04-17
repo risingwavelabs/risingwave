@@ -23,8 +23,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
-    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay,
+    OBJECT_ID_PLACEHOLDER, Schema, StreamJobStatus,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
@@ -33,27 +33,27 @@ use risingwave_common::hash::VnodeCount;
 use risingwave_common::license::Feature;
 use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
 use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf};
+use risingwave_pb::plan_common::{PbAsOf, as_of};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::pretty_config;
+use crate::PlanRef;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
+use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
-use crate::optimizer::StreamScanType;
 use crate::utils::{Condition, IndexSet};
-use crate::PlanRef;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
@@ -174,6 +174,8 @@ impl TableCatalogBuilder {
 
         TableCatalog {
             id: TableId::placeholder(),
+            schema_id: 0,
+            database_id: 0,
             associated_source_id: None,
             name: String::new(),
             dependent_relations: vec![],
@@ -401,7 +403,51 @@ pub fn infer_kv_log_store_table_catalog_inner(
         let indice = table_catalog_builder.add_column(field);
         value_indices.push(indice);
     }
+    table_catalog_builder.set_value_indices(value_indices);
 
+    // Modify distribution key indices based on the pre-defined columns.
+    let dist_key = input
+        .distribution()
+        .dist_column_indices()
+        .iter()
+        .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+        .collect_vec();
+
+    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
+pub fn infer_synced_kv_log_store_table_catalog_inner(
+    input: &PlanRef,
+    columns: &[Field],
+) -> TableCatalog {
+    let mut table_catalog_builder = TableCatalogBuilder::default();
+
+    let mut value_indices =
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
+
+    for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+        let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+        value_indices.push(indice);
+    }
+
+    table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
+
+    for (i, ordering) in PK_ORDERING.iter().enumerate() {
+        table_catalog_builder.add_order_column(i, *ordering);
+    }
+
+    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+    let payload_indices = {
+        let mut payload_indices = Vec::with_capacity(columns.len());
+        for column in columns {
+            let payload_index = table_catalog_builder.add_column(column);
+            payload_indices.push(payload_index);
+        }
+        payload_indices
+    };
+
+    value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);
 
     // Modify distribution key indices based on the pre-defined columns.
@@ -429,6 +475,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
         } else {
             false
         }
@@ -439,7 +486,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
 }
 
 pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
-    let Some(ref a) = a else {
+    let Some(a) = a else {
         return Ok(None);
     };
     Feature::TimeTravel
@@ -473,8 +520,8 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
                         MappedLocalTime::Single(d) => Ok(d.timestamp()),
                         MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
                             Err(anyhow!(format!(
-                                        "failed to parse the timestamp {ts} with the specified time zone {tz}"
-                                    )))
+                                "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                            )))
                         }
                     }
                 })??

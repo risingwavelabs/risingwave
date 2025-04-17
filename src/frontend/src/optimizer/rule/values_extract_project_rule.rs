@@ -17,10 +17,10 @@ use risingwave_common::types::DataType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprVisitor};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalValues};
 use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
-use crate::optimizer::PlanRef;
 
 pub struct ValuesExtractProjectRule {}
 impl Rule for ValuesExtractProjectRule {

@@ -35,7 +35,7 @@ macro_rules! for_all_classified_sources {
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
                 { Mqtt, $crate::source::mqtt::MqttProperties, $crate::source::mqtt::split::MqttSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
-                { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
+                { S3, $crate::source::filesystem::LegacyS3Properties, $crate::source::filesystem::LegacyFsSplit },
                 { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
                 { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },
                 { PosixFs, $crate::source::filesystem::opendal_source::PosixFsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalPosixFs> },
@@ -57,7 +57,8 @@ macro_rules! for_all_connections {
             {
                 { Kafka, $crate::connector_common::KafkaConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
                 { Iceberg, $crate::connector_common::IcebergConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
-                { SchemaRegistry, $crate::connector_common::ConfluentSchemaRegistryConnection, risingwave_pb::catalog::connection_params::PbConnectionType }
+                { SchemaRegistry, $crate::connector_common::ConfluentSchemaRegistryConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
+                { Elasticsearch, $crate::connector_common::ElasticsearchConnection, risingwave_pb::catalog::connection_params::PbConnectionType }
             }
             $(,$extra_args)*
         }
@@ -240,6 +241,20 @@ macro_rules! impl_connection {
                     <$pb_connection_path>::$variant_name => {
                         let c: Box<$connection_type> = serde_json::from_value(json!(value_secret_filled)).map_err($crate::error::ConnectorError::from)?;
                         Ok(c)
+                    },
+                )*
+                risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
+            }
+        }
+
+        pub fn enforce_secret_on_cloud_connection<'a>(
+            pb_connection_type: &risingwave_pb::catalog::connection_params::PbConnectionType,
+            prop_iter: impl Iterator<Item = &'a str>,
+        ) -> $crate::error::ConnectorResult<()> {
+            match pb_connection_type {
+                $(
+                    <$pb_connection_path>::$variant_name => {
+                        <$connection_type>::enforce_secret(prop_iter)
                     },
                 )*
                 risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),

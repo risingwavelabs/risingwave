@@ -25,13 +25,13 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
-use crate::hummock::utils::{range_overlap, MemoryTracker};
+use crate::hummock::utils::{MemoryTracker, range_overlap};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockResult};
 use crate::mem_table::ImmId;
@@ -216,14 +216,12 @@ impl SharedBufferBatchInner {
         assert!(!entries.is_empty());
         debug_assert!(entries.iter().is_sorted_by_key(|entry| &entry.key));
         debug_assert!(entries.iter().is_sorted_by_key(|entry| &entry.value_offset));
-        debug_assert!((0..entries.len()).all(|i| SharedBufferKeyEntry::values(
-            i,
-            &entries,
-            &new_values
-        )
-        .iter()
-        .rev()
-        .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)));
+        debug_assert!((0..entries.len()).all(|i| {
+            SharedBufferKeyEntry::values(i, &entries, &new_values)
+                .iter()
+                .rev()
+                .is_sorted_by_key(|(epoch_with_gap, _)| epoch_with_gap)
+        }));
         debug_assert!(!epochs.is_empty());
         debug_assert!(epochs.is_sorted());
 
@@ -240,11 +238,11 @@ impl SharedBufferBatchInner {
 
     /// Return `None` if cannot find a visible version
     /// Return `HummockValue::Delete` if the key has been deleted by some epoch <= `read_epoch`
-    fn get_value(
-        &self,
+    fn get_value<'a>(
+        &'a self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
-    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
+    ) -> Option<(HummockValue<&'a Bytes>, EpochWithGap)> {
         // Perform binary search on table key to find the corresponding entry
         if let Ok(i) = self
             .entries
@@ -258,7 +256,7 @@ impl SharedBufferBatchInner {
                 if read_epoch < e.pure_epoch() {
                     continue;
                 }
-                return Some((v.clone().into(), *e));
+                return Some((v.to_ref().into(), *e));
             }
             // cannot find a visible version
         }
@@ -414,12 +412,12 @@ impl SharedBufferBatch {
         self.inner.old_values.is_some()
     }
 
-    pub fn get(
-        &self,
+    pub fn get<'a>(
+        &'a self,
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         _read_options: &ReadOptions,
-    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
+    ) -> Option<(HummockValue<&'a Bytes>, EpochWithGap)> {
         self.inner.get_value(table_key, read_epoch)
     }
 
@@ -814,8 +812,8 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
 mod tests {
     use std::ops::Bound::Excluded;
 
-    use itertools::{zip_eq, Itertools};
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use itertools::{Itertools, zip_eq};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -870,8 +868,9 @@ mod tests {
                 shared_buffer_batch
                     .get(TableKey(k.as_slice()), epoch, &ReadOptions::default())
                     .unwrap()
-                    .0,
-                v.clone()
+                    .0
+                    .as_slice(),
+                v.as_slice()
             );
         }
         assert_eq!(
@@ -1388,8 +1387,9 @@ mod tests {
                             &ReadOptions::default()
                         )
                         .unwrap()
-                        .0,
-                    value.clone(),
+                        .0
+                        .as_slice(),
+                    value.as_slice(),
                     "epoch: {}, key: {:?}",
                     test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())
@@ -1573,8 +1573,9 @@ mod tests {
                             &ReadOptions::default()
                         )
                         .unwrap()
-                        .0,
-                    value.clone(),
+                        .0
+                        .as_slice(),
+                    value.as_slice(),
                     "epoch: {}, key: {:?}",
                     test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())

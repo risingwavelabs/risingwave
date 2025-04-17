@@ -19,10 +19,10 @@ use more_asserts::debug_assert_le;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
+use crate::hummock::HummockResult;
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
@@ -309,28 +309,29 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ops::Bound::{self, *};
 
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::distr::Alphanumeric;
+    use rand::{Rng, rng as thread_rng};
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::key::prev_key;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::*;
+    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
         iterator_test_bytes_key_of, iterator_test_bytes_key_of_epoch,
         iterator_test_bytes_user_key_of, iterator_test_user_key_of, iterator_test_value_of,
-        mock_sstable_store, TEST_KEYS_COUNT,
+        mock_sstable_store,
     };
-    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
 
     #[tokio::test]
     async fn test_backward_user_basic() {
         let sstable_store = mock_sstable_store().await;
-        let (table0, _) = gen_iterator_test_sstable_base(
+        let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -338,7 +339,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let (table1, _) = gen_iterator_test_sstable_base(
+        let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -346,7 +347,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let (table2, _) = gen_iterator_test_sstable_base(
+        let (table2, sstable_info_2) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 3,
@@ -356,9 +357,9 @@ mod tests {
         .await;
 
         let backward_iters = vec![
-            BackwardSstableIterator::new(table1, sstable_store.clone()),
-            BackwardSstableIterator::new(table2, sstable_store.clone()),
-            BackwardSstableIterator::new(table0, sstable_store),
+            BackwardSstableIterator::new(table0, sstable_store.clone(), &sstable_info_0),
+            BackwardSstableIterator::new(table1, sstable_store.clone(), &sstable_info_1),
+            BackwardSstableIterator::new(table2, sstable_store, &sstable_info_2),
         ];
 
         let mi = MergeIterator::new(backward_iters);
@@ -382,7 +383,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_user_seek() {
         let sstable_store = mock_sstable_store().await;
-        let (table0, _) = gen_iterator_test_sstable_base(
+        let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -390,7 +391,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let (table1, _) = gen_iterator_test_sstable_base(
+        let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -398,7 +399,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let (table2, _) = gen_iterator_test_sstable_base(
+        let (table2, sstable_info_2) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 3,
@@ -407,9 +408,9 @@ mod tests {
         )
         .await;
         let backward_iters = vec![
-            BackwardSstableIterator::new(table0, sstable_store.clone()),
-            BackwardSstableIterator::new(table1, sstable_store.clone()),
-            BackwardSstableIterator::new(table2, sstable_store),
+            BackwardSstableIterator::new(table0, sstable_store.clone(), &sstable_info_0),
+            BackwardSstableIterator::new(table1, sstable_store.clone(), &sstable_info_1),
+            BackwardSstableIterator::new(table2, sstable_store, &sstable_info_2),
         ];
 
         let bmi = MergeIterator::new(backward_iters);
@@ -461,18 +462,18 @@ mod tests {
             (1, 300, HummockValue::delete()),
             (2, 100, HummockValue::put(iterator_test_value_of(2))),
         ];
-        let (table0, _) =
+        let (table0, sstable_info_0) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
             (1, 400, HummockValue::put(iterator_test_value_of(1))),
             (2, 200, HummockValue::delete()),
         ];
-        let (table1, _) =
+        let (table1, sstable_info_1) =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![
-            BackwardSstableIterator::new(table0, sstable_store.clone()),
-            BackwardSstableIterator::new(table1, sstable_store),
+            BackwardSstableIterator::new(table0, sstable_store.clone(), &sstable_info_0),
+            BackwardSstableIterator::new(table1, sstable_store, &sstable_info_1),
         ];
         let bmi = MergeIterator::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
@@ -514,9 +515,13 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let (sstable, _) =
+        let (sstable, sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            sstable,
+            sstable_store,
+            &sstable_info,
+        )];
         let bmi = MergeIterator::new(backward_iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -591,11 +596,12 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let (sstable, _) =
+        let (sstable, sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(
             sstable.clone(),
             sstable_store.clone(),
+            &sstable_info,
         )];
         let bmi = MergeIterator::new(backward_iters);
 
@@ -650,7 +656,11 @@ mod tests {
             .unwrap();
         assert!(!bui.is_valid());
 
-        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            sstable,
+            sstable_store,
+            &sstable_info,
+        )];
         let bmi = MergeIterator::new(backward_iters);
 
         let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
@@ -692,11 +702,12 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let (sstable, _sstable_info) =
+        let (sstable, sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(
             sstable.clone(),
             sstable_store.clone(),
+            &sstable_info,
         )];
         let bmi = MergeIterator::new(backward_iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
@@ -747,7 +758,11 @@ mod tests {
         assert!(!bui.is_valid());
 
         let end_key = Excluded(iterator_test_bytes_user_key_of(6));
-        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            sstable,
+            sstable_store,
+            &sstable_info,
+        )];
         let bmi = MergeIterator::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(
             bmi,
@@ -789,9 +804,13 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let (handle, _sstable_info) =
+        let (handle, sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            handle,
+            sstable_store,
+            &sstable_info,
+        )];
         let bmi = MergeIterator::new(backward_iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
@@ -873,6 +892,7 @@ mod tests {
         end_bound: Bound<UserKey<Bytes>>,
         truth: &ChaosTestTruth,
         sstable_store: SstableStoreRef,
+        sstable_info: &SstableInfo,
     ) {
         let start_key = match &start_bound {
             Bound::Included(b) => {
@@ -887,7 +907,11 @@ mod tests {
             _ => unimplemented!(),
         };
 
-        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            handle,
+            sstable_store,
+            sstable_info,
+        )];
         let bmi = MergeIterator::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
         let num_puts: usize = truth
@@ -928,7 +952,13 @@ mod tests {
     type ChaosTestTruth =
         BTreeMap<UserKey<Bytes>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Bytes>>>;
 
-    async fn generate_chaos_test_data() -> (usize, TableHolder, ChaosTestTruth, SstableStoreRef) {
+    async fn generate_chaos_test_data() -> (
+        usize,
+        TableHolder,
+        ChaosTestTruth,
+        SstableStoreRef,
+        SstableInfo,
+    ) {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
         #[allow(clippy::mutable_key_type)]
@@ -936,14 +966,15 @@ mod tests {
         let mut prev_key_number: usize = 1;
         let number_of_keys = 5000;
         for _ in 0..number_of_keys {
-            let key: usize = rng.gen_range(prev_key_number..=(prev_key_number + 10));
+            let key: usize = rng.random_range(prev_key_number..=(prev_key_number + 10));
             prev_key_number = key + 1;
             let key_bytes = key_from_num(key).into_bytes();
             let mut prev_time = 500;
-            let num_updates = rng.gen_range(1..10usize);
+            let num_updates = rng.random_range(1..10usize);
             for _ in 0..num_updates {
-                let time: HummockEpoch = test_epoch(rng.gen_range(prev_time..=(prev_time + 1000)));
-                let is_delete = rng.gen_range(0..=1usize) < 1usize;
+                let time: HummockEpoch =
+                    test_epoch(rng.random_range(prev_time..=(prev_time + 1000)));
+                let is_delete = rng.random_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
                         truth
@@ -952,7 +983,7 @@ mod tests {
                             .insert(Reverse(time), HummockValue::delete());
                     }
                     false => {
-                        let value_size = rng.gen_range(100..=200);
+                        let value_size = rng.random_range(100..=200);
                         let value: String = thread_rng()
                             .sample_iter(&Alphanumeric)
                             .take(value_size)
@@ -968,7 +999,7 @@ mod tests {
             }
         }
         let sstable_store = mock_sstable_store().await;
-        let (sst, _sstable_info) = gen_test_sstable(
+        let (sst, sstable_info) = gen_test_sstable(
             default_builder_opt_for_test(),
             0,
             truth.iter().flat_map(|(key, inserts)| {
@@ -984,12 +1015,13 @@ mod tests {
         )
         .await;
 
-        (prev_key_number, sst, truth, sstable_store)
+        (prev_key_number, sst, truth, sstable_store, sstable_info)
     }
 
     #[tokio::test]
     async fn test_backward_user_chaos_unbounded_unbounded() {
-        let (_prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (_prev_key_number, sst, truth, sstable_store, sstable_info) =
+            generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             chaos_test_case(
@@ -998,6 +1030,7 @@ mod tests {
                 Unbounded,
                 &truth,
                 sstable_store.clone(),
+                &sstable_info,
             )
             .await;
         }
@@ -1005,11 +1038,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_unbounded_included() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (prev_key_number, sst, truth, sstable_store, sstable_info) =
+            generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1017,6 +1051,7 @@ mod tests {
                 Included(end_key_bytes.clone()),
                 &truth,
                 sstable_store.clone(),
+                &sstable_info,
             )
             .await;
         }
@@ -1024,12 +1059,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_included_unbounded() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (prev_key_number, sst, truth, sstable_store, sstable_info) =
+            generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1037,6 +1073,7 @@ mod tests {
                 Unbounded,
                 &truth,
                 sstable_store.clone(),
+                &sstable_info,
             )
             .await;
         }
@@ -1044,12 +1081,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_excluded_unbounded() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (prev_key_number, sst, truth, sstable_store, sstable_info) =
+            generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1057,6 +1095,7 @@ mod tests {
                 Unbounded,
                 &truth,
                 sstable_store.clone(),
+                &sstable_info,
             )
             .await;
         }
@@ -1064,13 +1103,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_included_included() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (prev_key_number, sst, truth, sstable_store, sstable_info) =
+            generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1078,6 +1118,7 @@ mod tests {
                 Included(end_key_bytes.clone()),
                 &truth,
                 sstable_store.clone(),
+                &sstable_info,
             )
             .await;
         }
@@ -1085,13 +1126,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_excluded_included() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (prev_key_number, sst, truth, sstable_store, sstable_info) =
+            generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key: usize = rng.random_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key: usize = rng.random_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
@@ -1099,6 +1141,7 @@ mod tests {
                 Included(end_key_bytes),
                 &truth,
                 sstable_store.clone(),
+                &sstable_info,
             )
             .await;
         }
@@ -1107,7 +1150,7 @@ mod tests {
     #[tokio::test]
     async fn test_min_epoch() {
         let sstable_store = mock_sstable_store().await;
-        let (table0, _) = gen_iterator_test_sstable_with_incr_epoch(
+        let (table0, sstable_info_0) = gen_iterator_test_sstable_with_incr_epoch(
             0,
             default_builder_opt_for_test(),
             |x| x * 3,
@@ -1117,7 +1160,11 @@ mod tests {
         )
         .await;
 
-        let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            table0,
+            sstable_store,
+            &sstable_info_0,
+        )];
 
         let min_count = (TEST_KEYS_COUNT / 5) as u64;
         let min_epoch = test_epoch(min_count);

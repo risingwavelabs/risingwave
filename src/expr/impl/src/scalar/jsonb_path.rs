@@ -14,7 +14,7 @@
 
 use jsonbb::ValueRef;
 use risingwave_common::types::{JsonbRef, JsonbVal};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 use sql_json_path::{EvalError, JsonPath, ParseError};
 use thiserror_ext::AsReport;
 

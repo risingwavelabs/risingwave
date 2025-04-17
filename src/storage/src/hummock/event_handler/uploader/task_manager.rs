@@ -42,10 +42,11 @@ impl TaskManager {
     ) -> &UploadingTaskStatus {
         let task_id = task.task_id;
         self.task_order.push_front(task.task_id);
-        assert!(self
-            .tasks
-            .insert(task.task_id, TaskEntry { task, status })
-            .is_none());
+        assert!(
+            self.tasks
+                .insert(task.task_id, TaskEntry { task, status })
+                .is_none()
+        );
         &self.tasks.get(&task_id).expect("should exist").status
     }
 

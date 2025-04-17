@@ -4,6 +4,7 @@ package stream_service;
 
 import "common.proto";
 import "hummock.proto";
+import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
@@ -17,8 +18,25 @@ message InjectBarrierRequest {
   repeated uint32 table_ids_to_sync = 5;
   uint32 partial_graph_id = 6;
 
-  repeated common.ActorInfo broadcast_info = 8;
-  repeated stream_plan.StreamActor actors_to_build = 9;
+  message FragmentBuildActorInfo {
+    uint32 fragment_id = 1;
+    stream_plan.StreamNode node = 2;
+    repeated BuildActorInfo actors = 3;
+  }
+
+  message BuildActorInfo {
+    message UpstreamActors {
+      repeated common.ActorInfo actors = 1;
+    }
+    uint32 actor_id = 1;
+    map<uint32, UpstreamActors> fragment_upstreams = 2;
+    repeated stream_plan.Dispatcher dispatchers = 3;
+    common.Buffer vnode_bitmap = 4;
+    string mview_definition = 5;
+    plan_common.ExprContext expr_context = 6;
+  }
+
+  repeated FragmentBuildActorInfo actors_to_build = 9;
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }
@@ -33,7 +51,7 @@ message BarrierCompleteResponse {
     uint64 consumed_epoch = 3;
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
-    uint32 pending_barrier_num = 5;
+    uint64 pending_epoch_lag = 5;
   }
   string request_id = 1;
   common.Status status = 2;
@@ -55,20 +73,10 @@ message BarrierCompleteResponse {
   uint32 database_id = 10;
 }
 
-message WaitEpochCommitRequest {
-  uint64 epoch = 1;
-  uint32 table_id = 2;
-}
-
-message WaitEpochCommitResponse {
-  common.Status status = 1;
-}
-
 message StreamingControlStreamRequest {
   message InitialPartialGraph {
     uint32 partial_graph_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
-    repeated common.ActorInfo actor_infos = 3;
   }
 
   message DatabaseInitialPartialGraph {
@@ -78,6 +86,7 @@ message StreamingControlStreamRequest {
 
   message InitRequest {
     repeated DatabaseInitialPartialGraph databases = 1;
+    string term_id = 2;
   }
 
   message CreatePartialGraphRequest {
@@ -137,7 +146,6 @@ message GetMinUncommittedSstIdResponse {
 }
 
 service StreamService {
-  rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
   rpc GetMinUncommittedSstId(GetMinUncommittedSstIdRequest) returns (GetMinUncommittedSstIdResponse);
 }

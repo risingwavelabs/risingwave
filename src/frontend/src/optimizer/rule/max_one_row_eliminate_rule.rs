@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalMaxOneRow};
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
-use crate::optimizer::PlanRef;
 
 /// Eliminate max one row restriction from `LogicalApply`.
 ///

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_frontend::expr::CastContext;
 use risingwave_sqlparser::ast::Expr;
 
-use crate::sql_gen::types::{data_type_to_ast_data_type, EXPLICIT_CAST_TABLE};
+use crate::sql_gen::types::{EXPLICIT_CAST_TABLE, data_type_to_ast_data_type};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<R: Rng> SqlGenerator<'_, R> {

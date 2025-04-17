@@ -21,16 +21,16 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
+use risingwave_expr::Result;
 use risingwave_expr::aggregate::{
-    build_append_only, AggCall, AggType, AggregateFunction, AggregateState as AggImplState,
-    BoxedAggregateFunction, PbAggKind,
+    AggCall, AggType, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
+    PbAggKind, build_append_only,
 };
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{
     BoxedWindowState, FrameBounds, StateEvictHint, StateKey, StatePos, WindowFuncCall,
     WindowFuncKind, WindowState,
 };
-use risingwave_expr::Result;
 use smallvec::SmallVec;
 
 use super::buffer::{RangeWindow, RowsWindow, SessionWindow, WindowBuffer, WindowImpl};

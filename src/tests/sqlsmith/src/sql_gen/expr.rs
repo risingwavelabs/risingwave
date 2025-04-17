@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::IndexedRandom;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;
@@ -42,17 +42,17 @@ impl<R: Rng> SqlGenerator<'_, R> {
             // Stop recursion with a simple scalar or column.
             // Weight it more towards columns, scalar has much higher chance of being generated,
             // since it is usually used as fail-safe expression.
-            return match self.rng.gen_bool(0.1) {
+            return match self.rng.random_bool(0.1) {
                 true => self.gen_simple_scalar(typ),
                 false => self.gen_col(typ, context),
             };
         }
 
-        if *typ == DataType::Boolean && self.rng.gen_bool(0.05) {
-            return match self.rng.gen_bool(0.5) {
+        if *typ == DataType::Boolean && self.rng.random_bool(0.05) {
+            return match self.rng.random_bool(0.5) {
                 true => {
                     let (ty, expr) = self.gen_arbitrary_expr(context);
-                    let n = self.rng.gen_range(1..=10);
+                    let n = self.rng.random_range(1..=10);
                     Expr::InList {
                         expr: Box::new(Expr::Nested(Box::new(expr))),
                         list: self.gen_n_exprs_with_type(n, &ty, context),
@@ -91,7 +91,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // ...
         // We just nest compound expressions to avoid this.
         let range = if context.can_gen_agg() { 100 } else { 50 };
-        match self.rng.gen_range(0..=range) {
+        match self.rng.random_range(0..=range) {
             0..=35 => Expr::Nested(Box::new(self.gen_func(typ, context))),
             36..=40 => self.gen_exists(typ, context),
             41..=50 => self.gen_explicit_cast(typ, context),
@@ -102,12 +102,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_data_type(&mut self) -> DataType {
         // Depth of struct/list nesting
-        let depth = self.rng.gen_range(0..=1);
+        let depth = self.rng.random_range(0..=1);
         self.gen_data_type_inner(depth)
     }
 
     fn gen_data_type_inner(&mut self, depth: usize) -> DataType {
-        match self.rng.gen_bool(0.8) {
+        match self.rng.random_bool(0.8) {
             true if !self.bound_columns.is_empty() => self
                 .bound_columns
                 .choose(&mut self.rng)
@@ -164,7 +164,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
-        let num_fields = self.rng.gen_range(1..4);
+        let num_fields = self.rng.random_range(1..4);
         DataType::Struct(StructType::new(
             STRUCT_FIELD_NAMES[0..num_fields]
                 .iter()
@@ -223,7 +223,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         };
         // Generating correlated subquery tends to create queries which cannot be unnested.
         // we still want to test it, but reduce the chance it occurs.
-        let (subquery, _) = match self.rng.gen_bool(0.05) {
+        let (subquery, _) = match self.rng.random_bool(0.05) {
             true => self.gen_correlated_query(),
             false => self.gen_local_query(),
         };
@@ -240,15 +240,15 @@ impl<R: Rng> SqlGenerator<'_, R> {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
                 expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
-                asc: if self.rng.gen_bool(0.3) {
+                asc: if self.rng.random_bool(0.3) {
                     None
                 } else {
-                    Some(self.rng.gen_bool(0.5))
+                    Some(self.rng.random_bool(0.5))
                 },
-                nulls_first: if self.rng.gen_bool(0.3) {
+                nulls_first: if self.rng.random_bool(0.3) {
                     None
                 } else {
-                    Some(self.rng.gen_bool(0.5))
+                    Some(self.rng.random_bool(0.5))
                 },
             })
         }
@@ -270,15 +270,15 @@ impl<R: Rng> SqlGenerator<'_, R> {
             let expr = exprs.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
                 expr: expr.clone(),
-                asc: if self.rng.gen_bool(0.3) {
+                asc: if self.rng.random_bool(0.3) {
                     None
                 } else {
-                    Some(self.rng.gen_bool(0.5))
+                    Some(self.rng.random_bool(0.5))
                 },
-                nulls_first: if self.rng.gen_bool(0.3) {
+                nulls_first: if self.rng.random_bool(0.3) {
                     None
                 } else {
-                    Some(self.rng.gen_bool(0.5))
+                    Some(self.rng.random_bool(0.5))
                 },
             })
         }

@@ -17,11 +17,11 @@ use std::ops::Deref;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-use futures::future::{try_join_all, TryJoinAll};
-use futures::prelude::TryFuture;
 use futures::TryFutureExt;
+use futures::future::{TryJoinAll, try_join_all};
+use futures::prelude::TryFuture;
 use itertools::Itertools;
-use mongodb::bson::{bson, doc, Array, Bson, Document};
+use mongodb::bson::{Array, Bson, Document, bson, doc};
 use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -29,7 +29,7 @@ use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarRefImpl;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -42,16 +42,16 @@ use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkParam, SinkWriterParam,
 };
 
 mod send_bulk_write_command_future {
     use core::future::Future;
 
     use anyhow::anyhow;
-    use mongodb::bson::Document;
     use mongodb::Database;
+    use mongodb::bson::Document;
 
     use crate::sink::{Result, SinkError};
 
@@ -74,7 +74,7 @@ mod send_bulk_write_command_future {
     }
 
     async fn send_bulk_write_command(db: Database, command: Document) -> Result<()> {
-        let result = db.run_command(command, None).await.map_err(|err| {
+        let result = db.run_command(command).await.map_err(|err| {
             SinkError::Mongodb(anyhow!(err).context(format!(
                 "sending bulk write command failed, database: {}",
                 db.name()
@@ -247,7 +247,8 @@ impl Sink for MongodbSink {
         if !self.is_append_only {
             if self.pk_indices.is_empty() {
                 return Err(SinkError::Config(anyhow!(
-                    "Primary key not defined for upsert mongodb sink (please define in `primary_key` field)")));
+                    "Primary key not defined for upsert mongodb sink (please define in `primary_key` field)"
+                )));
             }
 
             // checking if there is a non-pk field's name is `_id`
@@ -296,7 +297,7 @@ impl Sink for MongodbSink {
         let client = ClientGuard::new(self.param.sink_name.clone(), client);
         client
             .database("admin")
-            .run_command(doc! {"hello":1}, None)
+            .run_command(doc! {"hello":1})
             .await
             .map_err(|err| {
                 SinkError::Mongodb(anyhow!(err).context("failed to send hello command to mongodb"))
@@ -304,8 +305,8 @@ impl Sink for MongodbSink {
 
         if self.config.drop_collection_name_field && self.config.collection_name_field.is_none() {
             return Err(SinkError::Config(anyhow!(
-                    "collection.name.field must be specified when collection.name.field.drop is enabled"
-                )));
+                "collection.name.field must be specified when collection.name.field.drop is enabled"
+            )));
         }
 
         // checking dynamic collection name settings
@@ -334,7 +335,7 @@ impl Sink for MongodbSink {
                 )));
             }
 
-            if !self.is_append_only && self.pk_indices.iter().any(|idx| *idx == coll_field_index) {
+            if !self.is_append_only && self.pk_indices.contains(&coll_field_index) {
                 return Err(SinkError::Config(anyhow!(
                     "collection.name.field {} must not be equal to the primary key field",
                     coll_field

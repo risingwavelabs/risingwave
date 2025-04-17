@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use num_traits::{CheckedAdd, CheckedSub};
-use risingwave_expr::{aggregate, ExprError, Result};
+use risingwave_expr::{ExprError, Result, aggregate};
 
 #[aggregate("sum(int2) -> int8")]
 #[aggregate("sum(int4) -> int8")]
@@ -153,20 +153,12 @@ fn max<T: Ord>(state: T, input: T) -> T {
 /// ```
 #[aggregate("count(*) -> int8", init_state = "0i64")]
 fn count<T>(state: i64, _: T, retract: bool) -> i64 {
-    if retract {
-        state - 1
-    } else {
-        state + 1
-    }
+    if retract { state - 1 } else { state + 1 }
 }
 
 #[aggregate("count() -> int8", init_state = "0i64")]
 fn count_star(state: i64, retract: bool) -> i64 {
-    if retract {
-        state - 1
-    } else {
-        state + 1
-    }
+    if retract { state - 1 } else { state + 1 }
 }
 
 #[cfg(test)]
@@ -179,7 +171,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
     use risingwave_common::types::{Datum, Decimal};
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
     use test::Bencher;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {

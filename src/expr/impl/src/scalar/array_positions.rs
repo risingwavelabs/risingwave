@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{I32Array, ListRef, ListValue};
 use risingwave_common::types::ScalarRefImpl;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Returns the subscript of the first occurrence of the second argument in the array, or `NULL` if
 /// it's not present.
@@ -107,7 +107,7 @@ fn array_position_start(
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: "initial position must not be null".into(),
-            })
+            });
         }
         Some(start) => (start.max(1) - 1) as usize,
     };

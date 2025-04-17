@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use risingwave_common::array::{DataChunk, DataChunkTestExt, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -20,7 +20,7 @@ use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::common::table::state_table::WatermarkCacheParameterizedStateTable;
@@ -118,7 +118,10 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
         state_table.insert(row);
     }
     epoch.inc_for_test();
-    state_table.commit(epoch).await.unwrap();
+    state_table
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 }
 
 fn bench_state_table_inserts(c: &mut Criterion) {
@@ -178,7 +181,10 @@ async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
         state_table.write_chunk(chunk);
     }
     epoch.inc_for_test();
-    state_table.commit(epoch).await.unwrap();
+    state_table
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 }
 
 fn bench_state_table_write_chunk(c: &mut Criterion) {

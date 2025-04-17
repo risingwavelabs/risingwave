@@ -15,7 +15,7 @@
 use risingwave_sqlparser::ast::Query;
 
 use crate::binder::Binder;
-use crate::error::{bail_bind_error, Result};
+use crate::error::{Result, bail_bind_error};
 use crate::expr::{ExprImpl, Subquery, SubqueryKind};
 
 impl Binder {

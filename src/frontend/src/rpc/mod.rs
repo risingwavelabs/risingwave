@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_server::{BoxedError, SessionManager};
-use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableSchemaChange};
+use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -107,7 +107,7 @@ async fn get_new_table_plan(
         table_name,
         new_table_definition,
         &original_catalog,
-        SqlColumnStrategy::Follow, // not used
+        SqlColumnStrategy::FollowUnchecked, // not used
     )
     .await?;
 

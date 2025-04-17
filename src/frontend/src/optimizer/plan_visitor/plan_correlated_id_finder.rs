@@ -15,13 +15,13 @@
 use std::collections::HashSet;
 
 use super::{DefaultBehavior, DefaultValue};
+use crate::PlanRef;
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, LogicalProjectSet,
     LogicalTableFunction, PlanTreeNode,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::PlanRef;
 
 #[derive(Default)]
 pub struct PlanCorrelatedIdFinder {

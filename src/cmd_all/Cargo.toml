@@ -12,11 +12,8 @@ default = ["rw-static-link"]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
-all-udf = ["external-udf", "wasm-udf", "js-udf", "python-udf"]
-external-udf = ["risingwave_expr_impl/external-udf"]
-wasm-udf = ["risingwave_expr_impl/wasm-udf"]
-js-udf = ["risingwave_expr_impl/js-udf"]
-python-udf = ["risingwave_expr_impl/python-udf"]
+udf = ["risingwave_expr_impl/udf"]
+fips = ["workspace-config/fips"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
@@ -27,7 +24,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemal
 [dependencies]
 clap = { workspace = true }
 console = "0.15"
-const-str = "0.5"
+const-str = "0.6"
 home = "0.5"
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
@@ -40,8 +37,8 @@ risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
-strum = "0.26"
-strum_macros = "0.26"
+strum = "0.27"
+strum_macros = "0.27"
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }

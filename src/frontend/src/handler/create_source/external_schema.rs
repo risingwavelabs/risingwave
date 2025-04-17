@@ -14,8 +14,6 @@
 
 //! bind columns from external schema
 
-use risingwave_connector::parser::debezium_cdc_source_schema;
-
 use super::*;
 
 mod json;
@@ -70,10 +68,10 @@ async fn bind_columns_from_source_for_non_cdc(
                 session,
                 TelemetryDatabaseObject::Source,
             )?;
-            if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+            if !SOURCE_ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
                 return Err(RwError::from(ProtocolError(format!(
                     "connection type {:?} is not allowed, allowed types: {:?}",
-                    connection_type, ALLOWED_CONNECTION_CONNECTOR
+                    connection_type, SOURCE_ALLOWED_CONNECTION_CONNECTOR
                 ))));
             }
 
@@ -91,7 +89,7 @@ async fn bind_columns_from_source_for_non_cdc(
             session,
             TelemetryDatabaseObject::Source,
         )?;
-    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
 
     let (format_encode_options, format_encode_secret_refs) = sec_resolve_props.into_parts();
     // Need real secret to access the schema registry
@@ -141,26 +139,22 @@ async fn bind_columns_from_source_for_non_cdc(
         (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
             let (row_schema_location, use_schema_registry) =
                 get_schema_location(&mut format_encode_options_to_consume)?;
-            let protobuf_schema = ProtobufSchema {
-                message_name: consume_string_from_options(
-                    &mut format_encode_options_to_consume,
-                    MESSAGE_NAME_KEY,
-                )?,
-                row_schema_location,
-                use_schema_registry,
-            };
+            let message_name = consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                MESSAGE_NAME_KEY,
+            )?;
             let name_strategy = get_sr_name_strategy_check(
                 &mut format_encode_options_to_consume,
-                protobuf_schema.use_schema_registry,
+                use_schema_registry,
             )?;
 
-            stream_source_info.use_schema_registry = protobuf_schema.use_schema_registry;
+            stream_source_info.use_schema_registry = use_schema_registry;
             stream_source_info
                 .row_schema_location
-                .clone_from(&protobuf_schema.row_schema_location.0);
+                .clone_from(&row_schema_location.0);
             stream_source_info
                 .proto_message_name
-                .clone_from(&protobuf_schema.message_name.0);
+                .clone_from(&message_name.0);
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
@@ -168,7 +162,7 @@ async fn bind_columns_from_source_for_non_cdc(
 
             Some(
                 extract_protobuf_table_schema(
-                    &protobuf_schema,
+                    &stream_source_info,
                     &options_with_secret,
                     &mut format_encode_options_to_consume,
                 )
@@ -346,7 +340,7 @@ fn bind_columns_from_source_for_cdc(
         }
     };
 
-    let columns = debezium_cdc_source_schema();
+    let columns = ColumnCatalog::debezium_cdc_source_cols().to_vec();
     let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
 
     let stream_source_info = StreamSourceInfo {

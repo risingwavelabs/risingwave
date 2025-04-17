@@ -15,14 +15,14 @@
 use std::fmt::Debug;
 
 use anyhow::Context;
-use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
+use simd_json::prelude::MutableObject;
 
 use crate::error::ConnectorResult;
+use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions, TimestamptzHandling};
-use crate::parser::unified::AccessImpl;
-use crate::parser::AccessBuilder;
+use crate::parser::{AccessBuilder, MongoProperties};
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
@@ -48,7 +48,11 @@ impl DebeziumJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -71,22 +75,28 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 pub struct DebeziumMongoJsonAccessBuilder {
     value: Option<Vec<u8>>,
     json_parse_options: JsonParseOptions,
+    strong_schema: bool,
 }
 
 impl DebeziumMongoJsonAccessBuilder {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(props: MongoProperties) -> anyhow::Result<Self> {
         Ok(Self {
             value: None,
             json_parse_options: JsonParseOptions::new_for_debezium(
                 TimestamptzHandling::GuessNumberUnit,
             ),
+            strong_schema: props.strong_schema,
         })
     }
 }
 
 impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -100,6 +110,7 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 
         Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
             JsonAccess::new_with_options(payload, &self.json_parse_options),
+            self.strong_schema,
         )))
     }
 }
@@ -609,7 +620,6 @@ mod tests {
                         ("y", DataType::Float32),
                     ])),
                     column_id: 7.into(),
-                    fields: vec![],
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
                     is_hidden_addition_col: false,

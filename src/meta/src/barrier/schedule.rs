@@ -12,22 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
-use std::iter::once;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::meta::PausedReason;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
+use tracing::{info, warn};
 
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
@@ -82,20 +83,29 @@ struct StatusQueue<T> {
     status: QueueStatus,
 }
 
-type DatabaseScheduledQueue = StatusQueue<VecDeque<ScheduledQueueItem>>;
+struct DatabaseQueue {
+    inner: VecDeque<ScheduledQueueItem>,
+    send_latency: LabelGuardedHistogram,
+}
+
+type DatabaseScheduledQueue = StatusQueue<DatabaseQueue>;
 type ScheduledQueue = StatusQueue<HashMap<DatabaseId, DatabaseScheduledQueue>>;
 
-impl<T> StatusQueue<T> {
-    fn new() -> Self
-    where
-        T: Default,
-    {
+impl DatabaseScheduledQueue {
+    fn new(database_id: DatabaseId, metrics: &MetaMetrics, status: QueueStatus) -> Self {
         Self {
-            queue: T::default(),
-            status: QueueStatus::Ready,
+            queue: DatabaseQueue {
+                inner: Default::default(),
+                send_latency: metrics
+                    .barrier_send_latency
+                    .with_guarded_label_values(&[database_id.database_id.to_string().as_str()]),
+            },
+            status,
         }
     }
+}
 
+impl<T> StatusQueue<T> {
     fn mark_blocked(&mut self, reason: String) {
         self.status = QueueStatus::Blocked(reason);
     }
@@ -106,7 +116,7 @@ impl<T> StatusQueue<T> {
         prev_blocked
     }
 
-    fn validate_item(&mut self, scheduled: &ScheduledQueueItem) -> MetaResult<()> {
+    fn validate_item(&mut self, command: &Command) -> MetaResult<()> {
         // We don't allow any command to be scheduled when the queue is blocked, except for dropping streaming jobs.
         // Because we allow dropping streaming jobs when the cluster is under recovery, so we have to buffer the drop
         // command and execute it when the cluster is ready to clean up it.
@@ -114,7 +124,7 @@ impl<T> StatusQueue<T> {
         // we need to refine it when catalog and streaming metadata can be handled in a transactional way.
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
-                scheduled.command,
+                command,
                 Command::DropStreamingJobs { .. } | Command::DropSubscription { .. }
             )
         {
@@ -136,25 +146,6 @@ fn tracing_span() -> tracing::Span {
     }
 }
 
-impl Inner {
-    /// Create a new scheduled barrier with the given `checkpoint`, `command` and `notifiers`.
-    fn new_scheduled(
-        &self,
-        command: Command,
-        notifiers: impl IntoIterator<Item = Notifier>,
-    ) -> ScheduledQueueItem {
-        // Create a span only if we're being traced, instead of for every periodic barrier.
-        let span = tracing_span();
-
-        ScheduledQueueItem {
-            command,
-            notifiers: notifiers.into_iter().collect(),
-            send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
-            span,
-        }
-    }
-}
-
 /// The sender side of the barrier scheduling queue.
 /// Can be cloned and held by other managers to schedule and run barriers.
 #[derive(Clone)]
@@ -173,7 +164,10 @@ impl BarrierScheduler {
         metrics: Arc<MetaMetrics>,
     ) -> (Self, ScheduledBarriers) {
         let inner = Arc::new(Inner {
-            queue: Mutex::new(ScheduledQueue::new()),
+            queue: Mutex::new(ScheduledQueue {
+                queue: Default::default(),
+                status: QueueStatus::Ready,
+            }),
             changed_tx: watch::channel(()).0,
             metrics,
         });
@@ -191,23 +185,27 @@ impl BarrierScheduler {
     fn push(
         &self,
         database_id: DatabaseId,
-        scheduleds: impl IntoIterator<Item = ScheduledQueueItem>,
+        scheduleds: impl IntoIterator<Item = (Command, Notifier)>,
     ) -> MetaResult<()> {
         let mut queue = self.inner.queue.lock();
         let scheduleds = scheduleds.into_iter().collect_vec();
         scheduleds
             .iter()
-            .try_for_each(|scheduled| queue.validate_item(scheduled))?;
-        let queue = queue
-            .queue
-            .entry(database_id)
-            .or_insert_with(DatabaseScheduledQueue::new);
+            .try_for_each(|(command, _)| queue.validate_item(command))?;
+        let queue = queue.queue.entry(database_id).or_insert_with(|| {
+            DatabaseScheduledQueue::new(database_id, &self.inner.metrics, QueueStatus::Ready)
+        });
         scheduleds
             .iter()
-            .try_for_each(|scheduled| queue.validate_item(scheduled))?;
-        for scheduled in scheduleds {
-            queue.queue.push_back(scheduled);
-            if queue.queue.len() == 1 {
+            .try_for_each(|(command, _)| queue.validate_item(command))?;
+        for (command, notifier) in scheduleds {
+            queue.queue.inner.push_back(ScheduledQueueItem {
+                command,
+                notifiers: vec![notifier],
+                send_latency_timer: queue.queue.send_latency.start_timer(),
+                span: tracing_span(),
+            });
+            if queue.queue.inner.len() == 1 {
                 self.inner.changed_tx.send(()).ok();
             }
         }
@@ -221,7 +219,7 @@ impl BarrierScheduler {
             return false;
         };
 
-        if let Some(idx) = queue.queue.iter().position(|scheduled| {
+        if let Some(idx) = queue.queue.inner.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
                 && info.stream_job_fragments.stream_job_id() == table_id
             {
@@ -230,7 +228,7 @@ impl BarrierScheduler {
                 false
             }
         }) {
-            queue.queue.remove(idx).unwrap();
+            queue.queue.inner.remove(idx).unwrap();
             true
         } else {
             false
@@ -256,12 +254,12 @@ impl BarrierScheduler {
             let (collect_tx, collect_rx) = oneshot::channel();
 
             contexts.push((started_rx, collect_rx));
-            scheduleds.push(self.inner.new_scheduled(
+            scheduleds.push((
                 command,
-                once(Notifier {
+                Notifier {
                     started: Some(started_tx),
                     collected: Some(collect_tx),
-                }),
+                },
             ));
         }
 
@@ -284,26 +282,6 @@ impl BarrierScheduler {
         }
 
         Ok(())
-    }
-
-    /// Run a command with a `Pause` command before and `Resume` command after it. Used for
-    /// configuration change.
-    ///
-    /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(
-        &self,
-        database_id: DatabaseId,
-        command: Command,
-    ) -> MetaResult<()> {
-        self.run_multiple_commands(
-            database_id,
-            vec![
-                Command::pause(PausedReason::ConfigChange),
-                command,
-                Command::resume(PausedReason::ConfigChange),
-            ],
-        )
-        .await
     }
 
     /// Run a command and return when it's completely finished (i.e., collected).
@@ -410,7 +388,7 @@ impl ScheduledBarriers {
                     if queue.status.is_blocked() {
                         continue;
                     }
-                    if let Some(item) = queue.queue.pop_front() {
+                    if let Some(item) = queue.queue.inner.pop_front() {
                         item.send_latency_timer.observe_duration();
                         break 'outer Scheduled {
                             database_id: *database_id,
@@ -426,6 +404,13 @@ impl ScheduledBarriers {
     }
 }
 
+pub(super) enum MarkReadyOptions {
+    Database(DatabaseId),
+    Global {
+        blocked_databases: HashSet<DatabaseId>,
+    },
+}
+
 impl ScheduledBarriers {
     /// Pre buffered drop and cancel command, return true if any.
     pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> bool {
@@ -437,54 +422,129 @@ impl ScheduledBarriers {
     pub(super) fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
-        reason: impl Into<String> + Copy,
+        reason: impl Into<String>,
     ) {
         let mut queue = self.inner.queue.lock();
-        let mark_blocked_and_notify_failed = |queue: &mut DatabaseScheduledQueue| {
-            queue.mark_blocked(reason.into());
-            while let Some(ScheduledQueueItem { notifiers, .. }) = queue.queue.pop_front() {
-                notifiers.into_iter().for_each(|notify| {
-                    notify.notify_collection_failed(anyhow!(reason.into()).into())
-                })
+        fn database_blocked_reason(database_id: DatabaseId, reason: &String) -> String {
+            format!("database {} unavailable {}", database_id, reason)
+        }
+        fn mark_blocked_and_notify_failed(
+            database_id: DatabaseId,
+            queue: &mut DatabaseScheduledQueue,
+            reason: &String,
+        ) {
+            let reason = database_blocked_reason(database_id, reason);
+            let err: MetaError = anyhow!("{}", reason).into();
+            queue.mark_blocked(reason);
+            while let Some(ScheduledQueueItem { notifiers, .. }) = queue.queue.inner.pop_front() {
+                notifiers
+                    .into_iter()
+                    .for_each(|notify| notify.notify_collection_failed(err.clone()))
             }
-        };
+        }
         if let Some(database_id) = database_id {
-            let queue = queue
-                .queue
-                .entry(database_id)
-                .or_insert_with(DatabaseScheduledQueue::new);
-            mark_blocked_and_notify_failed(queue);
+            let reason = reason.into();
+            match queue.queue.entry(database_id) {
+                Entry::Occupied(entry) => {
+                    let queue = entry.into_mut();
+                    if queue.status.is_blocked() {
+                        if cfg!(debug_assertions) {
+                            panic!("database {} marked as blocked twice", database_id);
+                        } else {
+                            warn!(?database_id, "database marked as blocked twice");
+                        }
+                    }
+                    info!(?database_id, "database marked as blocked");
+                    mark_blocked_and_notify_failed(database_id, queue, &reason);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(DatabaseScheduledQueue::new(
+                        database_id,
+                        &self.inner.metrics,
+                        QueueStatus::Blocked(database_blocked_reason(database_id, &reason)),
+                    ));
+                }
+            }
         } else {
-            queue.mark_blocked(reason.into());
-            for queue in queue.queue.values_mut() {
-                mark_blocked_and_notify_failed(queue);
+            let reason = reason.into();
+            if queue.status.is_blocked() {
+                if cfg!(debug_assertions) {
+                    panic!("cluster marked as blocked twice");
+                } else {
+                    warn!("cluster marked as blocked twice");
+                }
+            }
+            info!("cluster marked as blocked");
+            queue.mark_blocked(reason.clone());
+            for (database_id, queue) in &mut queue.queue {
+                mark_blocked_and_notify_failed(*database_id, queue, &reason);
             }
         }
     }
 
     /// Mark command scheduler as ready to accept new command.
-    pub(super) fn mark_ready(&self, database_id: Option<DatabaseId>) {
+    pub(super) fn mark_ready(&self, options: MarkReadyOptions) {
         let mut queue = self.inner.queue.lock();
-        if let Some(database_id) = database_id {
-            let database_queue = queue
-                .queue
-                .entry(database_id)
-                .or_insert_with(DatabaseScheduledQueue::new);
-            if database_queue.mark_ready() && !database_queue.queue.is_empty() {
-                self.inner.changed_tx.send(()).ok();
+        let queue = &mut *queue;
+        match options {
+            MarkReadyOptions::Database(database_id) => {
+                info!(?database_id, "database marked as ready");
+                let database_queue = queue.queue.entry(database_id).or_insert_with(|| {
+                    DatabaseScheduledQueue::new(
+                        database_id,
+                        &self.inner.metrics,
+                        QueueStatus::Ready,
+                    )
+                });
+                if !database_queue.status.is_blocked() {
+                    if cfg!(debug_assertions) {
+                        panic!("database {} marked as ready twice", database_id);
+                    } else {
+                        warn!(?database_id, "database marked as ready twice");
+                    }
+                }
+                if database_queue.mark_ready()
+                    && !queue.status.is_blocked()
+                    && !database_queue.queue.inner.is_empty()
+                {
+                    self.inner.changed_tx.send(()).ok();
+                }
             }
-        } else {
-            let prev_blocked = queue.mark_ready();
-            for queue in queue.queue.values_mut() {
-                queue.mark_ready();
-            }
-            if prev_blocked
-                && queue
-                    .queue
-                    .values()
-                    .any(|database_queue| !database_queue.queue.is_empty())
-            {
-                self.inner.changed_tx.send(()).ok();
+            MarkReadyOptions::Global { blocked_databases } => {
+                if !queue.status.is_blocked() {
+                    if cfg!(debug_assertions) {
+                        panic!("cluster marked as ready twice");
+                    } else {
+                        warn!("cluster marked as ready twice");
+                    }
+                }
+                info!(?blocked_databases, "cluster marked as ready");
+                let prev_blocked = queue.mark_ready();
+                for database_id in &blocked_databases {
+                    queue.queue.entry(*database_id).or_insert_with(|| {
+                        DatabaseScheduledQueue::new(
+                            *database_id,
+                            &self.inner.metrics,
+                            QueueStatus::Blocked(format!(
+                                "database {} failed to recover in global recovery",
+                                database_id
+                            )),
+                        )
+                    });
+                }
+                for (database_id, queue) in &mut queue.queue {
+                    if !blocked_databases.contains(database_id) {
+                        queue.mark_ready();
+                    }
+                }
+                if prev_blocked
+                    && queue
+                        .queue
+                        .values()
+                        .any(|database_queue| !database_queue.queue.inner.is_empty())
+                {
+                    self.inner.changed_tx.send(()).ok();
+                }
             }
         }
     }
@@ -498,7 +558,7 @@ impl ScheduledBarriers {
         let mut pre_apply_drop_cancel = |queue: &mut DatabaseScheduledQueue| {
             while let Some(ScheduledQueueItem {
                 notifiers, command, ..
-            }) = queue.queue.pop_front()
+            }) = queue.queue.inner.pop_front()
             {
                 match command {
                     Command::DropStreamingJobs { .. } => {

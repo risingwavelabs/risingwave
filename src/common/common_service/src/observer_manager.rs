@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::error::RpcError;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
@@ -122,6 +122,7 @@ where
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
+            Info::ComputeNodeTotalCpuCount(_) => true,
             Info::StreamingWorkerSlotMapping(_) => {
                 notification.version
                     > info
@@ -178,11 +179,14 @@ where
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if let Err(err) = self.wait_init_notification().await {
-                        tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
-                        continue;
-                    } else {
-                        break;
+                    match self.wait_init_notification().await {
+                        Err(err) => {
+                            tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
+                            continue;
+                        }
+                        _ => {
+                            break;
+                        }
                     }
                 }
                 Err(_) => {

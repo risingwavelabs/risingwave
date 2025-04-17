@@ -15,8 +15,8 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::rw_catalog::rw_types::read_rw_types;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::catalog::system_catalog::rw_catalog::rw_types::read_rw_types;
 use crate::error::Result;
 
 /// The catalog `pg_type` stores information about data types.

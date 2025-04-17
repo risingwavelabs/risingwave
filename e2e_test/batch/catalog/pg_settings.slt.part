@@ -8,14 +8,17 @@ internal parallel_compact_size_mb
 internal sstable_size_mb
 internal state_store
 internal use_new_object_prefix_strategy
+postmaster adaptive_parallelism_strategy
 postmaster backup_storage_directory
 postmaster backup_storage_url
 postmaster barrier_interval_ms
 postmaster checkpoint_frequency
 postmaster enable_tracing
+postmaster enforce_secret_on_cloud
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
+postmaster per_database_isolation
 postmaster time_travel_retention_ms
 user application_name
 user backfill_rate_limit
@@ -39,6 +42,7 @@ user enable_two_phase_agg
 user extra_float_digits
 user force_split_distinct_agg
 user force_two_phase_agg
+user iceberg_engine_connection
 user idle_in_transaction_session_timeout
 user implicit_flush
 user intervalstyle
@@ -59,9 +63,18 @@ user statement_timeout
 user streaming_allow_jsonb_in_stream_key
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
+user streaming_enable_unaligned_join
+user streaming_force_filter_inside_join
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_parallelism_for_index
+user streaming_parallelism_for_materialized_view
+user streaming_parallelism_for_sink
+user streaming_parallelism_for_source
+user streaming_parallelism_for_table
+user streaming_sync_log_store_buffer_size
+user streaming_sync_log_store_pause_duration_ms
 user streaming_use_arrangement_backfill
 user streaming_use_shared_source
 user streaming_use_snapshot_backfill
@@ -78,9 +91,9 @@ SELECT * FROM pg_catalog.pg_settings where name='dummy';
 query TT
 SELECT min(name) name, context FROM pg_catalog.pg_settings GROUP BY context;
 ----
-application_name            user
-backup_storage_directory    postmaster
-block_size_kb               internal
+application_name	user
+adaptive_parallelism_strategy	postmaster
+block_size_kb	internal
 
 # Tab-completion of `SET` command
 query T

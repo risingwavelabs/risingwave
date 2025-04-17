@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamptz;
 
@@ -54,12 +54,14 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
         let prefix = self.prefix.as_deref().unwrap_or("/");
 
-        match self.op.list(prefix).await {
+        let mut lister = self.op.lister(prefix).await?;
+        // fetch one item as validation, no need to get all
+        match lister.try_next().await {
             Ok(_) => return Ok(vec![empty_split]),
             Err(e) => {
                 return Err(anyhow!(e)
                     .context("fail to create source, please check your config.")
-                    .into())
+                    .into());
             }
         }
     }
@@ -68,10 +70,13 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = self.prefix.as_deref().unwrap_or("/");
-
+        let list_prefix = match prefix.ends_with("/") {
+            true => prefix,
+            false => "/",
+        };
         let object_lister = self
             .op
-            .lister_with(prefix)
+            .lister_with(list_prefix)
             .recursive(true)
             .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
@@ -87,6 +92,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                     };
                     let timestamp = Timestamptz::from(t);
                     let size = om.content_length() as i64;
+
                     let metadata = FsPageItem {
                         name,
                         size,

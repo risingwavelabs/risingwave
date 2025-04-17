@@ -56,3 +56,4 @@ CREATE TABLE test_my_default_value (
     city varchar(200) default 'Shanghai',
     PRIMARY KEY (id)
 );
+INSERT INTO test_my_default_value(id, name) VALUES (1, 'bugen');

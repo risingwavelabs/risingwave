@@ -18,14 +18,14 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{Schema, KAFKA_TIMESTAMP_COLUMN_NAME};
-use risingwave_connector::source::DataType;
+use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, Schema};
+use risingwave_common::types::DataType;
 
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase,
-    PlanRef, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;

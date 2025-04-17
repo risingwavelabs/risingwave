@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::util::scan_range::{is_full_range, ScanRange};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_pb::batch_plan::SysRowSeqScanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::PbColumnDesc;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, scan_ranges_as_strs, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
+use super::utils::{Distill, childless_record, scan_ranges_as_strs};
+use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, generic};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSysSeqScan` implements [`super::LogicalSysScan`] to scan from a row-oriented table

@@ -17,14 +17,13 @@ use std::sync::Arc;
 use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::worker_util::WorkerNodeId;
+use risingwave_connector::source::iceberg::IcebergScanMetrics;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{
-    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, IcebergScanMetrics,
-};
+use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.

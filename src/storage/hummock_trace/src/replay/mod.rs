@@ -17,8 +17,8 @@ mod worker;
 
 use std::ops::Bound;
 
-use futures::stream::BoxStream;
 use futures::Stream;
+use futures::stream::BoxStream;
 #[cfg(test)]
 use futures_async_stream::try_stream;
 #[cfg(test)]
@@ -28,9 +28,9 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 pub use runner::*;
 pub(crate) use worker::*;
 
-use crate::error::Result;
 #[cfg(test)]
 use crate::TraceError;
+use crate::error::Result;
 use crate::{
     LocalStorageId, Record, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
@@ -61,8 +61,6 @@ pub(crate) enum WorkerId {
 pub trait LocalReplay: LocalReplayRead + ReplayWrite + Send + Sync {
     async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
-    fn is_dirty(&self) -> bool;
-    fn epoch(&self) -> u64;
     async fn try_flush(&mut self) -> Result<()>;
     async fn flush(&mut self) -> Result<usize>;
 }
@@ -182,8 +180,6 @@ mock! {
     impl LocalReplay for LocalReplayInterface{
         async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions);
-        fn is_dirty(&self) -> bool;
-        fn epoch(&self) -> u64;
         async fn flush(&mut self) -> Result<usize>;
         async fn try_flush(&mut self) -> Result<()>;
     }

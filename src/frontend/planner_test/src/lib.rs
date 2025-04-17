@@ -25,18 +25,18 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
-    explain, variable, HandlerArgs,
+    HandlerArgs, create_index, create_mv, create_schema, create_source, create_table, create_view,
+    drop_table, explain, variable,
 };
 use risingwave_frontend::session::SessionImpl;
-use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
+use risingwave_frontend::test_utils::{LocalFrontend, create_proto_file, get_explain_output};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
-    OptimizerContextRef, PlanRef, Planner, WithOptionsSecResolved,
+    Binder, Explain, FrontendOpts, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
+    WithOptionsSecResolved, build_graph, explain_stream_graph,
 };
 use risingwave_sqlparser::ast::{
     AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
@@ -268,7 +268,7 @@ impl TestCase {
             frontend.session_ref()
         };
 
-        if let Some(ref config_map) = self.with_config_map() {
+        if let Some(config_map) = self.with_config_map() {
             for (key, val) in config_map {
                 session.set_config(key, val.to_owned()).unwrap();
             }
@@ -452,7 +452,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         on_conflict,
-                        with_version_column,
+                        with_version_column.map(|x| x.real_value()),
                         cdc_table_info,
                         include_column_options,
                         webhook_info,
@@ -827,7 +827,7 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan)?;
+                    let graph = build_graph(stream_plan, None)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }

@@ -72,6 +72,7 @@ def validate_state_table_item(table_name: str, expect_count: int):
         database="dev"
     )
     # query for the internal table name and make sure it exists
+    result_count = 0
     with conn.cursor() as cursor:
         cursor.execute(f"select name from rw_internal_table_info where job_name = '{table_name}'")
         results = cursor.fetchall()
@@ -82,11 +83,31 @@ def validate_state_table_item(table_name: str, expect_count: int):
             cursor.execute(f"SELECT * FROM {internal_table_name}")
             results = cursor.fetchall()
             print(f"Get items from state table: {results}")
-            if len(results) == expect_count:
+            result_count = len(results)
+            if result_count == expect_count:
                 print(f"Found {expect_count} items in {internal_table_name}")
-                break
-            print(f"Waiting for {internal_table_name} to have {expect_count} items, got {len(results)}. Retry...")
+                return
+            print(f"Waiting for {internal_table_name} to have {expect_count} items, got {result_count}. Retry...")
             time.sleep(0.5)
+    raise Exception(f"Failed to find {expect_count} items in {internal_table_name}, expected {expect_count}, got {result_count}")
+
+
+async def ensure_all_ack(stream_name: str, consumer_name: str):
+    nc = NATS()
+    await nc.connect(servers=[NATS_SERVER])
+    js = nc.jetstream()
+
+    # Get consumer info
+    consumer = await js.consumer_info(stream_name, consumer_name)
+    print(f"Consumer stats for {consumer_name} on stream {stream_name}:")
+    print(f"  Delivered: {consumer.delivered.consumer_seq}")
+    print(f"  Ack Pending: {consumer.num_pending}")
+    print(f"  Redelivered: {consumer.num_redelivered}")
+    print(f"  Waiting: {consumer.num_waiting}")
+
+    if consumer.num_pending > 0:
+        raise Exception(f"Consumer {consumer_name} on stream {stream_name} has {consumer.num_pending} pending messages")
+    await nc.close()
 
 if __name__ == "__main__":
     import sys
@@ -113,7 +134,14 @@ if __name__ == "__main__":
         table_name = sys.argv[2]
         expect_count = int(sys.argv[3])
         validate_state_table_item(table_name, expect_count)
+    elif command == "ensure_all_ack":
+        if len(sys.argv) != 4:
+            print("Error: Both stream name and consumer name are required")
+            sys.exit(1)
+        stream_name = sys.argv[2]
+        consumer_name = sys.argv[3]
+        asyncio.run(ensure_all_ack(stream_name, consumer_name))
     else:
         print(f"Unknown command: {command}")
-        print("Supported commands: create_stream, produce_stream, validate_state")
+        print("Supported commands: create_stream, produce_stream, validate_state, ensure_all_ack")
         sys.exit(1)

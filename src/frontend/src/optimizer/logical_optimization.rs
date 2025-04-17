@@ -20,6 +20,7 @@ use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
+use crate::optimizer::PlanRef;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
@@ -28,10 +29,9 @@ use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
 use crate::optimizer::plan_visitor::{
-    has_logical_apply, HasMaxOneRowApply, PlanCheckApplyEliminationExt, PlanVisitor,
+    HasMaxOneRowApply, PlanCheckApplyEliminationExt, PlanVisitor, has_logical_apply,
 };
 use crate::optimizer::rule::*;
-use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 

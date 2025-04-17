@@ -14,9 +14,9 @@
 
 use risingwave_backup::error::BackupError;
 
+use crate::MetaError;
 use crate::model::MetadataModelError;
 use crate::storage::MetaStoreError;
-use crate::MetaError;
 
 impl From<BackupError> for MetaError {
     fn from(e: BackupError) -> Self {

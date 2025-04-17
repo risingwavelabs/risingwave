@@ -26,7 +26,7 @@ use super::{
     ValidationRuleType,
 };
 use crate::hummock::compaction::picker::TrivialMovePicker;
-use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
+use crate::hummock::compaction::{CompactionDeveloperConfig, create_overlap_strategy};
 use crate::hummock::level_handler::LevelHandler;
 
 std::thread_local! {
@@ -142,6 +142,10 @@ impl LevelCompactionPicker {
             } else {
                 0
             },
+            self.config
+                .sst_allowed_trivial_move_max_count
+                .unwrap_or(compaction_config::sst_allowed_trivial_move_max_count())
+                as usize,
         );
 
         trivial_move_picker.pick_trivial_move_task(
@@ -277,7 +281,8 @@ impl LevelCompactionPicker {
 
                     // reduce log
                     if log_counter % 100 == 0 {
-                        tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
+                        tracing::warn!(
+                            "skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
                             result.input_levels.len(),
                             result.total_file_count,
                             result.select_input_size,

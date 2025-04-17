@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use risingwave_pb::user::PbUserInfo;
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{AuthInfo, UserId};

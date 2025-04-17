@@ -25,8 +25,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode, generic};
+use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -34,7 +35,6 @@ use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -146,10 +146,11 @@ impl StreamTableScan {
     ///
     /// FIXME(kwannoel):
     /// - Across all vnodes, the values are the same.
-    /// - e.g. | vnode | pk ...  | `backfill_finished` | `row_count` |
-    ///        | 1002 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
+    /// - e.g.
+    ///   | vnode | pk ...  | `backfill_finished` | `row_count` |
+    ///   | 1002 | Int64(1) | t                   | 10          |
+    ///   | 1003 | Int64(1) | t                   | 10          |
+    ///   | 1003 | Int64(1) | t                   | 10          |
     ///
     /// Eventually we should track progress per vnode, to support scaling with both mview and
     /// the corresponding `no_shuffle_backfill`.
@@ -195,7 +196,7 @@ impl StreamTableScan {
                 // `row_count` column
                 catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
             }
-            StreamScanType::SnapshotBackfill => {
+            StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill => {
                 // `epoch` column
                 catalog_builder.add_column(&Field::with_name(DataType::Int64, "epoch"));
 
@@ -269,7 +270,9 @@ impl Distill for StreamTableScan {
 
 impl StreamNode for StreamTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!(
+            "stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead."
+        )
     }
 }
 
@@ -292,7 +295,8 @@ impl StreamTableScan {
             // For backfill, we additionally need the primary key columns.
             StreamScanType::Backfill
             | StreamScanType::ArrangementBackfill
-            | StreamScanType::SnapshotBackfill => self.core.output_and_pk_column_ids(),
+            | StreamScanType::SnapshotBackfill
+            | StreamScanType::CrossDbSnapshotBackfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -350,23 +354,10 @@ impl StreamTableScan {
             None
         };
 
-        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_desc.table_id.table_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
-            upstream_column_ids,
-            // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
-            state_table: Some(catalog),
-            arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
-            ..Default::default()
-        }));
-
-        Ok(PbStreamNode {
-            fields: self.schema().to_prost(),
-            input: vec![
+        let input = if self.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill {
+            vec![]
+        } else {
+            vec![
                 // Upstream updates
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
@@ -386,7 +377,26 @@ impl StreamTableScan {
                     input: vec![],
                     append_only: true,
                 },
-            ],
+            ]
+        };
+
+        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
+            table_id: self.core.table_desc.table_id.table_id,
+            stream_scan_type: self.stream_scan_type as i32,
+            // The column indices need to be forwarded to the downstream
+            output_indices,
+            upstream_column_ids,
+            // The table desc used by backfill executor
+            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            state_table: Some(catalog),
+            arrangement_table,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            ..Default::default()
+        }));
+
+        Ok(PbStreamNode {
+            fields: self.schema().to_prost(),
+            input,
             node_body: Some(node_body),
             stream_key,
             operator_id: self.base.id().0 as u64,

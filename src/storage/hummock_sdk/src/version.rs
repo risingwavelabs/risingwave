@@ -33,14 +33,14 @@ use tracing::warn;
 use crate::change_log::{
     ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
 };
-use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::compaction_group::StaticCompactionGroupId;
+use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
 use crate::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
-    FIRST_VERSION_ID,
+    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockSstableId, HummockSstableObjectId,
+    HummockVersionId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,10 +64,11 @@ impl HummockVersionStateTableInfo {
     ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
         let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
         for (table_id, info) in state_table_info {
-            assert!(ret
-                .entry(info.compaction_group_id)
-                .or_default()
-                .insert(*table_id));
+            assert!(
+                ret.entry(info.compaction_group_id)
+                    .or_default()
+                    .insert(*table_id)
+            );
         }
         ret
     }
@@ -116,9 +117,11 @@ impl HummockVersionStateTableInfo {
                 .expect("should exist");
             assert!(member_tables.remove(&table_id));
             if member_tables.is_empty() {
-                assert!(compaction_group_member_tables
-                    .remove(&compaction_group_id)
-                    .is_some());
+                assert!(
+                    compaction_group_member_tables
+                        .remove(&compaction_group_id)
+                        .is_some()
+                );
             }
         }
         for table_id in removed_table_id {
@@ -164,21 +167,23 @@ impl HummockVersionStateTableInfo {
                             prev_info.compaction_group_id,
                             *table_id,
                         );
-                        assert!(self
-                            .compaction_group_member_tables
-                            .entry(new_info.compaction_group_id)
-                            .or_default()
-                            .insert(*table_id));
+                        assert!(
+                            self.compaction_group_member_tables
+                                .entry(new_info.compaction_group_id)
+                                .or_default()
+                                .insert(*table_id)
+                        );
                     }
                     let prev_info = replace(prev_info, new_info);
                     changed_table.insert(*table_id, Some(prev_info));
                 }
                 Entry::Vacant(entry) => {
-                    assert!(self
-                        .compaction_group_member_tables
-                        .entry(new_info.compaction_group_id)
-                        .or_default()
-                        .insert(*table_id));
+                    assert!(
+                        self.compaction_group_member_tables
+                            .entry(new_info.compaction_group_id)
+                            .or_default()
+                            .insert(*table_id)
+                    );
                     has_bumped_committed_epoch = true;
                     entry.insert(new_info);
                     changed_table.insert(*table_id, None);
@@ -568,19 +573,33 @@ where
     ///
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
-    pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.newly_added_sst_infos()
+    pub fn newly_added_object_ids(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> HashSet<HummockSstableObjectId> {
+        self.newly_added_sst_infos(exclude_table_change_log)
             .map(|sst| sst.object_id())
             .collect()
     }
 
-    pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.newly_added_sst_infos()
+    pub fn newly_added_sst_ids(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> HashSet<HummockSstableObjectId> {
+        self.newly_added_sst_infos(exclude_table_change_log)
             .map(|sst| sst.sst_id())
             .collect()
     }
 
-    pub fn newly_added_sst_infos(&self) -> impl Iterator<Item = &'_ T> {
+    pub fn newly_added_sst_infos(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> impl Iterator<Item = &'_ T> {
+        let may_table_change_delta = if exclude_table_change_log {
+            None
+        } else {
+            Some(self.change_log_delta.values())
+        };
         self.group_deltas
             .values()
             .flat_map(|group_deltas| {
@@ -598,11 +617,17 @@ where
                     sst_slice.into_iter().flatten()
                 })
             })
-            .chain(self.change_log_delta.values().flat_map(|delta| {
-                // TODO: optimization: strip table change log
-                let new_log = &delta.new_log;
-                new_log.new_value.iter().chain(new_log.old_value.iter())
-            }))
+            .chain(
+                may_table_change_delta
+                    .map(|v| {
+                        v.flat_map(|delta| {
+                            let new_log = &delta.new_log;
+                            new_log.new_value.iter().chain(new_log.old_value.iter())
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
     }
 }
 
@@ -804,6 +829,7 @@ pub struct IntraLevelDeltaCommon<T> {
     pub removed_table_ids: HashSet<u64>,
     pub inserted_table_infos: Vec<T>,
     pub vnode_partition_count: u32,
+    pub compaction_group_version_id: u64,
 }
 
 pub type IntraLevelDelta = IntraLevelDeltaCommon<SstableInfo>;
@@ -837,6 +863,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: pb_intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -856,6 +883,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -879,6 +907,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -900,6 +929,7 @@ where
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: pb_intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -911,6 +941,7 @@ impl IntraLevelDelta {
         removed_table_ids: HashSet<u64>,
         inserted_table_infos: Vec<SstableInfo>,
         vnode_partition_count: u32,
+        compaction_group_version_id: u64,
     ) -> Self {
         Self {
             level_idx,
@@ -918,6 +949,7 @@ impl IntraLevelDelta {
             removed_table_ids,
             inserted_table_infos,
             vnode_partition_count,
+            compaction_group_version_id,
         }
     }
 }
@@ -926,7 +958,7 @@ impl IntraLevelDelta {
 pub enum GroupDeltaCommon<T> {
     NewL0SubLevel(Vec<T>),
     IntraLevel(IntraLevelDeltaCommon<T>),
-    GroupConstruct(PbGroupConstruct),
+    GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
 }
@@ -943,7 +975,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct)
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(pb_group_destroy)
@@ -973,7 +1005,7 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct)),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct)),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
@@ -1003,7 +1035,7 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct.clone())),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
@@ -1030,7 +1062,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct.clone())
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct.clone()))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(*pb_group_destroy)

@@ -93,7 +93,7 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
     if topic.contains(PARTITIONED_TOPIC_SUFFIX) {
         let partition = topic
             .split('-')
-            .last()
+            .next_back()
             .unwrap()
             .parse::<i32>()
             .map_err(|e| anyhow!(e))?;

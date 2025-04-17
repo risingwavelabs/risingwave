@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::{zip_eq, Itertools};
+use itertools::{Itertools, zip_eq};
 use rand::RngCore;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
@@ -21,6 +21,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_connector::sink::log_store::{FlushCurrentEpochOptions, LogStoreResult, LogWriter};
 use risingwave_pb::catalog::PbTable;
 
 use crate::common::log_store_impl::kv_log_store::KvLogStorePkInfo;
@@ -38,7 +39,7 @@ pub(crate) fn gen_sized_test_data(base: i64, max_count: usize) -> (Vec<Op>, Vec<
     let mut rows = Vec::new();
     while ops.len() < max_count - 1 {
         let index = ops.len() as i64;
-        match rand::thread_rng().next_u32() % 3 {
+        match rand::rng().next_u32() % 3 {
             0 => {
                 ops.push(Op::Insert);
                 rows.push(OwnedRow::new(vec![
@@ -215,3 +216,38 @@ pub(crate) fn check_rows_eq<R1: Row, R2: Row>(
 pub(crate) fn check_stream_chunk_eq(first: &StreamChunk, second: &StreamChunk) -> bool {
     check_rows_eq(first.rows(), second.rows())
 }
+
+#[macro_export]
+macro_rules! assert_stream_chunk_eq {
+    ($left:expr, $right:expr) => {
+        assert!(
+            check_stream_chunk_eq(&$left, &$right),
+            "stream chunk not equal: left: {:?}, right: {:?}",
+            $left,
+            $right
+        );
+    };
+}
+
+pub(crate) trait LogWriterTestExt: LogWriter {
+    async fn flush_current_epoch_for_test(
+        &mut self,
+        next_epoch: u64,
+        is_checkpoint: bool,
+    ) -> LogStoreResult<()> {
+        let post_flush = self
+            .flush_current_epoch(
+                next_epoch,
+                FlushCurrentEpochOptions {
+                    is_checkpoint,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                },
+            )
+            .await?;
+        (post_flush).post_yield_barrier().await?;
+        Ok(())
+    }
+}
+
+impl<W: LogWriter> LogWriterTestExt for W {}

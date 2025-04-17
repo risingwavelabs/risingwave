@@ -21,7 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, prefix_slice_with_vnode};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
@@ -39,7 +39,7 @@ use crate::hummock::{
     HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
     SstableStoreRef, TableHolder,
 };
-use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
+use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]

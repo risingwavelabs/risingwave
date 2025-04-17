@@ -1,3 +1,4 @@
+style_edition = "2024"
 comment_width = 120
 format_code_in_doc_comments = true
 format_macro_bodies = true
@@ -9,6 +10,7 @@ group_imports = "StdExternalCrate"
 reorder_impl_items = true
 reorder_imports = true
 tab_spaces = 4
+overflow_delimited_expr = false
 # TODO: Fix it later. It produces too many unwanted changes related with markdown lists now. e.g.,
 # https://github.com/rust-lang/rustfmt/issues/5862
 # https://github.com/rust-lang/rustfmt/issues/5836

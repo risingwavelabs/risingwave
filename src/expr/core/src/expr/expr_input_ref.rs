@@ -20,8 +20,8 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExpression, Build};
-use crate::expr::Expression;
 use crate::Result;
+use crate::expr::Expression;
 
 /// A reference to a column in input relation.
 #[derive(Debug, Clone)]

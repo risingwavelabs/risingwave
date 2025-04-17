@@ -48,21 +48,21 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
 use risingwave_sqlparser::ast::AsOf;
-use serde::ser::SerializeStruct;
 use serde::Serialize;
+use serde::ser::SerializeStruct;
 use uuid::Uuid;
 
 use super::SchedulerError;
-use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::error::RwError;
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
     BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
 };
 use crate::optimizer::property::Distribution;
-use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]

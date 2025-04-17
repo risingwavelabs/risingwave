@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use prometheus::{
-    exponential_buckets, histogram_opts, linear_buckets, register_histogram_with_registry,
-    Histogram, Registry,
+    Histogram, Registry, exponential_buckets, histogram_opts, linear_buckets,
+    register_histogram_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -41,20 +41,20 @@ use crate::store::{
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
-    pub get_duration: RelabeledGuardedHistogramVec<1>,
-    pub get_key_size: RelabeledGuardedHistogramVec<1>,
-    pub get_value_size: RelabeledGuardedHistogramVec<1>,
+    pub get_duration: RelabeledGuardedHistogramVec,
+    pub get_key_size: RelabeledGuardedHistogramVec,
+    pub get_value_size: RelabeledGuardedHistogramVec,
 
     // [table_id, iter_type: {"iter", "iter_log"}]
-    pub iter_size: RelabeledGuardedHistogramVec<2>,
-    pub iter_item: RelabeledGuardedHistogramVec<2>,
-    pub iter_init_duration: RelabeledGuardedHistogramVec<2>,
-    pub iter_scan_duration: RelabeledGuardedHistogramVec<2>,
-    pub iter_counts: RelabeledGuardedIntCounterVec<2>,
-    pub iter_in_progress_counts: RelabeledGuardedIntGaugeVec<2>,
+    pub iter_size: RelabeledGuardedHistogramVec,
+    pub iter_item: RelabeledGuardedHistogramVec,
+    pub iter_init_duration: RelabeledGuardedHistogramVec,
+    pub iter_scan_duration: RelabeledGuardedHistogramVec,
+    pub iter_counts: RelabeledGuardedIntCounterVec,
+    pub iter_in_progress_counts: RelabeledGuardedIntGaugeVec,
 
     // [table_id, op_type]
-    pub iter_log_op_type_counts: LabelGuardedIntCounterVec<2>,
+    pub iter_log_op_type_counts: LabelGuardedIntCounterVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
@@ -366,12 +366,12 @@ impl MonitoredStorageMetrics {
 }
 
 struct LocalIterMetricsInner {
-    iter_init_duration: LabelGuardedLocalHistogram<2>,
-    iter_scan_duration: LabelGuardedLocalHistogram<2>,
-    iter_counts: LabelGuardedLocalIntCounter<2>,
-    iter_item: LabelGuardedLocalHistogram<2>,
-    iter_size: LabelGuardedLocalHistogram<2>,
-    iter_in_progress_counts: LabelGuardedIntGauge<2>,
+    iter_init_duration: LabelGuardedLocalHistogram,
+    iter_scan_duration: LabelGuardedLocalHistogram,
+    iter_counts: LabelGuardedLocalIntCounter,
+    iter_item: LabelGuardedLocalHistogram,
+    iter_size: LabelGuardedLocalHistogram,
+    iter_in_progress_counts: LabelGuardedIntGauge,
 }
 
 struct LocalIterMetrics {
@@ -400,9 +400,9 @@ impl LocalIterMetricsInner {
 }
 
 struct LocalGetMetrics {
-    get_duration: LabelGuardedLocalHistogram<1>,
-    get_key_size: LabelGuardedLocalHistogram<1>,
-    get_value_size: LabelGuardedLocalHistogram<1>,
+    get_duration: LabelGuardedLocalHistogram,
+    get_key_size: LabelGuardedLocalHistogram,
+    get_value_size: LabelGuardedLocalHistogram,
     report_count: usize,
 }
 
@@ -420,9 +420,9 @@ impl LocalGetMetrics {
 
 struct LocalIterLogMetrics {
     iter_metrics: LocalIterMetricsInner,
-    insert_count: LabelGuardedLocalIntCounter<2>,
-    update_count: LabelGuardedLocalIntCounter<2>,
-    delete_count: LabelGuardedLocalIntCounter<2>,
+    insert_count: LabelGuardedLocalIntCounter,
+    update_count: LabelGuardedLocalIntCounter,
+    delete_count: LabelGuardedLocalIntCounter,
     report_count: usize,
 }
 

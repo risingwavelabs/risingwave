@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeMap, HashSet};
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
+    BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamMaterializedExprs, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
-use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, collect_input_refs};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -253,10 +256,60 @@ impl ToStream for LogicalProject {
         let new_input = self
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        let stream_plan = StreamProject::new(new_logical);
-        required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
+
+        // Extract UDFs to `MaterializedExprs` operator
+        let mut udf_field_names = BTreeMap::new();
+        let mut udf_expr_indices = HashSet::new();
+        let udf_exprs: Vec<_> = self
+            .exprs()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, expr)| {
+                if expr.has_user_defined_function() {
+                    udf_expr_indices.insert(idx);
+                    if let Some(name) = self.core.field_names.get(&idx) {
+                        udf_field_names.insert(idx, name.clone());
+                    }
+                    Some(expr.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let stream_plan = if !udf_exprs.is_empty() {
+            // Create `MaterializedExprs` for UDFs
+            let mat_exprs_plan: PlanRef =
+                StreamMaterializedExprs::new(new_input.clone(), udf_exprs, udf_field_names).into();
+
+            let input_len = new_input.schema().len();
+            let mut udf_pos = 0;
+
+            // Create final expressions list with UDFs replaced by `InputRef`s
+            let final_exprs = self
+                .exprs()
+                .iter()
+                .enumerate()
+                .map(|(idx, expr)| {
+                    if udf_expr_indices.contains(&idx) {
+                        let output_idx = input_len + udf_pos;
+                        udf_pos += 1;
+                        InputRef::new(output_idx, expr.return_type()).into()
+                    } else {
+                        expr.clone()
+                    }
+                })
+                .collect();
+
+            let core = generic::Project::new(final_exprs, mat_exprs_plan);
+            StreamProject::new(core).into()
+        } else {
+            // No UDFs, create a regular `StreamProject`
+            let core = generic::Project::new(self.exprs().clone(), new_input);
+            StreamProject::new(core).into()
+        };
+
+        required_dist.enforce_if_not_satisfies(stream_plan, &Order::any())
     }
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
@@ -270,7 +323,7 @@ impl ToStream for LogicalProject {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
-        // Add missing columns of input_pk into the select list.
+        // Add missing columns of `input_pk` into the select list.
         let input_pk = input.expect_stream_key();
         let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
@@ -295,6 +348,7 @@ impl ToStream for LogicalProject {
         Ok((proj.into(), out_col_change))
     }
 }
+
 #[cfg(test)]
 mod tests {
 
@@ -303,7 +357,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
+    use crate::expr::{FunctionCall, Literal, assert_eq_input_ref};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
 

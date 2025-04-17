@@ -18,10 +18,10 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
-use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::binder::ShareId;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::{optimizer, OptimizerContextRef};
+use crate::{OptimizerContextRef, optimizer};
 
 #[derive(Clone, Debug)]
 pub struct CteRef<PlanRef> {

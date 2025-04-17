@@ -31,6 +31,7 @@ mod redis_service;
 mod schema_registry_service;
 mod sql_server_service;
 mod task_configure_minio;
+mod task_db_ready_check;
 mod task_kafka_ready_check;
 mod task_log_ready_check;
 mod task_pubsub_emu_ready_check;
@@ -39,14 +40,16 @@ mod task_tcp_ready_check;
 mod tempo_service;
 mod utils;
 
+use std::collections::HashMap;
 use std::env;
+use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use indicatif::ProgressBar;
 use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;
@@ -70,13 +73,14 @@ pub use self::redis_service::*;
 pub use self::schema_registry_service::SchemaRegistryService;
 pub use self::sql_server_service::*;
 pub use self::task_configure_minio::*;
+pub use self::task_db_ready_check::*;
 pub use self::task_kafka_ready_check::*;
 pub use self::task_log_ready_check::*;
 pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
 pub use self::task_tcp_ready_check::*;
 pub use self::tempo_service::*;
-use crate::util::{complete_spin, get_program_args, get_program_name};
+use crate::util::{begin_spin, complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
 
 pub trait Task: 'static + Send {
@@ -134,6 +138,7 @@ where
     pub fn service(&mut self, task: &impl Task) {
         let id = task.id();
         if !id.is_empty() {
+            begin_spin(&self.pb);
             self.pb.set_prefix(id.clone());
             self.id = Some(id.clone());
             self.status_file = Some(self.status_dir.path().join(format!("{}.status", id)));
@@ -150,6 +155,26 @@ where
         let program_name = get_program_name(&cmd);
 
         writeln!(self.log, "> {} {}", program_name, get_program_args(&cmd))?;
+
+        // Record a service command for `risedev restart`
+        let node_id = self.id.as_ref();
+        if program_name == "tmux"
+            && let Some(node_id) = node_id
+            && node_id != "tmux-configure"
+        {
+            let cmd: HashMap<String, String> = HashMap::from_iter([(
+                node_id.clone(),
+                format!("{} {}", program_name, get_program_args(&cmd)),
+            )]);
+            let prefix_config = env::var("PREFIX_CONFIG").unwrap();
+            let path = Path::new(&prefix_config).join("risedev_commands.yaml");
+            let content = serde_yaml::to_string(&cmd)?;
+            fs_err::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?
+                .write_all(content.as_bytes())?;
+        }
 
         let output = cmd.output()?;
 
@@ -306,6 +331,7 @@ where
             // Set session name for this window
             .arg("-n")
             .arg(self.id.as_ref().unwrap());
+
         if let Some(dir) = user_cmd.get_current_dir() {
             cmd.arg("-c").arg(dir);
         }
@@ -324,6 +350,7 @@ where
         for arg in user_cmd.get_args() {
             cmd.arg(arg);
         }
+
         Ok(cmd)
     }
 }

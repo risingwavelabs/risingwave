@@ -10,10 +10,10 @@ anchors:
         run: rw-build-env
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
+        propagate-environment: true
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
-        propagate-environment: true
 
   - sql-backend: &sql-backend
       matrix:
@@ -99,8 +99,6 @@ steps:
         || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
       depends_on:
         - "build"
-        - "build-other"
-        - "docslt"
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
@@ -121,7 +119,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 8
+      timeout_in_minutes: 9
       retry: *auto-retry
 
     - label: "end-to-end test (parallel, {{matrix.backend}} backend)"
@@ -130,10 +128,11 @@ steps:
       command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-        || build.pull_request.labels includes "ci/run-e2e-parallel-tests"
+        || build.pull_request.labels includes "ci/run-e2e-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
       depends_on:
         - "build"
+        - "build-other"
         - "docslt"
       plugins:
         - seek-oss/aws-sm#v2.3.2:
@@ -144,24 +143,8 @@ steps:
             files: "*-junit.xml"
             format: "junit"
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 13
+      timeout_in_minutes: 18
       retry: *auto-retry
-
-  - label: "end-to-end test (parallel, in-memory) (release)"
-    key: "e2e-test-release-parallel-memory"
-    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "docslt"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
 
   - group: "end-to-end connector test (release)"
     steps:
@@ -281,7 +264,8 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 70
+    timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "integration test (madsim) - recovery"
@@ -342,7 +326,7 @@ steps:
 
   - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
-    command: "TEST_NUM=32 timeout 130m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -357,12 +341,13 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 135
+    timeout_in_minutes: 60
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test (madsim, random vnode count)"
     key: "e2e-test-deterministic-random-vnode-count"
-    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true timeout 130m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -377,12 +362,13 @@ steps:
           environment:
           - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 135
+    timeout_in_minutes: 60
+    parallelism: 4
     retry: *auto-retry
 
   - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 70m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -392,13 +378,14 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 75
+    timeout_in_minutes: 60
+    parallelism: 4
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 70m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 90m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -408,39 +395,27 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 70
+    timeout_in_minutes: 60
+    parallelism: 4
     retry: *auto-retry
 
-  - label: "end-to-end iceberg sink test (release)"
-    key: "e2e-iceberg-sink-test"
-    command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
+  - label: "end-to-end iceberg test (release)"
+    key: "e2e-iceberg-test"
+    command: "ci/scripts/e2e-iceberg-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
+      || build.pull_request.labels includes "ci/run-e2e-iceberg-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v5.5.0: *docker-compose
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 9
-    retry: *auto-retry
-
-  - label: "end-to-end iceberg sink v2 test (release)"
-    key: "e2e-iceberg-sink-v2-test"
-    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-v2-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-v2-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 17
+    timeout_in_minutes: 15
+    parallelism: 2
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
@@ -652,8 +627,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -669,28 +642,25 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
 
-  - label: "end-to-end test for opendal (parallel)"
+  - label: "end-to-end test for opendal storage backend (parallel)"
     key: "e2e-test-opendal-parallel"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-parallel-tests-for-opendal"
+      || build.pull_request.labels includes "ci/run-e2e-tests-for-opendal"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?-for-opendal(,|$$)/
     depends_on:
       - "build"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 14
+    timeout_in_minutes: 18
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"

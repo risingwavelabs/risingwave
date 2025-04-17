@@ -16,29 +16,32 @@ use std::collections::HashSet;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::serverless_backfill_controller::{
+    ProvisionRequest, node_group_controller_service_client,
+};
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
+use thiserror_ext::AsReport;
 
-use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
+use crate::WithOptions;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::check_valid_column_name;
-use crate::error::ErrorCode::ProtocolError;
+use crate::catalog::check_column_name_not_reserved;
+use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
-use crate::stream_fragmenter::build_graph;
+use crate::session::{SESSION_MANAGER, SessionImpl};
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::ordinal;
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
+pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -54,13 +57,12 @@ pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
 /// should guarantee that the column names number are consistent with the query.
 pub(super) fn get_column_names(
     bound: &BoundQuery,
-    session: &SessionImpl,
     columns: Vec<Ident>,
 ) -> Result<Option<Vec<String>>> {
     let col_names = parse_column_names(&columns);
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
-        // If user provide columns name (col_names.is_some()), we don't need alias.
+        // If user provides columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
         if col_names.is_none() {
@@ -72,11 +74,6 @@ pub(super) fn get_column_names(
                 .into());
                 }
             }
-        }
-        if let Some(relation) = &select.from {
-            let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
-            session.check_privileges(&check_items)?;
         }
     }
 
@@ -117,10 +114,7 @@ pub fn gen_create_mv_plan_bound(
 
     let definition = context.normalized_sql().to_owned();
 
-    let check_items = resolve_query_privileges(&query);
-    session.check_privileges(&check_items)?;
-
-    let col_names = get_column_names(&query, session, columns)?;
+    let col_names = get_column_names(&query, columns)?;
 
     let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
@@ -131,13 +125,18 @@ pub fn gen_create_mv_plan_bound(
     plan_root.set_req_dist_as_same_as_req_order();
     if let Some(col_names) = col_names {
         for name in &col_names {
-            check_valid_column_name(name)?;
+            check_column_name_not_reserved(name)?;
         }
         plan_root.set_out_names(col_names)?;
     }
-    let materialize =
-        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
-    let mut table = materialize.table().to_prost(schema_id, database_id);
+    let materialize = plan_root.gen_materialize_plan(
+        database_id,
+        schema_id,
+        table_name,
+        definition,
+        emit_on_window_close,
+    )?;
+    let mut table = materialize.table().to_prost();
 
     let plan: PlanRef = materialize.into();
 
@@ -183,6 +182,36 @@ pub async fn handle_create_mv(
     .await
 }
 
+/// Send a provision request to the serverless backfill controller
+pub async fn provision_resource_group(sbc_addr: String) -> Result<String> {
+    let request = tonic::Request::new(ProvisionRequest {});
+    let mut client =
+        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
+            sbc_addr.clone(),
+        )
+        .await
+        .map_err(|e| {
+            RwError::from(ErrorCode::InternalError(format!(
+                "unable to reach serverless backfill controller at addr {}: {}",
+                sbc_addr,
+                e.as_report()
+            )))
+        })?;
+
+    match client.provision(request).await {
+        Ok(resp) => Ok(resp.into_inner().resource_group),
+        Err(e) => Err(RwError::from(ErrorCode::InternalError(format!(
+            "serverless backfill controller returned error :{}",
+            e.as_report()
+        )))),
+    }
+}
+
+fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
+    let context = OptimizerContext::from_handler_args(handler_args);
+    context.with_options().clone()
+}
+
 pub async fn handle_create_mv_bound(
     handler_args: HandlerArgs,
     if_not_exists: bool,
@@ -207,10 +236,71 @@ pub async fn handle_create_mv_bound(
     }
 
     let (table, graph, dependencies, resource_group) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let mut with_options = context.with_options().clone();
+        let mut with_options = get_with_options(handler_args.clone());
+        let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
-        let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+        if resource_group.is_some() {
+            risingwave_common::license::Feature::ResourceGroup
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        let is_serverless_backfill = with_options
+            .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
+            .unwrap_or_default()
+            .parse::<bool>()
+            .unwrap_or(false);
+
+        if resource_group.is_some() && is_serverless_backfill {
+            return Err(RwError::from(InvalidInputSyntax(
+                "Please do not specify serverless backfilling and resource group together"
+                    .to_owned(),
+            )));
+        }
+
+        if !with_options.is_empty() {
+            // get other useful fields by `remove`, the logic here is to reject unknown options.
+            return Err(RwError::from(ProtocolError(format!(
+                "unexpected options in WITH clause: {:?}",
+                with_options.keys()
+            ))));
+        }
+
+        let sbc_addr = match SESSION_MANAGER.get() {
+            Some(manager) => manager.env().sbc_address(),
+            None => "",
+        }
+        .to_owned();
+
+        if is_serverless_backfill && sbc_addr.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
+            )));
+        }
+
+        if is_serverless_backfill {
+            match provision_resource_group(sbc_addr).await {
+                Err(e) => {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "failed to provision serverless backfill nodes: {}",
+                        e.as_report()
+                    ))));
+                }
+                Ok(val) => resource_group = Some(val),
+            }
+        }
+        tracing::debug!(
+            resource_group = resource_group,
+            "provisioning on resource group"
+        );
+
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let has_order_by = !query.order.is_empty();
+        if has_order_by {
+            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#.to_owned());
+        }
 
         if resource_group.is_some()
             && !context
@@ -219,21 +309,6 @@ pub async fn handle_create_mv_bound(
                 .streaming_use_arrangement_backfill()
         {
             return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-        }
-
-        if !with_options.is_empty() {
-            // get other useful fields by `remove`, the logic here is to reject unknown options.
-            return Err(RwError::from(ProtocolError(format!(
-                "unexpected options in WITH clause: {:?}",
-                context.with_options().keys()
-            ))));
-        }
-
-        let has_order_by = !query.order.is_empty();
-        if has_order_by {
-            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-"#.to_owned());
         }
 
         let (plan, table) =
@@ -252,7 +327,7 @@ It only indicates the physical clustering of the data, which may improve the per
                 )
                 .collect();
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::MaterializedView))?;
 
         (table, graph, dependencies, resource_group)
     };
@@ -286,12 +361,12 @@ pub mod tests {
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_mv_handler() {
@@ -334,15 +409,18 @@ pub mod tests {
             ("address", DataType::Varchar),
             ("zipcode", DataType::Varchar),
         ])
+        // .with_ids([5, 6].map(ColumnId::new))
         .into();
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
+            ROW_ID_COLUMN_NAME => DataType::Serial,
             "country" => StructType::new(
                  vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
-            ).into(),
+            )
+            // .with_ids([3, 4, 7].map(ColumnId::new))
+            .into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     /// When creating MV, a unique column name must be specified for each column

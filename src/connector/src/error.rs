@@ -19,9 +19,10 @@ use risingwave_common::error::def_anyhow_newtype;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
+use crate::enforce_secret::EnforceSecretError;
 use crate::parser::AccessError;
-use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::schema::InvalidOptionError;
+use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::sink::SinkError;
 use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;
@@ -69,7 +70,6 @@ def_anyhow_newtype! {
     async_nats::error::Error<async_nats::jetstream::context::RequestErrorKind> => "Nats error",
     NatsJetStreamError => "Nats error",
 
-    icelake::Error => "Iceberg error",
     iceberg::Error => "IcebergV2 error",
     redis::RedisError => "Redis error",
     risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
@@ -82,6 +82,7 @@ def_anyhow_newtype! {
 
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
+    EnforceSecretError => transparent,
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

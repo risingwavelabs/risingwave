@@ -23,13 +23,13 @@ use crate::expr::{
     CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall,
     InputRef,
 };
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNode, PlanTreeNodeBinary,
 };
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::rule::apply_offset_rewriter::ApplyCorrelatedIndicesConverter;
-use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Transpose `LogicalApply` and `LogicalJoin`.

@@ -15,7 +15,7 @@
 pub use nexmark::event::EventType;
 use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
-use risingwave_common::catalog::ROWID_PREFIX;
+use risingwave_common::catalog::ROW_ID_COLUMN_NAME;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -107,7 +107,7 @@ pub fn get_event_data_types_with_names(
 
     if let Some(row_id_index) = row_id_index {
         // _row_id
-        fields.insert(row_id_index, (ROWID_PREFIX.into(), DataType::Serial));
+        fields.insert(row_id_index, (ROW_ID_COLUMN_NAME.into(), DataType::Serial));
     }
 
     fields

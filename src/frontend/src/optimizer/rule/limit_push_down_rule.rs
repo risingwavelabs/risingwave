@@ -18,8 +18,8 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, LogicalProject, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::{LogicalLimit, LogicalProject, PlanTreeNodeUnary};
 
 pub struct LimitPushDownRule {}
 

@@ -32,10 +32,10 @@ pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
-use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
@@ -44,7 +44,7 @@ pub use vnode_watermark_selector::VnodeWatermarkCompactionSelector;
 
 use super::picker::LocalPickerStatistic;
 use super::{
-    create_compaction_task, CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker,
+    CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::CompactionTask;
 use crate::hummock::level_handler::LevelHandler;

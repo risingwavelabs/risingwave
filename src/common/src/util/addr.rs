@@ -123,7 +123,7 @@ pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String
 
 #[cfg(test)]
 mod tests {
-    use crate::util::addr::{is_local_address, HostAddr};
+    use crate::util::addr::{HostAddr, is_local_address};
 
     #[test]
     fn test_is_local_address() {

@@ -32,7 +32,7 @@ use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
 };
 use crate::executor::prelude::*;
-use crate::task::SharedContext;
+use crate::task::LocalBarrierManager;
 
 pub(crate) enum MergeExecutorUpstream {
     Singleton(BoxedInput),
@@ -43,7 +43,7 @@ pub(crate) struct MergeExecutorInput {
     upstream: MergeExecutorUpstream,
     actor_context: ActorContextRef,
     upstream_fragment_id: UpstreamFragmentId,
-    shared_context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
     executor_stats: Arc<StreamingMetrics>,
     pub(crate) info: ExecutorInfo,
     chunk_size: usize,
@@ -54,7 +54,7 @@ impl MergeExecutorInput {
         upstream: MergeExecutorUpstream,
         actor_context: ActorContextRef,
         upstream_fragment_id: UpstreamFragmentId,
-        shared_context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         info: ExecutorInfo,
         chunk_size: usize,
@@ -63,7 +63,7 @@ impl MergeExecutorInput {
             upstream,
             actor_context,
             upstream_fragment_id,
-            shared_context,
+            local_barrier_manager,
             executor_stats,
             info,
             chunk_size,
@@ -78,7 +78,7 @@ impl MergeExecutorInput {
                 fragment_id,
                 self.upstream_fragment_id,
                 input,
-                self.shared_context,
+                self.local_barrier_manager,
                 self.executor_stats,
                 barrier_rx,
             )
@@ -88,7 +88,7 @@ impl MergeExecutorInput {
                 fragment_id,
                 self.upstream_fragment_id,
                 inputs,
-                self.shared_context,
+                self.local_barrier_manager,
                 self.executor_stats,
                 barrier_rx,
                 self.chunk_size,
@@ -126,8 +126,7 @@ pub struct MergeExecutor {
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
 
-    /// Shared context of the stream manager.
-    context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
@@ -148,7 +147,7 @@ impl MergeExecutor {
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         upstreams: SelectReceivers,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         barrier_rx: mpsc::UnboundedReceiver<Barrier>,
         chunk_size: usize,
@@ -159,7 +158,7 @@ impl MergeExecutor {
             upstreams,
             fragment_id,
             upstream_fragment_id,
-            context,
+            local_barrier_manager,
             metrics,
             barrier_rx,
             chunk_size,
@@ -171,7 +170,6 @@ impl MergeExecutor {
     pub fn for_test(
         actor_id: ActorId,
         inputs: Vec<super::exchange::permit::Receiver>,
-        shared_context: Arc<SharedContext>,
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
     ) -> Self {
@@ -197,7 +195,7 @@ impl MergeExecutor {
             514,
             1919,
             upstream,
-            shared_context,
+            local_barrier_manager,
             metrics.into(),
             barrier_rx,
             100,
@@ -291,7 +289,6 @@ impl MergeExecutor {
                         let new_upstream_fragment_id = update
                             .new_upstream_fragment_id
                             .unwrap_or(self.upstream_fragment_id);
-                        let added_upstream_actor_id = update.added_upstream_actor_id.clone();
                         let removed_upstream_actor_id: HashSet<_> =
                             if update.new_upstream_fragment_id.is_some() {
                                 select_all.upstream_actor_ids().iter().copied().collect()
@@ -305,17 +302,18 @@ impl MergeExecutor {
                             .values_mut()
                             .for_each(|buffers| buffers.clear());
 
-                        if !added_upstream_actor_id.is_empty() {
+                        if !update.added_upstream_actors.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = added_upstream_actor_id
+                            let new_upstreams: Vec<_> = update
+                                .added_upstream_actors
                                 .iter()
-                                .map(|&upstream_actor_id| {
+                                .map(|upstream_actor| {
                                     new_input(
-                                        &self.context,
+                                        &self.local_barrier_manager,
                                         self.metrics.clone(),
                                         self.actor_context.id,
                                         self.fragment_id,
-                                        upstream_actor_id,
+                                        upstream_actor,
                                         new_upstream_fragment_id,
                                     )
                                 })
@@ -340,7 +338,12 @@ impl MergeExecutor {
                                 .buffered_watermarks
                                 .values_mut()
                                 .for_each(|buffers| {
-                                    buffers.add_buffers(added_upstream_actor_id.clone())
+                                    buffers.add_buffers(
+                                        update
+                                            .added_upstream_actors
+                                            .iter()
+                                            .map(|actor| actor.actor_id),
+                                    )
                                 });
                         }
 
@@ -400,7 +403,7 @@ pub struct SelectReceivers {
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
     /// If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
 }
 
 impl Stream for SelectReceivers {
@@ -498,7 +501,7 @@ impl SelectReceivers {
     fn new(
         actor_id: u32,
         upstreams: Vec<BoxedInput>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram, 2>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
     ) -> Self {
         assert!(!upstreams.is_empty());
         let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
@@ -574,7 +577,7 @@ impl SelectReceivers {
         self.extend_active(new_upstreams);
     }
 
-    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram, 2>> {
+    fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
         self.merge_barrier_align_duration.clone()
     }
 }
@@ -634,7 +637,7 @@ where
                         Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
                     } else {
                         Poll::Pending
-                    }
+                    };
                 }
 
                 Poll::Ready(Some(result)) => {
@@ -673,7 +676,6 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -706,24 +708,33 @@ mod tests {
         let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             assert_eq!(chunk.ops().len() as u64, 10);
         });
 
         // Send 2 chunks and expect them to be merged.
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             assert_eq!(chunk.ops().len() as u64, 20);
         });
 
         // Send a watermark.
-        tx.send(Message::Watermark(Watermark {
-            col_idx: 0,
-            data_type: DataType::Int64,
-            val: ScalarImpl::Int64(233),
-        }))
+        tx.send(
+            Message::Watermark(Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(233),
+            })
+            .into(),
+        )
         .await
         .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
@@ -731,13 +742,20 @@ mod tests {
         });
 
         // Send 2 chunks before a watermark. Expect the 2 chunks to be merged and the watermark to be emitted.
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Watermark(Watermark {
-            col_idx: 0,
-            data_type: DataType::Int64,
-            val: ScalarImpl::Int64(233),
-        }))
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(
+            Message::Watermark(Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(233),
+            })
+            .into(),
+        )
         .await
         .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
@@ -750,7 +768,7 @@ mod tests {
         // Send a barrier.
         let barrier = Barrier::new_test_barrier(test_epoch(1));
         test_env.inject_barrier(&barrier, [2]);
-        tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
+        tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
@@ -758,11 +776,15 @@ mod tests {
         });
 
         // Send 2 chunks before a barrier. Expect the 2 chunks to be merged and the barrier to be emitted.
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
-        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        tx.send(Message::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
         let barrier = Barrier::new_test_barrier(test_epoch(2));
         test_env.inject_barrier(&barrier, [2]);
-        tx.send(Message::Barrier(barrier.clone().into_dispatcher()))
+        tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
@@ -814,22 +836,27 @@ mod tests {
             let handle = tokio::spawn(async move {
                 for (idx, epoch) in epochs {
                     if idx % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(10))).await.unwrap();
+                        tx.send(Message::Chunk(build_test_chunk(10)).into())
+                            .await
+                            .unwrap();
                     } else {
-                        tx.send(Message::Watermark(Watermark {
-                            col_idx: (idx as usize / 20 + tx_id) % CHANNEL_NUMBER,
-                            data_type: DataType::Int64,
-                            val: ScalarImpl::Int64(idx as i64),
-                        }))
+                        tx.send(
+                            Message::Watermark(Watermark {
+                                col_idx: (idx as usize / 20 + tx_id) % CHANNEL_NUMBER,
+                                data_type: DataType::Int64,
+                                val: ScalarImpl::Int64(idx as i64),
+                            })
+                            .into(),
+                        )
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(barriers[&epoch].clone().into_dispatcher()))
+                    tx.send(Message::Barrier(barriers[&epoch].clone().into_dispatcher()).into())
                         .await
                         .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
-                tx.send(Message::Barrier(b2.clone().into_dispatcher()))
+                tx.send(Message::Barrier(b2.clone().into_dispatcher()).into())
                     .await
                     .unwrap();
             });
@@ -839,7 +866,6 @@ mod tests {
         let merger = MergeExecutor::for_test(
             actor_id,
             rxs,
-            barrier_test_env.shared_context.clone(),
             barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
         );
@@ -888,12 +914,6 @@ mod tests {
         let ctx = barrier_test_env.shared_context.clone();
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info in context.
-        ctx.add_actors(
-            [actor_id, untouched, old, new]
-                .into_iter()
-                .map(helper_make_local_actor),
-        );
         // untouched -> actor_id
         // old -> actor_id
         // new -> actor_id
@@ -904,11 +924,11 @@ mod tests {
             .into_iter()
             .map(|upstream_actor_id| {
                 new_input(
-                    &ctx,
+                    &barrier_test_env.local_barrier_manager,
                     metrics.clone(),
                     actor_id,
                     fragment_id,
-                    upstream_actor_id,
+                    &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
                 )
             })
@@ -920,7 +940,7 @@ mod tests {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
+                added_upstream_actors: vec![helper_make_local_actor(new)],
                 removed_upstream_actor_id: vec![old],
             }
         };
@@ -949,7 +969,7 @@ mod tests {
             fragment_id,
             upstream_fragment_id,
             upstream,
-            ctx.clone(),
+            barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
             barrier_rx,
             100,
@@ -973,13 +993,15 @@ mod tests {
 
         macro_rules! assert_recv_pending {
             () => {
-                assert!(merge
-                    .next()
-                    .now_or_never()
-                    .flatten()
-                    .transpose()
-                    .unwrap()
-                    .is_none());
+                assert!(
+                    merge
+                        .next()
+                        .now_or_never()
+                        .flatten()
+                        .transpose()
+                        .unwrap()
+                        .is_none()
+                );
             };
         }
         macro_rules! recv {
@@ -989,21 +1011,21 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([untouched, old], Message::Chunk(build_test_chunk(1)));
+        send!([untouched, old], Message::Chunk(build_test_chunk(1)).into());
         assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
         assert_recv_pending!();
 
         send!(
             [untouched, old],
-            Message::Barrier(b1.clone().into_dispatcher())
+            Message::Barrier(b1.clone().into_dispatcher()).into()
         );
         assert_recv_pending!(); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
-        send!([new], Message::Barrier(b1.clone().into_dispatcher()));
+        send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk.
-        send!([untouched, new], Message::Chunk(build_test_chunk(1)));
+        send!([untouched, new], Message::Chunk(build_test_chunk(1)).into());
         assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
         assert_recv_pending!();
     }
@@ -1037,9 +1059,9 @@ mod tests {
             // send stream_chunk
             let stream_chunk = StreamChunk::default().to_protobuf();
             tx.send(Ok(GetStreamResponse {
-                message: Some(StreamMessage {
-                    stream_message: Some(
-                        risingwave_pb::stream_plan::stream_message::StreamMessage::StreamChunk(
+                message: Some(PbStreamMessageBatch {
+                    stream_message_batch: Some(
+                        risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::StreamChunk(
                             stream_chunk,
                         ),
                     ),
@@ -1051,10 +1073,12 @@ mod tests {
             // send barrier
             let barrier = exchange_client_test_barrier();
             tx.send(Ok(GetStreamResponse {
-                message: Some(StreamMessage {
-                    stream_message: Some(
-                        risingwave_pb::stream_plan::stream_message::StreamMessage::Barrier(
-                            barrier.to_protobuf(),
+                message: Some(PbStreamMessageBatch {
+                    stream_message_batch: Some(
+                        risingwave_pb::stream_plan::stream_message_batch::StreamMessageBatch::BarrierBatch(
+                            BarrierBatch {
+                                barriers: vec![barrier.to_protobuf()],
+                            },
                         ),
                     ),
                 }),
@@ -1105,6 +1129,7 @@ mod tests {
                 test_env.shared_context.database_id,
                 Arc::new(StreamingMetrics::unused()),
                 BATCHED_PERMITS,
+                "for_test".into(),
             )
         };
 

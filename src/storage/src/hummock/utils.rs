@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use foyer::CacheHint;
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
@@ -31,18 +32,20 @@ use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
+    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreKeyedRow, StateStoreRead};
+use crate::store::{
+    OpConsistencyLevel, ReadOptions, StateStoreGet, StateStoreKeyedRow, StateStoreRead,
+};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -377,13 +380,23 @@ pub(crate) fn sanity_check_enabled() -> bool {
     SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
 }
 
+async fn get_from_state_store(
+    state_store: &impl StateStoreGet,
+    key: TableKey<Bytes>,
+    read_options: ReadOptions,
+) -> StorageResult<Option<Bytes>> {
+    state_store
+        .on_key_value(key, read_options, |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
+}
+
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -392,11 +405,10 @@ pub(crate) async fn do_insert_sanity_check(
     }
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    let stored_value = inner.get(key.clone(), epoch, read_options).await?;
+    let stored_value = get_from_state_store(inner, key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
@@ -414,8 +426,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -428,11 +438,10 @@ pub(crate) async fn do_delete_sanity_check(
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -460,8 +469,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -474,12 +481,11 @@ pub(crate) async fn do_update_sanity_check(
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
 
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -537,7 +543,7 @@ pub(crate) fn filter_with_delete_range<'a>(
             range_end
         );
     }
-    kv_iter.filter(move |(ref key, _)| {
+    kv_iter.filter(move |(key, _)| {
         if let Some(range_bound) = range {
             if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
                 == Ordering::Less
@@ -637,6 +643,11 @@ pub(crate) async fn wait_for_update(
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
+                // Provide backtrace iff in debug mode for observability.
+                let backtrace = cfg!(debug_assertions)
+                    .then(Backtrace::capture)
+                    .map(tracing::field::display);
+
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
@@ -649,6 +660,7 @@ pub(crate) async fn wait_for_update(
                 tracing::warn!(
                     info = periodic_debug_info(),
                     elapsed = ?start_time.elapsed(),
+                    backtrace,
                     "timeout when waiting for version update",
                 );
                 continue;
@@ -805,21 +817,23 @@ pub(crate) async fn merge_stream<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::sync::Arc;
     use std::task::Poll;
 
-    use futures::future::join_all;
     use futures::FutureExt;
-    use rand::random;
+    use futures::future::join_all;
+    use rand::random_range;
 
     use crate::hummock::utils::MemoryLimiter;
 
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
-            assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
+                    .await
+                    .is_pending()
+            );
         }
     }
 
@@ -853,7 +867,7 @@ mod tests {
             let limiter = memory_limiter.clone();
             let h = tokio::spawn(async move {
                 let mut buffers = vec![];
-                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
+                let mut current_buffer_usage = random_range(2..=9);
                 for _ in 0..1000 {
                     if buffers.len() < current_buffer_usage
                         && let Some(tracker) = limiter.try_require_memory(QUOTA)
@@ -861,7 +875,7 @@ mod tests {
                         buffers.push(tracker);
                     } else {
                         buffers.clear();
-                        current_buffer_usage = (random::<usize>() % 8) + 2;
+                        current_buffer_usage = random_range(2..=9);
                         let req = limiter.require_memory(QUOTA);
                         match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
                             Ok(tracker) => {
@@ -872,7 +886,7 @@ mod tests {
                             }
                         }
                     }
-                    let sleep_time = random::<u64>() % 3 + 1;
+                    let sleep_time = random_range(1..=3);
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 }
             });

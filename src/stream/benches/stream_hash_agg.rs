@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use futures::executor::block_on;
+use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use futures::StreamExt;
+use futures::executor::block_on;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
@@ -23,8 +23,8 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
-use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
+use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{Executor, PkIndices};

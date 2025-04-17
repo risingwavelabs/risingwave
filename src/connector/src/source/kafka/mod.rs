@@ -15,9 +15,11 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 
 use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorResult;
 
 mod client_context;
 pub mod enumerator;
@@ -62,6 +64,16 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde(rename = "properties.fetch.wait.max.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_wait_max_ms: Option<usize>,
+
+    /// Minimum number of bytes the broker responds with. If fetch.wait.max.ms expires the accumulated data will be sent to the client regardless of this setting.
+    #[serde(rename = "properties.fetch.min.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fetch_min_bytes: Option<usize>,
+
+    /// Initial maximum number of bytes per topic+partition to request when fetching messages from the broker. If the client encounters a message larger than this value it will gradually try to increase it until the entire message can be fetched.
+    #[serde(rename = "properties.fetch.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fetch_message_max_bytes: Option<usize>,
 
     /// How long to postpone the next fetch request for a topic+partition in case the current fetch
     /// queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been
@@ -162,6 +174,16 @@ pub struct KafkaProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
+impl EnforceSecret for KafkaProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            KafkaConnectionProps::enforce_one(prop)?;
+            AwsAuthProps::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl SourceProperties for KafkaProperties {
     type Split = KafkaSplit;
     type SplitEnumerator = KafkaSplitEnumerator;
@@ -203,6 +225,12 @@ impl RdKafkaPropertiesConsumer {
         }
         if let Some(v) = &self.fetch_wait_max_ms {
             c.set("fetch.wait.max.ms", v.to_string());
+        }
+        if let Some(v) = &self.fetch_min_bytes {
+            c.set("fetch.min.bytes", v.to_string());
+        }
+        if let Some(v) = &self.fetch_message_max_bytes {
+            c.set("fetch.message.max.bytes", v.to_string());
         }
         if let Some(v) = &self.fetch_queue_backoff_ms {
             c.set("fetch.queue.backoff.ms", v.to_string());

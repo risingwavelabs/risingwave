@@ -15,15 +15,15 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::max_column_id;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
+use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
 use super::create_source::generate_stream_graph_for_source;
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::Binder;
 
 // Note for future drop column:
 // 1. Dependencies of generated columns
@@ -44,16 +44,13 @@ pub async fn handle_alter_source_column(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (db_id, schema_id, mut catalog) = {
+    let mut catalog = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
-        let db = reader.get_database_by_name(db_name)?;
-        let schema = db.get_schema_by_name(schema_name).unwrap();
-
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
-        (db.id(), schema.id(), (**source).clone())
+        (**source).clone()
     };
 
     if catalog.associated_table_id.is_some() {
@@ -103,7 +100,9 @@ pub async fn handle_alter_source_column(
                     "column \"{new_column_name}\" of source \"{source_name}\" already exists"
                 )))?
             }
-            let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
+
+            // add column name is from user, so we still have check for reserved column name
+            let mut bound_column = bind_sql_columns(&[column_def], false)?.remove(0);
             bound_column.column_desc.column_id = max_column_id(columns).next();
             columns.push(bound_column);
             // No need to update the definition here. It will be done by purification later.
@@ -133,12 +132,10 @@ pub async fn handle_alter_source_column(
             catalog.columns.len(),
         );
         catalog_writer
-            .replace_source(catalog.to_prost(schema_id, db_id), graph, col_index_mapping)
+            .replace_source(catalog.to_prost(), graph, col_index_mapping)
             .await?
     } else {
-        catalog_writer
-            .alter_source(catalog.to_prost(schema_id, db_id))
-            .await?
+        catalog_writer.alter_source(catalog.to_prost()).await?
     };
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))

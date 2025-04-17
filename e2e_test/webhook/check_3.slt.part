@@ -32,3 +32,15 @@ select data ->> 'source', data->> 'auth_algo' from hubspot_sha256_v2;
 hubspot sha256_v2
 hubspot sha256_v2
 hubspot sha256_v2
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from test_primary_key;
+----
+github hmac_sha1
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from validate_raw_string;
+----
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1

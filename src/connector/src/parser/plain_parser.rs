@@ -23,8 +23,8 @@ use super::{
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
-use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::unified::AccessImpl;
+use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
 use crate::parser::upsert_parser::get_key_column_name;
 use crate::parser::{BytesProperties, ParseResult, ParserFormat};
 use crate::source::cdc::CdcMessageType;
@@ -107,7 +107,7 @@ impl PlainParser {
                         .transaction_meta_builder
                         .as_mut()
                         .expect("expect transaction metadata access builder")
-                        .generate_accessor(data)
+                        .generate_accessor(data, writer.source_meta())
                         .await?;
                     return match parse_transaction_meta(&accessor, &self.source_ctx.connector_props)
                     {
@@ -122,7 +122,7 @@ impl PlainParser {
                         .schema_change_builder
                         .as_mut()
                         .expect("expect schema change access builder")
-                        .generate_accessor(data)
+                        .generate_accessor(data, writer.source_meta())
                         .await?;
 
                     return match parse_schema_change(
@@ -150,17 +150,18 @@ impl PlainParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
+        let meta = writer.source_meta();
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key
             && let Some(key_builder) = self.key_builder.as_mut()
         {
             // key is optional in format plain
-            row_op.with_key(key_builder.generate_accessor(data).await?);
+            row_op.with_key(key_builder.generate_accessor(data, meta).await?);
         }
         if let Some(data) = payload {
             // the data part also can be an empty vec
-            row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data, meta).await?);
         }
 
         writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
@@ -207,28 +208,21 @@ mod tests {
     use std::sync::Arc;
 
     use expect_test::expect;
-    use futures::executor::block_on;
     use futures::StreamExt;
+    use futures::executor::block_on;
     use futures_async_stream::try_stream;
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::ColumnCatalog;
     use risingwave_pb::connector_service::cdc_message;
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
-    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts, SourceMessage, SplitId};
+    use crate::source::{ConnectorProperties, SourceCtrlOpts, SourceMessage, SplitId};
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -388,14 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -465,14 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_schema_change() {
-        let schema = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::named("payload", ColumnId::placeholder(), DataType::Jsonb),
-                is_hidden: false,
-            },
-            ColumnCatalog::offset_column(),
-            ColumnCatalog::cdc_table_name_column(),
-        ];
+        let schema = ColumnCatalog::debezium_cdc_source_cols();
 
         let columns = schema
             .iter()
@@ -526,8 +506,6 @@ mod tests {
                                         data_type: Int32,
                                         column_id: #2147483646,
                                         name: "id",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -535,6 +513,7 @@ mod tests {
                                         },
                                         version: Pr13707,
                                         system_column: None,
+                                        nullable: true,
                                     },
                                     is_hidden: false,
                                 },
@@ -543,8 +522,6 @@ mod tests {
                                         data_type: Timestamptz,
                                         column_id: #2147483646,
                                         name: "v1",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -552,6 +529,7 @@ mod tests {
                                         },
                                         version: Pr13707,
                                         system_column: None,
+                                        nullable: true,
                                     },
                                     is_hidden: false,
                                 },
@@ -560,8 +538,6 @@ mod tests {
                                         data_type: Varchar,
                                         column_id: #2147483646,
                                         name: "v2",
-                                        field_descs: [],
-                                        type_name: "",
                                         generated_or_default_column: None,
                                         description: None,
                                         additional_column: AdditionalColumn {
@@ -569,6 +545,7 @@ mod tests {
                                         },
                                         version: Pr13707,
                                         system_column: None,
+                                        nullable: true,
                                     },
                                     is_hidden: false,
                                 },

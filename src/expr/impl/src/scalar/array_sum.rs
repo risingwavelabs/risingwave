@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{ArrayError, ListRef};
 use risingwave_common::types::{CheckedAdd, Decimal, ScalarRefImpl};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("array_sum(int2[]) -> int8")]
 fn array_sum_int2(list: ListRef<'_>) -> Result<Option<i64>> {

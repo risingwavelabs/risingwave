@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
-use crate::optimizer::PlanRef;
 
 /// Convert union to distinct + union all
 pub struct UnionToDistinctRule {}

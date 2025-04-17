@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail, bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -37,8 +37,8 @@ use crate::optimizer::plan_node::stream_global_approx_percentile::StreamGlobalAp
 use crate::optimizer::plan_node::stream_local_approx_percentile::StreamLocalApproxPercentile;
 use crate::optimizer::plan_node::stream_row_merge::StreamRowMerge;
 use crate::optimizer::plan_node::{
-    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
-    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext, gen_filter_and_pushdown,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
@@ -1133,7 +1133,6 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .into()
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -1409,7 +1408,9 @@ impl ToStream for LogicalAgg {
             }
             (plan.clone(), stream_row_merge.base.schema().len())
         } else {
-            panic!("the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamRowMerge");
+            panic!(
+                "the root PlanNode must be StreamHashAgg, StreamSimpleAgg, StreamGlobalApproxPercentile, or StreamRowMerge"
+            );
         };
 
         if self.agg_calls().len() == n_final_agg_calls {
