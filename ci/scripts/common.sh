@@ -35,10 +35,6 @@ function dump_diagnose_info() {
 }
 trap dump_diagnose_info EXIT
 
-trap "echo Received SIGINT" SIGINT
-trap "echo Received SIGTERM" SIGTERM
-trap "echo Received SIGQUIT" SIGQUIT
-
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
 fi
