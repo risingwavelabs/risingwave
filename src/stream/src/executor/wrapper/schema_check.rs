@@ -31,21 +31,27 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             Message::Chunk(chunk) => risingwave_common::util::schema_check::schema_check(
                 info.schema.fields().iter().map(|f| &f.data_type),
                 chunk.columns(),
-            ),
+            )
+            .unwrap_or_else(|e| {
+                panic!(
+                    "schema check failed on {:?}: chunk: {}, error: {}",
+                    info,
+                    chunk.to_pretty(),
+                    e
+                )
+            }),
             Message::Watermark(watermark) => {
                 let expected = info.schema.fields()[watermark.col_idx].data_type();
                 let found = &watermark.data_type;
                 if &expected != found {
-                    Err(format!(
-                        "watermark type mismatched: expected {expected}, found {found}"
-                    ))
-                } else {
-                    Ok(())
+                    panic!(
+                        "schema check failed on {:?}: watermark type mismatched: expected {}, found {}",
+                        info, expected, found
+                    );
                 }
             }
-            Message::Barrier(_) => Ok(()),
+            Message::Barrier(_) => {}
         }
-        .unwrap_or_else(|e| panic!("schema check failed on {:?}: {}", info, e));
 
         yield message;
     }
