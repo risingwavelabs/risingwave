@@ -133,6 +133,10 @@ impl Execute for FilterExecutor {
 impl FilterExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
+        tracing::info!(
+            "SQLSERVER_DEBUG_LOG FilterExecutor start, expr: {:?}",
+            self.expr
+        );
         let input = self.input.execute();
         #[for_await]
         for msg in input {
@@ -143,9 +147,20 @@ impl FilterExecutor {
                     let chunk = chunk.compact();
 
                     let pred_output = self.expr.eval_infallible(chunk.data_chunk()).await;
+                    tracing::info!(
+                        "SQLSERVER_DEBUG_LOG FilterExecutor input chunk: \n{}, pred_output\n{:?}",
+                        chunk.to_pretty(),
+                        pred_output
+                    );
 
                     match Self::filter(chunk, pred_output)? {
-                        Some(new_chunk) => yield Message::Chunk(new_chunk),
+                        Some(new_chunk) => {
+                            tracing::info!(
+                                "SQLSERVER_DEBUG_LOG FilterExecutor output chunk: {}",
+                                new_chunk.to_pretty()
+                            );
+                            yield Message::Chunk(new_chunk)
+                        }
                         None => continue,
                     }
                 }

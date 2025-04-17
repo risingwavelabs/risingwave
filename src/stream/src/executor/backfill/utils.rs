@@ -500,6 +500,7 @@ fn mark_cdc_chunk_inner(
 
 /// Builds a new stream chunk with `output_indices`.
 pub(crate) fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
+    tracing::info!("SQLSERVER_DEBUG_LOG mapping chunk: {}", chunk.to_pretty());
     let (ops, columns, visibility) = chunk.into_inner();
     let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
     StreamChunk::with_visibility(ops, mapped_columns, visibility)

@@ -217,6 +217,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             // ignore chunk if we need backfill, since we can read the data from the snapshot
                         } else {
                             // forward the chunk to downstream
+                            tracing::info!(
+                                "SQLSERVER_DEBUG_LOG CdcBackfillExecutor forward chunk to downstream: {}",
+                                chunk.to_pretty()
+                            );
                             yield Message::Chunk(chunk);
                         }
                     }
@@ -811,7 +815,13 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: &[
     for msg in upstream {
         let mut msg = msg?;
         if let Message::Chunk(chunk) = &mut msg {
-            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
+            let res = parse_debezium_chunk(&mut parser, chunk).await;
+            tracing::info!(
+                "SQLSERVER_DEBUG_LOG CdcBackfillExecutor transform_upstream, chunk: \n{}, res: \n{:?}",
+                chunk.to_pretty(),
+                res
+            );
+            let parsed_chunk = res?;
             let _ = std::mem::replace(chunk, parsed_chunk);
         }
         yield msg;

@@ -30,6 +30,7 @@ use crate::parser::utils::log_error;
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
+    tracing::info!("SQLSERVER_DEBUG_LOG sql_server_row_to_owned_row: {:?}", row);
     let mut datums: Vec<Option<ScalarImpl>> = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
