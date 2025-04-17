@@ -58,17 +58,12 @@ pub struct SubscriptionCatalog {
     pub subscription_state: SubscriptionState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash,Default)]
 pub enum SubscriptionState {
     Init,
     Created,
+    #[default]
     Unspecified,
-}
-
-impl Default for SubscriptionState {
-    fn default() -> Self {
-        SubscriptionState::Unspecified
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -145,7 +140,9 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
-            subscription_state: match PbSubscriptionState::try_from(prost.subscription_state).unwrap() {
+            subscription_state: match PbSubscriptionState::try_from(prost.subscription_state)
+                .unwrap()
+            {
                 PbSubscriptionState::Init => SubscriptionState::Init,
                 PbSubscriptionState::Created => SubscriptionState::Created,
                 PbSubscriptionState::Unspecified => SubscriptionState::Unspecified,

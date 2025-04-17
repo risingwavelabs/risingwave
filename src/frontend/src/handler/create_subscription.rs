@@ -20,7 +20,9 @@ use risingwave_common::catalog::UserId;
 use risingwave_sqlparser::ast::CreateSubscriptionStatement;
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId, SubscriptionState};
+use crate::catalog::subscription_catalog::{
+    SubscriptionCatalog, SubscriptionId, SubscriptionState,
+};
 use crate::error::Result;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;

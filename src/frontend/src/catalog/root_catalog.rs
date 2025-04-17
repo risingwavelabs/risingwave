@@ -973,7 +973,8 @@ impl Catalog {
             let is_creating = !(subscription.subscription_state == SubscriptionState::Created);
             Err(CatalogError::Duplicated(
                 "subscription",
-                relation_name.to_owned(),is_creating,
+                relation_name.to_owned(),
+                is_creating,
             ))
         } else {
             Ok(())
