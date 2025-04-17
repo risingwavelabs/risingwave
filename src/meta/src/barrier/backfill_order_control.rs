@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -27,10 +27,10 @@ pub struct BackfillNode {
     fragment_id: FragmentId,
     /// How many more actors need to finish,
     /// before this fragment can finish backfilling.
-    remaining_actor_count: usize,
+    remaining_actors: HashSet<ActorId>,
     /// How many more dependencies need to finish,
     /// before this fragment can be backfilled.
-    remaining_dependency_count: usize,
+    remaining_dependencies: HashSet<FragmentId>,
     children: Vec<FragmentId>,
 }
 
@@ -68,10 +68,12 @@ impl BackfillOrderState {
                     fragment_id,
                     BackfillNode {
                         fragment_id,
-                        remaining_actor_count: stream_job_fragments
+                        remaining_actors: stream_job_fragments
                             .fragment_actors(fragment_id)
-                            .len(),
-                        remaining_dependency_count: 0,
+                            .iter()
+                            .map(|actor| actor.actor_id)
+                            .collect(),
+                        remaining_dependencies: Default::default(),
                         children: vec![],
                     },
                 );
@@ -81,7 +83,7 @@ impl BackfillOrderState {
         for (fragment_id, children) in backfill_orders {
             for child in &children {
                 let child_node = backfill_nodes.get_mut(child).unwrap();
-                child_node.remaining_dependency_count += 1;
+                child_node.remaining_dependencies.insert(fragment_id);
             }
 
             let backfill_node = backfill_nodes.get_mut(&fragment_id).unwrap();
@@ -91,7 +93,7 @@ impl BackfillOrderState {
         let mut current_backfill_nodes = HashMap::new();
         let mut remaining_backfill_nodes = HashMap::new();
         for (fragment_id, node) in backfill_nodes {
-            if node.remaining_dependency_count == 0 {
+            if node.remaining_dependencies.is_empty() {
                 current_backfill_nodes.insert(fragment_id, node);
             } else {
                 remaining_backfill_nodes.insert(fragment_id, node);
@@ -121,9 +123,14 @@ impl BackfillOrderState {
         // Decrease the remaining_actor_count of the operator.
         // If the remaining_actor_count is 0, add the operator to the current_backfill_nodes.
         let node = self.current_backfill_nodes.get_mut(fragment_id).unwrap();
-        node.remaining_actor_count -= 1;
-        tracing::debug!(?actor_id, remaining_actors = ?node.remaining_actor_count, ?fragment_id, "finish_backfilling_actor");
-        if node.remaining_actor_count == 0 {
+        assert!(node.remaining_actors.remove(&actor_id), "missing actor");
+        tracing::debug!(
+            actor_id,
+            remaining_actors = node.remaining_actors.len(),
+            fragment_id,
+            "finish_backfilling_actor"
+        );
+        if node.remaining_actors.is_empty() {
             return self.finish_fragment(*fragment_id);
         }
         vec![]
@@ -136,8 +143,11 @@ impl BackfillOrderState {
         let node = self.current_backfill_nodes.remove(&fragment_id).unwrap();
         for child_id in &node.children {
             let child = self.remaining_backfill_nodes.get_mut(child_id).unwrap();
-            child.remaining_dependency_count -= 1;
-            if child.remaining_dependency_count == 0 {
+            assert!(
+                child.remaining_dependencies.remove(&fragment_id),
+                "missing dependency"
+            );
+            if child.remaining_dependencies.is_empty() {
                 tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
                 self.current_backfill_nodes
                     .insert(child.fragment_id, child.clone());
