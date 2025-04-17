@@ -124,6 +124,9 @@ def main():
         help="Expected output template with '%' as wildcard.",
     )
     parser.add_argument(
+        "--db", default="dev", help="Database name to connect to (default: dev)."
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",  # Add debug flag
         help="Enable debug logging to stderr.",
@@ -141,7 +144,8 @@ def main():
     conn = None
     actual_output_raw = ""  # Initialize to handle potential errors before assignment
     try:
-        conn_string = f"host='{os.environ.get("RISEDEV_RW_FRONTEND_LISTEN_ADDRESS")}' port='{os.environ.get('RISEDEV_RW_FRONTEND_PORT')}' dbname='dev' user='root' password=''"
+        dbname = args.db
+        conn_string = f"host='{os.environ.get("RISEDEV_RW_FRONTEND_LISTEN_ADDRESS")}' port='{os.environ.get('RISEDEV_RW_FRONTEND_PORT')}' dbname='{dbname}' user='root' password=''"
         logger.debug(
             f"Connecting to: {conn_string.replace('password=\'\'', 'password=***')}..."
         )  # Hide password if any

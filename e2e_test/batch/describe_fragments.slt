@@ -72,10 +72,10 @@ FROM aged_users t
 LEFT JOIN describe_plan_test.complex_mv m ON t.name = m.name;
 
 # Test DESCRIBE FRAGMENTS for each relation
-# Use psql_validate.py since the fragment id is not deterministic
+# Use psql_validate.py --db since the fragment id is not deterministic
 
 system ok
-psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.tbl" \
+psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.tbl" \
 --expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [id, name, age, created_at, data], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
 ├── output: [ id, name, age, created_at, data ]
@@ -101,7 +101,7 @@ HINT: Use `DESCRIBE` instead.
 
 
 system ok
-psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.complex_mv" \
+psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.complex_mv" \
 --expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [name, count, avg_age, all_data], stream_key: [name], pk_columns: [name], pk_conflict: NoCheck }
 ├── output: [ tbl.name, count, $expr1, jsonb_agg(tbl.data) ]
@@ -127,7 +127,7 @@ StreamFilter { predicate: (tbl.age > 18:Int32) } { output: [ tbl.name, tbl.age, 
 
 
 system ok
-psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
+psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
 --expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
 ├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
@@ -143,7 +143,7 @@ StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
 
 
 system ok
-psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
+psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
 --expected 'Fragment % (Actor %)
 StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
 ├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
@@ -159,7 +159,7 @@ StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
 
 
 system ok
-psql_validate.py --sql "DESCRIBE FRAGMENTS describe_plan_test.snk" \
+psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.snk" \
 --expected 'Fragment % (Actor %)
 StreamSink { type: upsert, columns: [id, name, age, created_at, type], downstream_pk: [] }
 ├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, $expr1 ]
