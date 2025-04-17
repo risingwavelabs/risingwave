@@ -340,7 +340,7 @@ impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, Table
         &self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItem<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> impl StorageFuture<'_, Vec<O>> {
         self.inner.nearest(vec, options, on_nearest_item_fn)
     }
