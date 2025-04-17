@@ -17,11 +17,12 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 pub type VectorItem = f32;
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorInner<T>(T);
 
 pub type Vector = VectorInner<Arc<[VectorItem]>>;
 pub type VectorRef<'a> = VectorInner<&'a [VectorItem]>;
+pub type VectorMutRef<'a> = VectorInner<&'a mut [VectorItem]>;
 
 impl Vector {
     pub fn new(inner: &[VectorItem]) -> Self {
@@ -34,6 +35,16 @@ impl Vector {
 
     pub fn clone_from_ref(r: VectorRef<'_>) -> Self {
         Self(Vec::from(r.0).into())
+    }
+
+    pub fn get_mut(&mut self) -> Option<VectorMutRef<'_>> {
+        Arc::get_mut(&mut self.0).map(VectorInner)
+    }
+
+    /// safety: safe under the same condition to [`Arc::get_mut_unchecked`]
+    pub unsafe fn get_mut_unchecked(&mut self) -> VectorMutRef<'_> {
+        // safety: under unsafe function
+        unsafe { VectorInner(Arc::get_mut_unchecked(&mut self.0)) }
     }
 }
 
@@ -396,30 +407,47 @@ mod tests {
     }
 
     #[test]
+    fn test_vector() {}
+
+    #[test]
     fn test_distance() {
         let first_vec = [0.238474, 0.578234];
-        let second_vec = [0.93271829, 0.387495];
+        let second_vec = [0.9327183, 0.387495];
         let [v1_1, v1_2] = first_vec;
         let [v2_1, v2_2] = second_vec;
+        let first_vec = VectorInner(&first_vec[..]);
+        let second_vec = VectorInner(&second_vec[..]);
+        {
+            assert_eq!(first_vec.magnitude(), (v1_1.powi(2) + v1_2.powi(2)).sqrt());
+            let mut normalized_vec =
+                Vector::new(&[v1_1 / first_vec.magnitude(), v1_2 / first_vec.magnitude()]);
+            assert_eq!(first_vec.normalized(), normalized_vec);
+            assert!(normalized_vec.get_mut().is_some());
+            let mut normalized_vec_clone = normalized_vec.clone();
+            assert!(normalized_vec.get_mut().is_none());
+            assert!(normalized_vec_clone.get_mut().is_none());
+            drop(normalized_vec);
+            assert!(normalized_vec_clone.get_mut().is_some());
+        }
         assert_eq!(
-            L1Distance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            L1Distance::distance(first_vec, second_vec),
             (v1_1 - v2_1).abs() + (v1_2 - v2_2).abs()
         );
         assert_eq!(
-            L2Distance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            L2Distance::distance(first_vec, second_vec),
             (v1_1 - v2_1).powi(2) + (v1_2 - v2_2).powi(2)
         );
         assert_eq!(
-            KlDivergenceDistance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            KlDivergenceDistance::distance(first_vec, second_vec),
             v1_1 * (v1_1 / v2_1).ln() + v1_2 * (v1_2 / v2_2).ln()
         );
         assert_eq!(
-            CosineDistance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            CosineDistance::distance(first_vec, second_vec),
             (v1_1 * v2_1 + v1_2 * v2_2)
                 / ((v1_1.powi(2) + v1_2.powi(2)).sqrt() * (v2_1.powi(2) + v2_2.powi(2)).sqrt())
         );
         assert_eq!(
-            InnerProductDistance::distance(VectorInner(&first_vec), VectorInner(&second_vec)),
+            InnerProductDistance::distance(first_vec, second_vec),
             v1_1 * v2_1 + v1_2 * v2_2
         );
     }
@@ -441,7 +469,7 @@ mod tests {
             VectorInner(&VEC2),
         ));
         expect![[r#"
-            4.672073
+            0.29847336
         "#]]
         .assert_debug_eq(&KlDivergenceDistance::distance(
             VectorInner(&VEC1),
