@@ -24,35 +24,35 @@ if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
 fi
 
 # Direct shortcut for running SLT tests in CI, bypassing cargo-make
-if [ "$1" == "slt" ]; then
-    shift # Remove the slt argument
+# if [ "$1" == "slt" ]; then
+#     shift # Remove the slt argument
 
-    # Load environment variables from risedev-env if it exists
-    RC_ENV_FILE=".risingwave/config/risedev-env"
-    if [ -f "${RC_ENV_FILE}" ]; then
-        echo "Loading environment variables from ${RC_ENV_FILE}"
-        # Export all variables from RC_ENV_FILE
-        set -a  # automatically export all variables
-        source "${RC_ENV_FILE}"
-        set +a  # disable auto-export
-    else
-        echo "${RC_ENV_FILE} not found, have you launched the cluster with risedev?"
-        exit 1
-    fi
+#     # Load environment variables from risedev-env if it exists
+#     RC_ENV_FILE=".risingwave/config/risedev-env"
+#     if [ -f "${RC_ENV_FILE}" ]; then
+#         echo "Loading environment variables from ${RC_ENV_FILE}"
+#         # Export all variables from RC_ENV_FILE
+#         set -a  # automatically export all variables
+#         source "${RC_ENV_FILE}"
+#         set +a  # disable auto-export
+#     else
+#         echo "${RC_ENV_FILE} not found, have you launched the cluster with risedev?"
+#         exit 1
+#     fi
 
-    # Set up environment variables for sqllogictest
-    export SLT_HOST="${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:-127.0.0.1}"
-    export SLT_PORT="${RISEDEV_RW_FRONTEND_PORT:-4566}"
-    export SLT_DB="dev"
-    export PATH="$(pwd)/e2e_test/commands:${PATH}"
-    export RUST_BACKTRACE="0" # slt backtrace is useless
-    export RUST_LOG="sqllogictest=warn,sqllogictest::system_command=info"
+#     # Set up environment variables for sqllogictest
+#     export SLT_HOST="${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:-127.0.0.1}"
+#     export SLT_PORT="${RISEDEV_RW_FRONTEND_PORT:-4566}"
+#     export SLT_DB="dev"
+#     export PATH="$(pwd)/e2e_test/commands:${PATH}"
+#     export RUST_BACKTRACE="0" # slt backtrace is useless
+#     export RUST_LOG="sqllogictest=warn,sqllogictest::system_command=info"
 
-    # Execute sqllogictest directly with all arguments
-    echo "Running sqllogictest directly with provided arguments"
-    sqllogictest "$@"
-    exit $?
-fi
+#     # Execute sqllogictest directly with all arguments
+#     echo "Running sqllogictest directly with provided arguments"
+#     sqllogictest "$@"
+#     exit $?
+# fi
 
 cargo make --silent --allow-private configure-if-not-configured
 # We marked many tasks as private, so we can have a more concise output when listing all tasks.

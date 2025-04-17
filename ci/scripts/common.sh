@@ -180,4 +180,4 @@ else
 fi
 
 # Install dev sqllogictest
-cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 15b61d262b6f62b428dc3a74f0d7816023e04d95 --profile dev
+cargo install sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev 5d6655eaf08dd4509fa99985e96f901a072acca2 --profile dev
