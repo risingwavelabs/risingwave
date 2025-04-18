@@ -31,8 +31,8 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
-    JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
-    JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
+    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
+    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -97,6 +97,8 @@ pub struct CreateStreamingJobContext {
     pub option: CreateStreamingJobOption,
 
     pub streaming_job: StreamingJob,
+
+    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
 }
 
 impl CreateStreamingJobContext {
@@ -387,6 +389,7 @@ impl GlobalStreamManager {
             internal_tables,
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
+            fragment_backfill_ordering,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<(SourceChange, StreamingJob)> {
@@ -452,6 +455,7 @@ impl GlobalStreamManager {
             internal_tables: internal_tables.into_values().collect_vec(),
             job_type,
             create_type,
+            fragment_backfill_ordering,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {

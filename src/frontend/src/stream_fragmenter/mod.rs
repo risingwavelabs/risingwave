@@ -30,8 +30,9 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
+    BackfillOrderStrategy, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
+    NoOpNode, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
@@ -146,6 +147,14 @@ pub fn build_graph(
     plan_node: PlanRef,
     job_type: Option<GraphJobType>,
 ) -> SchedulerResult<StreamFragmentGraphProto> {
+    build_graph_with_strategy(plan_node, job_type, None)
+}
+
+pub fn build_graph_with_strategy(
+    plan_node: PlanRef,
+    job_type: Option<GraphJobType>,
+    backfill_order_strategy: Option<BackfillOrderStrategy>,
+) -> SchedulerResult<StreamFragmentGraphProto> {
     let ctx = plan_node.plan_base().ctx();
     let plan_node = reorganize_elements_id(plan_node);
 
@@ -176,6 +185,8 @@ pub fn build_graph(
     fragment_graph.ctx = Some(StreamContext {
         timezone: ctx.get_session_timezone(),
     });
+
+    fragment_graph.backfill_order_strategy = backfill_order_strategy;
 
     Ok(fragment_graph)
 }

@@ -35,7 +35,8 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -55,7 +56,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
+    FragmentBackfillOrder, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -177,6 +179,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
+    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
 }
 
 impl StreamJobFragments {
@@ -328,6 +331,9 @@ pub enum Command {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
     },
+
+    /// `StartFragmentBackfill` command will trigger backfilling for specified scans by `fragment_id`.
+    StartFragmentBackfill { fragment_ids: Vec<FragmentId> },
 }
 
 impl Command {
@@ -441,6 +447,7 @@ impl Command {
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
+            Command::StartFragmentBackfill { .. } => None,
         }
     }
 
@@ -981,6 +988,11 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                 }],
             })),
+            Command::StartFragmentBackfill { fragment_ids } => Some(
+                Mutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                    fragment_ids: fragment_ids.clone(),
+                }),
+            ),
         }
     }
 
