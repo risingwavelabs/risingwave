@@ -600,6 +600,7 @@ impl DdlController {
                 tracing::debug!(error = %e.as_report(), "cancel create subscription");
             })?;
 
+        // self.metadata_manager
         let version = self
             .metadata_manager
             .catalog_controller

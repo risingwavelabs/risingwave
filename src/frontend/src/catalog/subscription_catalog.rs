@@ -58,12 +58,10 @@ pub struct SubscriptionCatalog {
     pub subscription_state: SubscriptionState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SubscriptionState {
     Init,
     Created,
-    #[default]
-    Unspecified,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -119,7 +117,6 @@ impl SubscriptionCatalog {
             subscription_state: match self.subscription_state {
                 SubscriptionState::Init => PbSubscriptionState::Init.into(),
                 SubscriptionState::Created => PbSubscriptionState::Created.into(),
-                SubscriptionState::Unspecified => PbSubscriptionState::Unspecified.into(),
             },
         }
     }
@@ -145,7 +142,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             {
                 PbSubscriptionState::Init => SubscriptionState::Init,
                 PbSubscriptionState::Created => SubscriptionState::Created,
-                PbSubscriptionState::Unspecified => SubscriptionState::Unspecified,
+                PbSubscriptionState::Unspecified => unreachable!(),
             },
         }
     }
