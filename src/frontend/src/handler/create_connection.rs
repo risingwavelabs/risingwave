@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
 use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
-use risingwave_connector::source::enforce_secret_on_cloud_connection;
+use risingwave_connector::source::enforce_secret_connection;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::catalog::connection_params::ConnectionType;
@@ -123,13 +123,13 @@ pub async fn handle_create_connection(
         .system_params_manager()
         .get_params()
         .load()
-        .enforce_secret_on_cloud()
+        .enforce_secret()
     {
         use risingwave_pb::ddl_service::create_connection_request::Payload::ConnectionParams;
         let ConnectionParams(cp) = &create_connection_payload else {
             unreachable!()
         };
-        enforce_secret_on_cloud_connection(
+        enforce_secret_connection(
             &cp.connection_type(),
             cp.properties.keys().map(|s| s.as_str()),
         )?;

@@ -14,7 +14,7 @@ postmaster backup_storage_url
 postmaster barrier_interval_ms
 postmaster checkpoint_frequency
 postmaster enable_tracing
-postmaster enforce_secret_on_cloud
+postmaster enforce_secret
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
