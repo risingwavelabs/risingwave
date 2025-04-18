@@ -1133,7 +1133,6 @@ impl SinkWriter for IcebergSinkWriter {
                         warn!("Failed to build new writer after close");
                     }
                 }
-                close_result
             }
             IcebergWriterDispatch::PartitionUpsert {
                 writer,
