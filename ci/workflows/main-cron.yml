@@ -690,7 +690,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 24
+    timeout_in_minutes: 21
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
