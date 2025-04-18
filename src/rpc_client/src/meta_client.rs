@@ -74,9 +74,11 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -1557,6 +1559,12 @@ impl MetaClient {
         let resp = self.inner.list_rate_limits(request).await?;
         Ok(resp.rate_limits)
     }
+
+    pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
+        let request = ListIcebergTablesRequest {};
+        let resp = self.inner.list_iceberg_tables(request).await?;
+        Ok(resp.iceberg_tables)
+    }
 }
 
 #[async_trait]
@@ -1710,6 +1718,7 @@ struct GrpcMetaClientCore {
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
     cluster_limit_client: ClusterLimitServiceClient<Channel>,
+    hosted_iceberg_catalog_service_client: HostedIcebergCatalogServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1737,7 +1746,8 @@ impl GrpcMetaClientCore {
         let cloud_client = CloudServiceClient::new(channel.clone());
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
         let event_log_client = EventLogServiceClient::new(channel.clone());
-        let cluster_limit_client = ClusterLimitServiceClient::new(channel);
+        let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
+        let hosted_iceberg_catalog_service_client = HostedIcebergCatalogServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1758,6 +1768,7 @@ impl GrpcMetaClientCore {
             sink_coordinate_client,
             event_log_client,
             cluster_limit_client,
+            hosted_iceberg_catalog_service_client,
         }
     }
 }
@@ -2201,6 +2212,7 @@ macro_rules! for_all_meta_rpc {
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
             ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
+            ,{ hosted_iceberg_catalog_service_client, list_iceberg_tables, ListIcebergTablesRequest, ListIcebergTablesResponse }
         }
     };
 }
