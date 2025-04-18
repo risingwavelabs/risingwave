@@ -892,9 +892,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-python"
-version = "0.4.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75f0256a3694d8b32e45763b83ca4a1b898fd070816bf4d5736481559170ffc"
+checksum = "6a946b648352e6226d35801441c3e06b90e3757634ff34f3017b14e019260dfe"
 dependencies = [
  "anyhow",
  "arrow-array 54.2.1",
@@ -13076,9 +13076,9 @@ dependencies = [
 
 [[package]]
 name = "self_cell"
-version = "1.2.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f7d95a54511e0c7be3f51e8867aa8cf35148d7b9445d44de2f943e2b206e749"
+checksum = "c2fdfc24bc566f839a2da4c4295b82db7d25a24253867d5c64355abb5799bdbe"
 
 [[package]]
 name = "semver"
