@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use phf::{Set, phf_set};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
@@ -32,6 +33,7 @@ use with_options::WithOptions;
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -93,6 +95,11 @@ impl SqlServerConfig {
     }
 }
 
+impl EnforceSecret for SqlServerConfig {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "sqlserver.password"
+    };
+}
 #[derive(Debug)]
 pub struct SqlServerSink {
     pub config: SqlServerConfig,
@@ -101,6 +108,16 @@ pub struct SqlServerSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for SqlServerSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::sink::ConnectorResult<()> {
+        for prop in prop_iter {
+            SqlServerConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
 impl SqlServerSink {
     pub fn new(
         mut config: SqlServerConfig,
