@@ -453,6 +453,15 @@ IcebergConfig:
   - name: gcs.credential
     field_type: String
     required: false
+  - name: azblob.account_name
+    field_type: String
+    required: false
+  - name: azblob.account_key
+    field_type: String
+    required: false
+  - name: azblob.endpoint_url
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
