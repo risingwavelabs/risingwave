@@ -174,6 +174,7 @@ mod new_serde {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
             DataType::List(item_type) => new_deserialize_list(item_type, data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
 
             data_types::simple!() => plain::deserialize_value(ty, data)?,
         })

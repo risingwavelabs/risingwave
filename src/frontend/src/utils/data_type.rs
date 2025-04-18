@@ -51,6 +51,7 @@ impl DataType {
             DataType::Map(map) => {
                 AstDataType::Map(Box::new((map.key().to_ast(), map.value().to_ast())))
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             DataType::Serial => unreachable!("serial type should not be user-defined"),
         }
     }
