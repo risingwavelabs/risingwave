@@ -29,10 +29,11 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId, SchemaId,
-    SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database,
-    fragment, fragment_relation, function, index, object, object_dependency, schema, secret, sink,
-    source, streaming_job, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, JobStatus, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap, WorkerId,
+    actor, connection, database, fragment, fragment_relation, function, index, object,
+    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
+    user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -530,7 +531,9 @@ where
 {
     macro_rules! check_duplicated {
         ($obj_type:expr, $entity:ident, $table:ident) => {
-            let count = Object::find()
+            let object_id = Object::find()
+                .select_only()
+                .column(object::Column::Oid)
                 .inner_join($entity)
                 .filter(
                     object::Column::DatabaseId
@@ -538,10 +541,38 @@ where
                         .and(object::Column::SchemaId.eq(Some(schema_id)))
                         .and($table::Column::Name.eq(name)),
                 )
-                .count(db)
+                .into_tuple::<ObjectId>()
+                .one(db)
                 .await?;
-            if count != 0 {
-                return Err(MetaError::catalog_duplicated($obj_type.as_str(), name));
+            if let Some(oid) = object_id {
+                let check_creation = if $obj_type == ObjectType::View {
+                    false
+                } else if $obj_type == ObjectType::Source {
+                    let source_info = Source::find_by_id(oid)
+                        .select_only()
+                        .column(source::Column::SourceInfo)
+                        .into_tuple::<Option<StreamSourceInfo>>()
+                        .one(db)
+                        .await?
+                        .unwrap();
+                    source_info.map_or(false, |info| info.to_protobuf().is_shared())
+                } else {
+                    true
+                };
+                return if check_creation
+                    && !matches!(
+                        StreamingJob::find_by_id(oid)
+                            .select_only()
+                            .column(streaming_job::Column::JobStatus)
+                            .into_tuple::<JobStatus>()
+                            .one(db)
+                            .await?,
+                        Some(JobStatus::Created)
+                    ) {
+                    Err(MetaError::catalog_under_creation($obj_type.as_str(), name))
+                } else {
+                    Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
+                };
             }
         };
     }
