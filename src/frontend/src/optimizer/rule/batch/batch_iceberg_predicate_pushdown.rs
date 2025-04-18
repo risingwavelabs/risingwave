@@ -20,9 +20,8 @@
 use chrono::Datelike;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
-use risingwave_common::array::arrow::{ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE};
 use risingwave_common::catalog::Field;
-use risingwave_common::types::{Decimal, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
 use crate::optimizer::PlanRef;
