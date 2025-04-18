@@ -89,7 +89,7 @@ impl SqlServerConfig {
     }
 
     pub fn full_object_path(&self) -> String {
-        format!("[{}].[{}].[{}]", self.database, self.schema, self.table)
+        format!("[{}].[{}]", self.schema, self.table)
     }
 }
 
