@@ -20,6 +20,7 @@
 use chrono::Datelike;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
+use risingwave_common::array::arrow::{ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE};
 use risingwave_common::catalog::Field;
 use risingwave_common::types::{Decimal, ScalarImpl};
 
@@ -69,14 +70,9 @@ fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
         ScalarImpl::Int64(i) => Some(IcebergDatum::long(*i)),
         ScalarImpl::Float32(f) => Some(IcebergDatum::float(*f)),
         ScalarImpl::Float64(f) => Some(IcebergDatum::double(*f)),
-        ScalarImpl::Decimal(d) => {
-            let Decimal::Normalized(d) = d else {
-                return None;
-            };
-            let Ok(d) = IcebergDatum::decimal(*d) else {
-                return None;
-            };
-            Some(d)
+        ScalarImpl::Decimal(_) => {
+            // TODO(iceberg): iceberg-rust doesn't support decimal predicate pushdown yet.
+            None
         }
         ScalarImpl::Date(d) => {
             let Ok(datum) = IcebergDatum::date_from_ymd(d.0.year(), d.0.month(), d.0.day()) else {
