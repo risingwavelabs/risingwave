@@ -126,6 +126,9 @@ pub struct StorageOpts {
 
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
+    pub compactor_absolute_max_task_multiplier: f32, // allow boost when cpu usage is low
+    pub compactor_cpu_usage_threshold: f32,
+
     pub compactor_max_sst_size: u64,
     /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
@@ -231,6 +234,10 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             backup_storage_directory: p.backup_storage_directory().to_owned(),
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
+            compactor_absolute_max_task_multiplier: c
+                .storage
+                .compactor_absolute_max_task_multiplier,
+            compactor_cpu_usage_threshold: c.storage.compactor_cpu_usage_threshold,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
             check_compaction_result: c.storage.check_compaction_result,
