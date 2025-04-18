@@ -1216,6 +1216,7 @@ mod tests {
                     assert_eq!(epoch, epoch1);
                     assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
                 }
+
                 _ => unreachable!(),
             }
             match reader.next_item().await.unwrap() {
