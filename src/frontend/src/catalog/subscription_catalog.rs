@@ -60,7 +60,8 @@ pub struct SubscriptionCatalog {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub enum SubscriptionState {
-    #[default] Init,
+    #[default]
+    Init,
     Created,
 }
 
