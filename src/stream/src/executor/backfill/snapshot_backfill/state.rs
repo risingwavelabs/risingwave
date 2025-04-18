@@ -230,6 +230,7 @@ impl<S: StateStore> BackfillState<S> {
                 continue;
             };
             let progress = VnodeBackfillProgress::from_row(&progress_row, &pk_serde);
+            debug!(?vnode, ?progress, "load initial progress");
             assert!(
                 vnode_state
                     .insert(vnode, VnodeBackfillState::Committed(progress))
@@ -281,7 +282,13 @@ impl<S: StateStore> BackfillState<S> {
                                     &progress.progress
                             {
                                 assert_eq!(pk.len(), self.pk_serde.get_data_types().len());
-                                assert!(prev_progress.row_count <= progress.row_count);
+                                assert!(
+                                    prev_progress.row_count <= progress.row_count,
+                                    "{} <= {}, vnode: {:?}",
+                                    prev_progress.row_count,
+                                    progress.row_count,
+                                    vnode,
+                                );
                                 if cfg!(debug_assertions) {
                                     let mut prev_buf = vec![];
                                     self.pk_serde.serialize(prev_pk, &mut prev_buf);
