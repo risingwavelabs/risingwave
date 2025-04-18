@@ -24,7 +24,10 @@ mod arrow_iceberg;
 mod arrow_udf;
 
 pub use arrow_deltalake::DeltaLakeConvert;
-pub use arrow_iceberg::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
+pub use arrow_iceberg::{
+    ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE, IcebergArrowConvert,
+    IcebergCreateTableArrowConvert,
+};
 pub use arrow_udf::UdfArrowConvert;
 pub use reexport::*;
 /// For other RisingWave crates, they can directly use arrow re-exported here, without adding
