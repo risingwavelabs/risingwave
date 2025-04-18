@@ -167,12 +167,12 @@ impl MetaError {
         matches!(self.inner(), MetaErrorInner::Cancelled(..))
     }
 
-    pub fn catalog_duplicated<T: Into<String>>(
-        relation: &'static str,
-        name: T,
-        under_creation: bool,
-    ) -> Self {
-        MetaErrorInner::Duplicated(relation, name.into(), under_creation).into()
+    pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::Duplicated(relation, name.into(), false).into()
+    }
+
+    pub fn catalog_under_creation<T: Into<String>>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::Duplicated(relation, name.into(), true).into()
     }
 }
 

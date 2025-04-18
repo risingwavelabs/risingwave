@@ -393,7 +393,7 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated("database", name, false));
+        return Err(MetaError::catalog_duplicated("database", name));
     }
     Ok(())
 }
@@ -422,11 +422,7 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated(
-            "function",
-            &pb_function.name,
-            false,
-        ));
+        return Err(MetaError::catalog_duplicated("function", &pb_function.name));
     }
     Ok(())
 }
@@ -454,7 +450,6 @@ where
         return Err(MetaError::catalog_duplicated(
             "connection",
             &pb_connection.name,
-            false,
         ));
     }
     Ok(())
@@ -476,11 +471,7 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated(
-            "secret",
-            &pb_secret.name,
-            false,
-        ));
+        return Err(MetaError::catalog_duplicated("secret", &pb_secret.name));
     }
     Ok(())
 }
@@ -507,7 +498,6 @@ where
         return Err(MetaError::catalog_duplicated(
             "subscription",
             &pb_subscription.name,
-            false,
         ));
     }
     Ok(())
@@ -524,7 +514,7 @@ where
         .await?;
     if count > 0 {
         assert_eq!(count, 1);
-        return Err(MetaError::catalog_duplicated("user", name, false));
+        return Err(MetaError::catalog_duplicated("user", name));
     }
     Ok(())
 }
@@ -569,7 +559,7 @@ where
                 } else {
                     true
                 };
-                let under_creation = check_creation
+                return if check_creation
                     && !matches!(
                         StreamingJob::find_by_id(oid)
                             .select_only()
@@ -578,13 +568,11 @@ where
                             .one(db)
                             .await?,
                         Some(JobStatus::Created)
-                    );
-
-                return Err(MetaError::catalog_duplicated(
-                    $obj_type.as_str(),
-                    name,
-                    under_creation,
-                ));
+                    ) {
+                    Err(MetaError::catalog_under_creation($obj_type.as_str(), name))
+                } else {
+                    Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
+                };
             }
         };
     }
@@ -617,7 +605,7 @@ where
         .count(db)
         .await?;
     if count != 0 {
-        return Err(MetaError::catalog_duplicated("schema", name, false));
+        return Err(MetaError::catalog_duplicated("schema", name));
     }
 
     Ok(())
