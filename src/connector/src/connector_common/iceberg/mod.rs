@@ -192,22 +192,19 @@ impl IcebergCommon {
                 }
             }
 
-            if let Some(azblob_account_name) = &self.azblob_account_name {
+            if let (
+                Some(azblob_account_name),
+                Some(azblob_account_key),
+                Some(azblob_endpoint_url),
+            ) = (
+                &self.azblob_account_name,
+                &self.azblob_account_key,
+                &self.azblob_endpoint_url,
+            ) {
                 iceberg_configs.insert(AZBLOB_ACCOUNT_NAME.to_owned(), azblob_account_name.clone());
-                if catalog_type != "rest" && catalog_type != "rest_rust" {
-                    bail!("azblob unsupported in {} catalog", &catalog_type);
-                }
-            }
-
-            if let Some(azblob_account_key) = &self.azblob_account_key {
                 iceberg_configs.insert(AZBLOB_ACCOUNT_KEY.to_owned(), azblob_account_key.clone());
-                if catalog_type != "rest" && catalog_type != "rest_rust" {
-                    bail!("azblob unsupported in {} catalog", &catalog_type);
-                }
-            }
-
-            if let Some(azblob_endpoint_url) = &self.azblob_endpoint_url {
                 iceberg_configs.insert(AZBLOB_ENDPOINT.to_owned(), azblob_endpoint_url.clone());
+
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("azblob unsupported in {} catalog", &catalog_type);
                 }
