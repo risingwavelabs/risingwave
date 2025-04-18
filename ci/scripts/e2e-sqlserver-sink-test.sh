@@ -39,6 +39,7 @@ sqlcmd -S sqlserver-server -U SA -P SomeTestOnly@SA -Q "
 CREATE DATABASE SinkTest;
 GO
 USE SinkTest;
+GO
 CREATE SCHEMA test_schema;
 GO
 CREATE TABLE test_schema.t_many_data_type (
