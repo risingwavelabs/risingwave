@@ -6,11 +6,11 @@ insert into t select 1 from generate_series(1, 10000);
 
 # trigger high barrier latency
 system ok
-psql -c 'create materialized view m1 as select x.v1 from t x join t y using(v1);' &
+risedev psql -c 'create materialized view m1 as select x.v1 from t x join t y using(v1);' &
 
 # first create table
 system ok
-psql -c 'create table t2(v1 int);' &
+risedev psql -c 'create table t2(v1 int);' &
 
 statement error table with name t2 exists but under creation
 create table t2(v1 int);
