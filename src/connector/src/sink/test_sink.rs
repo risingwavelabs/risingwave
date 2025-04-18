@@ -19,7 +19,6 @@ use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use sea_orm::DatabaseConnection;
 
-use super::catalog::SinkId;
 use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 
@@ -27,7 +26,7 @@ pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFutur
     + Send
     + 'static;
 pub trait BuildBoxCoordinatorTrait =
-    FnMut(DatabaseConnection, SinkId) -> BoxCoordinator + Send + 'static;
+    FnMut(DatabaseConnection, SinkParam) -> BoxCoordinator + Send + 'static;
 
 type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
 type BuildBoxCoordinator = Box<dyn BuildBoxCoordinatorTrait>;
@@ -71,7 +70,7 @@ impl Sink for TestSink {
         &self,
         db: DatabaseConnection,
     ) -> crate::sink::Result<Self::Coordinator> {
-        Ok(build_box_coordinator(db, self.param.sink_id))
+        Ok(build_box_coordinator(db, self.param.clone()))
     }
 }
 
@@ -132,13 +131,13 @@ pub fn register_build_sink(
     })
 }
 
-fn build_box_coordinator(db: DatabaseConnection, sink_id: SinkId) -> BoxCoordinator {
+fn build_box_coordinator(db: DatabaseConnection, sink_param: SinkParam) -> BoxCoordinator {
     (get_registry()
         .build_box_sink
         .lock()
         .as_mut()
         .expect("should not be empty")
-        .1)(db, sink_id)
+        .1)(db, sink_param)
 }
 
 async fn build_box_log_sinker(

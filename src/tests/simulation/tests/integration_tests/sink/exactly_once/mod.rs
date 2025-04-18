@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#[cfg(madsim)]
+mod utils;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -22,7 +24,7 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_simulation::cluster::{Cluster, KillOpts};
 use tokio::time::sleep;
 
-use crate::sink::exactly_once_utils::SimulationTestIcebergExactlyOnceSink;
+use crate::sink::exactly_once::utils::SimulationTestIcebergExactlyOnceSink;
 use crate::sink::utils::{
     CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSource,
     start_sink_test_cluster,

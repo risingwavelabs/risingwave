@@ -1209,7 +1209,11 @@ mod tests {
             // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
             // set to true, we won't receive the following commented items.
             match reader.next_item().await.unwrap() {
-                (_epoch, LogStoreReadItem::StreamChunk { chunk: _, .. }) => {}
+                (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                    assert_eq!(epoch, epoch1);
+                    assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+                }
+
                 _ => unreachable!(),
             }
             match reader.next_item().await.unwrap() {
@@ -1226,7 +1230,7 @@ mod tests {
                 assert!(check_rows_eq(
                     chunk2_1.rows().chain(chunk2_2.rows()),
                     chunk.rows()
-                ))
+                ));
             }
             _ => unreachable!(),
         }

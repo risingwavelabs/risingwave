@@ -21,6 +21,9 @@ use thiserror_ext::AsReport;
 
 use crate::sink::Result;
 
+// This file contains methods for accessing system tables in the meta store
+// after enabling exactly once semantics.
+
 pub async fn persist_pre_commit_metadata(
     sink_id: u32,
     db: DatabaseConnection,

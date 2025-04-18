@@ -26,10 +26,7 @@ mod scale;
 mod utils;
 
 #[cfg(madsim)]
-mod exactly_once_utils;
-
-#[cfg(madsim)]
-mod exactly_once_iceberg;
+mod exactly_once;
 #[cfg(madsim)]
 #[macro_export]
 macro_rules! assert_with_err_returned {
