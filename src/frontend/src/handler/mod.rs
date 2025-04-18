@@ -456,7 +456,12 @@ pub async fn handle(
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
-        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::Describe { name, kind } => match kind {
+            DescribeKind::Fragments => {
+                describe::handle_describe_fragments(handler_args, name).await
+            }
+            DescribeKind::Plain => describe::handle_describe(handler_args, name),
+        },
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,

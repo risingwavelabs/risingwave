@@ -33,6 +33,9 @@ buildkite-agent artifact download udf.jar e2e_test/udf/remote_java/target/
 # preparing for generated tests
 download-and-decompress-artifact e2e_test_generated ./
 
+echo "--- Install Python Dependencies"
+python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
+
 mode=ci-3streaming-2serving-3fe
 start_cluster() {
     risedev ci-start $mode
