@@ -100,6 +100,7 @@ services:
       - nats-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   sink-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
@@ -123,6 +124,7 @@ services:
       - sqlserver-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   iceberg-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
@@ -133,10 +135,13 @@ services:
       - schemaregistry
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
+
   rw-build-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
@@ -146,6 +151,7 @@ services:
       - db
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   iceberg-engine-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
@@ -153,6 +159,7 @@ services:
       - db
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   ci-flamegraph-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
