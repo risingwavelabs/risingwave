@@ -296,7 +296,7 @@ impl Connection for IcebergConnection {
                     let op = Operator::new(builder)?.finish();
                     op.check().await?;
                 }
-                "acblob" => {
+                "azblob" => {
                     let mut builder = Azblob::default();
                     if let Some(account_name) = &self.azblob_account_name {
                         builder = builder.account_name(account_name);
