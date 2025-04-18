@@ -55,6 +55,8 @@ pub struct SqlServerConfig {
     pub password: String,
     #[serde(rename = "sqlserver.database")]
     pub database: String,
+    #[serde(rename = "sqlserver.schema", default = "default_schema")]
+    pub schema: String,
     #[serde(rename = "sqlserver.table")]
     pub table: String,
     #[serde(
@@ -64,6 +66,10 @@ pub struct SqlServerConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+fn default_schema() -> String {
+    "dbo".to_owned()
 }
 
 impl SqlServerConfig {
@@ -80,6 +86,10 @@ impl SqlServerConfig {
             )));
         }
         Ok(config)
+    }
+
+    pub fn full_object_path(&self) -> String {
+        format!("[{}].[{}].[{}]", self.database, self.schema, self.table)
     }
 }
 
@@ -164,7 +174,7 @@ impl Sink for SqlServerSink {
         let query_table_metadata_error = || {
             SinkError::SqlServer(anyhow!(format!(
                 "SQL Server table {} metadata error",
-                self.config.table
+                self.config.full_object_path()
             )))
         };
         static QUERY_TABLE_METADATA: &str = r#"
@@ -183,7 +193,7 @@ ORDER BY
     col.column_id;"#;
         let rows = sql_client
             .inner_client
-            .query(QUERY_TABLE_METADATA, &[&self.config.table])
+            .query(QUERY_TABLE_METADATA, &[&self.config.full_object_path()])
             .await?
             .into_results()
             .await?;
@@ -209,7 +219,8 @@ ORDER BY
                 None => {
                     return Err(SinkError::SqlServer(anyhow!(format!(
                         "column {} not found in the downstream SQL Server table {}",
-                        col.name, self.config.table
+                        col.name,
+                        self.config.full_object_path()
                     ))));
                 }
                 Some(sql_server_is_pk) => {
@@ -219,13 +230,15 @@ ORDER BY
                     if rw_is_pk && !*sql_server_is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
-                            col.name, self.config.table,
+                            col.name,
+                            self.config.full_object_path(),
                         ))));
                     }
                     if !rw_is_pk && *sql_server_is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
-                            col.name, self.config.table,
+                            col.name,
+                            self.config.full_object_path(),
                         ))));
                     }
                 }
@@ -241,7 +254,7 @@ ORDER BY
                 return Err(SinkError::SqlServer(anyhow!(format!(
                     "primary key does not match between RisingWave sink ({}) and SQL Server table {} ({})",
                     self.pk_indices.len(),
-                    self.config.table,
+                    self.config.full_object_path(),
                     sql_server_pk_count,
                 ))));
             }
@@ -380,8 +393,8 @@ impl SqlServerSinkWriter {
                 SqlOp::Insert(_) => {
                     write!(
                         &mut query_str,
-                        "INSERT INTO [{}] ({}) VALUES ({});",
-                        self.config.table,
+                        "INSERT INTO {} ({}) VALUES ({});",
+                        self.config.full_object_path(),
                         all_col_names,
                         param_placeholders(&mut next_param_id),
                     )
@@ -390,12 +403,12 @@ impl SqlServerSinkWriter {
                 SqlOp::Merge(_) => {
                     write!(
                         &mut query_str,
-                        r#"MERGE [{}] AS [TARGET]
+                        r#"MERGE {} AS [TARGET]
                         USING (VALUES ({})) AS [SOURCE] ({})
                         ON {}
                         WHEN MATCHED THEN UPDATE SET {}
                         WHEN NOT MATCHED THEN INSERT ({}) VALUES ({});"#,
-                        self.config.table,
+                        self.config.full_object_path(),
                         param_placeholders(&mut next_param_id),
                         all_col_names,
                         pk_match,
@@ -408,8 +421,8 @@ impl SqlServerSinkWriter {
                 SqlOp::Delete(_) => {
                     write!(
                         &mut query_str,
-                        r#"DELETE FROM [{}] WHERE {};"#,
-                        self.config.table,
+                        r#"DELETE FROM {} WHERE {};"#,
+                        self.config.full_object_path(),
                         self.pk_indices
                             .iter()
                             .map(|idx| {
