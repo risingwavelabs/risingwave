@@ -856,70 +856,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "arrow-udf-flight"
-version = "0.4.2"
+name = "arrow-udf-runtime"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfebc7d9f6449457b90f6f42ad7864cdec39f97b730e476d9b009c95b5465a1f"
+checksum = "24f8107f116f62ff440560ad472a29261c31ba3efce516d83d7407d97edee139"
 dependencies = [
+ "anyhow",
  "arrow-array 54.2.1",
+ "arrow-buffer 54.2.1",
  "arrow-flight",
+ "arrow-ipc 54.2.1",
  "arrow-schema 54.2.1",
  "arrow-select 54.2.1",
+ "async-trait",
+ "atomic-time",
+ "base64 0.22.1",
  "futures-util",
+ "genawaiter2",
+ "itertools 0.14.0",
+ "pyo3",
+ "pyo3-build-config",
+ "reqwest 0.12.4",
+ "rquickjs",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.3",
  "tokio",
  "tonic",
  "tracing",
-]
-
-[[package]]
-name = "arrow-udf-js"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccef6f74030c63fe5221a8d4f77235ee2e4ebee58fadf3efaa943a090c9bea65"
-dependencies = [
- "anyhow",
- "arrow-array 54.2.1",
- "arrow-buffer 54.2.1",
- "arrow-schema 54.2.1",
- "atomic-time",
- "futures-util",
- "reqwest 0.12.4",
- "rquickjs",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "arrow-udf-python"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a946b648352e6226d35801441c3e06b90e3757634ff34f3017b14e019260dfe"
-dependencies = [
- "anyhow",
- "arrow-array 54.2.1",
- "arrow-buffer 54.2.1",
- "arrow-ipc 54.2.1",
- "arrow-schema 54.2.1",
- "pyo3",
- "pyo3-build-config",
-]
-
-[[package]]
-name = "arrow-udf-wasm"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca1738d77eb9707333d75448b9982b9ea03bede1fe39cf29406c69fa0819542f"
-dependencies = [
- "anyhow",
- "arrow-array 54.2.1",
- "arrow-ipc 54.2.1",
- "arrow-schema 54.2.1",
- "async-trait",
- "base64 0.22.1",
- "genawaiter2",
- "itertools 0.14.0",
- "tempfile",
  "wasi-common",
  "wasmtime",
 ]
@@ -11349,10 +11313,7 @@ version = "2.4.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "arrow-udf-flight",
- "arrow-udf-js",
- "arrow-udf-python",
- "arrow-udf-wasm",
+ "arrow-udf-runtime",
  "async-trait",
  "auto_enums",
  "bytes",
@@ -13070,9 +13031,9 @@ dependencies = [
 
 [[package]]
 name = "self_cell"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2fdfc24bc566f839a2da4c4295b82db7d25a24253867d5c64355abb5799bdbe"
+checksum = "0f7d95a54511e0c7be3f51e8867aa8cf35148d7b9445d44de2f943e2b206e749"
 
 [[package]]
 name = "semver"

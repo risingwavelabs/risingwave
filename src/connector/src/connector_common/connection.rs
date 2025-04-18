@@ -34,7 +34,7 @@ use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
 use crate::deserialize_optional_bool_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
@@ -61,10 +61,8 @@ pub struct KafkaConnection {
     pub aws_auth_props: AwsAuthProps,
 }
 
-impl EnforceSecretOnCloud for KafkaConnection {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> ConnectorResult<()> {
+impl EnforceSecret for KafkaConnection {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
         for prop in prop_iter {
             KafkaConnectionProps::enforce_one(prop)?;
             AwsAuthProps::enforce_one(prop)?;
@@ -216,8 +214,8 @@ pub struct IcebergConnection {
     pub hosted_catalog: Option<bool>,
 }
 
-impl EnforceSecretOnCloud for IcebergConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for IcebergConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "s3.access.key",
         "s3.secret.key",
         "gcs.credential",
@@ -386,8 +384,8 @@ impl Connection for ConfluentSchemaRegistryConnection {
     }
 }
 
-impl EnforceSecretOnCloud for ConfluentSchemaRegistryConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ConfluentSchemaRegistryConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "schema.registry.password",
     };
 }
@@ -407,8 +405,8 @@ impl Connection for ElasticsearchConnection {
     }
 }
 
-impl EnforceSecretOnCloud for ElasticsearchConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ElasticsearchConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "elasticsearch.password",
     };
 }

@@ -16,15 +16,18 @@ mod graph;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+mod parallelism;
 mod rewrite;
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::rc::Rc;
 
 use educe::Educe;
 use risingwave_common::catalog::TableId;
+use risingwave_common::session_config::SessionConfig;
+use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode, StreamContext,
@@ -37,6 +40,7 @@ use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::scheduler::SchedulerResult;
+use crate::stream_fragmenter::parallelism::derive_parallelism;
 
 /// The mutable state when building fragment graph.
 #[derive(Educe)]
@@ -117,7 +121,31 @@ impl BuildFragmentGraphState {
     }
 }
 
-pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphProto> {
+// The type of streaming job. It is used to determine the parallelism of the job during `build_graph`.
+pub enum GraphJobType {
+    Table,
+    MaterializedView,
+    Source,
+    Sink,
+    Index,
+}
+
+impl GraphJobType {
+    pub fn to_parallelism(&self, config: &SessionConfig) -> ConfigParallelism {
+        match self {
+            GraphJobType::Table => config.streaming_parallelism_for_table(),
+            GraphJobType::MaterializedView => config.streaming_parallelism_for_materialized_view(),
+            GraphJobType::Source => config.streaming_parallelism_for_source(),
+            GraphJobType::Sink => config.streaming_parallelism_for_sink(),
+            GraphJobType::Index => config.streaming_parallelism_for_index(),
+        }
+    }
+}
+
+pub fn build_graph(
+    plan_node: PlanRef,
+    job_type: Option<GraphJobType>,
+) -> SchedulerResult<StreamFragmentGraphProto> {
     let ctx = plan_node.plan_base().ctx();
     let plan_node = reorganize_elements_id(plan_node);
 
@@ -137,13 +165,10 @@ pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphPro
     // Set parallelism and vnode count.
     {
         let config = ctx.session_ctx().config();
-
-        fragment_graph.parallelism =
-            config
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
+        fragment_graph.parallelism = derive_parallelism(
+            job_type.map(|t| t.to_parallelism(config.deref())),
+            config.streaming_parallelism(),
+        );
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
     }
 

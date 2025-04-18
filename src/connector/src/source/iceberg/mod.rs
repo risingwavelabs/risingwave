@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
 use crate::connector_common::IcebergCommon;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{
@@ -69,17 +69,20 @@ pub struct IcebergProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
-impl EnforceSecretOnCloud for IcebergProperties {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for IcebergProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "catalog.jdbc.password",
     };
 
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> ConnectorResult<()> {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
         for prop in prop_iter {
             IcebergCommon::enforce_one(prop)?;
-            Self::enforce_one(prop)?;
+            if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+                return Err(EnforceSecretError {
+                    key: prop.to_owned(),
+                }
+                .into());
+            }
         }
         Ok(())
     }

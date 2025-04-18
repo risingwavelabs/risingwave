@@ -280,6 +280,10 @@ profile:
       - use: kafka
         persist-data: true
 
+  kafka:
+    steps:
+      - use: kafka
+
   meta-1cn-1fe-sqlite:
     steps:
       - use: minio
@@ -688,8 +692,8 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-        api-requests-max: 30
-        api-requests-deadline: 3s
+        api-requests-max: 100
+        api-requests-deadline: 5s
       - use: meta-node
         meta-backend: env
       - use: compute-node

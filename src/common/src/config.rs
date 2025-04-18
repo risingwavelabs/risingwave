@@ -424,14 +424,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
+    /// The interval of the periodic scheduling compaction group split job.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
+    /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
+    /// The threshold of each dimension of the compaction group after merging. When the dimension * `compaction_group_merge_dimension_threshold` >= limit, the merging job will be rejected.
+    #[serde(default = "default::meta::compaction_group_merge_dimension_threshold")]
+    pub compaction_group_merge_dimension_threshold: f64,
 
     #[serde(default)]
     #[config_doc(nested)]
@@ -1726,6 +1732,10 @@ pub mod default {
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn compaction_group_merge_dimension_threshold() -> f64 {
+            1.2
         }
     }
 
