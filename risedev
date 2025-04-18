@@ -33,7 +33,10 @@ cargo make --silent --allow-private configure-if-not-configured
 # ignore SIGINT. However, all child processes spawned by `cargo make` can still receive and handle SIGINT.
 # As a result, `cargo make` will behave similar to `bash`.
 # To test this, run `risedev psql`, press ^C, and compare the behavior with `cargo make psql`.
-trap '' INT
+if [ "$1" == "psql" ]; then
+    trap '' INT
+fi
+
 # We marked many tasks as private, so we can have a more concise output when listing all tasks.
 # But we allow private tasks to be executed.
 cargo make --allow-private "$@"
