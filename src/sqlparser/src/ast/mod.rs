@@ -1465,10 +1465,11 @@ pub enum Statement {
         fragment_id: u32,
         operation: AlterFragmentOperation,
     },
-    /// DESCRIBE TABLE OR SOURCE
+    /// DESCRIBE relation
     Describe {
-        /// Table or Source name
+        /// relation name
         name: ObjectName,
+        kind: DescribeKind,
     },
     /// SHOW OBJECT COMMAND
     ShowObjects {
@@ -1654,6 +1655,16 @@ pub enum Statement {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DescribeKind {
+    /// `DESCRIBE <name>`
+    Plain,
+
+    /// `DESCRIBE FRAGMENTS <name>`
+    Fragments,
+}
+
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = String::new();
@@ -1708,8 +1719,15 @@ impl Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::Describe { name } => {
+            Statement::Describe { name, kind } => {
                 write!(f, "DESCRIBE {}", name)?;
+                match kind {
+                    DescribeKind::Plain => {}
+
+                    DescribeKind::Fragments => {
+                        write!(f, " FRAGMENTS")?;
+                    }
+                }
                 Ok(())
             }
             Statement::ShowObjects {

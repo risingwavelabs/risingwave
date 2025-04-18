@@ -920,3 +920,21 @@ message ListRateLimitsResponse {
   }
   repeated RateLimitInfo rate_limits = 1;
 }
+
+service HostedIcebergCatalogService {
+  rpc ListIcebergTables(ListIcebergTablesRequest) returns (ListIcebergTablesResponse);
+}
+
+message ListIcebergTablesRequest {}
+
+message ListIcebergTablesResponse {
+  message IcebergTable {
+    string catalog_name = 1;
+    string table_namespace = 2;
+    string table_name = 3;
+    optional string metadata_location = 4;
+    optional string previous_metadata_location = 5;
+    optional string iceberg_type = 6;
+  }
+  repeated IcebergTable iceberg_tables = 1;
+}
