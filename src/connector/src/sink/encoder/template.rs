@@ -163,7 +163,7 @@ impl TemplateStringEncoder {
         let replaced = re.replace_all(s.as_ref(), |caps: &Captures<'_>| {
             if caps.get(1).is_some() {
                 Cow::Borrowed("}")
-            } else if caps.get(1).is_some() {
+            } else if caps.get(2).is_some() {
                 Cow::Borrowed("{")
             } else if let Some(content) = caps.get(3) {
                 let (idx, field) = self.field_name_to_index.get(content.as_str()).unwrap();

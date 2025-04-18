@@ -636,7 +636,7 @@ mod test {
         btree_map.insert(KEY_FORMAT.to_owned(), "key-{id}".to_owned());
         btree_map.insert(
             VALUE_FORMAT.to_owned(),
-            "values:{id:{id},name:{name}}".to_owned(),
+            "values:\\{id:{id},name:{name}\\}".to_owned(),
         );
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
