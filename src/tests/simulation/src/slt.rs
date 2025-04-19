@@ -128,7 +128,9 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                             let name = tokens.next()?.to_owned();
                             SqlCmd::CreateMaterializedView { name }
                         } else {
-                            let name = next.to_owned();
+                            let next = next.to_owned();
+                            let mut name = next.split("("); // handle mv(col_name ...) pattern
+                            let name = name.next().expect("MV should have name").to_owned();
                             SqlCmd::CreateMaterializedView { name }
                         }
                     }
@@ -277,8 +279,20 @@ pub async fn run_slt_task(
             }
 
             let cmd = match &record {
-                sqllogictest::Record::Statement { sql, .. }
-                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
+                sqllogictest::Record::Statement {
+                    sql, conditions, ..
+                }
+                | sqllogictest::Record::Query {
+                    sql, conditions, ..
+                } if conditions
+                    .iter()
+                    .all(|c| !matches!(c, Condition::SkipIf{ label } if label == "madsim"))
+                    && !conditions
+                        .iter()
+                        .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
+                {
+                    extract_sql_command(sql)
+                }
                 _ => SqlCmd::Others,
             };
 
@@ -327,10 +341,9 @@ pub async fn run_slt_task(
             // For kill enabled.
             tracing::debug!(?cmd, "Running");
 
-            if background_ddl_rate > 0.0
-                && let SqlCmd::SetBackgroundDdl { enable } = cmd
-            {
+            if let SqlCmd::SetBackgroundDdl { enable } = cmd {
                 manual_background_ddl_enabled = enable;
+                background_ddl_enabled = enable;
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
@@ -340,16 +353,18 @@ pub async fn run_slt_task(
                 connection,
                 ..
             } = &record
-                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
                 && !manual_background_ddl_enabled
-                && conditions.iter().all(|c| {
-                    *c != Condition::SkipIf {
-                        label: "madsim".to_owned(),
-                    }
-                })
-                && background_ddl_rate > 0.0
             {
-                let background_ddl_setting = rng.gen_bool(background_ddl_rate);
+                let enable_random_background_ddl =
+                    matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+                        && conditions.iter().all(|c| {
+                            *c != Condition::SkipIf {
+                                label: "madsim".to_owned(),
+                            }
+                        })
+                        && background_ddl_rate > 0.0;
+                let background_ddl_setting =
+                    enable_random_background_ddl && rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),
@@ -358,6 +373,7 @@ pub async fn run_slt_task(
                     sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
                 };
                 tester.run_async(set_background_ddl).await.unwrap();
+                tracing::debug!("SET BACKGROUND_DDL={background_ddl_setting};");
                 background_ddl_enabled = background_ddl_setting;
             };
 
@@ -440,7 +456,7 @@ pub async fn run_slt_task(
                                 }
                             )
                         {
-                            tracing::debug!(iteration = i, "Retry for background ddl");
+                            tracing::debug!(iteration = i, name, "Retry for background ddl");
                             match wait_background_mv_finished(name).await {
                                 Ok(_) => {
                                     tracing::debug!(
@@ -473,16 +489,49 @@ pub async fn run_slt_task(
                             }
                             | SqlCmd::CreateSink {
                                 is_sink_into_table: false,
-                            }
-                            | SqlCmd::CreateMaterializedView { .. }
-                                if i != 0
-                                    // It should not be a gRPC request to meta error,
-                                    // otherwise it means that the catalog is not yet populated to fe.
-                                    && !e.to_string().contains("gRPC request to meta service failed")
-                                    && e.to_string().contains("exists")
-                                    && e.to_string().contains("Catalog error") =>
+                            } if i != 0
+                                // It should not be a gRPC request to meta error,
+                                // otherwise it means that the catalog is not yet populated to fe.
+                                && !e.to_string().contains("gRPC request to meta service failed")
+                                && e.to_string().contains("exists")
+                                && e.to_string().contains("Catalog error") =>
                             {
-                                break
+                                tracing::debug!(?cmd, ?e, "already exists");
+                                break;
+                            }
+                            SqlCmd::CreateMaterializedView { ref name }
+                                if i != 0
+                                // It should not be a gRPC request to meta error,
+                                // otherwise it means that the catalog is not yet populated to fe.
+                                && !e.to_string().contains("gRPC request to meta service failed")
+                                && e.to_string().contains("exists")
+                                && e.to_string().contains("Catalog error") =>
+                            {
+                                if background_ddl_enabled {
+                                    match wait_background_mv_finished(name).await {
+                                        Ok(_) => {
+                                            tracing::debug!(
+                                                iteration = i,
+                                                "Record with background_ddl {:?} finished",
+                                                record
+                                            );
+                                            break;
+                                        }
+                                        Err(err) => {
+                                            tracing::error!(
+                                                iteration = i,
+                                                ?err,
+                                                "failed to wait for background mv to finish creating"
+                                            );
+                                            if i >= MAX_RETRY {
+                                                panic!("failed to run test after retry {i} times, error={err:#?}");
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
+                                tracing::debug!(?cmd, "already dropped");
+                                break;
                             }
                             // allow 'not found' error when retry DROP statement
                             SqlCmd::Drop
@@ -490,7 +539,8 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("not found")
                                     && e.to_string().contains("Catalog error") =>
                             {
-                                break
+                                tracing::debug!(?cmd, "already dropped");
+                                break;
                             }
 
                             // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
