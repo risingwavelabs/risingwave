@@ -77,6 +77,7 @@ def_anyhow_newtype! {
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT SDK error",
     rumqttc::v5::OptionError => "MQTT Option error",
+    rumqttc::v5::ConnectionError => "MQTT Connection error",
     MqttError => "MQTT Source error",
     mongodb::error::Error => "Mongodb error",
 
