@@ -114,6 +114,20 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        panic!()
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        panic!("should not operate on the panic state store!");
+    }
+}
+
+impl StateStoreWriteEpochControl for PanicStateStore {
     async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
@@ -128,18 +142,6 @@ impl LocalStateStore for PanicStateStore {
 
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        panic!("should not operate on the panic state store!");
-    }
-
-    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
-        panic!("should not operate on the panic state store!");
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        panic!()
     }
 }
 

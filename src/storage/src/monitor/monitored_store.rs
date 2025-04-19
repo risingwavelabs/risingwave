@@ -249,6 +249,24 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        MonitoredTableStateStore::new(
+            self.inner.new_flushed_snapshot_reader(),
+            self.storage_metrics.clone(),
+            self.table_id(),
+        )
+    }
+
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
+    }
+}
+
+impl<S: LocalStateStore> StateStoreWriteEpochControl for MonitoredTableStateStore<S> {
     fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
         self.inner.flush().instrument_await("store_flush".verbose())
     }
@@ -266,22 +284,6 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         self.inner
             .try_flush()
             .instrument_await("store_try_flush".verbose())
-    }
-
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        self.inner.update_vnode_bitmap(vnodes).await
-    }
-
-    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-        self.inner.get_table_watermark(vnode)
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        MonitoredTableStateStore::new(
-            self.inner.new_flushed_snapshot_reader(),
-            self.storage_metrics.clone(),
-            self.table_id(),
-        )
     }
 }
 

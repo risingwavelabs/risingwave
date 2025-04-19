@@ -1013,6 +1013,29 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        if self.vnodes.len() > 1 {
+            TableState::wait_epoch(
+                &self.inner.tables,
+                self.table_id,
+                self.epoch.expect("should have init").prev,
+            )
+            .await;
+        }
+        Ok(std::mem::replace(&mut self.vnodes, vnodes))
+    }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        // TODO: may store the written table watermark and have a correct implementation
+        None
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.new_read_snapshot_impl(MAX_EPOCH, self.table_id)
+    }
+}
+
+impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
@@ -1176,27 +1199,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
 
     async fn try_flush(&mut self) -> StorageResult<()> {
         Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        if self.vnodes.len() > 1 {
-            TableState::wait_epoch(
-                &self.inner.tables,
-                self.table_id,
-                self.epoch.expect("should have init").prev,
-            )
-            .await;
-        }
-        Ok(std::mem::replace(&mut self.vnodes, vnodes))
-    }
-
-    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
-        // TODO: may store the written table watermark and have a correct implementation
-        None
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        self.inner.new_read_snapshot_impl(MAX_EPOCH, self.table_id)
     }
 }
 

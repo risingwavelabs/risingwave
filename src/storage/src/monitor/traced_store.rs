@@ -238,6 +238,26 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
         res
     }
 
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        TracedStateStore::new_with_snapshot_epoch(
+            self.inner.new_flushed_snapshot_reader(),
+            (self.table_id(), None),
+        )
+    }
+
+    // TODO: add trace span
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
+    }
+}
+
+impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl
+    for TracedStateStore<S, TableSnapshot>
+{
     async fn flush(&mut self) -> StorageResult<usize> {
         let span = TraceSpan::new_flush_span(self.storage_type);
         let res = self.inner.flush().await;
@@ -267,22 +287,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S, TableSnapshot> 
         let res = self.inner.try_flush().await;
         span.may_send_result(OperationResult::TryFlush(res.as_ref().map(|o| *o).into()));
         res
-    }
-
-    // TODO: add trace span
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        self.inner.update_vnode_bitmap(vnodes).await
-    }
-
-    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-        self.inner.get_table_watermark(vnode)
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        TracedStateStore::new_with_snapshot_epoch(
-            self.inner.new_flushed_snapshot_reader(),
-            (self.table_id(), None),
-        )
     }
 }
 
