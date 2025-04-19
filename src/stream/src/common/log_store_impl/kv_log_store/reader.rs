@@ -28,7 +28,7 @@ use futures::future::{BoxFuture, try_join_all};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::{EpochExt, EpochPair};
 use risingwave_connector::sink::log_store::{
@@ -53,7 +53,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
+    Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, LogStoreVnodeRowProgress, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -125,7 +125,9 @@ impl RewindDelay {
 enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// `Some` means consuming historical log data
     ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
-    ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
+    ReadFlushedChunk(
+        BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64, LogStoreVnodeRowProgress)>>,
+    ),
     Reset(Option<LogStoreReadStateStreamRangeStart>),
     Empty,
 }
@@ -461,7 +463,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     .instrument_await("Try Next for Historical Stream")
                     .await?
                 {
-                    Some((epoch, item)) => {
+                    Some((epoch, _, item)) => {
                         if let Some(latest_offset) = &self.latest_offset {
                             latest_offset.check_next_item_epoch(epoch)?;
                         }
@@ -493,7 +495,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 }
             }
             KvLogStoreReaderFutureState::ReadFlushedChunk(future) => {
-                let (chunk_id, chunk, item_epoch) = future.await?;
+                let (chunk_id, chunk, item_epoch, _) = future.await?;
                 self.future_state = KvLogStoreReaderFutureState::Empty;
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,
@@ -560,7 +562,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         .boxed()
                 };
 
-                let (_, chunk, _) = set_and_drive_future!(
+                let (_, chunk, _, _) = set_and_drive_future!(
                     &mut self.future_state,
                     ReadFlushedChunk,
                     read_flushed_chunk_future
@@ -659,7 +661,9 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
-    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
+    ) -> impl Future<
+        Output = LogStoreResult<(ChunkId, StreamChunk, Epoch, LogStoreVnodeRowProgress)>,
+    > + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
         async move {
@@ -695,7 +699,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
             .instrument_await("Wait Create Iter Stream")
             .await?;
 
-            let chunk = serde
+            let (progress, chunk) = serde
                 .deserialize_stream_chunk(
                     iters,
                     start_seq_id,
@@ -706,7 +710,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .instrument_await("Deserialize Stream Chunk")
                 .await?;
 
-            Ok((chunk_id, chunk, item_epoch))
+            Ok((chunk_id, chunk, item_epoch, progress))
         }
         .instrument_await("Read Flushed Chunk")
     }
@@ -719,14 +723,12 @@ pub(crate) enum LogStoreReadStateStreamRangeStart {
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
-    pub(crate) fn read_persisted_log_store(
+    fn read_persisted_log_store_futures(
         &self,
-        read_metrics: KvLogStoreReadMetrics,
         first_write_epoch: u64,
         range_start: LogStoreReadStateStreamRangeStart,
-    ) -> impl Future<
-        Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
-    > + Send
+    ) -> impl Future<Output = StorageResult<Vec<(VirtualNode, TimeoutAutoRebuildIter<S>)>>>
+    + Send
     + 'static {
         let serde = self.serde.clone();
         let range_start = match range_start {
@@ -740,7 +742,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
 
         let state_store = self.state_store.clone();
         let table_id = self.table_id;
-        let streams_future = try_join_all(self.serde.vnodes().iter_vnodes().map(move |vnode| {
+        try_join_all(self.serde.vnodes().iter_vnodes().map(move |vnode| {
             let key_range = prefixed_range_with_vnode(
                 (range_start.clone(), Excluded(range_end.clone())),
                 vnode,
@@ -763,8 +765,20 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .await
                 .map(|iter| (vnode, iter))
             }
-        }));
+        }))
+    }
 
+    pub(crate) fn read_persisted_log_store(
+        &self,
+        read_metrics: KvLogStoreReadMetrics,
+        first_write_epoch: u64,
+        range_start: LogStoreReadStateStreamRangeStart,
+    ) -> impl Future<
+        Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>,
+    > + Send
+    + 'static {
+        let serde = self.serde.clone();
+        let streams_future = self.read_persisted_log_store_futures(first_write_epoch, range_start);
         streams_future.map_err(Into::into).map_ok(move |streams| {
             // TODO: set chunk size by config
             Box::pin(merge_log_store_item_stream(
