@@ -286,6 +286,7 @@ pub async fn get_compaction_score(
         row.add_cell("Target Level".into());
         row.add_cell("Type".into());
         row.add_cell("Score".into());
+        row.add_cell("ScoreRatio".into());
         row
     });
     for s in scores.into_iter().sorted_by(|a, b| {
@@ -298,6 +299,7 @@ pub async fn get_compaction_score(
         row.add_cell(s.target_level.into());
         row.add_cell(s.picker_type.into());
         row.add_cell(s.score.into());
+        row.add_cell(s.score_ratio.into());
         table.add_row(row);
     }
     println!("{table}");
