@@ -38,6 +38,7 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 };
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use phf::{Set, phf_set};
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
@@ -63,6 +64,7 @@ use super::{
 };
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
@@ -92,6 +94,12 @@ pub struct BigQueryCommon {
     pub auto_create: bool,
     #[serde(rename = "bigquery.credentials")]
     pub credentials: Option<String>,
+}
+
+impl EnforceSecret for BigQueryCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "bigquery.credentials",
+    };
 }
 
 struct BigQueryFutureManager {
@@ -239,6 +247,15 @@ pub struct BigQueryConfig {
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
 }
+
+impl EnforceSecret for BigQueryConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        BigQueryCommon::enforce_one(prop)?;
+        AwsAuthProps::enforce_one(prop)?;
+        Ok(())
+    }
+}
+
 impl BigQueryConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
@@ -262,6 +279,17 @@ pub struct BigQuerySink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecret for BigQuerySink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            BigQueryConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl BigQuerySink {

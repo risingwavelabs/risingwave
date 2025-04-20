@@ -906,17 +906,17 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
-    // check the system parameter `enforce_secret_on_cloud`
+    // check the system parameter `enforce_secret`
     if session
         .env()
         .system_params_manager()
         .get_params()
         .load()
-        .enforce_secret_on_cloud()
+        .enforce_secret()
         && Feature::SecretManagement.check_available().is_ok()
     {
         // check enforce using secret for some props on cloud
-        ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
+        ConnectorProperties::enforce_secret_source(&with_properties)?;
     }
 
     let (with_properties, connection_type, connector_conn_ref) =

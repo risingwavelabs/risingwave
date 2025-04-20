@@ -693,9 +693,9 @@ profile:
     steps:
       - use: minio
         # Set the rate limit for MinIO to 30 requests per second
-        api-requests-max: 30
-        # Set the deadline for API requests to 3 seconds
-        api-requests-deadline: 3s
+        api-requests-max: 100
+        # Set the deadline for API requests to 5 seconds        
+        api-requests-deadline: 5s
       - use: meta-node
         meta-backend: env
       - use: compute-node

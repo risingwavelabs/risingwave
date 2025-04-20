@@ -570,7 +570,7 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enforce_secret_on_cloud(
+    pub fn enforce_secret_source(
         with_properties: &impl WithPropertiesExt,
     ) -> crate::error::ConnectorResult<()> {
         let connector = with_properties
