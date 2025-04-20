@@ -72,7 +72,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
@@ -578,7 +577,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
 
-            let mut progress = LogStoreVnodeProgress::new();
+            let mut progress = LogStoreVnodeProgress::None;
 
             loop {
                 let select_result = {
@@ -635,7 +634,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                     &mut write_state,
                                                     barrier.clone(),
                                                     &self.metrics,
-                                                    &mut progress,
+                                                    progress.take(),
                                                     &mut buffer,
                                                 )
                                                 .await?;
@@ -789,9 +788,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                     match item {
                         KvLogStoreItem::Barrier { vnodes, .. } => {
                             // update the progress
-                            for vnode in vnodes.iter_vnodes() {
-                                progress.insert(vnode, (epoch, None));
-                            }
+                            progress.apply_aligned(vnodes, epoch, None);
                             continue;
                         }
                         KvLogStoreItem::StreamChunk {
@@ -799,9 +796,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             progress: chunk_progress,
                         } => {
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
-                            for (vnode, seq_id) in chunk_progress {
-                                progress.insert(vnode, (epoch, Some(seq_id)));
-                            }
+                            progress.apply_per_vnode(epoch, chunk_progress);
                             return Ok(chunk);
                         }
                     }
@@ -873,9 +868,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
         };
 
         let (_, chunk, epoch) = future.await?;
-        for vnode in read_state.vnodes().iter_vnodes() {
-            progress.insert(vnode, (epoch, Some(end_seq_id)));
-        }
+        progress.apply_aligned(read_state.vnodes().clone(), epoch, Some(end_seq_id));
         tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
         *self = ReadFuture::Idle;
         Ok(chunk)
@@ -888,7 +881,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &SyncedKvLogStoreMetrics,
-        progress: &mut LogStoreVnodeProgress,
+        progress: LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
@@ -928,7 +921,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         metrics
             .storage_write_size
             .inc_by(flush_info.flush_size as _);
-        let post_seal = write_state.seal_current_epoch_with_progress(barrier.epoch.curr, progress);
+        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, progress);
 
         // Add to buffer
         buffer.buffer.push_back((
