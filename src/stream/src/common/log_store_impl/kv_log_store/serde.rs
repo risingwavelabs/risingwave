@@ -46,7 +46,7 @@ use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
     Epoch, KvLogStorePkInfo, KvLogStoreReadMetrics, LogStoreVnodeProgress,
-    LogStoreVnodeRowProgress, ReaderTruncationOffsetType, RowOpCodeType, SeqId,
+    ReaderTruncationOffsetType, RowOpCodeType, SeqId,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -439,13 +439,12 @@ impl LogStoreRowSerde {
         end_seq_id: SeqId,
         expected_epoch: u64,
         metrics: &KvLogStoreReadMetrics,
-    ) -> LogStoreResult<(LogStoreVnodeRowProgress, StreamChunk)> {
+    ) -> LogStoreResult<StreamChunk> {
         let size_bound = (end_seq_id - start_seq_id + 1) as usize;
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.payload_schema.clone(), size_bound + 1);
         let mut ops = Vec::with_capacity(size_bound);
         let mut read_info = ReadInfo::new();
-        let mut progress = LogStoreVnodeRowProgress::new();
         let stream = select_all(
             iters
                 .into_iter()
@@ -453,12 +452,11 @@ impl LogStoreRowSerde {
         );
         pin_mut!(stream);
         while let Some(row) = stream.try_next().await? {
-            let vnode = row.row_meta.vnode;
             let epoch = row.row_meta.epoch;
             let op = row.op;
             let row_size = row.row_meta.size;
             match (epoch, op) {
-                (epoch, LogStoreOp::Row { seq_id, op, row }) => {
+                (epoch, LogStoreOp::Row { op, row, .. }) => {
                     if epoch != expected_epoch {
                         return Err(anyhow!(
                             "decoded epoch {} not match expected epoch {}",
@@ -476,14 +474,13 @@ impl LogStoreRowSerde {
                         ));
                     }
                     assert!(data_chunk_builder.append_one_row(row).is_none());
-                    progress.insert(vnode, seq_id);
                 }
                 (
                     epoch,
                     LogStoreOp::Update {
-                        seq_id,
                         new_value,
                         old_value,
+                        ..
                     },
                 ) => {
                     if epoch != expected_epoch {
@@ -505,7 +502,6 @@ impl LogStoreRowSerde {
                     }
                     assert!(data_chunk_builder.append_one_row(old_value).is_none());
                     assert!(data_chunk_builder.append_one_row(new_value).is_none());
-                    progress.insert(vnode, seq_id);
                 }
                 (_, LogStoreOp::Barrier { .. }) => {
                     return Err(anyhow!("should not get barrier when decoding stream chunk"));
@@ -520,13 +516,12 @@ impl LogStoreRowSerde {
             ));
         }
         read_info.report(metrics);
-        let chunk = StreamChunk::from_parts(
+        Ok(StreamChunk::from_parts(
             ops,
             data_chunk_builder
                 .consume_all()
                 .expect("should not be empty"),
-        );
-        Ok((progress, chunk))
+        ))
     }
 }
 
@@ -1406,7 +1401,7 @@ mod tests {
         );
         let end_seq_id = seq_id - 1;
         tx.send(()).unwrap();
-        let (_, chunk) = serde
+        let chunk = serde
             .deserialize_stream_chunk(
                 once((
                     VirtualNode::ZERO,

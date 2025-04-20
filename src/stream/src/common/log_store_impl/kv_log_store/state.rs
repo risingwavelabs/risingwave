@@ -44,6 +44,10 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
     pub(crate) fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         self.serde.update_vnode_bitmap(vnode_bitmap);
     }
+
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        self.serde.vnodes()
+    }
 }
 
 pub(crate) struct LogStoreWriteState<S: LocalStateStore> {
@@ -145,7 +149,11 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         let watermark = progress
             .drain()
             .map(|(vnode, (epoch, seq_id))| {
-                let bitmap = vnode.to_bitmap();
+                let bitmap = {
+                    let mut builder = BitmapBuilder::zeroed(self.serde.vnodes().len());
+                    builder.set(vnode.to_index(), true);
+                    builder.finish()
+                };
                 let truncation_offset = (epoch, seq_id);
                 VnodeWatermark::new(
                     bitmap.into(),

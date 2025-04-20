@@ -72,7 +72,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
@@ -94,7 +94,7 @@ use crate::common::log_store_impl::kv_log_store::state::{
     LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
-    Epoch, FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, LogStoreVnodeRowProgress, SeqId,
+    Epoch, FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, SeqId,
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
@@ -303,8 +303,7 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture =
-    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch, LogStoreVnodeRowProgress)>>;
+type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
@@ -768,7 +767,10 @@ type PersistedStream<S> = Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRe
 
 enum ReadFuture<S: StateStoreRead> {
     ReadingPersistedStream(PersistedStream<S>),
-    ReadingFlushedChunk { future: ReadFlushedChunkFuture },
+    ReadingFlushedChunk {
+        future: ReadFlushedChunkFuture,
+        end_seq_id: SeqId,
+    },
     Idle,
 }
 
@@ -849,7 +851,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                                 read_metrics,
                             )
                             .boxed();
-                        *self = ReadFuture::ReadingFlushedChunk { future };
+                        *self = ReadFuture::ReadingFlushedChunk { future, end_seq_id };
                         break;
                     }
                     LogStoreBufferItem::Barrier { .. } => {
@@ -859,16 +861,16 @@ impl<S: StateStoreRead> ReadFuture<S> {
             },
         }
 
-        let future = match self {
+        let (future, end_seq_id) = match self {
             ReadFuture::ReadingPersistedStream(_) | ReadFuture::Idle => {
                 unreachable!("should be at ReadingFlushedChunk")
             }
-            ReadFuture::ReadingFlushedChunk { future, .. } => future,
+            ReadFuture::ReadingFlushedChunk { future, end_seq_id } => (future, *end_seq_id),
         };
 
-        let (_, chunk, epoch, local_progress) = future.await?;
-        for (vnode, seq_id) in local_progress {
-            progress.insert(vnode, (epoch, Some(seq_id)));
+        let (_, chunk, epoch) = future.await?;
+        for vnode in read_state.vnodes().iter_vnodes() {
+            progress.insert(vnode, (epoch, Some(end_seq_id)));
         }
         tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
         *self = ReadFuture::Idle;
