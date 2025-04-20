@@ -148,10 +148,6 @@ impl<T> TableChangeLogCommon<T> {
         self.0.range(start..end)
     }
 
-    pub fn epoch_groups(&self) -> impl Iterator<Item = &Vec<u64>> + '_ {
-        self.0.iter().map(|epoch_log| &epoch_log.epochs)
-    }
-
     /// Get the `next_epoch` of the given `epoch`
     /// Return:
     ///     - Ok(Some(`next_epoch`)): the `next_epoch` of `epoch`

@@ -212,10 +212,12 @@ impl CreatingStreamingJobStatus {
                 vec![CreatingStreamingJobStatus::new_fake_barrier(
                     prev_epoch_fake_physical_time,
                     pending_non_checkpoint_barriers,
-                    if barrier_info.kind.is_checkpoint() {
-                        PbBarrierKind::Checkpoint
-                    } else {
-                        PbBarrierKind::Barrier
+                    match barrier_info.kind {
+                        BarrierKind::Barrier => PbBarrierKind::Barrier,
+                        BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
+                        BarrierKind::Initial => {
+                            unreachable!("upstream new epoch should not be initial")
+                        }
                     },
                 )]
             }

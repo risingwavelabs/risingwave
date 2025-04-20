@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::{Ordering, max, min};
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
@@ -21,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -34,7 +37,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
-    RescheduleOptions, SourceChange,
+    RescheduleOptions, SourceChange, StreamFragmentGraph,
 };
 use crate::{MetaResult, model};
 
@@ -131,6 +134,101 @@ impl GlobalBarrierWorkerContextImpl {
                 )
             })
             .collect())
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn resolve_hummock_version_epochs(
+        background_jobs: &HashMap<TableId, (String, StreamJobFragments)>,
+        version: &HummockVersion,
+    ) -> MetaResult<(HashMap<TableId, u64>, HashMap<TableId, Vec<Vec<u64>>>)> {
+        let table_committed_epoch: HashMap<_, _> = version
+            .state_table_info
+            .info()
+            .iter()
+            .map(|(table_id, info)| (*table_id, info.committed_epoch))
+            .collect();
+        let get_table_committed_epoch = |table_id| -> anyhow::Result<u64> {
+            Ok(*table_committed_epoch
+                .get(&table_id)
+                .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
+        };
+        let mut min_downstream_committed_epochs = HashMap::new();
+        for (_, job) in background_jobs.values() {
+            let job_committed_epoch = get_table_committed_epoch(job.stream_job_id)?;
+            if let (Some(snapshot_backfill_info), _) =
+                StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                    job.fragments()
+                        .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+                )?
+            {
+                for (upstream_table, snapshot_epoch) in
+                    snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
+                {
+                    let snapshot_epoch = snapshot_epoch.ok_or_else(|| {
+                        anyhow!(
+                            "recovered snapshot backfill job has not filled snapshot epoch: {:?}",
+                            job
+                        )
+                    })?;
+                    let pinned_epoch = max(snapshot_epoch, job_committed_epoch);
+                    match min_downstream_committed_epochs.entry(upstream_table) {
+                        Entry::Occupied(entry) => {
+                            let prev_min_epoch = entry.into_mut();
+                            *prev_min_epoch = min(*prev_min_epoch, pinned_epoch);
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(pinned_epoch);
+                        }
+                    }
+                }
+            }
+        }
+        let mut log_epochs = HashMap::new();
+        for (upstream_table_id, downstream_committed_epoch) in min_downstream_committed_epochs {
+            let upstream_committed_epoch = get_table_committed_epoch(upstream_table_id)?;
+            match upstream_committed_epoch.cmp(&downstream_committed_epoch) {
+                Ordering::Less => {
+                    return Err(anyhow!(
+                        "downstream epoch {} later than upstream epoch {} of table {}",
+                        downstream_committed_epoch,
+                        upstream_committed_epoch,
+                        upstream_table_id
+                    )
+                    .into());
+                }
+                Ordering::Equal => {
+                    continue;
+                }
+                Ordering::Greater => {
+                    if let Some(table_change_log) = version.table_change_log.get(&upstream_table_id)
+                    {
+                        let epochs = table_change_log
+                            .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
+                            .map(|epoch_log| epoch_log.epochs.clone())
+                            .collect_vec();
+                        let first_epochs = epochs.first();
+                        if let Some(first_epochs) = &first_epochs
+                            && first_epochs.last() == Some(&downstream_committed_epoch)
+                        {
+                        } else {
+                            return Err(anyhow!(
+                                "resolved first log epoch {:?} on table {} not matched with downstream committed epoch {}",
+                                epochs, upstream_table_id, downstream_committed_epoch).into()
+                            );
+                        }
+                        log_epochs
+                            .try_insert(upstream_table_id, epochs)
+                            .expect("non-duplicated");
+                    } else {
+                        return Err(anyhow!(
+                            "upstream table {} on epoch {} has lagged downstream on epoch {} but no table change log",
+                            upstream_table_id, upstream_committed_epoch, downstream_committed_epoch).into()
+                        );
+                    }
+                }
+            }
+        }
+        Ok((table_committed_epoch, log_epochs))
     }
 
     pub(super) async fn reload_runtime_info_impl(
@@ -267,26 +365,9 @@ impl GlobalBarrierWorkerContextImpl {
                     let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
                         .on_current_version(|version| {
-                            (
-                                version
-                                    .state_table_info
-                                    .info()
-                                    .iter()
-                                    .map(|(table_id, info)| (*table_id, info.committed_epoch))
-                                    .collect(),
-                                version
-                                    .table_change_log
-                                    .iter()
-                                    .map(|(table_id, change_log)| {
-                                        (
-                                            *table_id,
-                                            change_log.epoch_groups().cloned().collect_vec(),
-                                        )
-                                    })
-                                    .collect(),
-                            )
+                            Self::resolve_hummock_version_epochs(&background_jobs, version)
                         })
-                        .await;
+                        .await?;
 
                     let subscription_infos = self
                         .metadata_manager
@@ -425,23 +506,9 @@ impl GlobalBarrierWorkerContextImpl {
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
             .on_current_version(|version| {
-                (
-                    version
-                        .state_table_info
-                        .info()
-                        .iter()
-                        .map(|(table_id, info)| (*table_id, info.committed_epoch))
-                        .collect(),
-                    version
-                        .table_change_log
-                        .iter()
-                        .map(|(table_id, change_log)| {
-                            (*table_id, change_log.epoch_groups().cloned().collect())
-                        })
-                        .collect(),
-                )
+                Self::resolve_hummock_version_epochs(&background_jobs, version)
             })
-            .await;
+            .await?;
 
         let subscription_infos = self
             .metadata_manager

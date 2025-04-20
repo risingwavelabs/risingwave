@@ -1611,6 +1611,16 @@ impl DdlController {
 
         let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
             fragment_graph.collect_snapshot_backfill_info()?;
+        assert!(
+            snapshot_backfill_info
+                .iter()
+                .chain([&cross_db_snapshot_backfill_info])
+                .flat_map(|info| info.upstream_mv_table_id_to_backfill_epoch.values())
+                .all(|backfill_epoch| backfill_epoch.is_none()),
+            "should not set backfill epoch when initially build the job: {:?} {:?}",
+            snapshot_backfill_info,
+            cross_db_snapshot_backfill_info
+        );
 
         // check if log store exists for all cross-db upstreams
         self.metadata_manager

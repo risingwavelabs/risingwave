@@ -556,10 +556,23 @@ impl ControlStreamManager {
             kind: BarrierKind::Initial,
         };
 
-        let mut creating_streaming_job_info: HashMap<TableId, _> = HashMap::new();
-        for (job_id, (info, _, stream_job_fragments)) in &snapshot_backfill_jobs {
+        let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
+        for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
             let committed_epoch =
-                resolve_jobs_committed_epoch(state_table_committed_epochs, [info]);
+                resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
+            if committed_epoch == barrier_info.prev_epoch() {
+                info!(
+                    "recovered creating snapshot backfill job {} catch up with upstream already",
+                    job_id
+                );
+                background_mviews
+                    .try_insert(job_id, (definition, stream_job_fragments))
+                    .expect("non-duplicate");
+                database_jobs
+                    .try_insert(job_id, info)
+                    .expect("non-duplicate");
+                continue;
+            }
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                 stream_job_fragments
                     .fragments()
@@ -598,13 +611,22 @@ impl ControlStreamManager {
                     .mv_depended_subscriptions
                     .entry(*upstream_table_id)
                     .or_default()
-                    .try_insert((*job_id).into(), max(snapshot_epoch, committed_epoch))
+                    .try_insert(job_id.into(), max(snapshot_epoch, committed_epoch))
                     .expect("non-duplicate");
             }
-            creating_streaming_job_info.insert(
-                *job_id,
-                (upstream_table_ids, committed_epoch, snapshot_epoch),
-            );
+            ongoing_snapshot_backfill_jobs
+                .try_insert(
+                    job_id,
+                    (
+                        info,
+                        definition,
+                        stream_job_fragments,
+                        upstream_table_ids,
+                        committed_epoch,
+                        snapshot_epoch,
+                    ),
+                )
+                .expect("non-duplicated");
         }
 
         let node_to_collect = {
@@ -653,9 +675,18 @@ impl ControlStreamManager {
 
         let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
             HashMap::new();
-        for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
-            let (upstream_table_ids, committed_epoch, snapshot_epoch) =
-                creating_streaming_job_info.remove(&job_id).unwrap();
+        for (
+            job_id,
+            (
+                info,
+                definition,
+                stream_job_fragments,
+                upstream_table_ids,
+                committed_epoch,
+                snapshot_epoch,
+            ),
+        ) in ongoing_snapshot_backfill_jobs
+        {
             let node_actors =
                 edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
                     (
