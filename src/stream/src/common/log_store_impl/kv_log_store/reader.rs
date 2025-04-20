@@ -461,12 +461,12 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     .instrument_await("Try Next for Historical Stream")
                     .await?
                 {
-                    Some((epoch, _, item)) => {
+                    Some((epoch, item)) => {
                         if let Some(latest_offset) = &self.latest_offset {
                             latest_offset.check_next_item_epoch(epoch)?;
                         }
                         let item = match item {
-                            KvLogStoreItem::StreamChunk(chunk) => {
+                            KvLogStoreItem::StreamChunk { chunk, .. } => {
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {

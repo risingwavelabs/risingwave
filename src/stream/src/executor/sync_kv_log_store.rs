@@ -72,7 +72,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::must_match;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_storage::StateStore;
@@ -785,19 +785,23 @@ impl<S: StateStoreRead> ReadFuture<S> {
     ) -> StreamExecutorResult<StreamChunk> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
-                while let Some((epoch, mut latest_progress, item)) = stream.try_next().await? {
-                    progress.extend(latest_progress.drain());
+                while let Some((epoch, item)) = stream.try_next().await? {
                     match item {
                         KvLogStoreItem::Barrier { vnodes, .. } => {
                             // update the progress
-                            for vnode_index in vnodes.iter_ones() {
-                                progress
-                                    .insert(VirtualNode::from_index(vnode_index), (epoch, None));
+                            for vnode in vnodes.iter_vnodes() {
+                                progress.insert(vnode, (epoch, None));
                             }
                             continue;
                         }
-                        KvLogStoreItem::StreamChunk(chunk) => {
+                        KvLogStoreItem::StreamChunk {
+                            chunk,
+                            progress: chunk_progress,
+                        } => {
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
+                            for (vnode, seq_id) in chunk_progress {
+                                progress.insert(vnode, (epoch, Some(seq_id)));
+                            }
                             return Ok(chunk);
                         }
                     }
