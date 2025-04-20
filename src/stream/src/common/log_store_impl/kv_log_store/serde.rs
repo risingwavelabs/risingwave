@@ -1711,7 +1711,7 @@ mod tests {
         let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
         assert_eq!(EPOCH0, epoch);
         match item {
-            KvLogStoreItem::StreamChunk(_) => unreachable!(),
+            KvLogStoreItem::StreamChunk { .. } => unreachable!(),
             KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(is_checkpoint);
             }
@@ -1732,7 +1732,7 @@ mod tests {
                 let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
                 assert_eq!(EPOCH1, epoch);
                 match item {
-                    KvLogStoreItem::StreamChunk(chunk) => {
+                    KvLogStoreItem::StreamChunk { chunk, .. } => {
                         let size = chunk.cardinality();
                         assert!(size <= CHUNK_SIZE);
                         remain -= size;
@@ -1749,7 +1749,7 @@ mod tests {
         let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
         assert_eq!(EPOCH1, epoch);
         match item {
-            KvLogStoreItem::StreamChunk(_) => unreachable!(),
+            KvLogStoreItem::StreamChunk { .. } => unreachable!(),
             KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(!is_checkpoint);
             }
@@ -1770,7 +1770,7 @@ mod tests {
                 let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
                 assert_eq!(EPOCH2, epoch);
                 match item {
-                    KvLogStoreItem::StreamChunk(chunk) => {
+                    KvLogStoreItem::StreamChunk { chunk, .. } => {
                         let size = chunk.cardinality();
                         assert!(size <= CHUNK_SIZE);
                         remain -= size;
@@ -1787,7 +1787,7 @@ mod tests {
         let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
         assert_eq!(EPOCH2, epoch);
         match item {
-            KvLogStoreItem::StreamChunk(_) => unreachable!(),
+            KvLogStoreItem::StreamChunk { .. } => unreachable!(),
             KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                 assert!(is_checkpoint);
             }
