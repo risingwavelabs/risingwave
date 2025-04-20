@@ -207,6 +207,80 @@ impl CreatingStreamingJobControl {
         Ok(ret)
     }
 
+    fn recover_consuming_snapshot(
+        job_id: TableId,
+        definition: &String,
+        snapshot_backfill_upstream_tables: &HashSet<TableId>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<Vec<u64>>>,
+        backfill_epoch: u64,
+        committed_epoch: u64,
+        upstream_curr_epoch: u64,
+        stream_job_fragments: StreamJobFragments,
+        version_stat: &HummockVersionStats,
+    ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
+        let snapshot_backfill_actors = stream_job_fragments.snapshot_backfill_actor_ids();
+        let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
+        let mut pending_non_checkpoint_barriers = vec![];
+        let create_mview_tracker = CreateMviewProgressTracker::recover(
+            [(job_id, (definition.clone(), &stream_job_fragments))],
+            version_stat,
+        );
+        let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
+            &mut prev_epoch_fake_physical_time,
+            &mut pending_non_checkpoint_barriers,
+            PbBarrierKind::Initial,
+        );
+        Ok((
+            CreatingStreamingJobStatus::ConsumingSnapshot {
+                prev_epoch_fake_physical_time,
+                pending_upstream_barriers: Self::resolve_upstream_log_epochs(
+                    snapshot_backfill_upstream_tables,
+                    upstream_table_log_epochs,
+                    backfill_epoch,
+                    upstream_curr_epoch,
+                )?,
+                version_stats: version_stat.clone(),
+                create_mview_tracker,
+                snapshot_backfill_actors,
+                backfill_epoch,
+                pending_non_checkpoint_barriers,
+            },
+            barrier_info,
+        ))
+    }
+
+    fn recover_consuming_log_store(
+        snapshot_backfill_upstream_tables: &HashSet<TableId>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<Vec<u64>>>,
+        committed_epoch: u64,
+        upstream_curr_epoch: u64,
+        stream_job_fragments: StreamJobFragments,
+    ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
+        let snapshot_backfill_actors = stream_job_fragments.snapshot_backfill_actor_ids();
+        let mut barriers_to_inject = Self::resolve_upstream_log_epochs(
+            snapshot_backfill_upstream_tables,
+            upstream_table_log_epochs,
+            committed_epoch,
+            upstream_curr_epoch,
+        )?;
+        let mut first_barrier = barriers_to_inject.remove(0);
+        assert!(first_barrier.kind.is_checkpoint());
+        first_barrier.kind = BarrierKind::Initial;
+        Ok((
+            CreatingStreamingJobStatus::ConsumingLogStore {
+                log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                    snapshot_backfill_actors.into_iter(),
+                    barriers_to_inject
+                        .last()
+                        .map(|info| info.prev_epoch() - committed_epoch)
+                        .unwrap_or(0),
+                ),
+                barriers_to_inject: Some(barriers_to_inject),
+            },
+            first_barrier,
+        ))
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn recover(
         database_id: DatabaseId,
@@ -231,79 +305,40 @@ impl CreatingStreamingJobControl {
         );
         let mut barrier_control =
             CreatingStreamingJobBarrierControl::new(job_id, backfill_epoch, true);
-        let snapshot_backfill_actors = stream_job_fragments.snapshot_backfill_actor_ids();
-        let status = if committed_epoch < backfill_epoch {
-            let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
-            let mut pending_non_checkpoint_barriers = vec![];
-            let create_mview_tracker = CreateMviewProgressTracker::recover(
-                [(job_id, (definition.clone(), &stream_job_fragments))],
-                version_stat,
-            );
-            let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
-                &mut prev_epoch_fake_physical_time,
-                &mut pending_non_checkpoint_barriers,
-                PbBarrierKind::Initial,
-            );
-            control_stream_manager.add_partial_graph(database_id, Some(job_id));
-            Self::inject_barrier(
-                database_id,
+
+        let (status, first_barrier_info) = if committed_epoch < backfill_epoch {
+            Self::recover_consuming_snapshot(
                 job_id,
-                control_stream_manager,
-                &mut barrier_control,
-                &graph_info,
-                Some(&graph_info),
-                barrier_info,
-                Some(new_actors),
-                Some(initial_mutation),
-            )?;
-            CreatingStreamingJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
-                pending_upstream_barriers: Self::resolve_upstream_log_epochs(
-                    &snapshot_backfill_upstream_tables,
-                    upstream_table_log_epochs,
-                    backfill_epoch,
-                    upstream_curr_epoch,
-                )?,
-                version_stats: version_stat.clone(),
-                create_mview_tracker,
-                snapshot_backfill_actors,
+                &definition,
+                &snapshot_backfill_upstream_tables,
+                upstream_table_log_epochs,
                 backfill_epoch,
-                pending_non_checkpoint_barriers,
-            }
+                committed_epoch,
+                upstream_curr_epoch,
+                stream_job_fragments,
+                version_stat,
+            )?
         } else {
-            // TODO: should inject barrier
-            let mut barriers_to_inject = Self::resolve_upstream_log_epochs(
+            Self::recover_consuming_log_store(
                 &snapshot_backfill_upstream_tables,
                 upstream_table_log_epochs,
                 committed_epoch,
                 upstream_curr_epoch,
-            )?;
-            let mut first_barrier = barriers_to_inject.remove(0);
-            assert!(first_barrier.kind.is_checkpoint());
-            first_barrier.kind = BarrierKind::Initial;
-            control_stream_manager.add_partial_graph(database_id, Some(job_id));
-            Self::inject_barrier(
-                database_id,
-                job_id,
-                control_stream_manager,
-                &mut barrier_control,
-                &graph_info,
-                Some(&graph_info),
-                first_barrier,
-                Some(new_actors),
-                Some(initial_mutation),
-            )?;
-            CreatingStreamingJobStatus::ConsumingLogStore {
-                log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    snapshot_backfill_actors.into_iter(),
-                    barriers_to_inject
-                        .last()
-                        .map(|info| info.prev_epoch() - committed_epoch)
-                        .unwrap_or(0),
-                ),
-                barriers_to_inject: Some(barriers_to_inject),
-            }
+                stream_job_fragments,
+            )?
         };
+        control_stream_manager.add_partial_graph(database_id, Some(job_id));
+        Self::inject_barrier(
+            database_id,
+            job_id,
+            control_stream_manager,
+            &mut barrier_control,
+            &graph_info,
+            Some(&graph_info),
+            first_barrier_info,
+            Some(new_actors),
+            Some(initial_mutation),
+        )?;
         Ok(Self {
             database_id,
             job_id,
