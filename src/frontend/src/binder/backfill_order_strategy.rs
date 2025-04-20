@@ -76,6 +76,7 @@ fn has_cycle(order: &HashMap<ObjectId, Uint32Vector>) -> bool {
         if stack.contains(&node) {
             return true; // Cycle detected
         }
+
         if visited.insert(node) {
             stack.insert(node);
             if let Some(downstreams) = order.get(&node) {
@@ -93,7 +94,7 @@ fn has_cycle(order: &HashMap<ObjectId, Uint32Vector>) -> bool {
     let mut visited = HashSet::new();
     let mut stack = HashSet::new();
     for &start in order.keys() {
-        if !visited.contains(&start) && dfs(start, order, &mut visited, &mut stack) {
+        if dfs(start, order, &mut visited, &mut stack) {
             return true;
         }
     }
