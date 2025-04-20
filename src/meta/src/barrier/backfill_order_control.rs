@@ -107,7 +107,7 @@ impl BackfillOrderState {
 
 // Getters
 impl BackfillOrderState {
-    pub fn get_initial_nodes(&self) -> Vec<FragmentId> {
+    pub fn get_current_nodes(&self) -> Vec<FragmentId> {
         self.current_backfill_nodes.keys().cloned().collect()
     }
 }
