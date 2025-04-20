@@ -341,7 +341,7 @@ impl StreamFragmentEdge {
 }
 
 /// Adjacency list (G) of backfill orders.
-/// G[10] -> [1, 2, 11]
+/// `G[10] -> [1, 2, 11]`
 /// means for the backfill node in `fragment 10`
 /// should be backfilled before the backfill nodes in `fragment 1, 2 and 11`.
 pub type FragmentBackfillOrder = HashMap<FragmentId, Vec<FragmentId>>;
