@@ -949,7 +949,7 @@ fn derive_with_options_for_cdc_table(
                     .any(|name| name == db_name)
                 {
                     return Err(anyhow!(
-                        "The database name `{}` in the FROM clause does not contain the database name `{}` in source definition",
+                        "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
                         db_name,
                         source_database_name
                     ).into());
