@@ -209,6 +209,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
             #[doc = #get_t_func_doc]
             pub fn #get_t_func_name(&self) -> #ty {
+                tracing::info!(entry = #entry_name, "parameter accessed");
                 self.#field_ident.clone()
             }
 
