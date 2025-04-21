@@ -74,7 +74,10 @@ impl BackfillOrderState {
                             .map(|actor| actor.actor_id)
                             .collect(),
                         remaining_dependencies: Default::default(),
-                        children: backfill_orders[&fragment_id].clone(),
+                        children: backfill_orders
+                            .get(&fragment_id)
+                            .cloned()
+                            .unwrap_or_else(Vec::new),
                     },
                 );
             }
