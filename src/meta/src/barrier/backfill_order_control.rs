@@ -131,13 +131,6 @@ impl BackfillOrderState {
     }
 }
 
-// Getters
-impl BackfillOrderState {
-    pub fn get_current_nodes(&self) -> Vec<FragmentId> {
-        self.current_backfill_nodes.keys().cloned().collect()
-    }
-}
-
 // state transitions
 impl BackfillOrderState {
     pub fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
