@@ -326,6 +326,7 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
+        let mut pending_backfill_nodes = Vec::new();
         for (creating_table_id, (definition, table_fragments)) in mviews {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
@@ -337,6 +338,7 @@ impl CreateMviewProgressTracker {
             }
 
             let backfill_order_state = backfill_order_map.remove(&creating_table_id);
+            pending_backfill_nodes.extend(table_fragments.fragment_ids());
 
             let progress = Self::recover_progress(
                 states,
@@ -355,7 +357,7 @@ impl CreateMviewProgressTracker {
             progress_map,
             actor_map,
             pending_finished_jobs: Vec::new(),
-            pending_backfill_nodes: Vec::new(),
+            pending_backfill_nodes,
         }
     }
 
@@ -503,7 +505,7 @@ impl CreateMviewProgressTracker {
         self.pending_finished_jobs.push(finished_job);
     }
 
-    fn queue_backfill(&mut self, backfill_nodes: Vec<FragmentId>) {
+    fn queue_backfill(&mut self, backfill_nodes: impl IntoIterator<Item = FragmentId>) {
         self.pending_backfill_nodes.extend(backfill_nodes);
     }
 
@@ -583,6 +585,9 @@ impl CreateMviewProgressTracker {
             .map(|order| BackfillOrderState::new(order, &table_fragments));
         if let Some(ref state) = backfill_order_state {
             self.queue_backfill(state.get_current_nodes());
+        } else {
+            // queue all nodes
+            self.queue_backfill(table_fragments.fragment_ids())
         }
         let progress = Progress::new(
             actors,
