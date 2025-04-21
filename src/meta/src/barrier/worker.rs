@@ -715,6 +715,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let enable_per_database_isolation = self.enable_per_database_isolation();
 
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
+            self.env.stream_client_pool().invalidate_all();
             // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
             // it holds the reschedule_read_lock and wait for creating job to finish, and caused the following scale_actor fail
             // to acquire the reschedule_write_lock, and then keep recovering, and then deadlock.
