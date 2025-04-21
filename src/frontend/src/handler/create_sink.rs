@@ -125,7 +125,7 @@ pub async fn gen_sink_plan(
         resolve_connection_ref_and_secret_ref(
             with_options,
             session,
-            TelemetryDatabaseObject::Sink,
+            Some(TelemetryDatabaseObject::Sink),
         )?;
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
@@ -707,7 +707,7 @@ fn bind_sink_format_desc(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(value.row_options.as_slice())?,
             session,
-            TelemetryDatabaseObject::Sink,
+            Some(TelemetryDatabaseObject::Sink),
         )?;
     ensure_connection_type_allowed(
         connection_type_flag,

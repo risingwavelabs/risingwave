@@ -617,6 +617,7 @@ fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
@@ -663,6 +664,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
         }
+    }
+
+    fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
+        Ok(())
     }
 
     async fn validate(&self) -> Result<()>;

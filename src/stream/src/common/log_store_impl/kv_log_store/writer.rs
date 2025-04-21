@@ -28,7 +28,9 @@ use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
-use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, KvLogStoreMetrics, SeqId};
+use crate::common::log_store_impl::kv_log_store::{
+    FIRST_SEQ_ID, KvLogStoreMetrics, LogStoreVnodeProgress, SeqId,
+};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     seq_id: SeqId,
@@ -158,7 +160,14 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         flush_info.report(&self.metrics);
 
         let truncate_offset = self.tx.pop_truncation(epoch);
-        let post_seal_epoch = self.state.seal_current_epoch(next_epoch, truncate_offset);
+        let post_seal_epoch = self.state.seal_current_epoch(
+            next_epoch,
+            truncate_offset
+                .map(|(epoch, seq_id)| {
+                    LogStoreVnodeProgress::Aligned(self.state.vnodes().clone(), epoch, seq_id)
+                })
+                .unwrap_or(LogStoreVnodeProgress::None),
+        );
         self.tx.barrier(epoch, options.is_checkpoint, next_epoch);
         let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;

@@ -526,6 +526,7 @@ impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -569,6 +570,11 @@ impl Sink for ClickHouseSink {
                 "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        ClickHouseConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 

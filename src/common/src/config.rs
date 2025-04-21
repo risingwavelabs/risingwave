@@ -1289,6 +1289,9 @@ pub struct BatchDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    #[serde(default = "default::developer::batch_local_execute_buffer_size")]
+    pub local_execute_buffer_size: usize,
 }
 
 macro_rules! define_system_config {
@@ -2109,6 +2112,10 @@ pub mod default {
 
         pub fn batch_chunk_size() -> usize {
             1024
+        }
+
+        pub fn batch_local_execute_buffer_size() -> usize {
+            64
         }
 
         /// Default to unset to be compatible with the behavior before this config is introduced,
