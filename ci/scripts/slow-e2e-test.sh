@@ -31,5 +31,6 @@ echo "--- e2e, $mode, slow tests"
 python3 -m pip install --break-system-packages arrow-udf==0.3.0
 RUST_LOG="info" \
 risedev ci-start "$mode"
-risedev slt -p 4566 -d dev './e2e_test/slow_tests/**/*.slt'
+# Use `-j 1` to run tests in different databases sequentially but with better isolation.
+risedev slt -p 4566 -d dev -j 1 './e2e_test/slow_tests/**/*.slt'
 risedev kill
