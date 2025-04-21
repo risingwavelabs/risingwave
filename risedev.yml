@@ -692,8 +692,10 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-        api-requests-max: 30
-        api-requests-deadline: 3s
+        # Set the rate limit for MinIO to 100 requests per second
+        api-requests-max: 100
+        # Set the deadline for API requests to 5 seconds
+        api-requests-deadline: 5s
       - use: meta-node
         meta-backend: env
       - use: compute-node

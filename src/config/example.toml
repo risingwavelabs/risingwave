@@ -324,7 +324,7 @@ license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
 per_database_isolation = true
-enforce_secret_on_cloud = false
+enforce_secret = false
 
 [udf]
 enable_embedded_python_udf = false

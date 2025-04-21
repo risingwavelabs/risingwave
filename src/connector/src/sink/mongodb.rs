@@ -40,6 +40,7 @@ use super::writer::{
 };
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -149,6 +150,12 @@ pub struct MongodbConfig {
     pub bulk_write_max_entries: usize,
 }
 
+impl EnforceSecret for MongodbConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        MongodbCommon::enforce_one(prop)
+    }
+}
+
 impl MongodbConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> crate::sink::Result<Self> {
         let config =
@@ -211,6 +218,17 @@ pub struct MongodbSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecret for MongodbSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::sink::ConnectorResult<()> {
+        for prop in prop_iter {
+            MongodbConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl MongodbSink {

@@ -315,8 +315,8 @@ impl BackupManager {
         Ok(())
     }
 
-    /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> HashSet<HummockSstableObjectId> {
+    /// List id of all objects required by backups.
+    pub fn list_pinned_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.backup_store
             .load()
             .0
