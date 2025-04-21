@@ -661,9 +661,6 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 
   optional uint64 snapshot_backfill_epoch = 11;
-
-  // Whether this node should pause backfilling.
-  bool backfill_paused = 12;
 }
 
 // Config options for CDC backfill

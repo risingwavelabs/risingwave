@@ -3642,17 +3642,6 @@ impl fmt::Display for BackfillOrderStrategy {
     }
 }
 
-impl BackfillOrderStrategy {
-    /// Returns whether all backfill nodes should pause initially.
-    /// Meta will resume them in the order specified by the backfill order.
-    pub fn should_pause_initially(&self) -> bool {
-        matches!(
-            self,
-            BackfillOrderStrategy::Auto | BackfillOrderStrategy::Fixed(_)
-        )
-    }
-}
-
 impl Statement {
     pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
         REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())

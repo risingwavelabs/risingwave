@@ -67,12 +67,6 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
 
     rate_limiter: MonitoredRateLimiter,
 
-    /// This is independent from pausing via rate limit.
-    /// It's added for backfill order control.
-    /// and can only be overwritten by the barrier command: `Command::StartBackfillFragment`.
-    /// This avoids conflicts with alter rate limit.
-    backfill_paused: bool,
-
     /// Fragment id of the fragment this backfill node belongs to.
     fragment_id: FragmentId,
 }
@@ -93,7 +87,6 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: RateLimit,
-        backfill_paused: bool,
         fragment_id: FragmentId,
     ) -> Self {
         let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table.table_id());
@@ -107,7 +100,6 @@ where
             metrics,
             chunk_size,
             rate_limiter,
-            backfill_paused,
             fragment_id,
         }
     }
@@ -153,7 +145,7 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let mut paused = first_barrier.is_pause_on_startup();
-        let mut backfill_paused = self.backfill_paused;
+        let mut backfill_paused = true;
         let first_epoch = first_barrier.epoch;
         let is_newly_added = first_barrier.is_newly_added(self.actor_id);
         // The first barrier message should be propagated.
