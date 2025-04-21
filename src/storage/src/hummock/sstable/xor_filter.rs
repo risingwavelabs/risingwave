@@ -444,7 +444,7 @@ impl Clone for XorFilterReader {
 mod tests {
     use std::collections::HashMap;
 
-    use foyer::CacheHint;
+    use foyer::Hint;
     use rand::RngCore;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
@@ -467,7 +467,7 @@ mod tests {
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CacheHint::Normal),
+            policy: CachePolicy::Fill(Hint::Normal),
         };
         let opts = SstableBuilderOptions {
             capacity: 0,
@@ -524,7 +524,7 @@ mod tests {
                     .get_block_response(
                         &sstable,
                         idx,
-                        CachePolicy::Fill(CacheHint::Normal),
+                        CachePolicy::Fill(Hint::Normal),
                         &mut stat,
                     )
                     .await
