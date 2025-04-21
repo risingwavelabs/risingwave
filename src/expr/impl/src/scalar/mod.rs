@@ -86,6 +86,7 @@ pub use to_jsonb::*;
 mod encrypt;
 mod external;
 mod inet;
+mod schema_map;
 mod test_license;
 mod to_timestamp;
 mod translate;
