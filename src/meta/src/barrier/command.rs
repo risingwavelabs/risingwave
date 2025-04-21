@@ -26,6 +26,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -45,6 +46,7 @@ use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamin
 use crate::barrier::InflightSubscriptionInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
+use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::collect_resp_info;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
@@ -475,6 +477,10 @@ impl BarrierKind {
         matches!(self, BarrierKind::Checkpoint(_))
     }
 
+    pub fn is_initial(&self) -> bool {
+        matches!(self, BarrierKind::Initial)
+    }
+
     pub fn as_str_name(&self) -> &'static str {
         match self {
             BarrierKind::Initial => "Initial",
@@ -634,6 +640,7 @@ impl Command {
         &self,
         is_currently_paused: bool,
         edges: &mut Option<FragmentEdgeBuildResult>,
+        control_stream_manager: &ControlStreamManager,
     ) -> Option<Mutation> {
         match self {
             Command::Flush => None,
@@ -894,11 +901,17 @@ impl Command {
                                         actor_id,
                                         upstream_fragment_id: fragment_id,
                                         new_upstream_fragment_id: None,
-                                        added_upstream_actor_id: reschedule
+                                        added_upstream_actors: reschedule
                                             .added_actors
-                                            .values()
-                                            .flatten()
-                                            .cloned()
+                                            .iter()
+                                            .flat_map(|(worker_id, actors)| {
+                                                let host =
+                                                    control_stream_manager.host_addr(*worker_id);
+                                                actors.iter().map(move |actor_id| ActorInfo {
+                                                    actor_id: *actor_id,
+                                                    host: Some(host.clone()),
+                                                })
+                                            })
                                             .collect(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors
@@ -999,6 +1012,7 @@ impl Command {
         &self,
         graph_info: &InflightDatabaseInfo,
         edges: &mut Option<FragmentEdgeBuildResult>,
+        control_stream_manager: &ControlStreamManager,
     ) -> Option<StreamJobActorsToCreate> {
         match self {
             Command::CreateStreamingJob { info, job_type, .. } => {
@@ -1026,15 +1040,19 @@ impl Command {
                 ..
             } => {
                 let mut actor_upstreams = Self::collect_actor_upstreams(
-                    reschedules.iter().flat_map(|(fragment_id, reschedule)| {
-                        reschedule
-                            .newly_created_actors
-                            .values()
-                            .map(|((actor, dispatchers), _)| {
-                                (actor.actor_id, *fragment_id, dispatchers.as_slice())
-                            })
+                    reschedules.iter().map(|(fragment_id, reschedule)| {
+                        (
+                            *fragment_id,
+                            reschedule.newly_created_actors.values().map(
+                                |((actor, dispatchers), _)| {
+                                    (actor.actor_id, dispatchers.as_slice())
+                                },
+                            ),
+                        )
                     }),
                     Some((reschedules, fragment_actors)),
+                    graph_info,
+                    control_stream_manager,
                 );
                 let mut map: HashMap<WorkerId, HashMap<_, (_, Vec<_>)>> = HashMap::new();
                 for (fragment_id, (actor, dispatchers), worker_id) in
@@ -1110,35 +1128,56 @@ impl Command {
 
 impl Command {
     #[expect(clippy::type_complexity)]
-    pub fn collect_actor_upstreams(
-        actor_dispatchers: impl Iterator<Item = (ActorId, FragmentId, &[Dispatcher])>,
+    pub(super) fn collect_actor_upstreams(
+        actor_dispatchers: impl Iterator<
+            Item = (FragmentId, impl Iterator<Item = (ActorId, &[Dispatcher])>),
+        >,
         reschedule_dispatcher_update: Option<(
             &HashMap<FragmentId, Reschedule>,
             &HashMap<FragmentId, HashSet<ActorId>>,
         )>,
+        graph_info: &InflightDatabaseInfo,
+        control_stream_manager: &ControlStreamManager,
     ) -> HashMap<ActorId, ActorUpstreams> {
         let mut actor_upstreams: HashMap<ActorId, ActorUpstreams> = HashMap::new();
-        for (upstream_actor_id, upstream_fragment_id, dispatchers) in actor_dispatchers {
-            for downstream_actor_id in dispatchers
-                .iter()
-                .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter())
-            {
-                actor_upstreams
-                    .entry(*downstream_actor_id)
-                    .or_default()
-                    .entry(upstream_fragment_id)
-                    .or_default()
-                    .insert(upstream_actor_id);
+        for (upstream_fragment_id, upstream_actors) in actor_dispatchers {
+            let upstream_fragment = graph_info.fragment(upstream_fragment_id);
+            for (upstream_actor_id, dispatchers) in upstream_actors {
+                let upstream_actor_location =
+                    upstream_fragment.actors[&upstream_actor_id].worker_id;
+                let upstream_actor_host = control_stream_manager.host_addr(upstream_actor_location);
+                for downstream_actor_id in dispatchers
+                    .iter()
+                    .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter())
+                {
+                    actor_upstreams
+                        .entry(*downstream_actor_id)
+                        .or_default()
+                        .entry(upstream_fragment_id)
+                        .or_default()
+                        .insert(
+                            upstream_actor_id,
+                            ActorInfo {
+                                actor_id: upstream_actor_id,
+                                host: Some(upstream_actor_host.clone()),
+                            },
+                        );
+                }
             }
         }
         if let Some((reschedules, fragment_actors)) = reschedule_dispatcher_update {
             for reschedule in reschedules.values() {
                 for (upstream_fragment_id, _) in &reschedule.upstream_fragment_dispatcher_ids {
+                    let upstream_fragment = graph_info.fragment(*upstream_fragment_id);
                     let upstream_reschedule = reschedules.get(upstream_fragment_id);
                     for upstream_actor_id in fragment_actors
                         .get(upstream_fragment_id)
                         .expect("should exist")
                     {
+                        let upstream_actor_location =
+                            upstream_fragment.actors[upstream_actor_id].worker_id;
+                        let upstream_actor_host =
+                            control_stream_manager.host_addr(upstream_actor_location);
                         if let Some(upstream_reschedule) = upstream_reschedule
                             && upstream_reschedule
                                 .removed_actors
@@ -1146,13 +1185,26 @@ impl Command {
                         {
                             continue;
                         }
-                        for downstream_actor_id in reschedule.added_actors.values().flatten() {
+                        for (_, downstream_actor_id) in
+                            reschedule
+                                .added_actors
+                                .iter()
+                                .flat_map(|(worker_id, actors)| {
+                                    actors.iter().map(|actor| (*worker_id, *actor))
+                                })
+                        {
                             actor_upstreams
-                                .entry(*downstream_actor_id)
+                                .entry(downstream_actor_id)
                                 .or_default()
                                 .entry(*upstream_fragment_id)
                                 .or_default()
-                                .insert(*upstream_actor_id);
+                                .insert(
+                                    *upstream_actor_id,
+                                    ActorInfo {
+                                        actor_id: *upstream_actor_id,
+                                        host: Some(upstream_actor_host.clone()),
+                                    },
+                                );
                         }
                     }
                 }

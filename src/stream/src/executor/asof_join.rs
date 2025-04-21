@@ -358,26 +358,30 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         let left_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
         let right_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let barrier_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                "barrier",
+            ]);
 
         let left_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
 
         let right_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let mut start_time = Instant::now();
 
@@ -1026,11 +1030,7 @@ mod tests {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::for_test(123),

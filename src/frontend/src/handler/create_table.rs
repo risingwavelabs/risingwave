@@ -30,7 +30,6 @@ use risingwave_common::catalog::{
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -83,7 +82,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -1374,7 +1373,7 @@ pub async fn handle_create_table(
         )
         .await?;
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
         (graph, source, table, job_type)
     };
@@ -1430,9 +1429,6 @@ pub async fn create_iceberg_engine_table(
     // 4. create an iceberg source
 
     let meta_client = session.env().meta_client();
-    let system_params = meta_client.get_system_params().await?;
-    let state_store_endpoint = system_params.state_store().to_owned();
-    let data_directory = system_params.data_directory().to_owned();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
     let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
@@ -1508,96 +1504,15 @@ pub async fn create_iceberg_engine_table(
     let iceberg_table_name = table_name.0.last().unwrap().real_value();
 
     let iceberg_engine_connection: String = session.config().iceberg_engine_connection();
+    let sink_decouple = session.config().sink_decouple();
+    if matches!(sink_decouple, SinkDecouple::Disable) {
+        bail!(
+            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = false` to resolve it"
+        );
+    }
 
     let mut connection_ref = BTreeMap::new();
     let with_common = if iceberg_engine_connection.is_empty() {
-        #[allow(dead_code)]
-        {
-            let (s3_region, s3_endpoint, s3_ak, s3_sk, warehouse_path) = match state_store_endpoint
-            {
-                s3 if s3.starts_with("hummock+s3://") => {
-                    let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
-                        s3_region
-                    } else {
-                        bail!(
-                            "To create an iceberg engine table with s3 backend, AWS_REGION needed to be set"
-                        );
-                    };
-                    let s3_bucket = s3.strip_prefix("hummock+s3://").unwrap().to_owned();
-                    (
-                        Some(s3_region),
-                        None,
-                        None,
-                        None,
-                        Some(format!(
-                            "s3://{}/{}/iceberg/{}",
-                            s3_bucket, data_directory, iceberg_catalog_name
-                        )),
-                    )
-                }
-                minio if minio.starts_with("hummock+minio://") => {
-                    let server = minio.strip_prefix("hummock+minio://").unwrap();
-                    let (access_key_id, rest) = server.split_once(':').unwrap();
-                    let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-                    let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://")
-                    {
-                        rest = rest_stripped;
-                        "https://"
-                    } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-                        rest = rest_stripped;
-                        "http://"
-                    } else {
-                        "http://"
-                    };
-                    let (address, s3_bucket) = rest.split_once('/').unwrap();
-                    (
-                        Some("us-east-1".to_owned()),
-                        Some(format!("{}{}", endpoint_prefix, address)),
-                        Some(access_key_id.to_owned()),
-                        Some(secret_access_key.to_owned()),
-                        Some(format!(
-                            "s3://{}/{}/iceberg/{}",
-                            s3_bucket, data_directory, iceberg_catalog_name
-                        )),
-                    )
-                }
-                _ => {
-                    bail!(
-                        "iceberg engine can't operate with this state store endpoint: {}",
-                        state_store_endpoint
-                    );
-                }
-            };
-
-            let mut with_common = BTreeMap::new();
-            with_common.insert("enable_config_load".to_owned(), "true".to_owned());
-            with_common.insert("connector".to_owned(), "iceberg".to_owned());
-            with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-            if let Some(warehouse_path) = warehouse_path.clone() {
-                with_common.insert("warehouse.path".to_owned(), warehouse_path.to_owned());
-            }
-            if let Some(s3_endpoint) = s3_endpoint.clone() {
-                with_common.insert("s3.endpoint".to_owned(), s3_endpoint);
-            }
-            if let Some(s3_ak) = s3_ak.clone() {
-                with_common.insert("s3.access.key".to_owned(), s3_ak.to_owned());
-            }
-            if let Some(s3_sk) = s3_sk.clone() {
-                with_common.insert("s3.secret.key".to_owned(), s3_sk.to_owned());
-            }
-            if let Some(s3_region) = s3_region.clone() {
-                with_common.insert("s3.region".to_owned(), s3_region.to_owned());
-            }
-            with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-            with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
-            with_common.insert(
-                "catalog.jdbc.password".to_owned(),
-                meta_store_password.clone(),
-            );
-            with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
-            with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
-            with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
-        }
         bail!("to use iceberg engine table, the variable `iceberg_engine_connection` must be set.");
     } else {
         let parts: Vec<&str> = iceberg_engine_connection.split('.').collect();
@@ -1621,6 +1536,22 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("connector".to_owned(), "iceberg".to_owned());
                 with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
                 with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+
+                if let Some(s) = params.properties.get("hosted_catalog") {
+                    if s.eq_ignore_ascii_case("true") {
+                        with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+                        with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+                        with_common
+                            .insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                        with_common.insert(
+                            "catalog.jdbc.password".to_owned(),
+                            meta_store_password.clone(),
+                        );
+                        with_common
+                            .insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
+                    }
+                }
+
                 with_common
             } else {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(
@@ -1960,7 +1891,7 @@ pub async fn generate_stream_graph_for_replace_table(
         ))?
     }
 
-    let graph = build_graph(plan)?;
+    let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
     // Fill the original table ID.
     let mut table = Table {

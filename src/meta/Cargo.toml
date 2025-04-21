@@ -37,7 +37,7 @@ num-integer = "0.1"
 num-traits = "0.2"
 otlp-embedded = { workspace = true }
 parking_lot = { workspace = true }
-prometheus = "0.13"
+prometheus = "0.14"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = { workspace = true }

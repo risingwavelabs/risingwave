@@ -229,6 +229,14 @@ impl ObjectName {
     pub fn from_test_str(s: &str) -> Self {
         ObjectName::from(vec![s.into()])
     }
+
+    pub fn base_name(&self) -> String {
+        self.0
+            .iter()
+            .last()
+            .expect("should have base name")
+            .real_value()
+    }
 }
 
 impl fmt::Display for ObjectName {
@@ -1458,10 +1466,11 @@ pub enum Statement {
         fragment_id: u32,
         operation: AlterFragmentOperation,
     },
-    /// DESCRIBE TABLE OR SOURCE
+    /// DESCRIBE relation
     Describe {
-        /// Table or Source name
+        /// relation name
         name: ObjectName,
+        kind: DescribeKind,
     },
     /// SHOW OBJECT COMMAND
     ShowObjects {
@@ -1647,6 +1656,16 @@ pub enum Statement {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DescribeKind {
+    /// `DESCRIBE <name>`
+    Plain,
+
+    /// `DESCRIBE FRAGMENTS <name>`
+    Fragments,
+}
+
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = String::new();
@@ -1701,8 +1720,15 @@ impl Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::Describe { name } => {
+            Statement::Describe { name, kind } => {
                 write!(f, "DESCRIBE {}", name)?;
+                match kind {
+                    DescribeKind::Plain => {}
+
+                    DescribeKind::Fragments => {
+                        write!(f, " FRAGMENTS")?;
+                    }
+                }
                 Ok(())
             }
             Statement::ShowObjects {
@@ -2321,6 +2347,25 @@ impl Statement {
                 write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
             }
         }
+    }
+
+    pub fn is_create(&self) -> bool {
+        matches!(
+            self,
+            Statement::CreateTable { .. }
+                | Statement::CreateView { .. }
+                | Statement::CreateSource { .. }
+                | Statement::CreateSink { .. }
+                | Statement::CreateSubscription { .. }
+                | Statement::CreateConnection { .. }
+                | Statement::CreateSecret { .. }
+                | Statement::CreateUser { .. }
+                | Statement::CreateDatabase { .. }
+                | Statement::CreateFunction { .. }
+                | Statement::CreateAggregate { .. }
+                | Statement::CreateIndex { .. }
+                | Statement::CreateSchema { .. }
+        )
     }
 }
 

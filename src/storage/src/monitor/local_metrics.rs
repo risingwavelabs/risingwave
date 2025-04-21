@@ -223,17 +223,17 @@ impl Drop for StoreLocalStatistic {
 }
 
 struct LocalStoreMetrics {
-    cache_data_block_total: LabelGuardedLocalIntCounter<2>,
-    cache_data_block_miss: LabelGuardedLocalIntCounter<2>,
-    cache_meta_block_total: LabelGuardedLocalIntCounter<2>,
-    cache_meta_block_miss: LabelGuardedLocalIntCounter<2>,
-    cache_data_prefetch_count: LabelGuardedLocalIntCounter<2>,
-    cache_data_prefetch_block_count: LabelGuardedLocalIntCounter<2>,
+    cache_data_block_total: LabelGuardedLocalIntCounter,
+    cache_data_block_miss: LabelGuardedLocalIntCounter,
+    cache_meta_block_total: LabelGuardedLocalIntCounter,
+    cache_meta_block_miss: LabelGuardedLocalIntCounter,
+    cache_data_prefetch_count: LabelGuardedLocalIntCounter,
+    cache_data_prefetch_block_count: LabelGuardedLocalIntCounter,
     remote_io_time: LocalHistogram,
-    processed_key_count: LabelGuardedLocalIntCounter<2>,
-    skip_multi_version_key_count: LabelGuardedLocalIntCounter<2>,
-    skip_delete_key_count: LabelGuardedLocalIntCounter<2>,
-    total_key_count: LabelGuardedLocalIntCounter<2>,
+    processed_key_count: LabelGuardedLocalIntCounter,
+    skip_multi_version_key_count: LabelGuardedLocalIntCounter,
+    skip_delete_key_count: LabelGuardedLocalIntCounter,
+    total_key_count: LabelGuardedLocalIntCounter,
     get_shared_buffer_hit_counts: LocalIntCounter,
     staging_imm_iter_count: LocalHistogram,
     staging_sst_iter_count: LocalHistogram,
@@ -470,7 +470,7 @@ add_local_metrics_count!(
 macro_rules! define_bloom_filter_metrics {
     ($($x:ident),*) => (
         struct BloomFilterLocalMetrics {
-            $($x: LabelGuardedLocalIntCounter<2>,)*
+            $($x: LabelGuardedLocalIntCounter,)*
         }
 
         impl BloomFilterLocalMetrics {

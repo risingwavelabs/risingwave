@@ -20,14 +20,14 @@ use crate::executor::prelude::*;
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn stream_node_metrics(
+    info: Arc<ExecutorInfo>,
     enable_explain_analyze_stats: bool,
-    operator_id: u64,
     input: impl MessageStream,
     actor_ctx: ActorContextRef,
 ) {
     let stats = ProfileMetricsImpl::new(
+        info.id,
         &actor_ctx.streaming_metrics,
-        operator_id,
         enable_explain_analyze_stats,
     );
 
@@ -39,6 +39,6 @@ pub async fn stream_node_metrics(
         }
         let blocking_duration = Instant::now();
         yield message;
-        stats.inc_blocking_duration_ms(blocking_duration.elapsed().as_millis() as u64);
+        stats.inc_blocking_duration_ns(blocking_duration.elapsed().as_nanos() as u64);
     }
 }

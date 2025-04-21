@@ -69,7 +69,7 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 
     sync_call_timeout: Duration,
-    high_watermark_metrics: HashMap<i32, LabelGuardedIntGauge<2>>,
+    high_watermark_metrics: HashMap<i32, LabelGuardedIntGauge>,
 
     properties: KafkaProperties,
     config: rdkafka::ClientConfig,

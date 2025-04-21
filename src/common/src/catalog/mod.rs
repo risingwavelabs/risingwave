@@ -476,6 +476,16 @@ pub enum ConflictBehavior {
     DoUpdateIfNotNull,
 }
 
+#[macro_export]
+macro_rules! _checked_conflict_behaviors {
+    () => {
+        ConflictBehavior::Overwrite
+            | ConflictBehavior::IgnoreConflict
+            | ConflictBehavior::DoUpdateIfNotNull
+    };
+}
+pub use _checked_conflict_behaviors as checked_conflict_behaviors;
+
 impl ConflictBehavior {
     pub fn from_protobuf(tb_conflict_behavior: &PbHandleConflictBehavior) -> Self {
         match tb_conflict_behavior {

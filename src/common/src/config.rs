@@ -422,14 +422,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
+    /// The interval of the periodic scheduling compaction group split job.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
+    /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
+    /// The threshold of each dimension of the compaction group after merging. When the dimension * `compaction_group_merge_dimension_threshold` >= limit, the merging job will be rejected.
+    #[serde(default = "default::meta::compaction_group_merge_dimension_threshold")]
+    pub compaction_group_merge_dimension_threshold: f64,
 
     #[serde(default)]
     #[config_doc(nested)]
@@ -1232,6 +1238,18 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    /// `IcebergListExecutor`: The interval in seconds for Iceberg source to list new files.
+    #[serde(default = "default::developer::iceberg_list_interval_sec")]
+    pub iceberg_list_interval_sec: u64,
+
+    /// `IcebergFetchExecutor`: The number of files the executor will fetch concurrently in a batch.
+    #[serde(default = "default::developer::iceberg_fetch_batch_size")]
+    pub iceberg_fetch_batch_size: u64,
+
+    /// `IcebergSink`: The size of the cache for positional delete in the sink.
+    #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
+    pub iceberg_sink_positional_delete_cache_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1709,6 +1727,10 @@ pub mod default {
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
         }
+
+        pub fn compaction_group_merge_dimension_threshold() -> f64 {
+            1.2
+        }
     }
 
     pub mod server {
@@ -1923,7 +1945,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            2
+            10
         }
     }
 
@@ -2243,6 +2265,18 @@ pub mod default {
 
         pub fn rpc_client_connect_timeout_secs() -> u64 {
             5
+        }
+
+        pub fn iceberg_list_interval_sec() -> u64 {
+            1
+        }
+
+        pub fn iceberg_fetch_batch_size() -> u64 {
+            1024
+        }
+
+        pub fn iceberg_sink_positional_delete_cache_size() -> usize {
+            1024
         }
     }
 

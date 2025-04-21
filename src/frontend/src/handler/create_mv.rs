@@ -37,7 +37,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::ordinal;
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -239,6 +239,12 @@ pub async fn handle_create_mv_bound(
         let mut with_options = get_with_options(handler_args.clone());
         let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
+        if resource_group.is_some() {
+            risingwave_common::license::Feature::ResourceGroup
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
         let is_serverless_backfill = with_options
             .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
             .unwrap_or_default()
@@ -321,7 +327,7 @@ It only indicates the physical clustering of the data, which may improve the per
                 )
                 .collect();
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::MaterializedView))?;
 
         (table, graph, dependencies, resource_group)
     };

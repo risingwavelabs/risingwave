@@ -144,6 +144,7 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
+pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
@@ -183,6 +184,20 @@ pub struct ExecutorInfo {
 
     /// Identity of the executor.
     pub identity: String,
+
+    /// The executor id of the executor.
+    pub id: u64,
+}
+
+impl ExecutorInfo {
+    pub fn new(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            identity,
+            id,
+        }
+    }
 }
 
 /// [`Execute`] describes the methods an executor should implement to handle control messages.

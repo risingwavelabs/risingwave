@@ -246,6 +246,20 @@ macro_rules! impl_connection {
                 risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
             }
         }
+
+        pub fn enforce_secret_connection<'a>(
+            pb_connection_type: &risingwave_pb::catalog::connection_params::PbConnectionType,
+            prop_iter: impl Iterator<Item = &'a str>,
+        ) -> $crate::error::ConnectorResult<()> {
+            match pb_connection_type {
+                $(
+                    <$pb_connection_path>::$variant_name => {
+                        <$connection_type>::enforce_secret(prop_iter)
+                    },
+                )*
+                risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
+            }
+        }
     }
 }
 

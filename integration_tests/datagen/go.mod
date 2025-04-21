@@ -1,6 +1,8 @@
 module datagen
 
-go 1.18
+go 1.23.0
+
+toolchain go1.24.2
 
 require (
 	github.com/Shopify/sarama v1.37.2

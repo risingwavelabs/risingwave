@@ -30,8 +30,8 @@ use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
-    LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory, LogWriter, LogWriterExt,
-    LogWriterMetrics,
+    FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
+    LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
@@ -329,8 +329,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let post_flush = log_writer
                         .flush_current_epoch(
                             barrier.epoch.curr,
-                            barrier.kind.is_checkpoint(),
-                            update_vnode_bitmap.clone(),
+                            FlushCurrentEpochOptions {
+                                is_checkpoint: barrier.kind.is_checkpoint(),
+                                new_vnode_bitmap: update_vnode_bitmap.clone(),
+                                is_stop: barrier.is_stop(actor_id),
+                            },
                         )
                         .await?;
 
@@ -409,7 +412,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         chunk_size: usize,
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
-        sink_chunk_buffer_size_metrics: LabelGuardedIntGauge<3>,
+        sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
         compact_chunk: bool,
     ) {
         // need to buffer chunks during one barrier
@@ -776,11 +779,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, pk_indices, "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -909,11 +908,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![0, 1],
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, vec![0, 1], "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -1015,11 +1010,7 @@ mod test {
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "SinkExecutor".to_owned(),
-        };
+        let info = ExecutorInfo::new(schema, pk_indices, "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 

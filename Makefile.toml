@@ -36,10 +36,7 @@ env_scripts = [
   is_not_release = not ${is_release}
   is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
   is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
-  is_external_udf_enabled = get_env ENABLE_EXTERNAL_UDF
-  is_wasm_udf_enabled = get_env ENABLE_WASM_UDF
-  is_js_udf_enabled = get_env ENABLE_JS_UDF
-  is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
+  is_udf_enabled = get_env ENABLE_UDF
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -62,24 +59,9 @@ env_scripts = [
     set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
   end
 
-  if ${is_external_udf_enabled}
+  if ${is_udf_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features external-udf"
-  end
-
-  if ${is_wasm_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features wasm-udf"
-  end
-
-  if ${is_js_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features js-udf"
-  end
-
-  if ${is_python_udf_enabled}
-    flags = get_env RISINGWAVE_FEATURE_FLAGS
-    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features python-udf"
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features udf"
   end
 
   if ${is_hummock_trace}
@@ -1344,7 +1326,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.27.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.28.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
@@ -1492,4 +1474,46 @@ set -euo pipefail
 cat ${PREFIX_CONFIG}/risedev-env
 echo "Hint: To load the environment variables into the shell, you may run:"
 echo "$(tput setaf 4)\set -a; source ${PREFIX_CONFIG}/risedev-env; set +a$(tput sgr0)"
+'''
+
+[tasks.restart]
+category = "RiseDev - Start/Stop"
+description = "Restart a specific node in the cluster"
+script = '''
+#!/usr/bin/env bash
+
+set -e
+
+NODE_NAME="$1"
+
+if [[ -z "${NODE_NAME}" ]]; then
+  echo "Usage: ./risedev restart <node_name>"
+  echo "Available nodes:"
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
+  exit 1
+fi
+
+COMMAND_FILE="${PREFIX_CONFIG}/risedev_commands.yaml"
+
+if [[ ! -f "${COMMAND_FILE}" ]]; then
+  echo "Error: Command file ${COMMAND_FILE} not found. Did you start the cluster with './risedev d'?"
+  exit 1
+fi
+
+COMMAND=$(yq ".${NODE_NAME}" "${COMMAND_FILE}")
+
+if [[ -z "${COMMAND}" ]]; then
+  echo "Error: Node '${NODE_NAME}' not found in ${COMMAND_FILE}"
+  echo "Available nodes:"
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
+  exit 1
+fi
+
+echo "killing existing node ${NODE_NAME}..."
+${TMUX} kill-window -t "${NODE_NAME}"
+
+echo "Restarting node ${NODE_NAME}..."
+eval "${COMMAND}"
+
+echo "Node ${NODE_NAME} restarted."
 '''

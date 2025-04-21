@@ -347,3 +347,20 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+- name: Force filter pushed down into join
+  sql: |
+    set streaming_force_filter_inside_join = true;
+    create table t(v1 int, v2 int);
+    create table t2(v3 int, v4 int);
+    select * from t, t2 where t.v1 = t2.v3 and t.v2 > t2.v4 + 1000;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: Pull up filter from join by default
+  sql: |
+    create table t(v1 int, v2 int);
+    create table t2(v3 int, v4 int);
+    select * from t, t2 where t.v1 = t2.v3 and t.v2 > t2.v4 + 1000;
+  expected_outputs:
+  - batch_plan
+  - stream_plan

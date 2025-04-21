@@ -693,6 +693,7 @@ message SystemParams {
   optional uint64 time_travel_retention_ms = 18;
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
+  optional bool enforce_secret = 21;
 }
 
 message GetSystemParamsRequest {}
@@ -937,4 +938,22 @@ message ListRateLimitsResponse {
     string node_name = 5;
   }
   repeated RateLimitInfo rate_limits = 1;
+}
+
+service HostedIcebergCatalogService {
+  rpc ListIcebergTables(ListIcebergTablesRequest) returns (ListIcebergTablesResponse);
+}
+
+message ListIcebergTablesRequest {}
+
+message ListIcebergTablesResponse {
+  message IcebergTable {
+    string catalog_name = 1;
+    string table_namespace = 2;
+    string table_name = 3;
+    optional string metadata_location = 4;
+    optional string previous_metadata_location = 5;
+    optional string iceberg_type = 6;
+  }
+  repeated IcebergTable iceberg_tables = 1;
 }

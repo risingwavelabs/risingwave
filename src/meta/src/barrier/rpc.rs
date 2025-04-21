@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Formatter};
@@ -29,10 +31,12 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::{
+    AddMutation, Barrier, BarrierMutation, FragmentTypeFlag, SubscriptionUpstreamInfo,
+};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
@@ -53,7 +57,9 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
-use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::{
+    BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
+};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
@@ -62,7 +68,7 @@ use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate, StreamJobFragments};
-use crate::stream::build_actor_connector_splits;
+use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
 fn to_partial_graph_id(job_id: Option<TableId>) -> u32 {
@@ -83,57 +89,64 @@ pub(super) fn from_partial_graph_id(partial_graph_id: u32) -> Option<TableId> {
 }
 
 struct ControlStreamNode {
-    worker: WorkerNode,
+    worker_id: WorkerId,
+    host: HostAddress,
     handle: StreamingControlHandle,
 }
 
 pub(super) struct ControlStreamManager {
-    nodes: HashMap<WorkerId, ControlStreamNode>,
-    pub(crate) env: MetaSrvEnv,
+    connected_nodes: HashMap<WorkerId, ControlStreamNode>,
+    workers: HashMap<WorkerId, WorkerNode>,
+    env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
     pub(super) fn new(env: MetaSrvEnv) -> Self {
         Self {
-            nodes: Default::default(),
+            connected_nodes: Default::default(),
+            workers: Default::default(),
             env,
         }
     }
 
-    pub(super) fn contains_worker(&self, worker_id: WorkerId) -> bool {
-        self.nodes.contains_key(&worker_id)
+    pub(super) fn is_connected(&self, worker_id: WorkerId) -> bool {
+        self.connected_nodes.contains_key(&worker_id)
     }
 
-    pub(super) async fn try_add_worker(
+    pub(super) fn host_addr(&self, worker_id: WorkerId) -> HostAddress {
+        self.workers[&worker_id].host.clone().unwrap()
+    }
+
+    pub(super) async fn try_reconnect_worker(
         &mut self,
-        node: WorkerNode,
+        worker_id: WorkerId,
         inflight_infos: impl Iterator<
             Item = (
                 DatabaseId,
                 &InflightSubscriptionInfo,
-                &InflightDatabaseInfo,
-                impl Iterator<Item = &InflightStreamingJobInfo>,
+                impl Iterator<Item = TableId>,
             ),
         >,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
-        let node_id = node.id as WorkerId;
-        if self.nodes.contains_key(&node_id) {
-            warn!(id = node.id, host = ?node.host, "node already exists");
+        if self.connected_nodes.contains_key(&worker_id) {
+            warn!(worker_id, "node already connected");
             return;
         }
-        let node_host = node.host.clone().unwrap();
+        let node = &self.workers[&worker_id];
+        let node_host = node.host.as_ref().unwrap();
 
-        let init_request = self.collect_init_request(inflight_infos, term_id);
-        match context.new_control_stream(&node, &init_request).await {
+        let init_request = Self::collect_init_request(inflight_infos, term_id);
+        match context.new_control_stream(node, &init_request).await {
             Ok(handle) => {
                 assert!(
-                    self.nodes
+                    self.connected_nodes
                         .insert(
-                            node_id,
+                            worker_id,
                             ControlStreamNode {
-                                worker: node.clone(),
+                                worker_id,
+                                host: node.host.clone().unwrap(),
                                 handle,
                             }
                         )
@@ -154,33 +167,42 @@ impl ControlStreamManager {
             Item = (
                 DatabaseId,
                 &InflightSubscriptionInfo,
-                &InflightDatabaseInfo,
-                impl Iterator<Item = &InflightStreamingJobInfo>,
+                impl Iterator<Item = TableId>,
             ),
         >,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
-        if self.nodes.contains_key(&node_id) {
-            warn!(id = node.id, host = ?node.host, "node already exists");
+        let node = match self.workers.entry(node_id) {
+            Entry::Occupied(entry) => {
+                let entry = entry.into_mut();
+                assert_eq!(entry.host, node.host);
+                warn!(id = node.id, host = ?node.host, "node already exists");
+                &*entry
+            }
+            Entry::Vacant(entry) => &*entry.insert(node),
+        };
+        if self.connected_nodes.contains_key(&node_id) {
+            warn!(id = node.id, host = ?node.host, "new node already connected");
             return;
         }
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
-        let init_request = self.collect_init_request(inflight_infos, term_id);
+        let init_request = Self::collect_init_request(inflight_infos, term_id);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
-            match context.new_control_stream(&node, &init_request).await {
+            match context.new_control_stream(node, &init_request).await {
                 Ok(handle) => {
                     assert!(
-                        self.nodes
+                        self.connected_nodes
                             .insert(
                                 node_id,
                                 ControlStreamNode {
-                                    worker: node.clone(),
+                                    worker_id: node.id as _,
+                                    host: node.host.clone().unwrap(),
                                     handle,
                                 }
                             )
@@ -212,22 +234,24 @@ impl ControlStreamManager {
             term_id,
         };
         let init_request = &init_request;
+        self.workers = nodes.clone();
         let nodes = join_all(nodes.iter().map(|(worker_id, node)| async move {
             let result = context.new_control_stream(node, init_request).await;
             (*worker_id, node.clone(), result)
         }))
         .await;
-        self.nodes.clear();
+        self.connected_nodes.clear();
         let mut failed_workers = HashSet::new();
         for (worker_id, node, result) in nodes {
             match result {
                 Ok(handle) => {
                     assert!(
-                        self.nodes
+                        self.connected_nodes
                             .insert(
                                 worker_id,
                                 ControlStreamNode {
-                                    worker: node,
+                                    worker_id: node.id as _,
+                                    host: node.host.clone().unwrap(),
                                     handle
                                 }
                             )
@@ -261,12 +285,12 @@ impl ControlStreamManager {
         WorkerId,
         MetaResult<streaming_control_stream_response::Response>,
     )> {
-        if self.nodes.is_empty() {
+        if self.connected_nodes.is_empty() {
             return Poll::Pending;
         }
         let mut poll_result: Poll<(WorkerId, MetaResult<_>)> = Poll::Pending;
         {
-            for (worker_id, node) in &mut self.nodes {
+            for (worker_id, node) in &mut self.connected_nodes {
                 match node.handle.response_stream.poll_next_unpin(cx) {
                     Poll::Ready(result) => {
                         poll_result = Poll::Ready((
@@ -303,10 +327,10 @@ impl ControlStreamManager {
 
         if let Poll::Ready((worker_id, Err(err))) = &poll_result {
             let node = self
-                .nodes
+                .connected_nodes
                 .remove(worker_id)
                 .expect("should exist when get shutdown resp");
-            warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
+            warn!(worker_id = node.worker_id, host = ?node.host, err = %err.as_report(), "get error from response stream");
         }
 
         poll_result
@@ -322,71 +346,31 @@ impl ControlStreamManager {
     }
 
     fn collect_init_request(
-        &self,
         initial_inflight_infos: impl Iterator<
             Item = (
                 DatabaseId,
                 &InflightSubscriptionInfo,
-                &InflightDatabaseInfo,
-                impl Iterator<Item = &InflightStreamingJobInfo>,
+                impl Iterator<Item = TableId>,
             ),
         >,
         term_id: String,
     ) -> PbInitRequest {
         PbInitRequest {
             databases: initial_inflight_infos
-                .map(
-                    |(
-                        database_id,
-                        subscriptions,
-                        database_inflight_info,
-                        creating_job_inflight_info,
-                    )| {
-                        fn actor_infos(
-                            nodes: &HashMap<WorkerId, ControlStreamNode>,
-                            fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
-                        ) -> Vec<ActorInfo> {
-                            {
-                                fragment_infos
-                                    .flat_map(|fragment| {
-                                        fragment.actors.iter().map(|(actor_id, actor)| {
-                                            let host_addr = nodes
-                                                .get(&actor.worker_id)
-                                                .expect("worker should exist for inflight actor")
-                                                .worker
-                                                .host
-                                                .clone()
-                                                .expect("should exist");
-                                            ActorInfo {
-                                                actor_id: *actor_id,
-                                                host: Some(host_addr),
-                                            }
-                                        })
-                                    })
-                                    .collect()
-                            }
-                        }
-                        let mut graphs = vec![PbInitialPartialGraph {
-                            partial_graph_id: to_partial_graph_id(None),
-                            subscriptions: subscriptions.into_iter().collect_vec(),
-                            actor_infos: actor_infos(
-                                &self.nodes,
-                                database_inflight_info.fragment_infos(),
-                            ),
-                        }];
-                        graphs.extend(creating_job_inflight_info.map(|job| {
-                            PbInitialPartialGraph {
-                                partial_graph_id: to_partial_graph_id(Some(job.job_id)),
-                                subscriptions: vec![],
-                                actor_infos: actor_infos(&self.nodes, job.fragment_infos()),
-                            }
-                        }));
-                        PbDatabaseInitialPartialGraph {
-                            database_id: database_id.database_id,
-                            graphs,
-                        }
-                    },
-                )
+                .map(|(database_id, subscriptions, creating_job_ids)| {
+                    let mut graphs = vec![PbInitialPartialGraph {
+                        partial_graph_id: to_partial_graph_id(None),
+                        subscriptions: subscriptions.into_iter().collect_vec(),
+                    }];
+                    graphs.extend(creating_job_ids.map(|job_id| PbInitialPartialGraph {
+                        partial_graph_id: to_partial_graph_id(Some(job_id)),
+                        subscriptions: vec![],
+                    }));
+                    PbDatabaseInitialPartialGraph {
+                        database_id: database_id.database_id,
+                        graphs,
+                    }
+                })
                 .collect(),
             term_id,
         }
@@ -398,6 +382,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     node_to_collect: NodeToCollect,
     database_state: BarrierWorkerState,
     create_mview_tracker: CreateMviewProgressTracker,
+    creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     committed_epoch: u64,
 }
 
@@ -413,20 +398,36 @@ impl Debug for DatabaseInitialBarrierCollector {
 impl DatabaseInitialBarrierCollector {
     pub(super) fn is_collected(&self) -> bool {
         self.node_to_collect.is_empty()
+            && self
+                .creating_streaming_job_controls
+                .values()
+                .all(|job| job.is_empty())
     }
 
-    pub(super) fn database_state(&self) -> &BarrierWorkerState {
-        &self.database_state
+    pub(super) fn database_state(
+        &self,
+    ) -> (
+        &BarrierWorkerState,
+        &HashMap<TableId, CreatingStreamingJobControl>,
+    ) {
+        (&self.database_state, &self.creating_streaming_job_controls)
     }
 
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
         assert_eq!(self.database_id.database_id, resp.database_id);
-        assert_eq!(resp.epoch, self.committed_epoch);
-        assert!(
-            self.node_to_collect
-                .remove(&(resp.worker_id as _))
-                .is_some()
-        );
+        if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
+            self.creating_streaming_job_controls
+                .get_mut(&creating_job_id)
+                .expect("should exist")
+                .collect(resp);
+        } else {
+            assert_eq!(resp.epoch, self.committed_epoch);
+            assert!(
+                self.node_to_collect
+                    .remove(&(resp.worker_id as _))
+                    .is_some()
+            );
+        }
     }
 
     pub(super) fn finish(self) -> DatabaseCheckpointControl {
@@ -436,11 +437,16 @@ impl DatabaseInitialBarrierCollector {
             self.create_mview_tracker,
             self.database_state,
             self.committed_epoch,
+            self.creating_streaming_job_controls,
         )
     }
 
     pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
         is_valid_after_worker_err(&mut self.node_to_collect, worker_id)
+            && self
+                .creating_streaming_job_controls
+                .values_mut()
+                .all(|job| job.is_valid_after_worker_err(worker_id))
     }
 }
 
@@ -450,19 +456,21 @@ impl ControlStreamManager {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
-        info: InflightDatabaseInfo,
+        jobs: HashMap<TableId, InflightStreamingJobInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
+        state_table_log_epochs: &mut HashMap<TableId, Vec<Vec<u64>>>,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
-        subscription_info: InflightSubscriptionInfo,
+        mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
-        let source_split_assignments = info
-            .fragment_infos()
+        let source_split_assignments = jobs
+            .values()
+            .flat_map(|job| job.fragment_infos())
             .flat_map(|info| info.actors.keys())
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
@@ -480,22 +488,65 @@ impl ControlStreamManager {
             subscriptions_to_add: Default::default(),
         });
 
-        let mut epochs = info.existing_table_ids().map(|table_id| {
-            (
-                table_id,
-                state_table_committed_epochs
-                    .remove(&table_id)
-                    .expect("should exist"),
-            )
-        });
-        let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
-        for (table_id, epoch) in epochs {
-            assert_eq!(
-                prev_epoch, epoch,
-                "{} has different committed epoch to {}",
-                first_table_id, table_id
-            );
+        fn resolve_jobs_committed_epoch(
+            state_table_committed_epochs: &mut HashMap<TableId, u64>,
+            jobs: impl IntoIterator<Item = &InflightStreamingJobInfo>,
+        ) -> u64 {
+            let mut epochs = jobs
+                .into_iter()
+                .flat_map(InflightStreamingJobInfo::existing_table_ids)
+                .map(|table_id| {
+                    (
+                        table_id,
+                        state_table_committed_epochs
+                            .remove(&table_id)
+                            .expect("should exist"),
+                    )
+                });
+            let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
+            for (table_id, epoch) in epochs {
+                assert_eq!(
+                    prev_epoch, epoch,
+                    "{} has different committed epoch to {}",
+                    first_table_id, table_id
+                );
+            }
+            prev_epoch
         }
+
+        let mut database_jobs = HashMap::new();
+        let mut snapshot_backfill_jobs = HashMap::new();
+        let mut background_mviews = HashMap::new();
+
+        for (job_id, job) in jobs {
+            if let Some((definition, stream_job_fragments)) = background_jobs.remove(&job_id) {
+                if stream_job_fragments.fragments().any(|fragment| {
+                    (fragment.fragment_type_mask
+                        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
+                        != 0
+                }) {
+                    debug!(%job_id, definition, "recovered snapshot backfill job");
+                    snapshot_backfill_jobs.insert(job_id, (job, definition, stream_job_fragments));
+                } else {
+                    database_jobs.insert(job_id, job);
+                    background_mviews.insert(job_id, (definition, stream_job_fragments));
+                }
+            } else {
+                database_jobs.insert(job_id, job);
+            }
+        }
+
+        let database_job_log_epochs: HashMap<_, _> = database_jobs
+            .keys()
+            .filter_map(|job_id| {
+                state_table_log_epochs
+                    .remove(job_id)
+                    .map(|epochs| (*job_id, epochs))
+            })
+            .collect();
+
+        let prev_epoch =
+            resolve_jobs_committed_epoch(state_table_committed_epochs, database_jobs.values());
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
         let curr_epoch = prev_epoch.next();
@@ -505,55 +556,186 @@ impl ControlStreamManager {
             kind: BarrierKind::Initial,
         };
 
-        let node_actors =
-            edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
-                (
-                    fragment_info.fragment_id,
-                    &fragment_info.nodes,
-                    fragment_info.actors.iter().map(move |(actor_id, actor)| {
-                        (
-                            stream_actors.get(actor_id).expect("should exist"),
-                            actor.worker_id,
-                        )
-                    }),
+        let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
+        for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
+            let committed_epoch =
+                resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
+            if committed_epoch == barrier_info.prev_epoch() {
+                info!(
+                    "recovered creating snapshot backfill job {} catch up with upstream already",
+                    job_id
+                );
+                background_mviews
+                    .try_insert(job_id, (definition, stream_job_fragments))
+                    .expect("non-duplicate");
+                database_jobs
+                    .try_insert(job_id, info)
+                    .expect("non-duplicate");
+                continue;
+            }
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                stream_job_fragments
+                    .fragments()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| {
+                anyhow!(
+                    "recovered snapshot backfill job {} has no snapshot backfill info",
+                    job_id
                 )
-            }));
+            })?;
+            let mut snapshot_epoch = None;
+            let upstream_table_ids: HashSet<_> = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+                .cloned()
+                .collect();
+            for (upstream_table_id, epoch) in
+                snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
+            {
+                let epoch = epoch.ok_or_else(|| anyhow!("recovered snapshot backfill job {} to upstream {} has not set snapshot epoch", job_id, upstream_table_id))?;
+                let snapshot_epoch = snapshot_epoch.get_or_insert(epoch);
+                if *snapshot_epoch != epoch {
+                    return Err(anyhow!("snapshot epoch {} to upstream {} different to snapshot epoch {} to previous upstream", epoch, upstream_table_id, snapshot_epoch).into());
+                }
+            }
+            let snapshot_epoch = snapshot_epoch.ok_or_else(|| {
+                anyhow!(
+                    "snapshot backfill job {} has not set snapshot epoch",
+                    job_id
+                )
+            })?;
+            for upstream_table_id in &upstream_table_ids {
+                subscription_info
+                    .mv_depended_subscriptions
+                    .entry(*upstream_table_id)
+                    .or_default()
+                    .try_insert(job_id.into(), max(snapshot_epoch, committed_epoch))
+                    .expect("non-duplicate");
+            }
+            ongoing_snapshot_backfill_jobs
+                .try_insert(
+                    job_id,
+                    (
+                        info,
+                        definition,
+                        stream_job_fragments,
+                        upstream_table_ids,
+                        committed_epoch,
+                        snapshot_epoch,
+                    ),
+                )
+                .expect("non-duplicated");
+        }
 
-        let background_mviews = info.job_ids().filter_map(|job_id| {
-            background_jobs
-                .get(&job_id)
-                .map(|(definition, stream_job_fragments)| {
-                    (job_id, (definition.clone(), stream_job_fragments))
-                })
-        });
-        let tracker = CreateMviewProgressTracker::recover(background_mviews, hummock_version_stats);
+        let node_to_collect = {
+            let node_actors = edges.collect_actors_to_create(database_jobs.values().flatten().map(
+                move |fragment_info| {
+                    (
+                        fragment_info.fragment_id,
+                        &fragment_info.nodes,
+                        fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                            (
+                                stream_actors.get(actor_id).expect("should exist"),
+                                actor.worker_id,
+                            )
+                        }),
+                    )
+                },
+            ));
 
-        let node_to_collect = self.inject_barrier(
-            database_id,
-            None,
-            Some(mutation),
-            &barrier_info,
-            info.fragment_infos(),
-            info.fragment_infos(),
-            Some(node_actors),
-            (&subscription_info).into_iter().collect(),
-            vec![],
-        )?;
-        debug!(
-            ?node_to_collect,
-            database_id = database_id.database_id,
-            "inject initial barrier"
+            let node_to_collect = self.inject_barrier(
+                database_id,
+                None,
+                Some(mutation.clone()),
+                &barrier_info,
+                database_jobs.values().flatten(),
+                database_jobs.values().flatten(),
+                Some(node_actors),
+                (&subscription_info).into_iter().collect(),
+                vec![],
+            )?;
+            debug!(
+                ?node_to_collect,
+                database_id = database_id.database_id,
+                "inject initial barrier"
+            );
+            node_to_collect
+        };
+
+        let tracker = CreateMviewProgressTracker::recover(
+            background_mviews
+                .iter()
+                .map(|(table_id, (definition, stream_job_fragments))| {
+                    (*table_id, (definition.clone(), stream_job_fragments))
+                }),
+            hummock_version_stats,
         );
+
+        let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
+            HashMap::new();
+        for (
+            job_id,
+            (
+                info,
+                definition,
+                stream_job_fragments,
+                upstream_table_ids,
+                committed_epoch,
+                snapshot_epoch,
+            ),
+        ) in ongoing_snapshot_backfill_jobs
+        {
+            let node_actors =
+                edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
+                    (
+                        fragment_info.fragment_id,
+                        &fragment_info.nodes,
+                        fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                            (
+                                stream_actors.get(actor_id).expect("should exist"),
+                                actor.worker_id,
+                            )
+                        }),
+                    )
+                }));
+
+            creating_streaming_job_controls.insert(
+                job_id,
+                CreatingStreamingJobControl::recover(
+                    database_id,
+                    job_id,
+                    definition,
+                    upstream_table_ids,
+                    &database_job_log_epochs,
+                    snapshot_epoch,
+                    committed_epoch,
+                    barrier_info.curr_epoch.value().0,
+                    info,
+                    stream_job_fragments,
+                    hummock_version_stats,
+                    node_actors,
+                    mutation.clone(),
+                    self,
+                )?,
+            );
+        }
 
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
+        let mut database = InflightDatabaseInfo::empty();
+        database_jobs
+            .into_values()
+            .for_each(|job| database.extend(job));
         let database_state =
-            BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
+            BarrierWorkerState::recovery(new_epoch, database, subscription_info, is_paused);
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
             database_state,
             create_mview_tracker: tracker,
+            creating_streaming_job_controls,
             committed_epoch,
         })
     }
@@ -568,7 +750,7 @@ impl ControlStreamManager {
         applied_graph_info: &InflightDatabaseInfo,
         edges: &mut Option<FragmentEdgeBuildResult>,
     ) -> MetaResult<NodeToCollect> {
-        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges));
+        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges, self));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -588,7 +770,7 @@ impl ControlStreamManager {
             applied_graph_info.fragment_infos(),
             command
                 .as_ref()
-                .map(|command| command.actors_to_create(pre_applied_graph_info, edges))
+                .map(|command| command.actors_to_create(pre_applied_graph_info, edges, self))
                 .unwrap_or_default(),
             subscriptions_to_add,
             subscriptions_to_remove,
@@ -616,7 +798,7 @@ impl ControlStreamManager {
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
         for worker_id in node_actors.keys() {
-            if !self.nodes.contains_key(worker_id) {
+            if !self.connected_nodes.contains_key(worker_id) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
@@ -627,27 +809,8 @@ impl ControlStreamManager {
                 .collect();
 
         let mut node_need_collect = HashMap::new();
-        let new_actors_location_to_broadcast = new_actors
-            .iter()
-            .flatten()
-            .flat_map(|(worker_id, actor_infos)| {
-                actor_infos
-                    .iter()
-                    .flat_map(|(_, (_, actors))| actors.iter())
-                    .map(|actor_info| ActorInfo {
-                        actor_id: actor_info.0.actor_id,
-                        host: self
-                            .nodes
-                            .get(worker_id)
-                            .expect("have checked exist previously")
-                            .worker
-                            .host
-                            .clone(),
-                    })
-            })
-            .collect_vec();
 
-        self.nodes
+        self.connected_nodes
             .iter()
             .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect = node_actors
@@ -686,7 +849,6 @@ impl ControlStreamManager {
                                             .cloned()
                                             .collect(),
                                         partial_graph_id,
-                                        broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
                                             .as_mut()
                                             .map(|new_actors| new_actors.remove(&(*node_id as _)))
@@ -709,7 +871,7 @@ impl ControlStreamManager {
                                                                             fragment_id,
                                                                             UpstreamActors {
                                                                                 actors: upstreams
-                                                                                    .into_iter()
+                                                                                    .into_values()
                                                                                     .collect(),
                                                                             },
                                                                         )
@@ -734,8 +896,8 @@ impl ControlStreamManager {
                         .map_err(|_| {
                             MetaError::from(anyhow!(
                                 "failed to send request to {} {:?}",
-                                node.worker.id,
-                                node.worker.host
+                                node.worker_id,
+                                node.host
                             ))
                         })?;
 
@@ -764,7 +926,7 @@ impl ControlStreamManager {
         creating_job_id: Option<TableId>,
     ) {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
-        self.nodes.iter().for_each(|(_, node)| {
+        self.connected_nodes.iter().for_each(|(_, node)| {
             if node
                 .handle
                 .request_sender
@@ -778,7 +940,7 @@ impl ControlStreamManager {
                         ),
                     ),
                 }).is_err() {
-                warn!(%database_id, ?creating_job_id, worker_id = node.worker.id, "fail to add partial graph to worker")
+                warn!(%database_id, ?creating_job_id, worker_id = node.worker_id, "fail to add partial graph to worker")
             }
         });
     }
@@ -795,7 +957,7 @@ impl ControlStreamManager {
             .into_iter()
             .map(|job_id| to_partial_graph_id(Some(job_id)))
             .collect_vec();
-        self.nodes.iter().for_each(|(_, node)| {
+        self.connected_nodes.iter().for_each(|(_, node)| {
             if node.handle
                 .request_sender
                 .send(StreamingControlStreamRequest {
@@ -810,7 +972,7 @@ impl ControlStreamManager {
                 })
                 .is_err()
             {
-                warn!(worker_id = node.worker.id,node = ?node.worker.host,"failed to send remove partial graph request");
+                warn!(worker_id = node.worker_id,node = ?node.host,"failed to send remove partial graph request");
             }
         })
     }
@@ -820,27 +982,29 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         reset_request_id: u32,
     ) -> HashSet<WorkerId> {
-        self.nodes.iter().filter_map(|(worker_id, node)| {
-            if node.handle
-                .request_sender
-                .send(StreamingControlStreamRequest {
-                    request: Some(
-                        streaming_control_stream_request::Request::ResetDatabase(
+        self.connected_nodes
+            .iter()
+            .filter_map(|(worker_id, node)| {
+                if node
+                    .handle
+                    .request_sender
+                    .send(StreamingControlStreamRequest {
+                        request: Some(streaming_control_stream_request::Request::ResetDatabase(
                             ResetDatabaseRequest {
                                 database_id: database_id.database_id,
                                 reset_request_id,
                             },
-                        ),
-                    ),
-                })
-                .is_err()
-            {
-                warn!(worker_id, node = ?node.worker.host,"failed to send reset database request");
-                None
-            } else {
-                Some(*worker_id)
-            }
-        }).collect()
+                        )),
+                    })
+                    .is_err()
+                {
+                    warn!(worker_id, node = ?node.host,"failed to send reset database request");
+                    None
+                } else {
+                    Some(*worker_id)
+                }
+            })
+            .collect()
     }
 }
 

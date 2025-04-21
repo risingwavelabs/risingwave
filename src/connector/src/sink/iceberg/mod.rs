@@ -84,15 +84,14 @@ use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::{
-    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
-};
+use super::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
-    SinkCommittedEpochSubscriber, SinkError, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
 use crate::connector_common::IcebergCommon;
-use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::enforce_secret::EnforceSecret;
+use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
@@ -146,6 +145,21 @@ pub struct IcebergConfig {
     // We should try to find and use that as default commit retry num first.
     #[serde(default = "default_commit_retry_num")]
     pub commit_retry_num: u32,
+}
+
+impl EnforceSecret for IcebergConfig {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            IcebergCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        IcebergCommon::enforce_one(prop)
+    }
 }
 
 impl IcebergConfig {
@@ -228,6 +242,17 @@ pub struct IcebergSink {
     param: SinkParam,
     // In upsert mode, it never be None and empty.
     unique_column_ids: Option<Vec<usize>>,
+}
+
+impl EnforceSecret for IcebergSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            IcebergConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<SinkParam> for IcebergSink {
@@ -473,7 +498,7 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<IcebergSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
     const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = ICEBERG_SINK;
@@ -504,32 +529,19 @@ impl Sink for IcebergSink {
             IcebergSinkWriter::new_append_only(table, &writer_param).await?
         };
 
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let writer = CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
-            self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
-            inner,
-        )
-        .await?;
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
-
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
+        let writer = CoordinatedLogSinker::new(
+            &writer_param,
+            self.param.clone(),
+            inner,
             commit_checkpoint_interval,
-        ))
+        )
+        .await?;
+
+        Ok(writer)
     }
 
     fn is_coordinated_sink(&self) -> bool {
@@ -640,9 +652,9 @@ pub struct IcebergWriterMetrics {
     // They are actually used in `PrometheusWriterBuilder`:
     //     WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone())
     // We keep them here to let the guard cleans the labels from metrics registry when dropped
-    _write_qps: LabelGuardedIntCounter<3>,
-    _write_latency: LabelGuardedHistogram<3>,
-    write_bytes: LabelGuardedIntCounter<3>,
+    _write_qps: LabelGuardedIntCounter,
+    _write_latency: LabelGuardedHistogram,
+    write_bytes: LabelGuardedIntCounter,
 }
 
 impl IcebergSinkWriter {
@@ -846,7 +858,10 @@ impl IcebergSinkWriter {
             MonitoredPositionDeleteWriterBuilder::new(
                 SortPositionDeleteWriterBuilder::new(
                     parquet_writer_builder.clone(),
-                    1024,
+                    writer_param
+                        .streaming_config
+                        .developer
+                        .iceberg_sink_positional_delete_cache_size,
                     None,
                     None,
                 ),
@@ -2292,6 +2307,7 @@ mod test {
                 rest_signing_name: None,
                 rest_signing_region: None,
                 rest_sigv4_enabled: None,
+                hosted_catalog: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

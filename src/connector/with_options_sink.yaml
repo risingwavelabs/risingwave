@@ -524,6 +524,11 @@ IcebergConfig:
     comments: enable config load.
     required: false
     default: Default::default
+  - name: hosted_catalog
+    field_type: bool
+    comments: This is only used by iceberg engine to enable the hosted catalog.
+    required: false
+    default: Default::default
   - name: primary_key
     field_type: Vec<String>
     required: false
@@ -683,6 +688,10 @@ KafkaConfig:
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+  - name: properties.socket.keepalive.enable
+    field_type: bool
+    required: false
+    default: 'true'
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -1177,6 +1186,10 @@ SqlServerConfig:
   - name: sqlserver.database
     field_type: String
     required: true
+  - name: sqlserver.schema
+    field_type: String
+    required: false
+    default: '"dbo" . to_owned ()'
   - name: sqlserver.table
     field_type: String
     required: true
