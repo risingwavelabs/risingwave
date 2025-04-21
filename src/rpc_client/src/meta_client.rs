@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -70,6 +70,7 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
+use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -92,6 +93,7 @@ use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::*;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -1277,6 +1279,24 @@ impl MetaClient {
         Ok(resp.meta_store_endpoint)
     }
 
+    pub async fn alter_sink_props(
+        &self,
+        sink_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: sink_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref,
+            object_type: AlterConnectorPropsObject::Sink as i32,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
     pub async fn set_system_param(
         &self,
         param: String,
@@ -2120,6 +2140,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
+            ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

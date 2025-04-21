@@ -4948,8 +4948,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59819ed1a4be90fe66aa13df94adff2365bbb94929ad1052fd977e06b478974e"
+source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4969,8 +4968,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06d425cd90d221e1c2cad27717260414cc1d55fa325fd8d02bbd928e4930d7d8"
+source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
 dependencies = [
  "ahash 0.8.11",
  "bincode 1.3.3",
@@ -4999,8 +4997,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2582199b44afa6f617464335cc50debdff3caaf9a93972369bbf7e42cc630d"
+source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -5025,8 +5022,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba8dbd31e2caa79d3816b6924c30cc7eb292eac731d8a2af9c59bec911c27924"
+source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -7550,9 +7546,9 @@ dependencies = [
 
 [[package]]
 name = "mixtrics"
-version = "0.0.6"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41434672bd2f5df1b8ed58e0cee0a7a1000bf8dd711cea5a5540afcf41f7d7fb"
+checksum = "749ed12bab176c8a42c13a679dd2de12876d5ad4abe7525548e31ae001a9ebbf"
 dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.1",
@@ -11641,6 +11637,7 @@ dependencies = [
  "futures",
  "hex",
  "http 1.3.1",
+ "indexmap 2.9.0",
  "itertools 0.14.0",
  "jsonbb",
  "madsim-tokio",

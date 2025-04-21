@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -65,6 +65,7 @@ use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, PbTableParallelism, PbThrottleTarget, RecoveryStatus, SystemParams,
 };
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -1120,6 +1121,16 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
+        unimplemented!()
+    }
+
+    async fn alter_sink_props(
+        &self,
+        _sink_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        _connector_conn_ref: Option<u32>,
+    ) -> RpcResult<()> {
         unimplemented!()
     }
 

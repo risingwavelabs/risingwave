@@ -62,6 +62,7 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
@@ -2995,6 +2996,20 @@ impl fmt::Display for SqlOption {
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
+    }
+}
+
+impl TryFrom<(&String, &String)> for SqlOption {
+    type Error = ParserError;
+
+    fn try_from((name, value): (&String, &String)) -> Result<Self, Self::Error> {
+        let query = format!("{} = {}", name, value);
+        let mut tokenizer = Tokenizer::new(query.as_str());
+        let tokens = tokenizer.tokenize_with_location()?;
+        let mut parser = Parser(&tokens);
+        parser
+            .parse_sql_option()
+            .map_err(|e| ParserError::ParserError(e.to_string()))
     }
 }
 
