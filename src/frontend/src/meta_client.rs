@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
@@ -38,6 +38,7 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -135,6 +136,14 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
+
+    async fn alter_sink_props(
+        &self,
+        sink_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 }
@@ -323,6 +332,23 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_meta_store_endpoint(&self) -> Result<String> {
         self.0.get_meta_store_endpoint().await
+    }
+
+    async fn alter_sink_props(
+        &self,
+        sink_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .alter_sink_props(
+                sink_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
     }
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {

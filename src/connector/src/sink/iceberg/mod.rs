@@ -500,6 +500,7 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -512,6 +513,11 @@ impl Sink for IcebergSink {
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
         let _ = self.create_and_validate_table().await?;
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        IcebergConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 

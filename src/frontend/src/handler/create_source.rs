@@ -923,7 +923,7 @@ pub async fn bind_create_source_or_table_with_connector(
         resolve_connection_ref_and_secret_ref(
             with_properties,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 

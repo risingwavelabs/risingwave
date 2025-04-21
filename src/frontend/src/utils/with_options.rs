@@ -207,7 +207,7 @@ impl WithOptions {
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
-    object: TelemetryDatabaseObject,
+    object: Option<TelemetryDatabaseObject>,
 ) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
@@ -235,21 +235,23 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         };
 
-        // report to telemetry
-        report_event(
-            PbTelemetryEventStage::CreateStreamJob,
-            "connection_ref",
-            0,
-            connector_name.clone(),
-            Some(object),
-            {
-                connection_params.as_ref().map(|cp| {
-                    jsonbb::json!({
-                        "connection_type": cp.connection_type().as_str_name().to_owned()
+        if let Some(object) = object {
+            // report to telemetry
+            report_event(
+                PbTelemetryEventStage::CreateStreamJob,
+                "connection_ref",
+                0,
+                connector_name.clone(),
+                Some(object),
+                {
+                    connection_params.as_ref().map(|cp| {
+                        jsonbb::json!({
+                            "connection_type": cp.connection_type().as_str_name().to_owned()
+                        })
                     })
-                })
-            },
-        );
+                },
+            );
+        }
     }
 
     let mut inner_secret_refs = {

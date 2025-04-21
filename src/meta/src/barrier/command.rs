@@ -30,12 +30,14 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
-    DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -55,7 +57,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
+    ConnectorPropsChange, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -328,6 +331,8 @@ pub enum Command {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
     },
+
+    ConnectorPropsChange(ConnectorPropsChange),
 }
 
 impl Command {
@@ -441,6 +446,7 @@ impl Command {
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
+            Command::ConnectorPropsChange(_) => None,
         }
     }
 
@@ -928,12 +934,10 @@ impl Command {
                             .unwrap();
                     }
                 }
-
                 let dropped_actors = reschedules
                     .values()
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
-
                 let mut actor_splits = HashMap::new();
 
                 for reschedule in reschedules.values() {
@@ -985,6 +989,22 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                 }],
             })),
+            Command::ConnectorPropsChange(config) => {
+                let mut connector_props_infos = HashMap::default();
+                for (k, v) in config {
+                    connector_props_infos.insert(
+                        *k,
+                        ConnectorPropsInfo {
+                            connector_props_info: v.clone(),
+                        },
+                    );
+                }
+                Some(Mutation::ConnectorPropsChange(
+                    ConnectorPropsChangeMutation {
+                        connector_props_infos,
+                    },
+                ))
+            }
         }
     }
 

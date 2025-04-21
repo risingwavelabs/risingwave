@@ -37,12 +37,13 @@ use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
+use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
-    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -310,6 +311,7 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
@@ -514,7 +516,8 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
-            | Mutation::DropSubscriptions { .. } => false,
+            | Mutation::DropSubscriptions { .. }
+            | Mutation::ConnectorPropsChange(_) => false,
         }
     }
 
@@ -739,6 +742,24 @@ impl Mutation {
                     )
                     .collect(),
             }),
+            Mutation::ConnectorPropsChange(map) => {
+                PbMutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
+                    connector_props_infos: map
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                ConnectorPropsInfo {
+                                    connector_props_info: options
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+            }
         }
     }
 
@@ -857,6 +878,24 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
+            PbMutation::ConnectorPropsChange(alter_connector_props) => {
+                Mutation::ConnectorPropsChange(
+                    alter_connector_props
+                        .connector_props_infos
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                options
+                                    .connector_props_info
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {
