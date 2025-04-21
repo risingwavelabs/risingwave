@@ -854,6 +854,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         break;
                     }
                     LogStoreBufferItem::Barrier { .. } => {
+                        progress.apply_aligned(read_state.vnodes().clone(), item_epoch, None);
                         continue;
                     }
                 }
