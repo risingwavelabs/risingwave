@@ -47,6 +47,29 @@ pub struct BackfillOrderState {
     actor_to_fragment_id: HashMap<ActorId, FragmentId>,
 }
 
+pub fn get_root_nodes(
+    backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+    stream_job_fragments: &StreamJobFragments,
+) -> Vec<FragmentId> {
+    let mut root_nodes = HashSet::new();
+    for fragment in stream_job_fragments.fragments() {
+        if fragment.fragment_type_mask
+            & (FragmentTypeFlag::StreamScan as u32 | FragmentTypeFlag::SourceScan as u32)
+            > 0
+        {
+            root_nodes.insert(fragment.fragment_id);
+        }
+    }
+
+    for children in backfill_orders.values() {
+        for child in children {
+            root_nodes.remove(child);
+        }
+    }
+
+    root_nodes.into_iter().collect()
+}
+
 // constructor
 impl BackfillOrderState {
     pub fn new(
