@@ -165,6 +165,7 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_pb::common::Uint32Vector;
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
@@ -299,6 +300,8 @@ pub struct AddMutation {
     pub pause: bool,
     /// (`upstream_mv_table_id`,  `subscriber_id`)
     pub subscriptions_to_add: Vec<(TableId, u32)>,
+    /// nodes which should start backfill
+    pub backfill_nodes_to_start: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -535,6 +538,23 @@ impl Barrier {
         }
     }
 
+    pub fn is_backfill_pause_on_startup(&self, backfill_fragment_id: FragmentId) -> bool {
+        match self.mutation.as_deref() {
+            Some(Mutation::Add(AddMutation {
+                backfill_nodes_to_start,
+                ..
+            }))
+            | Some(Mutation::AddAndUpdate(
+                AddMutation {
+                    backfill_nodes_to_start,
+                    ..
+                },
+                _,
+            )) => !backfill_nodes_to_start.contains(&backfill_fragment_id),
+            _ => true,
+        }
+    }
+
     /// Whether this barrier is for resume.
     pub fn is_resume(&self) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Resume))
@@ -679,6 +699,7 @@ impl Mutation {
                 splits,
                 pause,
                 subscriptions_to_add,
+                backfill_nodes_to_start,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -701,6 +722,9 @@ impl Mutation {
                         upstream_mv_table_id: table_id.table_id,
                     })
                     .collect(),
+                backfill_nodes_to_start: Some(Uint32Vector {
+                    data: backfill_nodes_to_start.iter().cloned().collect(),
+                }),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -852,6 +876,14 @@ impl Mutation {
                             (TableId::new(*upstream_mv_table_id), *subscriber_id)
                         },
                     )
+                    .collect(),
+                backfill_nodes_to_start: add
+                    .backfill_nodes_to_start
+                    .as_ref()
+                    .expect("not None")
+                    .data
+                    .iter()
+                    .copied()
                     .collect(),
             }),
 

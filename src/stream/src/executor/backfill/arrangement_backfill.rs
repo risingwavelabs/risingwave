@@ -144,8 +144,8 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        let mut paused = first_barrier.is_pause_on_startup();
-        let mut backfill_paused = true;
+        let mut global_pause = first_barrier.is_pause_on_startup();
+        let mut backfill_paused = first_barrier.is_backfill_pause_on_startup(self.fragment_id);
         let first_epoch = first_barrier.epoch;
         let is_newly_added = first_barrier.is_newly_added(self.actor_id);
         // The first barrier message should be propagated.
@@ -234,7 +234,7 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
                     // Check if stream paused
-                    let paused = paused
+                    let paused = global_pause
                         || backfill_paused
                         || matches!(self.rate_limiter.rate_limit(), RateLimit::Pause);
                     // Create the snapshot stream
@@ -501,10 +501,10 @@ where
                     use crate::executor::Mutation;
                     match mutation {
                         Mutation::Pause => {
-                            paused = true;
+                            global_pause = true;
                         }
                         Mutation::Resume => {
-                            paused = false;
+                            global_pause = false;
                         }
                         Mutation::StartFragmentBackfill { fragment_ids } if backfill_paused => {
                             if fragment_ids.contains(&self.fragment_id) {

@@ -26,7 +26,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
-use risingwave_pb::common::ActorInfo;
+use risingwave_pb::common::{ActorInfo, Uint32Vector};
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -44,6 +44,7 @@ use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::InflightSubscriptionInfo;
+use crate::barrier::backfill_order_control::get_root_nodes;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::ControlStreamManager;
@@ -708,6 +709,7 @@ impl Command {
                         stream_job_fragments: table_fragments,
                         init_split_assignment: split_assignment,
                         upstream_fragment_downstreams,
+                        fragment_backfill_ordering,
                         ..
                     },
                 job_type,
@@ -734,6 +736,10 @@ impl Command {
                     } else {
                         Default::default()
                     };
+                let backfill_nodes_to_start: Vec<_> = match fragment_backfill_ordering {
+                    Some(backfill_order) => get_root_nodes(backfill_order, table_fragments),
+                    None => table_fragments.fragment_ids().collect(),
+                };
                 let add = Some(Mutation::Add(AddMutation {
                     actor_dispatchers: edges
                         .dispatchers
@@ -748,6 +754,9 @@ impl Command {
                     // If the cluster is already paused, the new actors should be paused too.
                     pause: is_currently_paused,
                     subscriptions_to_add,
+                    backfill_nodes_to_start: Some(Uint32Vector {
+                        data: backfill_nodes_to_start,
+                    }),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1000,6 +1009,7 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                     subscriber_id: *subscription_id,
                 }],
+                backfill_nodes_to_start: Some(Uint32Vector { data: vec![] }),
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
