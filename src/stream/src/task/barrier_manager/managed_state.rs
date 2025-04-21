@@ -821,12 +821,15 @@ impl DatabaseManagedBarrierState {
             );
         }
 
-        // Spawn a trivial join handle to be compatible with the unit test
+        // Spawn a trivial join handle to be compatible with the unit test. In the unit tests that involve local barrier manager,
+        // actors are spawned in the local test logic, but we assume that there is an entry for each spawned actor in ·actor_states`,
+        // so under cfg!(test) we add a dummy entry for each new actor.
         if cfg!(test) {
             for actor_id in &request.actor_ids_to_collect {
                 if !self.actor_states.contains_key(actor_id) {
                     let (tx, rx) = unbounded_channel();
                     let join_handle = self.actor_manager.runtime.spawn(async move {
+                        // The rx is spawned so that tx.send() will not fail.
                         let _ = rx;
                         pending().await
                     });
