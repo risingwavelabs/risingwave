@@ -16,9 +16,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
-use pgwire::pg_protocol::truncated_fmt;
+use pgwire::pg_protocol::{MinSession as _, truncated_fmt};
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};

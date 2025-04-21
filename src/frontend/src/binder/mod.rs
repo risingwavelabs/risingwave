@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use pgwire::pg_protocol::MinSession as _;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
@@ -49,7 +50,7 @@ pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
 pub use insert::BoundInsert;
-use pgwire::pg_server::{Session, SessionId};
+use pgwire::pg_server::SessionId;
 pub use query::BoundQuery;
 pub use relation::{
     BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,

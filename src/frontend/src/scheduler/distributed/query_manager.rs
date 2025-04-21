@@ -19,7 +19,8 @@ use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 
 use futures::Stream;
-use pgwire::pg_server::{BoxedError, Session, SessionId};
+use pgwire::pg_protocol::MinSession as _;
+use pgwire::pg_server::{BoxedError, SessionId};
 use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManagerRef, WorkerNodeSelector,
 };

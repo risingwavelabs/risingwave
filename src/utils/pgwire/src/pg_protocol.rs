@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::panic::AssertUnwindSafe;
@@ -65,10 +64,7 @@ static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
         }
     });
 
-tokio::task_local! {
-    /// The current session. Concrete type is erased for different session implementations.
-    pub static CURRENT_SESSION: Weak<dyn Any + Send + Sync>
-}
+pub use risingwave_common::util::session::{CURRENT_SESSION, MinSession};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -316,11 +312,13 @@ where
     /// - `None` means to terminate the current connection
     /// - `Some(())` means to continue processing the next message
     async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
+        use risingwave_common::util::session::MinSession;
+
         let span = self.root_span_for_msg(&msg);
         let weak_session = self
             .session
             .as_ref()
-            .map(|s| Arc::downgrade(s) as Weak<dyn Any + Send + Sync>);
+            .map(|s| Arc::downgrade(s) as Weak<dyn MinSession>);
 
         // Processing the message itself.
         //

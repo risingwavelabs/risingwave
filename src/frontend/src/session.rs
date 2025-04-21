@@ -28,6 +28,7 @@ use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
+use pgwire::pg_protocol::MinSession;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::{
     BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
@@ -1561,6 +1562,12 @@ impl SessionManagerImpl {
     }
 }
 
+impl MinSession for SessionImpl {
+    fn id(&self) -> SessionId {
+        self.id
+    }
+}
+
 impl Session for SessionImpl {
     type Portal = Portal;
     type PreparedStatement = PrepareStatement;
@@ -1584,10 +1591,6 @@ impl Session for SessionImpl {
 
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
-    }
-
-    fn id(&self) -> SessionId {
-        self.id
     }
 
     async fn parse(

@@ -23,6 +23,8 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::session::MinSession;
+pub use risingwave_common::util::session::SessionId;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
@@ -37,9 +39,6 @@ use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-type ProcessId = i32;
-type SecretKey = i32;
-pub type SessionId = (ProcessId, SecretKey);
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
@@ -75,7 +74,7 @@ pub trait SessionManager: Send + Sync + 'static {
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
-pub trait Session: Send + Sync {
+pub trait Session: MinSession + Send + Sync {
     type ValuesStream: ValuesStream;
     type PreparedStatement: Send + Clone + 'static;
     type Portal: Send + Clone + std::fmt::Display + 'static;
@@ -123,8 +122,6 @@ pub trait Session: Send + Sync {
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
 
     fn user_authenticator(&self) -> &UserAuthenticator;
-
-    fn id(&self) -> SessionId;
 
     fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
 
@@ -344,6 +341,7 @@ mod tests {
     use futures::StreamExt;
     use futures::stream::BoxStream;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::session::MinSession;
     use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
@@ -393,6 +391,12 @@ mod tests {
         }
 
         fn end_session(&self, _session: &Self::Session) {}
+    }
+
+    impl MinSession for MockSession {
+        fn id(&self) -> SessionId {
+            (0, 0)
+        }
     }
 
     impl Session for MockSession {
@@ -474,10 +478,6 @@ mod tests {
 
         fn user_authenticator(&self) -> &UserAuthenticator {
             &UserAuthenticator::None
-        }
-
-        fn id(&self) -> SessionId {
-            (0, 0)
         }
 
         fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
