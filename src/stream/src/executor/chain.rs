@@ -146,6 +146,7 @@ mod test {
                     splits: Default::default(),
                     pause: false,
                     subscriptions_to_add: vec![],
+                    backfill_nodes_to_start: Default::default(),
                 }),
             )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),

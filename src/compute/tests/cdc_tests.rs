@@ -309,6 +309,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             splits,
             pause: false,
             subscriptions_to_add: vec![],
+            backfill_nodes_to_start: Default::default(),
         }));
 
     tx.send_barrier(init_barrier);
