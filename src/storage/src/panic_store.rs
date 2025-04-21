@@ -118,10 +118,6 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn is_dirty(&self) -> bool {
-        panic!("should not operate on the panic state store!");
-    }
-
     async fn init(&mut self, _epoch: InitOptions) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }

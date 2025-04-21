@@ -30,6 +30,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
@@ -145,6 +146,8 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
         })
     }
 }
+
+impl<T: CdcSourceTypeTrait> EnforceSecret for CdcProperties<T> {} // todo: enforce jdbc like properties
 
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where

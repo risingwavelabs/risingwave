@@ -161,17 +161,71 @@ SELECT id, price, date FROM price WHERE date <= DATE '2025-02-10' - interval '5'
 1 100.5000000000 2025-02-01
 2 200.7500000000 2025-02-05
 
+query ??? rowsort
+SELECT id, price, date FROM price WHERE price < 180.20
+----
+1 100.5000000000 2025-02-01
+3 150.2500000000 2025-02-10
+
 statement ok
 DROP TABLE price;
 
 statement ok
-set sink_decouple = false;
+DROP CONNECTION my_conn;
 
-statement error
-create table t2(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+# test hosted catalog (meta store as jdbc catalog)
+statement ok
+create connection my_hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
 
 statement ok
-DROP CONNECTION my_conn;
+set iceberg_engine_connection = 'public.my_hosted_catalog_conn';
+
+statement ok
+create table t_hosted_catalog(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_hosted_catalog values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+query ??
+select * from t_hosted_catalog;
+----
+1 xxx
+
+query ?
+select count(*) from rw_catalog.iceberg_tables where table_namespace = 'public' and table_name = 't_hosted_catalog';
+----
+1
+
+statement ok
+DROP TABLE t_hosted_catalog;
+
+query ?
+select count(*) from rw_catalog.iceberg_tables;
+----
+0
+
+statement ok
+DROP CONNECTION public.my_hosted_catalog_conn;
+
+statement ok
+set sink_decouple = false;
+
+# test iceberg engine without sink decouple
+statement error
+create table t2(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
 DROP SECRET my_secret;

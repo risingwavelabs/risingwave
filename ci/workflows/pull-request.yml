@@ -152,7 +152,7 @@ steps:
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-parallel-tests"
+      || build.pull_request.labels includes "ci/run-e2e-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
       - "build"
@@ -174,16 +174,6 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 14
-    retry: *auto-retry
-
-  - label: "end-to-end test (parallel, in-memory)"
-    if: build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
-    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
-    depends_on: "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end source test"

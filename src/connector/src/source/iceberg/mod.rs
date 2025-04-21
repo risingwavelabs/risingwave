@@ -29,6 +29,7 @@ use iceberg::spec::DataContentType;
 use iceberg::table::Table;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
+use phf::{Set, phf_set};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
@@ -44,6 +45,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
 use crate::connector_common::IcebergCommon;
+use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{
@@ -65,6 +67,25 @@ pub struct IcebergProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for IcebergProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "catalog.jdbc.password",
+    };
+
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            IcebergCommon::enforce_one(prop)?;
+            if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+                return Err(EnforceSecretError {
+                    key: prop.to_owned(),
+                }
+                .into());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl IcebergProperties {
