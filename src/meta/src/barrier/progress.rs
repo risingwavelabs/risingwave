@@ -583,12 +583,6 @@ impl CreateMviewProgressTracker {
 
         let backfill_order_state = fragment_backfill_ordering
             .map(|order| BackfillOrderState::new(order, &table_fragments));
-        if let Some(ref state) = backfill_order_state {
-            self.queue_backfill(state.get_current_nodes());
-        } else {
-            // queue all nodes
-            self.queue_backfill(table_fragments.fragment_ids())
-        }
         let progress = Progress::new(
             actors,
             upstream_mv_count,
