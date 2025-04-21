@@ -1027,7 +1027,7 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
 
-    /// Deprecated soon. Please use `throttle` instead io throttling.
+    /// Deprecated soon. Please use `throttle` to do I/O throttling instead.
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
