@@ -42,12 +42,12 @@ use risingwave_pb::stream_plan::{
     StreamScanType, backfill_order_strategy,
 };
 
-use crate::MetaResult;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, Fragment, FragmentId, StreamActor};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
+use crate::{MetaError, MetaResult};
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
@@ -1027,7 +1027,7 @@ impl CompleteStreamFragmentGraph {
                                         })
                                         .collect::<Option<Vec<_>>>()
                                         .context(
-                                            "column not found in the upstream materialized view",
+                                            "BUG: column not found in the upstream materialized view",
                                         )?;
                                     (dist_key_indices, output_indices)
                                 };
@@ -1152,11 +1152,9 @@ impl CompleteStreamFragmentGraph {
                     res = Some(columns);
                 });
 
-                let columns = res.context("failed to locate downstream scan")?;
+                let output_columns = res.context("failed to locate downstream scan")?;
 
-                let mut upstream_columns = None;
-
-                let node = graph
+                let nodes = graph
                     .fragments
                     .get(&table_fragment_id)
                     .unwrap()
@@ -1164,26 +1162,27 @@ impl CompleteStreamFragmentGraph {
                     .as_ref()
                     .unwrap();
 
-                stream_graph_visitor::visit_stream_node(node, |node_body| {
-                    if let NodeBody::Materialize(materialize) = node_body {
-                        let columns = materialize.column_ids().clone();
-                        upstream_columns = Some(columns);
-                    }
-                });
-
-                let upstream_columns =
-                    upstream_columns.context("failed to locate upstream materialize")?;
-
-                let output_indices = columns
-                    .iter()
-                    .map(|c| {
-                        upstream_columns
-                            .iter()
-                            .position(|&id| id == *c)
-                            .map(|i| i as u32)
-                    })
-                    .collect::<Option<Vec<_>>>()
-                    .context("column not found in the upstream materialize")?;
+                let (dist_key_indices, output_indices) = {
+                    let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
+                    let all_column_ids = mview_node.column_ids();
+                    let dist_key_indices = mview_node.dist_key_indices();
+                    let output_indices = output_columns
+                        .iter()
+                        .map(|c| {
+                            all_column_ids
+                                .iter()
+                                .position(|&id| id == *c)
+                                .map(|i| i as u32)
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            MetaError::invalid_parameter(
+                                "unable to drop or alter the column due to \
+                                 being referenced by downstream materialized views or sinks",
+                            )
+                        })?;
+                    (dist_key_indices, output_indices)
+                };
 
                 let edge = StreamFragmentEdge {
                     id: EdgeId::DownstreamExternal(DownstreamExternalEdgeId {
@@ -1192,7 +1191,8 @@ impl CompleteStreamFragmentGraph {
                     }),
                     dispatch_strategy: DispatchStrategy {
                         output_indices,
-                        ..dispatch_strategy.clone()
+                        r#type: dispatch_strategy.r#type,
+                        dist_key_indices,
                     },
                 };
 
