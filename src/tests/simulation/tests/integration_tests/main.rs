@@ -30,3 +30,4 @@ mod sink;
 mod storage;
 mod throttle;
 mod utils;
+mod log_store;

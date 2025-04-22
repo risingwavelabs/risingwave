@@ -1,0 +1,2 @@
+#[cfg(madsim)]
+mod recovery;
