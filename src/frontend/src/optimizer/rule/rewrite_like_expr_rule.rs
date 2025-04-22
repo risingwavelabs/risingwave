@@ -22,7 +22,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionC
 use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 
-/// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
+/// `RewriteLikeExprRule` rewrites simple like expression, so that it can benefit from index selection.
 /// col like 'ABC' => col = 'ABC'
 /// col like 'ABC%' => col >= 'ABC' and col < 'ABD'
 /// col like 'ABC%E' => col >= 'ABC' and col < 'ABD' and col like 'ABC%E'
@@ -31,7 +31,7 @@ impl Rule for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         if filter.predicate().conjunctions.iter().any(|expr| {
-            let mut has_like = HasLikeExprVisitor { has: false };
+            let mut has_like = HasSimpleLikeExprVisitor { has: false };
             has_like.visit_expr(expr);
             has_like.has
         }) {
@@ -43,12 +43,14 @@ impl Rule for RewriteLikeExprRule {
     }
 }
 
-struct HasLikeExprVisitor {
+struct HasSimpleLikeExprVisitor {
     has: bool,
 }
 
-impl ExprVisitor for HasLikeExprVisitor {
+impl ExprVisitor for HasSimpleLikeExprVisitor {
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        // Simple like expression is a binary operation, e.g. col like 'ABC%'
+        // While col like 'ABC%' ESCAPE '!' is a complex like expression.
         if func_call.func_type() == ExprType::Like
             && func_call.inputs().len() == 2
             && let (_, ExprImpl::InputRef(_), ExprImpl::Literal(_)) =
