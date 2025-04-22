@@ -50,6 +50,7 @@ struct HasLikeExprVisitor {
 impl ExprVisitor for HasLikeExprVisitor {
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
         if func_call.func_type() == ExprType::Like
+            && func_call.inputs().len() == 2
             && let (_, ExprImpl::InputRef(_), ExprImpl::Literal(_)) =
                 func_call.clone().decompose_as_binary()
         {

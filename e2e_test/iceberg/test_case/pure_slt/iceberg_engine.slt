@@ -209,6 +209,11 @@ select count(*) from rw_catalog.iceberg_tables where table_namespace = 'public' 
 ----
 1
 
+query ?
+SELECT table_namespace FROM iceberg_tables WHERE catalog_name = 'dev' AND (table_namespace = 'public' OR table_namespace LIKE '*' ESCAPE '!') LIMIT 1;
+----
+public
+
 statement ok
 DROP TABLE t_hosted_catalog;
 
