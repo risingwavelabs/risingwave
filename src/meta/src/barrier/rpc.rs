@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -33,7 +34,9 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::{
+    AddMutation, Barrier, BarrierMutation, FragmentTypeFlag, SubscriptionUpstreamInfo,
+};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
@@ -54,16 +57,18 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
-use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::{
+    BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
+};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate, StreamJobFragments};
-use crate::stream::build_actor_connector_splits;
+use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
 fn to_partial_graph_id(job_id: Option<TableId>) -> u32 {
@@ -377,6 +382,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     node_to_collect: NodeToCollect,
     database_state: BarrierWorkerState,
     create_mview_tracker: CreateMviewProgressTracker,
+    creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     committed_epoch: u64,
 }
 
@@ -392,20 +398,36 @@ impl Debug for DatabaseInitialBarrierCollector {
 impl DatabaseInitialBarrierCollector {
     pub(super) fn is_collected(&self) -> bool {
         self.node_to_collect.is_empty()
+            && self
+                .creating_streaming_job_controls
+                .values()
+                .all(|job| job.is_empty())
     }
 
-    pub(super) fn database_state(&self) -> &BarrierWorkerState {
-        &self.database_state
+    pub(super) fn database_state(
+        &self,
+    ) -> (
+        &BarrierWorkerState,
+        &HashMap<TableId, CreatingStreamingJobControl>,
+    ) {
+        (&self.database_state, &self.creating_streaming_job_controls)
     }
 
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
         assert_eq!(self.database_id.database_id, resp.database_id);
-        assert_eq!(resp.epoch, self.committed_epoch);
-        assert!(
-            self.node_to_collect
-                .remove(&(resp.worker_id as _))
-                .is_some()
-        );
+        if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
+            self.creating_streaming_job_controls
+                .get_mut(&creating_job_id)
+                .expect("should exist")
+                .collect(resp);
+        } else {
+            assert_eq!(resp.epoch, self.committed_epoch);
+            assert!(
+                self.node_to_collect
+                    .remove(&(resp.worker_id as _))
+                    .is_some()
+            );
+        }
     }
 
     pub(super) fn finish(self) -> DatabaseCheckpointControl {
@@ -415,11 +437,16 @@ impl DatabaseInitialBarrierCollector {
             self.create_mview_tracker,
             self.database_state,
             self.committed_epoch,
+            self.creating_streaming_job_controls,
         )
     }
 
     pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
         is_valid_after_worker_err(&mut self.node_to_collect, worker_id)
+            && self
+                .creating_streaming_job_controls
+                .values_mut()
+                .all(|job| job.is_valid_after_worker_err(worker_id))
     }
 }
 
@@ -429,19 +456,21 @@ impl ControlStreamManager {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
-        info: InflightDatabaseInfo,
+        jobs: HashMap<TableId, InflightStreamingJobInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
+        state_table_log_epochs: &mut HashMap<TableId, Vec<Vec<u64>>>,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
-        subscription_info: InflightSubscriptionInfo,
+        mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
-        let source_split_assignments = info
-            .fragment_infos()
+        let source_split_assignments = jobs
+            .values()
+            .flat_map(|job| job.fragment_infos())
             .flat_map(|info| info.actors.keys())
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
@@ -459,22 +488,65 @@ impl ControlStreamManager {
             subscriptions_to_add: Default::default(),
         });
 
-        let mut epochs = info.existing_table_ids().map(|table_id| {
-            (
-                table_id,
-                state_table_committed_epochs
-                    .remove(&table_id)
-                    .expect("should exist"),
-            )
-        });
-        let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
-        for (table_id, epoch) in epochs {
-            assert_eq!(
-                prev_epoch, epoch,
-                "{} has different committed epoch to {}",
-                first_table_id, table_id
-            );
+        fn resolve_jobs_committed_epoch(
+            state_table_committed_epochs: &mut HashMap<TableId, u64>,
+            jobs: impl IntoIterator<Item = &InflightStreamingJobInfo>,
+        ) -> u64 {
+            let mut epochs = jobs
+                .into_iter()
+                .flat_map(InflightStreamingJobInfo::existing_table_ids)
+                .map(|table_id| {
+                    (
+                        table_id,
+                        state_table_committed_epochs
+                            .remove(&table_id)
+                            .expect("should exist"),
+                    )
+                });
+            let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
+            for (table_id, epoch) in epochs {
+                assert_eq!(
+                    prev_epoch, epoch,
+                    "{} has different committed epoch to {}",
+                    first_table_id, table_id
+                );
+            }
+            prev_epoch
         }
+
+        let mut database_jobs = HashMap::new();
+        let mut snapshot_backfill_jobs = HashMap::new();
+        let mut background_mviews = HashMap::new();
+
+        for (job_id, job) in jobs {
+            if let Some((definition, stream_job_fragments)) = background_jobs.remove(&job_id) {
+                if stream_job_fragments.fragments().any(|fragment| {
+                    (fragment.fragment_type_mask
+                        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
+                        != 0
+                }) {
+                    debug!(%job_id, definition, "recovered snapshot backfill job");
+                    snapshot_backfill_jobs.insert(job_id, (job, definition, stream_job_fragments));
+                } else {
+                    database_jobs.insert(job_id, job);
+                    background_mviews.insert(job_id, (definition, stream_job_fragments));
+                }
+            } else {
+                database_jobs.insert(job_id, job);
+            }
+        }
+
+        let database_job_log_epochs: HashMap<_, _> = database_jobs
+            .keys()
+            .filter_map(|job_id| {
+                state_table_log_epochs
+                    .remove(job_id)
+                    .map(|epochs| (*job_id, epochs))
+            })
+            .collect();
+
+        let prev_epoch =
+            resolve_jobs_committed_epoch(state_table_committed_epochs, database_jobs.values());
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
         let curr_epoch = prev_epoch.next();
@@ -484,55 +556,186 @@ impl ControlStreamManager {
             kind: BarrierKind::Initial,
         };
 
-        let node_actors =
-            edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
-                (
-                    fragment_info.fragment_id,
-                    &fragment_info.nodes,
-                    fragment_info.actors.iter().map(move |(actor_id, actor)| {
-                        (
-                            stream_actors.get(actor_id).expect("should exist"),
-                            actor.worker_id,
-                        )
-                    }),
+        let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
+        for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
+            let committed_epoch =
+                resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
+            if committed_epoch == barrier_info.prev_epoch() {
+                info!(
+                    "recovered creating snapshot backfill job {} catch up with upstream already",
+                    job_id
+                );
+                background_mviews
+                    .try_insert(job_id, (definition, stream_job_fragments))
+                    .expect("non-duplicate");
+                database_jobs
+                    .try_insert(job_id, info)
+                    .expect("non-duplicate");
+                continue;
+            }
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                stream_job_fragments
+                    .fragments()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| {
+                anyhow!(
+                    "recovered snapshot backfill job {} has no snapshot backfill info",
+                    job_id
                 )
-            }));
+            })?;
+            let mut snapshot_epoch = None;
+            let upstream_table_ids: HashSet<_> = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+                .cloned()
+                .collect();
+            for (upstream_table_id, epoch) in
+                snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
+            {
+                let epoch = epoch.ok_or_else(|| anyhow!("recovered snapshot backfill job {} to upstream {} has not set snapshot epoch", job_id, upstream_table_id))?;
+                let snapshot_epoch = snapshot_epoch.get_or_insert(epoch);
+                if *snapshot_epoch != epoch {
+                    return Err(anyhow!("snapshot epoch {} to upstream {} different to snapshot epoch {} to previous upstream", epoch, upstream_table_id, snapshot_epoch).into());
+                }
+            }
+            let snapshot_epoch = snapshot_epoch.ok_or_else(|| {
+                anyhow!(
+                    "snapshot backfill job {} has not set snapshot epoch",
+                    job_id
+                )
+            })?;
+            for upstream_table_id in &upstream_table_ids {
+                subscription_info
+                    .mv_depended_subscriptions
+                    .entry(*upstream_table_id)
+                    .or_default()
+                    .try_insert(job_id.into(), max(snapshot_epoch, committed_epoch))
+                    .expect("non-duplicate");
+            }
+            ongoing_snapshot_backfill_jobs
+                .try_insert(
+                    job_id,
+                    (
+                        info,
+                        definition,
+                        stream_job_fragments,
+                        upstream_table_ids,
+                        committed_epoch,
+                        snapshot_epoch,
+                    ),
+                )
+                .expect("non-duplicated");
+        }
 
-        let background_mviews = info.job_ids().filter_map(|job_id| {
-            background_jobs
-                .get(&job_id)
-                .map(|(definition, stream_job_fragments)| {
-                    (job_id, (definition.clone(), stream_job_fragments))
-                })
-        });
-        let tracker = CreateMviewProgressTracker::recover(background_mviews, hummock_version_stats);
+        let node_to_collect = {
+            let node_actors = edges.collect_actors_to_create(database_jobs.values().flatten().map(
+                move |fragment_info| {
+                    (
+                        fragment_info.fragment_id,
+                        &fragment_info.nodes,
+                        fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                            (
+                                stream_actors.get(actor_id).expect("should exist"),
+                                actor.worker_id,
+                            )
+                        }),
+                    )
+                },
+            ));
 
-        let node_to_collect = self.inject_barrier(
-            database_id,
-            None,
-            Some(mutation),
-            &barrier_info,
-            info.fragment_infos(),
-            info.fragment_infos(),
-            Some(node_actors),
-            (&subscription_info).into_iter().collect(),
-            vec![],
-        )?;
-        debug!(
-            ?node_to_collect,
-            database_id = database_id.database_id,
-            "inject initial barrier"
+            let node_to_collect = self.inject_barrier(
+                database_id,
+                None,
+                Some(mutation.clone()),
+                &barrier_info,
+                database_jobs.values().flatten(),
+                database_jobs.values().flatten(),
+                Some(node_actors),
+                (&subscription_info).into_iter().collect(),
+                vec![],
+            )?;
+            debug!(
+                ?node_to_collect,
+                database_id = database_id.database_id,
+                "inject initial barrier"
+            );
+            node_to_collect
+        };
+
+        let tracker = CreateMviewProgressTracker::recover(
+            background_mviews
+                .iter()
+                .map(|(table_id, (definition, stream_job_fragments))| {
+                    (*table_id, (definition.clone(), stream_job_fragments))
+                }),
+            hummock_version_stats,
         );
+
+        let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
+            HashMap::new();
+        for (
+            job_id,
+            (
+                info,
+                definition,
+                stream_job_fragments,
+                upstream_table_ids,
+                committed_epoch,
+                snapshot_epoch,
+            ),
+        ) in ongoing_snapshot_backfill_jobs
+        {
+            let node_actors =
+                edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
+                    (
+                        fragment_info.fragment_id,
+                        &fragment_info.nodes,
+                        fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                            (
+                                stream_actors.get(actor_id).expect("should exist"),
+                                actor.worker_id,
+                            )
+                        }),
+                    )
+                }));
+
+            creating_streaming_job_controls.insert(
+                job_id,
+                CreatingStreamingJobControl::recover(
+                    database_id,
+                    job_id,
+                    definition,
+                    upstream_table_ids,
+                    &database_job_log_epochs,
+                    snapshot_epoch,
+                    committed_epoch,
+                    barrier_info.curr_epoch.value().0,
+                    info,
+                    stream_job_fragments,
+                    hummock_version_stats,
+                    node_actors,
+                    mutation.clone(),
+                    self,
+                )?,
+            );
+        }
 
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
+        let mut database = InflightDatabaseInfo::empty();
+        database_jobs
+            .into_values()
+            .for_each(|job| database.extend(job));
         let database_state =
-            BarrierWorkerState::recovery(new_epoch, info, subscription_info, is_paused);
+            BarrierWorkerState::recovery(new_epoch, database, subscription_info, is_paused);
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
             database_state,
             create_mview_tracker: tracker,
+            creating_streaming_job_controls,
             committed_epoch,
         })
     }

@@ -42,6 +42,7 @@ use super::{
     DummySinkCommitCoordinator, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SinkError, SinkParam, SinkWriterMetrics,
 };
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -79,6 +80,12 @@ pub struct StarrocksCommon {
     pub table: String,
 }
 
+impl EnforceSecret for StarrocksCommon {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
+        "starrocks.password", "starrocks.user"
+    };
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct StarrocksConfig {
@@ -107,6 +114,12 @@ pub struct StarrocksConfig {
     pub partial_update: Option<String>,
 
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+impl EnforceSecret for StarrocksConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        StarrocksCommon::enforce_one(prop)
+    }
 }
 
 fn default_commit_checkpoint_interval() -> u64 {
@@ -141,6 +154,17 @@ pub struct StarrocksSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecret for StarrocksSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            StarrocksConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl StarrocksSink {
@@ -253,6 +277,7 @@ impl Sink for StarrocksSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -291,6 +316,11 @@ impl Sink for StarrocksSink {
         let starrocks_columns_desc = client.get_columns_from_starrocks().await?;
 
         self.check_column_name_and_type(starrocks_columns_desc)?;
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        StarrocksConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 

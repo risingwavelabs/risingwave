@@ -25,6 +25,7 @@ use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
 use jni::JavaVM;
+use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -64,6 +65,7 @@ use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -79,21 +81,24 @@ macro_rules! def_remote_sink {
             //todo!, delete java impl
             // { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
             // { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
-            { Cassandra, CassandraSink, "cassandra" }
-            { Jdbc, JdbcSink, "jdbc" }
-            { DeltaLake, DeltaLakeSink, "deltalake" }
-            { HttpJava, HttpJavaSink, "http" }
+            { Cassandra, CassandraSink, "cassandra", [ "cassandra.url" ] }
+            { Jdbc, JdbcSink, "jdbc", [ "jdbc.url" ] }
         }
     };
-    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ] }) => {
         #[derive(Debug)]
         pub struct $variant_name;
         impl RemoteSinkTrait for $variant_name {
             const SINK_NAME: &'static str = $sink_name;
         }
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+                $($enforce_secret_prop),*
+            };
+        }
         pub type $sink_type_name = RemoteSink<$variant_name>;
     };
-    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, |$desc:ident| $body:expr }) => {
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ], |$desc:ident| $body:expr }) => {
         #[derive(Debug)]
         pub struct $variant_name;
         impl RemoteSinkTrait for $variant_name {
@@ -101,6 +106,11 @@ macro_rules! def_remote_sink {
             fn default_sink_decouple($desc: &SinkDesc) -> bool {
                 $body
             }
+        }
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+                $($enforce_secret_prop),*
+            };
         }
         pub type $sink_type_name = RemoteSink<$variant_name>;
     };
@@ -119,7 +129,7 @@ macro_rules! def_remote_sink {
 
 def_remote_sink!();
 
-pub trait RemoteSinkTrait: Send + Sync + 'static {
+pub trait RemoteSinkTrait: EnforceSecret + Send + Sync + 'static {
     const SINK_NAME: &'static str;
     fn default_sink_decouple() -> bool {
         true
@@ -130,6 +140,10 @@ pub trait RemoteSinkTrait: Send + Sync + 'static {
 pub struct RemoteSink<R: RemoteSinkTrait> {
     param: SinkParam,
     _phantom: PhantomData<R>,
+}
+
+impl<R: RemoteSinkTrait> EnforceSecret for RemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
 }
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
@@ -510,6 +524,10 @@ impl LogSinker for RemoteLogSinker {
 pub struct CoordinatedRemoteSink<R: RemoteSinkTrait> {
     param: SinkParam,
     _phantom: PhantomData<R>,
+}
+
+impl<R: RemoteSinkTrait> EnforceSecret for CoordinatedRemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
 }
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {

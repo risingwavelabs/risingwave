@@ -30,12 +30,14 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, Dispatcher, Dispatchers,
-    DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -55,7 +57,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
+    ConnectorPropsChange, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -66,7 +69,7 @@ pub struct Reschedule {
     pub added_actors: HashMap<WorkerId, Vec<ActorId>>,
 
     /// Removed actors in this fragment.
-    pub removed_actors: Vec<ActorId>,
+    pub removed_actors: HashSet<ActorId>,
 
     /// Vnode bitmap updates for some actors in this fragment.
     pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
@@ -328,6 +331,8 @@ pub enum Command {
         subscription_id: u32,
         upstream_mv_table_id: TableId,
     },
+
+    ConnectorPropsChange(ConnectorPropsChange),
 }
 
 impl Command {
@@ -441,6 +446,7 @@ impl Command {
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
+            Command::ConnectorPropsChange(_) => None,
         }
     }
 
@@ -469,6 +475,10 @@ impl BarrierKind {
 
     pub fn is_checkpoint(&self) -> bool {
         matches!(self, BarrierKind::Checkpoint(_))
+    }
+
+    pub fn is_initial(&self) -> bool {
+        matches!(self, BarrierKind::Initial)
     }
 
     pub fn as_str_name(&self) -> &'static str {
@@ -825,8 +835,23 @@ impl Command {
                             .get(&upstream_fragment_id)
                             .expect("should contain");
 
+                        let upstream_reschedule = reschedules.get(&upstream_fragment_id);
+
                         // Record updates for all actors.
                         for &actor_id in upstream_actor_ids {
+                            let added_downstream_actor_id = if upstream_reschedule
+                                .map(|reschedule| !reschedule.removed_actors.contains(&actor_id))
+                                .unwrap_or(true)
+                            {
+                                reschedule
+                                    .added_actors
+                                    .values()
+                                    .flatten()
+                                    .cloned()
+                                    .collect()
+                            } else {
+                                Default::default()
+                            };
                             // Index with the dispatcher id to check duplicates.
                             dispatcher_update
                                 .try_insert(
@@ -838,15 +863,12 @@ impl Command {
                                             .upstream_dispatcher_mapping
                                             .as_ref()
                                             .map(|m| m.to_protobuf()),
-                                        added_downstream_actor_id: reschedule
-                                            .added_actors
-                                            .values()
-                                            .flatten()
-                                            .cloned()
-                                            .collect(),
+                                        added_downstream_actor_id,
                                         removed_downstream_actor_id: reschedule
                                             .removed_actors
-                                            .clone(),
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
                                     },
                                 )
                                 .unwrap();
@@ -905,7 +927,9 @@ impl Command {
                                             .collect(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors
-                                            .clone(),
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
                                     },
                                 )
                                 .unwrap();
@@ -924,12 +948,10 @@ impl Command {
                             .unwrap();
                     }
                 }
-
                 let dropped_actors = reschedules
                     .values()
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
-
                 let mut actor_splits = HashMap::new();
 
                 for reschedule in reschedules.values() {
@@ -981,6 +1003,22 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                 }],
             })),
+            Command::ConnectorPropsChange(config) => {
+                let mut connector_props_infos = HashMap::default();
+                for (k, v) in config {
+                    connector_props_infos.insert(
+                        *k,
+                        ConnectorPropsInfo {
+                            connector_props_info: v.clone(),
+                        },
+                    );
+                }
+                Some(Mutation::ConnectorPropsChange(
+                    ConnectorPropsChangeMutation {
+                        connector_props_infos,
+                    },
+                ))
+            }
         }
     }
 

@@ -30,7 +30,7 @@ use risingwave_storage::store::{
 };
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{FlushInfo, ReaderTruncationOffsetType, SeqId};
+use crate::common::log_store_impl::kv_log_store::{FlushInfo, LogStoreVnodeProgress, SeqId};
 
 pub(crate) struct LogStoreReadState<S: StateStoreRead> {
     pub(super) table_id: TableId,
@@ -41,6 +41,10 @@ pub(crate) struct LogStoreReadState<S: StateStoreRead> {
 impl<S: StateStoreRead> LogStoreReadState<S> {
     pub(crate) fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         self.serde.update_vnode_bitmap(vnode_bitmap);
+    }
+
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        self.serde.vnodes()
     }
 }
 
@@ -87,6 +91,10 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         self.epoch.expect("should have init")
     }
 
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        self.serde.vnodes()
+    }
+
     pub(crate) fn start_writer(&mut self, record_vnode: bool) -> LogStoreStateWriter<'_, S> {
         let written_vnodes = if record_vnode {
             Some(BitmapBuilder::zeroed(self.serde.vnodes().len()))
@@ -103,18 +111,36 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
     pub(crate) fn seal_current_epoch(
         &mut self,
         next_epoch: u64,
-        truncate_offset: Option<ReaderTruncationOffsetType>,
+        progress: LogStoreVnodeProgress,
     ) -> LogStorePostSealCurrentEpoch<'_, S> {
         assert!(!self.on_post_seal);
-        let watermark = truncate_offset
-            .map(|truncation_offset| {
+        let watermark = match progress {
+            LogStoreVnodeProgress::PerVnode(progress) => progress
+                .into_iter()
+                .map(|(vnode, (epoch, seq_id))| {
+                    let bitmap = {
+                        let mut bitmap = BitmapBuilder::zeroed(self.serde.vnodes().len());
+                        bitmap.set(vnode.to_index(), true);
+                        bitmap.finish()
+                    };
+                    VnodeWatermark::new(
+                        bitmap.into(),
+                        self.serde
+                            .serialize_truncation_offset_watermark((epoch, seq_id)),
+                    )
+                })
+                .collect(),
+            LogStoreVnodeProgress::Aligned(vnodes, epoch, seq_id) => {
                 vec![VnodeWatermark::new(
-                    self.serde.vnodes().clone(),
+                    vnodes,
                     self.serde
-                        .serialize_truncation_offset_watermark(truncation_offset),
+                        .serialize_truncation_offset_watermark((epoch, seq_id)),
                 )]
-            })
-            .unwrap_or_default();
+            }
+            LogStoreVnodeProgress::None => {
+                vec![]
+            }
+        };
         self.state_store.seal_current_epoch(
             next_epoch,
             SealCurrentEpochOptions {

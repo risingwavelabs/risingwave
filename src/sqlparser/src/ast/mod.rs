@@ -62,6 +62,7 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
@@ -1465,10 +1466,11 @@ pub enum Statement {
         fragment_id: u32,
         operation: AlterFragmentOperation,
     },
-    /// DESCRIBE TABLE OR SOURCE
+    /// DESCRIBE relation
     Describe {
-        /// Table or Source name
+        /// relation name
         name: ObjectName,
+        kind: DescribeKind,
     },
     /// SHOW OBJECT COMMAND
     ShowObjects {
@@ -1654,6 +1656,16 @@ pub enum Statement {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DescribeKind {
+    /// `DESCRIBE <name>`
+    Plain,
+
+    /// `DESCRIBE FRAGMENTS <name>`
+    Fragments,
+}
+
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = String::new();
@@ -1708,8 +1720,15 @@ impl Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::Describe { name } => {
+            Statement::Describe { name, kind } => {
                 write!(f, "DESCRIBE {}", name)?;
+                match kind {
+                    DescribeKind::Plain => {}
+
+                    DescribeKind::Fragments => {
+                        write!(f, " FRAGMENTS")?;
+                    }
+                }
                 Ok(())
             }
             Statement::ShowObjects {
@@ -2977,6 +2996,20 @@ impl fmt::Display for SqlOption {
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
+    }
+}
+
+impl TryFrom<(&String, &String)> for SqlOption {
+    type Error = ParserError;
+
+    fn try_from((name, value): (&String, &String)) -> Result<Self, Self::Error> {
+        let query = format!("{} = {}", name, value);
+        let mut tokenizer = Tokenizer::new(query.as_str());
+        let tokens = tokenizer.tokenize_with_location()?;
+        let mut parser = Parser(&tokens);
+        parser
+            .parse_sql_option()
+            .map_err(|e| ParserError::ParserError(e.to_string()))
     }
 }
 

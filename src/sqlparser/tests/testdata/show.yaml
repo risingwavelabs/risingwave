@@ -40,7 +40,7 @@
   formatted_ast: 'ShowObjects { object: Source { schema: Some(Ident { value: "t", quote_style: None }) }, filter: None }'
 - input: DESCRIBE schema.t
   formatted_sql: DESCRIBE schema.t
-  formatted_ast: 'Describe { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }'
+  formatted_ast: 'Describe { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]), kind: Plain }'
 - input: SHOW COLUMNS FROM schema.t
   formatted_sql: SHOW COLUMNS FROM schema.t
   formatted_ast: 'ShowObjects { object: Columns { table: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }, filter: None }'
