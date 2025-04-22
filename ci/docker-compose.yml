@@ -69,7 +69,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     depends_on:
       - mysql
       - sqlserver-server
@@ -84,7 +84,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     depends_on:
       - mysql
       - db
@@ -106,13 +106,13 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     volumes:
       - ..:/risingwave
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     depends_on:
       - mysql
       - db
@@ -120,14 +120,14 @@ services:
       - ..:/risingwave
 
   iceberg-engine-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     depends_on:
       - db
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -138,7 +138,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
     depends_on:
       db:
         condition: service_healthy
