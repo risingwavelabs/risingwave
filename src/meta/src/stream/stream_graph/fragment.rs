@@ -1114,7 +1114,7 @@ impl CompleteStreamFragmentGraph {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 // Similar to `extract_upstream_table_columns_except_cross_db_backfill`.
-                let output_columns = || {
+                let output_columns = {
                     let mut res = None;
 
                     stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
@@ -1131,18 +1131,18 @@ impl CompleteStreamFragmentGraph {
                         res = Some(columns);
                     });
 
-                    res.context("failed to locate downstream scan")
+                    res.context("failed to locate downstream scan")?
                 };
 
                 let table_fragment = graph.fragments.get(&table_fragment_id).unwrap();
                 let nodes = table_fragment.node.as_ref().unwrap();
 
                 let (dist_key_indices, output_indices) = match job_type {
-                    StreamingJobType::Table(TableJobType::General) => {
+                    StreamingJobType::Table(_) => {
                         let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
                         let all_column_ids = mview_node.column_ids();
                         let dist_key_indices = mview_node.dist_key_indices();
-                        let output_indices = gen_output_indices(&output_columns()?, all_column_ids)
+                        let output_indices = gen_output_indices(&output_columns, all_column_ids)
                             .ok_or_else(|| {
                                 MetaError::invalid_parameter(
                                     "unable to drop the column due to \
@@ -1151,17 +1151,11 @@ impl CompleteStreamFragmentGraph {
                             })?;
                         (dist_key_indices, output_indices)
                     }
-                    StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                        assert_eq!(*dispatcher_type, DispatcherType::NoShuffle);
-                        (
-                            vec![], // not used for `NoShuffle`
-                            (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
-                        )
-                    }
+
                     StreamingJobType::Source => {
                         let source_node = nodes.get_node_body().unwrap().as_source().unwrap();
                         let all_column_ids = source_node.column_ids().unwrap();
-                        let output_indices = gen_output_indices(&output_columns()?, all_column_ids)
+                        let output_indices = gen_output_indices(&output_columns, all_column_ids)
                             .ok_or_else(|| {
                                 MetaError::invalid_parameter(
                                     "unable to drop the column due to \
