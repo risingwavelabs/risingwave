@@ -27,7 +27,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::{
-    self, visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
+    self, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
@@ -852,7 +852,7 @@ pub struct FragmentGraphUpstreamContext {
 
 pub struct FragmentGraphDownstreamContext {
     original_root_fragment_id: FragmentId,
-    downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+    downstream_fragments: Vec<(DispatcherType, Fragment)>,
     downstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
@@ -895,7 +895,7 @@ impl CompleteStreamFragmentGraph {
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
         original_root_fragment_id: FragmentId,
-        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        downstream_fragments: Vec<(DispatcherType, Fragment)>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {
@@ -917,7 +917,7 @@ impl CompleteStreamFragmentGraph {
         upstream_root_fragments: HashMap<TableId, Fragment>,
         upstream_actor_location: HashMap<ActorId, WorkerId>,
         original_root_fragment_id: FragmentId,
-        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+        downstream_fragments: Vec<(DispatcherType, Fragment)>,
         downstream_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {
@@ -1137,7 +1137,7 @@ impl CompleteStreamFragmentGraph {
 
             // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
             // existing materialized views.
-            for (dispatch_strategy, fragment) in &downstream_fragments {
+            for (dispatcher_type, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 let mut res = None;
@@ -1190,8 +1190,8 @@ impl CompleteStreamFragmentGraph {
                         downstream_fragment_id: id,
                     }),
                     dispatch_strategy: DispatchStrategy {
+                        r#type: *dispatcher_type as i32,
                         output_indices,
-                        r#type: dispatch_strategy.r#type,
                         dist_key_indices,
                     },
                 };
