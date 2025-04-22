@@ -32,7 +32,13 @@ impl SourceManager {
 
         let prev_splits = prev_actor_ids
             .iter()
-            .flat_map(|actor_id| core.actor_splits.get(actor_id).into_iter().flatten())
+            .flat_map(|actor_id| {
+                let splits = core.actor_splits.get(actor_id);
+                if splits.is_none() {
+                    tracing::warn!("actor {actor_id} not found in actor_splits");
+                }
+                splits.into_iter().flatten()
+            })
             .map(|split| (split.id(), split.clone()))
             .collect();
 
