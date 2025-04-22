@@ -126,6 +126,12 @@ except
 select * from m1_no_order
 ----
 
+query I
+select * from m1_no_order
+except
+select * from m1
+----
+
 statement ok
 drop table if exists car_sales cascade;
 
