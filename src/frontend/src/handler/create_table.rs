@@ -929,6 +929,10 @@ fn derive_with_options_for_cdc_table(
 ) -> Result<WithOptionsSecResolved> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
+    let source_database_name: &str = source_with_properties
+        .get("database.name")
+        .ok_or_else(|| anyhow!("The source with properties does not contain 'database.name'"))?
+        .as_str();
     let mut with_options = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
         match connector.as_str() {
@@ -938,6 +942,18 @@ fn derive_with_options_for_cdc_table(
                 let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
                     anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
                 })?;
+                // We allow multiple database names in the source definition
+                if !source_database_name
+                    .split(',')
+                    .map(|s| s.trim())
+                    .any(|name| name == db_name)
+                {
+                    return Err(anyhow!(
+                        "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
+                        db_name,
+                        source_database_name
+                    ).into());
+                }
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
@@ -953,12 +969,19 @@ fn derive_with_options_for_cdc_table(
             SQL_SERVER_CDC_CONNECTOR => {
                 // SQL Server external table name is in 'databaseName.schemaName.tableName' pattern,
                 // we remove the database name prefix and split the schema name and table name
-                let schema_table_name = external_table_name
-                    .split_once('.')
-                    .ok_or_else(|| {
+                let (db_name, schema_table_name) =
+                    external_table_name.split_once('.').ok_or_else(|| {
                         anyhow!("The upstream table name must be in 'database.schema.table' format")
-                    })?
-                    .1;
+                    })?;
+
+                // Currently SQL Server only supports single database name in the source definition
+                if db_name != source_database_name {
+                    return Err(anyhow!(
+                            "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                            db_name,
+                            source_database_name
+                        ).into());
+                }
 
                 let (schema_name, table_name) =
                     schema_table_name.split_once('.').ok_or_else(|| {
