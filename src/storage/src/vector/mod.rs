@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+mod utils;
+
 use std::sync::Arc;
+
+use crate::vector::utils::BoundedNearest;
 
 pub type VectorItem = f32;
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -274,43 +276,9 @@ impl<'a> MeasureDistance<'a> for InnerProductDistanceMeasure<'a> {
     }
 }
 
-struct NearestNode<O> {
-    distance: VectorDistance,
-    output: O,
-}
-
-impl<O> PartialEq for NearestNode<O> {
-    fn eq(&self, other: &Self) -> bool {
-        self.distance.eq(&other.distance)
-    }
-}
-
-impl<O> Eq for NearestNode<O> {}
-
-impl<O> PartialOrd for NearestNode<O> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<O> Ord for NearestNode<O> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.distance
-            .partial_cmp(&other.distance)
-            .unwrap_or_else(|| {
-                panic!(
-                    "failed to compare distance {} and {}",
-                    self.distance, other.distance
-                )
-            })
-    }
-}
-
 pub struct NearestBuilder<'a, O, M: MeasureDistanceBuilder> {
     measure: M::Measure<'a>,
-    /// max-heap with
-    heap: BinaryHeap<NearestNode<O>>,
-    n: usize,
+    nearest: BoundedNearest<O>,
 }
 
 impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
@@ -318,8 +286,7 @@ impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
         assert!(n > 0);
         NearestBuilder {
             measure: M::new(target),
-            heap: BinaryHeap::with_capacity(n),
-            n,
+            nearest: BoundedNearest::new(n),
         }
     }
 
@@ -330,37 +297,13 @@ impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
     ) {
         for (vec, info) in vecs {
             let distance = self.measure.measure(vec);
-            if self.heap.len() >= self.n {
-                let mut top = self.heap.peek_mut().expect("non-empty");
-                if top.distance > distance {
-                    top.distance = distance;
-                    top.output = on_nearest_item(vec, distance, info);
-                }
-            } else {
-                let output = on_nearest_item(vec, distance, info);
-                self.heap.push(NearestNode { distance, output });
-            }
+            self.nearest
+                .insert(distance, || on_nearest_item(vec, distance, info));
         }
     }
 
-    pub fn finish(mut self) -> Vec<O> {
-        let size = self.heap.len();
-        let mut vec = Vec::with_capacity(size);
-        let uninit_slice = vec.spare_capacity_mut();
-        let mut i = size;
-        // elements are popped from max to min, so we write elements from back to front to ensure that the output is sorted ascendingly.
-        while let Some(node) = self.heap.pop() {
-            i -= 1;
-            // safety: `i` is initialized as the size of `self.heap`. It must have decremented for once, and can
-            // decrement for at most `size` time, so it must be that 0 <= i < size
-            unsafe {
-                uninit_slice.get_unchecked_mut(i).write(node.output);
-            }
-        }
-        assert_eq!(i, 0);
-        // safety: should have write `size` elements to the vector.
-        unsafe { vec.set_len(size) }
-        vec
+    pub fn finish(self) -> Vec<O> {
+        self.nearest.collect()
     }
 }
 
