@@ -447,6 +447,7 @@ mod tests {
             sink_from_name: "test".into(),
         };
 
+        let epoch0 = 232;
         let epoch1 = 233;
         let epoch2 = 234;
 
@@ -549,6 +550,15 @@ mod tests {
 
         let (mut client1, mut client2) =
             join(build_client(vnode1), pin!(build_client(vnode2))).await;
+
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch0),
+            client2.align_initial_epoch(epoch1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch1);
+        assert_eq!(aligned_epoch2, epoch1);
 
         {
             // commit epoch1
@@ -725,6 +735,9 @@ mod tests {
         };
 
         let mut client = build_client(vnode).await;
+
+        let aligned_epoch = client.align_initial_epoch(epoch1).await.unwrap();
+        assert_eq!(aligned_epoch, epoch1);
 
         client
             .commit(
@@ -1067,6 +1080,15 @@ mod tests {
             try_join(build_client(vnode1), pin!(build_client(vnode2)))
                 .await
                 .unwrap();
+
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch1),
+            client2.align_initial_epoch(epoch1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch1);
+        assert_eq!(aligned_epoch2, epoch1);
 
         {
             // commit epoch1

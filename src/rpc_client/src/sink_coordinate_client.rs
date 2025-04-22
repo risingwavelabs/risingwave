@@ -141,4 +141,22 @@ impl CoordinatorStreamHandle {
             msg => Err(anyhow!("should get Stopped but get {:?}", msg)),
         }
     }
+
+    pub async fn align_initial_epoch(&mut self, initial_epoch: u64) -> anyhow::Result<u64> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::AlignInitialEpochRequest(
+                initial_epoch,
+            )),
+        })
+        .await?;
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::AlignInitialEpochResponse(epoch)),
+            } => Ok(epoch),
+            msg => Err(anyhow!(
+                "should get AlignInitialEpochResponse but get {:?}",
+                msg
+            )),
+        }
+    }
 }

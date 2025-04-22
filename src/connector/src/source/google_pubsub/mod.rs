@@ -30,7 +30,7 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 
@@ -94,8 +94,8 @@ pub struct PubsubProperties {
     pub unknown_fields: HashMap<String, String>,
 }
 
-impl EnforceSecretOnCloud for PubsubProperties {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for PubsubProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "pubsub.credentials",
     };
 }

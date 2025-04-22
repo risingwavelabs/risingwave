@@ -13,42 +13,31 @@
 // limitations under the License.
 
 use std::cmp::min;
-use std::env;
-use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::path::Path;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
-use itertools::Itertools;
-use rand::seq::IteratorRandom;
-use rand::{Rng, SeedableRng, rng as thread_rng};
-use rand_chacha::ChaChaRng;
+use anyhow::Result;
+use rand::{Rng, rng as thread_rng};
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
 };
 
 use crate::client::RisingWave;
-use crate::cluster::{Cluster, KillOpts};
+use crate::cluster::Cluster;
+use crate::parse::extract_sql_command;
+use crate::slt::background_ddl_mode::*;
+use crate::slt::runner::{random_vnode_count, run_kill_not_allowed, run_no_kill};
+use crate::slt::slt_env::{Env, Opts};
+use crate::slt::vnode_mode::*;
 use crate::utils::TimedExt;
+use crate::{evaluate_skip, wait_or_retry_background_ddl};
 
 // retry a maximum times until it succeed
 const MAX_RETRY: usize = 10;
 
-fn is_create_table_as(sql: &str) -> bool {
-    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
-
-    parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
-}
-
-fn is_sink_into_table(sql: &str) -> bool {
-    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
-
-    parts.len() >= 4 && parts[0] == "create" && parts[1] == "sink" && parts[3] == "into"
-}
-
 #[derive(Debug, PartialEq, Eq)]
-enum SqlCmd {
+pub enum SqlCmd {
     /// Other create statements.
     Create {
         is_create_table_as: bool,
@@ -68,7 +57,6 @@ enum SqlCmd {
     Drop,
     Dml,
     Flush,
-    Alter,
     Others,
 }
 
@@ -101,67 +89,6 @@ impl SqlCmd {
     }
 }
 
-fn extract_sql_command(sql: &str) -> SqlCmd {
-    let sql = sql.to_lowercase();
-    let tokens = sql.split_whitespace();
-    let mut tokens = tokens.multipeek();
-    let first_token = tokens.next().unwrap_or("");
-
-    match first_token {
-        // NOTE(kwannoel):
-        // It's entirely possible for a malformed command to be parsed as `SqlCmd::Create`.
-        // BUT an error should be expected for such a test.
-        // So we don't need to handle this case.
-        // Eventually if there are too many edge cases, we can opt to use our parser.
-        "create" => {
-            let result: Option<SqlCmd> = try {
-                match tokens.next()? {
-                    "materialized" => {
-                        // view
-                        tokens.next()?;
-
-                        // if not exists | name
-                        let next = *tokens.peek()?;
-                        if "if" == next
-                            && let Some("not") = tokens.peek().cloned()
-                            && let Some("exists") = tokens.peek().cloned()
-                        {
-                            tokens.next();
-                            tokens.next();
-                            tokens.next();
-                            let name = tokens.next()?.to_owned();
-                            SqlCmd::CreateMaterializedView { name }
-                        } else {
-                            let name = next.to_owned();
-                            SqlCmd::CreateMaterializedView { name }
-                        }
-                    }
-                    "sink" => SqlCmd::CreateSink {
-                        is_sink_into_table: is_sink_into_table(&sql),
-                    },
-                    _ => SqlCmd::Create {
-                        is_create_table_as: is_create_table_as(&sql),
-                    },
-                }
-            };
-            result.unwrap_or(SqlCmd::Others)
-        }
-        "set" => {
-            if sql.contains("background_ddl") {
-                let enable = sql.contains("true");
-                SqlCmd::SetBackgroundDdl { enable }
-            } else {
-                SqlCmd::Others
-            }
-        }
-        "drop" => SqlCmd::Drop,
-        "insert" | "update" | "delete" => SqlCmd::Dml,
-        "flush" => SqlCmd::Flush,
-        "alter" => SqlCmd::Alter,
-        _ => SqlCmd::Others,
-    }
-}
-
 const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
@@ -177,99 +104,359 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/cursor_multi_conn.slt",
 ];
 
-/// Wait for background mv to finish creating
-async fn wait_background_mv_finished(mview_name: &str) -> Result<()> {
-    let Ok(rw) = RisingWave::connect("frontend".into(), "dev".into()).await else {
-        bail!("failed to connect to frontend for {mview_name}");
-    };
-    let client = rw.pg_client();
-    if client.simple_query("WAIT;").await.is_err() {
-        bail!("failed to wait for background mv to finish creating for {mview_name}");
-    }
+/// Randomly set DDL statements to use `background_ddl`
+mod background_ddl_mode {
+    use anyhow::bail;
+    use rand::Rng;
+    use rand_chacha::ChaChaRng;
+    use sqllogictest::{Condition, Record, StatementExpect};
 
-    let Ok(result) = client
-        .query(
-            "select count(*) from pg_matviews where matviewname=$1;",
-            &[&mview_name],
-        )
-        .await
-    else {
-        bail!("failed to query pg_matviews for {mview_name}");
-    };
+    use crate::client::RisingWave;
+    use crate::slt::SqlCmd;
+    use crate::slt::slt_env::Env;
 
-    match result[0].try_get::<_, i64>(0) {
-        Ok(1) => Ok(()),
-        r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
-    }
-}
-
-// Copied from sqllogictest-bin.
-#[derive(Clone)]
-struct HashPartitioner {
-    count: u64,
-    id: u64,
-}
-
-impl HashPartitioner {
-    fn new(count: u64, id: u64) -> Result<Self> {
-        if count == 0 {
-            bail!("partition count must be greater than zero");
+    /// Wait for background mv to finish creating
+    pub(super) async fn wait_background_mv_finished(mview_name: &str) -> anyhow::Result<()> {
+        let Ok(rw) = RisingWave::connect("frontend".into(), "dev".into()).await else {
+            bail!("failed to connect to frontend for {mview_name}");
+        };
+        let client = rw.pg_client();
+        if client.simple_query("WAIT;").await.is_err() {
+            bail!("failed to wait for background mv to finish creating for {mview_name}");
         }
-        if id >= count {
-            bail!("partition id (zero-based) must be less than count");
+
+        let Ok(result) = client
+            .query(
+                "select count(*) from pg_matviews where matviewname=$1;",
+                &[&mview_name],
+            )
+            .await
+        else {
+            bail!("failed to query pg_matviews for {mview_name}");
+        };
+
+        match result[0].try_get::<_, i64>(0) {
+            Ok(1) => Ok(()),
+            r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
         }
-        Ok(Self { count, id })
+    }
+
+    // TODO(kwannoel): move rng, `background_ddl` to `Env` struct
+    pub(super) async fn set_background_ddl<D, M, T>(
+        tester: &mut sqllogictest::Runner<D, M>,
+        env: &Env,
+        record: &Record<T>,
+        cmd: &SqlCmd,
+        manual_background_ddl_enabled: bool,
+        rng: &mut ChaChaRng,
+        background_ddl_enabled: &mut bool,
+    ) where
+        D: sqllogictest::AsyncDB<ColumnType = T>,
+        M: sqllogictest::MakeConnection<Conn = D>,
+        T: sqllogictest::ColumnType,
+    {
+        if let Record::Statement {
+            loc,
+            conditions,
+            connection,
+            ..
+        } = &record
+            && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+            && !manual_background_ddl_enabled
+            && conditions.iter().all(|c| {
+                *c != Condition::SkipIf {
+                    label: "madsim".to_owned(),
+                }
+            })
+            && env.background_ddl_rate() > 0.0
+        {
+            let background_ddl_setting = rng.random_bool(env.background_ddl_rate());
+            let set_background_ddl = Record::Statement {
+                loc: loc.clone(),
+                conditions: conditions.clone(),
+                connection: connection.clone(),
+                expected: StatementExpect::Ok,
+                sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
+                retry: None,
+            };
+            tester.run_async(set_background_ddl).await.unwrap();
+            *background_ddl_enabled = background_ddl_setting;
+        };
+    }
+
+    // NOTE(kwannoel): only applicable to mvs currently
+    #[macro_export]
+    macro_rules! wait_or_retry_background_ddl {
+        ($record:expr, $name:expr, $iteration:expr) => {
+            let record = $record;
+            let i = $iteration;
+            tracing::debug!(iteration = i, "Retry for background ddl");
+            match wait_background_mv_finished($name).await {
+                Ok(_) => {
+                    tracing::debug!(
+                        iteration = i,
+                        "Record with background_ddl {:?} finished",
+                        record
+                    );
+                    break;
+                }
+                Err(err) => {
+                    tracing::error!(
+                        iteration = i,
+                        ?err,
+                        "failed to wait for background mv to finish creating"
+                    );
+                    if i >= MAX_RETRY {
+                        panic!("failed to run test after retry {i} times, error={err:#?}");
+                    }
+                    continue;
+                }
+            }
+        };
     }
 }
 
-impl Partitioner for HashPartitioner {
-    fn matches(&self, file_name: &str) -> bool {
-        let mut hasher = DefaultHasher::new();
-        file_name.hash(&mut hasher);
-        hasher.finish() % self.count == self.id
+mod vnode_mode {
+    use std::env;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    use std::sync::LazyLock;
+
+    use anyhow::bail;
+    use sqllogictest::Partitioner;
+
+    // Copied from sqllogictest-bin.
+    #[derive(Clone)]
+    pub(super) struct HashPartitioner {
+        count: u64,
+        id: u64,
+    }
+
+    impl HashPartitioner {
+        pub(super) fn new(count: u64, id: u64) -> anyhow::Result<Self> {
+            if count == 0 {
+                bail!("partition count must be greater than zero");
+            }
+            if id >= count {
+                bail!("partition id (zero-based) must be less than count");
+            }
+            Ok(Self { count, id })
+        }
+    }
+
+    impl Partitioner for HashPartitioner {
+        fn matches(&self, file_name: &str) -> bool {
+            let mut hasher = DefaultHasher::new();
+            file_name.hash(&mut hasher);
+            hasher.finish() % self.count == self.id
+        }
+    }
+
+    pub(super) static PARTITIONER: LazyLock<Option<HashPartitioner>> = LazyLock::new(|| {
+        let count = env::var("BUILDKITE_PARALLEL_JOB_COUNT")
+            .ok()?
+            .parse::<u64>()
+            .unwrap();
+        let id = env::var("BUILDKITE_PARALLEL_JOB")
+            .ok()?
+            .parse::<u64>()
+            .unwrap();
+        Some(HashPartitioner::new(count, id).unwrap())
+    });
+}
+
+pub mod slt_env {
+    use rand::SeedableRng;
+    use rand_chacha::ChaChaRng;
+
+    use crate::cluster::KillOpts;
+
+    pub struct Opts {
+        pub kill_opts: KillOpts,
+        /// Probability of `background_ddl` being set to true per ddl record.
+        pub background_ddl_rate: f64,
+        /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
+        pub random_vnode_count: bool,
+    }
+
+    pub(super) struct Env {
+        opts: Opts,
+    }
+
+    impl Env {
+        pub fn new(opts: Opts) -> Self {
+            Self { opts }
+        }
+
+        pub fn get_rng() -> ChaChaRng {
+            let seed = std::env::var("MADSIM_TEST_SEED")
+                .unwrap_or("0".to_owned())
+                .parse::<u64>()
+                .unwrap();
+            ChaChaRng::seed_from_u64(seed)
+        }
+
+        pub fn background_ddl_rate(&self) -> f64 {
+            self.opts.background_ddl_rate
+        }
+
+        pub fn kill(&self) -> bool {
+            self.opts.kill_opts.kill_compute
+                || self.opts.kill_opts.kill_meta
+                || self.opts.kill_opts.kill_frontend
+                || self.opts.kill_opts.kill_compactor
+        }
+
+        pub fn random_vnode_count(&self) -> bool {
+            self.opts.random_vnode_count
+        }
+
+        pub fn kill_opts(&self) -> KillOpts {
+            self.opts.kill_opts
+        }
+
+        pub fn kill_rate(&self) -> f64 {
+            self.opts.kill_opts.kill_rate as f64
+        }
     }
 }
 
-static PARTITIONER: LazyLock<Option<HashPartitioner>> = LazyLock::new(|| {
-    let count = env::var("BUILDKITE_PARALLEL_JOB_COUNT")
-        .ok()?
-        .parse::<u64>()
-        .unwrap();
-    let id = env::var("BUILDKITE_PARALLEL_JOB")
-        .ok()?
-        .parse::<u64>()
-        .unwrap();
-    Some(HashPartitioner::new(count, id).unwrap())
-});
+mod runner {
+    use std::time::Duration;
 
-pub struct Opts {
-    pub kill_opts: KillOpts,
-    /// Probability of `background_ddl` being set to true per ddl record.
-    pub background_ddl_rate: f64,
-    /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
-    pub random_vnode_count: bool,
+    use rand::prelude::IteratorRandom;
+    use rand::rng as thread_rng;
+    use sqllogictest::{Record, StatementExpect, TestError};
+
+    use crate::slt::slt_env::Env;
+    use crate::slt::{MAX_RETRY, SqlCmd};
+    use crate::utils::TimedExt;
+    #[macro_export]
+    macro_rules! evaluate_skip {
+        ($env:expr, $path:expr) => {
+            if let Some(partitioner) = PARTITIONER.as_ref()
+                && !partitioner.matches($path.to_str().unwrap())
+            {
+                println!("[skip partition] {}", $path.display());
+                continue;
+            } else if $env.kill() && KILL_IGNORE_FILES.iter().any(|s| $path.ends_with(s)) {
+                println!("[skip kill] {}", $path.display());
+                continue;
+            } else {
+                println!("[run] {}", $path.display());
+            }
+        };
+    }
+
+    pub(super) fn random_vnode_count<T: sqllogictest::ColumnType>(
+        env: &Env,
+        records: &[Record<T>],
+    ) -> bool {
+        env.random_vnode_count()
+            && records.iter().all(|record| {
+                if let Record::Statement { sql, .. } | Record::Query { sql, .. } = record
+                    && sql.to_lowercase().contains("parallelism")
+                {
+                    println!("[RANDOM VNODE COUNT] skip: {}", sql);
+                    false
+                } else {
+                    true
+                }
+            })
+    }
+
+    /// `kill` is totally disabled.
+    pub(super) async fn run_no_kill<D, M, T>(
+        tester: &mut sqllogictest::Runner<D, M>,
+        random_vnode_count: bool,
+        cmd: &SqlCmd,
+        record: Record<T>,
+    ) -> Result<(), TestError>
+    where
+        D: sqllogictest::AsyncDB<ColumnType = T>,
+        M: sqllogictest::MakeConnection<Conn = D>,
+        T: sqllogictest::ColumnType,
+    {
+        // Set random vnode count if needed.
+        if random_vnode_count
+            && cmd.is_create()
+            && let Record::Statement {
+                loc,
+                conditions,
+                connection,
+                ..
+            } = &record
+        {
+            let vnode_count = (2..=64) // small
+                .chain(224..=288) // normal
+                .chain(992..=1056) // 1024 affects row id gen behavior
+                .choose(&mut thread_rng())
+                .unwrap();
+            let sql = format!("SET STREAMING_MAX_PARALLELISM = {vnode_count};");
+            println!("[RANDOM VNODE COUNT] set: {vnode_count}");
+            let set_random_vnode_count = Record::Statement {
+                loc: loc.clone(),
+                conditions: conditions.clone(),
+                connection: connection.clone(),
+                sql,
+                expected: StatementExpect::Ok,
+                retry: None,
+            };
+            tester.run_async(set_random_vnode_count).await.unwrap();
+            println!("[RANDOM VNODE COUNT] run: {record}");
+        }
+
+        tester.run_async(record).await.map(|_| ())
+    }
+
+    /// Used when `kill` is not allowed for some specific commands
+    pub(super) async fn run_kill_not_allowed<D, M, T>(
+        tester: &mut sqllogictest::Runner<D, M>,
+        record: Record<T>,
+    ) where
+        D: sqllogictest::AsyncDB<ColumnType = T>,
+        M: sqllogictest::MakeConnection<Conn = D>,
+        T: sqllogictest::ColumnType,
+    {
+        for i in 0usize.. {
+            let delay = Duration::from_secs(1 << i);
+            if let Err(err) = tester
+                .run_async(record.clone())
+                .timed(|_res, elapsed| {
+                    tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
+                })
+                .await
+            {
+                let err_string = err.to_string();
+                // cluster could be still under recovering if killed before, retry if
+                // meets `no reader for dml in table with id {}`.
+                let allowed_errs = [
+                    "no reader for dml in table",
+                    "error reading a body from connection: broken pipe",
+                    "failed to inject barrier",
+                    "get error from control stream",
+                    "cluster is under recovering",
+                ];
+                let should_retry = i < MAX_RETRY
+                    && allowed_errs
+                        .iter()
+                        .any(|allowed_err| err_string.contains(allowed_err));
+                if !should_retry {
+                    panic!("{}", err);
+                }
+                tracing::error!("failed to run test: {err}\nretry after {delay:?}");
+            } else {
+                break;
+            }
+            tokio::time::sleep(delay).await;
+        }
+    }
 }
 
 /// Run the sqllogictest files in `glob`.
-pub async fn run_slt_task(
-    cluster: Arc<Cluster>,
-    glob: &str,
-    Opts {
-        kill_opts,
-        background_ddl_rate,
-        random_vnode_count,
-    }: Opts,
-) {
-    tracing::info!("background_ddl_rate: {}", background_ddl_rate);
-    let seed = std::env::var("MADSIM_TEST_SEED")
-        .unwrap_or("0".to_owned())
-        .parse::<u64>()
-        .unwrap();
-    let mut rng = ChaChaRng::seed_from_u64(seed);
-    let kill = kill_opts.kill_compute
-        || kill_opts.kill_meta
-        || kill_opts.kill_frontend
-        || kill_opts.kill_compactor;
+pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
+    let env = slt_env::Env::new(opts);
+    tracing::info!("background_ddl_rate: {}", env.background_ddl_rate());
+    let mut rng = Env::get_rng();
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         // use a session per file
@@ -280,16 +467,7 @@ pub async fn run_slt_task(
         let file = file.unwrap();
         let path = file.as_path();
 
-        if let Some(partitioner) = PARTITIONER.as_ref()
-            && !partitioner.matches(path.to_str().unwrap())
-        {
-            println!("{} [partition skipped]", path.display());
-            continue;
-        } else if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
-            println!("{} [kill ignored]", path.display());
-            continue;
-        }
-        println!("{}", path.display());
+        evaluate_skip!(env, path);
 
         // XXX: hack for kafka source test
         let tempfile = (path.ends_with("kafka.slt") || path.ends_with("kafka_batch.slt"))
@@ -304,19 +482,7 @@ pub async fn run_slt_task(
         let mut manual_background_ddl_enabled = false;
 
         let records = sqllogictest::parse_file(path).expect("failed to parse file");
-        let random_vnode_count = random_vnode_count
-            // Skip using random vnode count if the test case cares about parallelism, including
-            // setting parallelism manually or checking the parallelism with system tables.
-            && records.iter().all(|record| {
-                if let Record::Statement { sql, .. } | Record::Query { sql, .. } = record
-                    && sql.to_lowercase().contains("parallelism")
-                {
-                    println!("[RANDOM VNODE COUNT] skip: {}", path.display());
-                    false
-                } else {
-                    true
-                }
-            });
+        let random_vnode_count = random_vnode_count(&env, &records);
 
         for record in records {
             // uncomment to print metrics for task counts
@@ -340,49 +506,14 @@ pub async fn run_slt_task(
                         .iter()
                         .any(|c| matches!(c, Condition::OnlyIf{ label} if label != "madsim" )) =>
                 {
-                    extract_sql_command(sql)
+                    extract_sql_command(sql).unwrap_or(SqlCmd::Others)
                 }
                 _ => SqlCmd::Others,
             };
 
             // For normal records.
-            if !kill {
-                // Set random vnode count if needed.
-                if random_vnode_count
-                    && cmd.is_create()
-                    && let Record::Statement {
-                        loc,
-                        conditions,
-                        connection,
-                        ..
-                    } = &record
-                {
-                    let vnode_count = (2..=64) // small
-                        .chain(224..=288) // normal
-                        .chain(992..=1056) // 1024 affects row id gen behavior
-                        .choose(&mut thread_rng())
-                        .unwrap();
-                    let sql = format!("SET STREAMING_MAX_PARALLELISM = {vnode_count};");
-                    println!("[RANDOM VNODE COUNT] set: {vnode_count}");
-                    let set_random_vnode_count = Record::Statement {
-                        loc: loc.clone(),
-                        conditions: conditions.clone(),
-                        connection: connection.clone(),
-                        sql,
-                        expected: StatementExpect::Ok,
-                        retry: None,
-                    };
-                    tester.run_async(set_random_vnode_count).await.unwrap();
-                    println!("[RANDOM VNODE COUNT] run: {record}");
-                }
-
-                match tester
-                    .run_async(record.clone())
-                    .timed(|_res, elapsed| {
-                        tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-                    })
-                    .await
-                {
+            if !env.kill() {
+                match run_no_kill(&mut tester, random_vnode_count, &cmd, record).await {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
                 }
@@ -397,75 +528,27 @@ pub async fn run_slt_task(
             }
 
             // For each background ddl compatible statement, provide a chance for background_ddl=true.
-            if let Record::Statement {
-                loc,
-                conditions,
-                connection,
-                ..
-            } = &record
-                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
-                && !manual_background_ddl_enabled
-                && conditions.iter().all(|c| {
-                    *c != Condition::SkipIf {
-                        label: "madsim".to_owned(),
-                    }
-                })
-                && background_ddl_rate > 0.0
-            {
-                let background_ddl_setting = rng.random_bool(background_ddl_rate);
-                let set_background_ddl = Record::Statement {
-                    loc: loc.clone(),
-                    conditions: conditions.clone(),
-                    connection: connection.clone(),
-                    expected: StatementExpect::Ok,
-                    sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
-                    retry: None,
-                };
-                tester.run_async(set_background_ddl).await.unwrap();
-                background_ddl_enabled = background_ddl_setting;
-            };
+            set_background_ddl(
+                &mut tester,
+                &env,
+                &record,
+                &cmd,
+                manual_background_ddl_enabled,
+                &mut rng,
+                &mut background_ddl_enabled,
+            )
+            .await;
 
             if !cmd.allow_kill() {
-                for i in 0usize.. {
-                    let delay = Duration::from_secs(1 << i);
-                    if let Err(err) = tester
-                        .run_async(record.clone())
-                        .timed(|_res, elapsed| {
-                            tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-                        })
-                        .await
-                    {
-                        let err_string = err.to_string();
-                        // cluster could be still under recovering if killed before, retry if
-                        // meets `no reader for dml in table with id {}`.
-                        let allowed_errs = [
-                            "no reader for dml in table",
-                            "error reading a body from connection: broken pipe",
-                            "failed to inject barrier",
-                            "get error from control stream",
-                            "cluster is under recovering",
-                        ];
-                        let should_retry = i < MAX_RETRY
-                            && allowed_errs
-                                .iter()
-                                .any(|allowed_err| err_string.contains(allowed_err));
-                        if !should_retry {
-                            panic!("{}", err);
-                        }
-                        tracing::error!("failed to run test: {err}\nretry after {delay:?}");
-                    } else {
-                        break;
-                    }
-                    tokio::time::sleep(delay).await;
-                }
+                run_kill_not_allowed(&mut tester, record.clone()).await;
                 continue;
             }
 
-            let should_kill = thread_rng().random_bool(kill_opts.kill_rate as f64);
+            let should_kill = thread_rng().random_bool(env.kill_rate());
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
-                let opts = kill_opts;
+                let opts = env.kill_opts();
                 Some(tokio::spawn(async move {
                     let t = thread_rng().random_range(Duration::default()..Duration::from_secs(1));
                     tokio::time::sleep(t).await;
@@ -504,30 +587,7 @@ pub async fn run_slt_task(
                                 }
                             )
                         {
-                            tracing::debug!(iteration = i, "Retry for background ddl");
-                            match wait_background_mv_finished(name).await {
-                                Ok(_) => {
-                                    tracing::debug!(
-                                        iteration = i,
-                                        "Record with background_ddl {:?} finished",
-                                        record
-                                    );
-                                    break;
-                                }
-                                Err(err) => {
-                                    tracing::error!(
-                                        iteration = i,
-                                        ?err,
-                                        "failed to wait for background mv to finish creating"
-                                    );
-                                    if i >= MAX_RETRY {
-                                        panic!(
-                                            "failed to run test after retry {i} times, error={err:#?}"
-                                        );
-                                    }
-                                    continue;
-                                }
-                            }
+                            wait_or_retry_background_ddl!(&record, name, i);
                         }
                         break;
                     }
@@ -570,30 +630,7 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("table is in creating procedure")
                                     && background_ddl_enabled =>
                             {
-                                tracing::debug!(iteration = i, name, "Retry for background ddl");
-                                match wait_background_mv_finished(name).await {
-                                    Ok(_) => {
-                                        tracing::debug!(
-                                            iteration = i,
-                                            "Record with background_ddl {:?} finished",
-                                            record
-                                        );
-                                        break;
-                                    }
-                                    Err(err) => {
-                                        tracing::error!(
-                                            iteration = i,
-                                            ?err,
-                                            "failed to wait for background mv to finish creating"
-                                        );
-                                        if i >= MAX_RETRY {
-                                            panic!(
-                                                "failed to run test after retry {i} times, error={err:#?}"
-                                            );
-                                        }
-                                        continue;
-                                    }
-                                }
+                                wait_or_retry_background_ddl!(&record, name, i);
                             }
                             _ => tracing::error!(
                                 iteration = i,
@@ -680,57 +717,60 @@ mod tests {
     }
 
     #[test]
-    fn test_is_create_table_as() {
-        assert!(is_create_table_as("     create     table xx  as select 1;"));
-        assert!(!is_create_table_as(
-            "     create table xx not  as select 1;"
-        ));
-        assert!(!is_create_table_as("     create view xx as select 1;"));
-    }
-
-    #[test]
     fn test_extract_sql_command() {
         check(
             extract_sql_command("create  table  t as select 1;"),
             expect![[r#"
-                Create {
-                    is_create_table_as: true,
-                }"#]],
+                Ok(
+                    Create {
+                        is_create_table_as: true,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("  create table  t (a int);"),
             expect![[r#"
-                Create {
-                    is_create_table_as: false,
-                }"#]],
+                Ok(
+                    Create {
+                        is_create_table_as: false,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command(" create materialized   view  m_1 as select 1;"),
             expect![[r#"
-                CreateMaterializedView {
-                    name: "m_1",
-                }"#]],
+                Ok(
+                    CreateMaterializedView {
+                        name: "m_1",
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("set background_ddl= true;"),
             expect![[r#"
-                SetBackgroundDdl {
-                    enable: true,
-                }"#]],
+                Ok(
+                    SetBackgroundDdl {
+                        enable: true,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("SET BACKGROUND_DDL=true;"),
             expect![[r#"
-                SetBackgroundDdl {
-                    enable: true,
-                }"#]],
+                Ok(
+                    SetBackgroundDdl {
+                        enable: true,
+                    },
+                )"#]],
         );
         check(
             extract_sql_command("CREATE MATERIALIZED VIEW if not exists m_1 as select 1;"),
             expect![[r#"
-                CreateMaterializedView {
-                    name: "m_1",
-                }"#]],
+                Ok(
+                    CreateMaterializedView {
+                        name: "m_1",
+                    },
+                )"#]],
         )
     }
 }

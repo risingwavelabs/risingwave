@@ -24,7 +24,7 @@ use with_options::WithOptions;
 
 use super::common::{load_certs, load_private_key};
 use crate::deserialize_bool_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
@@ -92,8 +92,8 @@ pub struct MqttCommon {
     pub client_key: Option<String>,
 }
 
-impl EnforceSecretOnCloud for MqttCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for MqttCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "tls.client_cert",
         "tls.client_key",
         "password",

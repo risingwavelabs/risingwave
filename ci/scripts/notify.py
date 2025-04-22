@@ -47,7 +47,7 @@ MAIN_CRON_TEST_MAP = {
     "pulsar-source-tests": ["bohan"],
     "run-micro-benchmarks": ["noelkwan"],
     "upload-micro-benchmarks": ["noelkwan"],
-    "backwards-compat-tests": ["noelkwan"],
+    "backwards-compat-tests": ["yuchao"],
     "sqlsmith-differential-tests": ["noelkwan"],
     "backfill-tests": ["noelkwan", "yiming"],
     "e2e-standalone-binary-tests": ["noelkwan"],

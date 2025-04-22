@@ -26,6 +26,7 @@ use risingwave_common::config::{
     AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
     StorageMemoryConfig, load_config,
 };
+use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
@@ -204,6 +205,7 @@ pub async fn compute_node_serve(
             .ok(),
     };
 
+    LicenseManager::get().refresh(system_params.license_key());
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),

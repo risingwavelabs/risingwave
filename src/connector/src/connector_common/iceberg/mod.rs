@@ -33,7 +33,7 @@ use with_options::WithOptions;
 
 use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
 #[serde_as]
@@ -115,10 +115,18 @@ pub struct IcebergCommon {
     /// enable config load.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
 }
 
-impl EnforceSecretOnCloud for IcebergCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for IcebergCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "s3.access.key",
         "s3.secret.key",
         "gcs.credential",

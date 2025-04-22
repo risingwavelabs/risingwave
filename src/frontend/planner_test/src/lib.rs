@@ -827,7 +827,7 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan)?;
+                    let graph = build_graph(stream_plan, None)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }

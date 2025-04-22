@@ -248,6 +248,8 @@ pub struct MetaOpts {
 
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
 
+    pub compaction_group_merge_dimension_threshold: f64,
+
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
@@ -340,6 +342,7 @@ impl MetaOpts {
             table_stat_throuput_window_seconds_for_split: 60,
             table_stat_throuput_window_seconds_for_merge: 240,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
+            compaction_group_merge_dimension_threshold: 1.2,
             license_key_path: None,
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),

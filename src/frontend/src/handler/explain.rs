@@ -233,7 +233,7 @@ async fn do_handle_explain(
                             }
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone())?;
+                            let graph = build_graph(plan.clone(), None)?;
                             if explain_format == ExplainFormat::Dot {
                                 blocks.push(explain_stream_graph_as_dot(&graph, explain_verbose))
                             } else {

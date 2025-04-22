@@ -61,7 +61,7 @@ use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
@@ -413,7 +413,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Sink))?;
 
         (sink, graph, target_table_catalog, dependencies)
     };

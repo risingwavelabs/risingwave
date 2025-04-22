@@ -206,6 +206,18 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     }
 }
 
+impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
+    fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> impl StorageFuture<'_, Vec<O>> {
+        // TODO: monitor
+        self.inner.nearest(vec, options, on_nearest_item_fn)
+    }
+}
+
 impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
     type FlushedSnapshotReader = MonitoredTableStateStore<S::FlushedSnapshotReader>;
 
@@ -249,6 +261,24 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.inner.get_table_watermark(vnode)
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        MonitoredTableStateStore::new(
+            self.inner.new_flushed_snapshot_reader(),
+            self.storage_metrics.clone(),
+            self.table_id(),
+        )
+    }
+
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.inner.update_vnode_bitmap(vnodes).await
+    }
+}
+
+impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTableStateStore<S> {
     fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
         self.inner.flush().instrument_await("store_flush".verbose())
     }
@@ -267,27 +297,19 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
             .try_flush()
             .instrument_await("store_try_flush".verbose())
     }
+}
 
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        self.inner.update_vnode_bitmap(vnodes).await
-    }
-
-    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-        self.inner.get_table_watermark(vnode)
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        MonitoredTableStateStore::new(
-            self.inner.new_flushed_snapshot_reader(),
-            self.storage_metrics.clone(),
-            self.table_id(),
-        )
+impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
+    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        // TODO: monitor
+        self.inner.insert(vec, info)
     }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredTableStateStore<S::Local>;
     type ReadSnapshot = MonitoredTableStateStore<S::ReadSnapshot>;
+    type VectorWriter = MonitoredTableStateStore<S::VectorWriter>;
 
     fn try_wait_epoch(
         &self,
@@ -329,6 +351,15 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             self.storage_metrics.clone(),
             options.table_id,
         ))
+    }
+
+    async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        let table_id = options.table_id;
+        MonitoredTableStateStore::new(
+            self.inner.new_vector_writer(options).await,
+            self.storage_metrics.clone(),
+            table_id,
+        )
     }
 }
 

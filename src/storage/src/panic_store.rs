@@ -114,6 +114,20 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        panic!()
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        panic!("should not operate on the panic state store!");
+    }
+}
+
+impl StateStoreWriteEpochControl for PanicStateStore {
     async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
@@ -129,16 +143,21 @@ impl LocalStateStore for PanicStateStore {
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
+}
 
-    async fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        panic!("should not operate on the panic state store!");
+impl StateStoreWriteVector for PanicStateStore {
+    fn insert(&mut self, _vec: Vector, _info: Bytes) -> StorageResult<()> {
+        panic!()
     }
+}
 
-    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
-        panic!("should not operate on the panic state store!");
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+impl StateStoreReadVector for PanicStateStore {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        _vec: Vector,
+        _options: VectorNearestOptions,
+        _on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> StorageResult<Vec<O>> {
         panic!()
     }
 }
@@ -146,6 +165,7 @@ impl LocalStateStore for PanicStateStore {
 impl StateStore for PanicStateStore {
     type Local = Self;
     type ReadSnapshot = Self;
+    type VectorWriter = PanicStateStore;
 
     async fn try_wait_epoch(
         &self,
@@ -164,6 +184,10 @@ impl StateStore for PanicStateStore {
         _epoch: HummockReadEpoch,
         _options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
+        panic!()
+    }
+
+    async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
         panic!()
     }
 }

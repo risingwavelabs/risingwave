@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::future::pending;
 use std::num::NonZeroU64;
 use std::time::Instant;
@@ -78,16 +79,54 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
             .await?;
         let mut sink_writer = self.writer;
         log_reader.start_from(log_store_rewind_start_epoch).await?;
-        let first_item = log_reader.next_item().await?;
+        let mut first_item = log_reader.next_item().await?;
         if let (Some(log_store_rewind_start_epoch), (first_epoch, _)) =
             (log_store_rewind_start_epoch, &first_item)
-            && log_store_rewind_start_epoch >= *first_epoch
         {
-            bail!(
-                "log_store_rewind_start_epoch {} not later than first_epoch {}",
-                log_store_rewind_start_epoch,
-                first_epoch
-            );
+            if log_store_rewind_start_epoch >= *first_epoch {
+                bail!(
+                    "log_store_rewind_start_epoch {} not later than first_epoch {}",
+                    log_store_rewind_start_epoch,
+                    first_epoch
+                );
+            }
+        } else {
+            let &(initial_epoch, _) = &first_item;
+            let aligned_initial_epoch = coordinator_stream_handle
+                .align_initial_epoch(initial_epoch)
+                .await?;
+            if initial_epoch != aligned_initial_epoch {
+                warn!(
+                    initial_epoch,
+                    aligned_initial_epoch,
+                    sink_id = self.param.sink_id.sink_id,
+                    "initial epoch not matched aligned initial epoch"
+                );
+                let mut peeked_first = Some(first_item);
+                first_item = loop {
+                    let (epoch, item) = if let Some(peeked_first) = peeked_first.take() {
+                        peeked_first
+                    } else {
+                        log_reader.next_item().await?
+                    };
+                    match epoch.cmp(&aligned_initial_epoch) {
+                        Ordering::Less => {
+                            continue;
+                        }
+                        Ordering::Equal => {
+                            break (epoch, item);
+                        }
+                        Ordering::Greater => {
+                            return Err(anyhow!(
+                                "initial epoch {} greater than aligned initial epoch {}",
+                                initial_epoch,
+                                aligned_initial_epoch
+                            )
+                            .into());
+                        }
+                    }
+                };
+            }
         }
 
         let mut first_item = Some(first_item);

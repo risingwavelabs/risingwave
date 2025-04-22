@@ -280,6 +280,10 @@ profile:
       - use: kafka
         persist-data: true
 
+  kafka:
+    steps:
+      - use: kafka
+
   meta-1cn-1fe-sqlite:
     steps:
       - use: minio

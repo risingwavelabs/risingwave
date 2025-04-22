@@ -34,7 +34,7 @@ use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
 use crate::deserialize_optional_bool_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
@@ -61,10 +61,8 @@ pub struct KafkaConnection {
     pub aws_auth_props: AwsAuthProps,
 }
 
-impl EnforceSecretOnCloud for KafkaConnection {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> ConnectorResult<()> {
+impl EnforceSecret for KafkaConnection {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
         for prop in prop_iter {
             KafkaConnectionProps::enforce_one(prop)?;
             AwsAuthProps::enforce_one(prop)?;
@@ -206,10 +204,18 @@ pub struct IcebergConnection {
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
 }
 
-impl EnforceSecretOnCloud for IcebergConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for IcebergConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "s3.access.key",
         "s3.secret.key",
         "gcs.credential",
@@ -289,6 +295,26 @@ impl Connection for IcebergConnection {
             }
         }
 
+        if self.hosted_catalog.unwrap_or(false) {
+            // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
+            if self.catalog_type.is_some() {
+                bail!("`catalog.type` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_uri.is_some() {
+                bail!("`catalog.uri` must not be set when `hosted_catalog` is set");
+            }
+            if self.catalog_name.is_some() {
+                bail!("`catalog.name` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_user.is_some() {
+                bail!("`catalog.jdbc.user` must not be set when `hosted_catalog` is set");
+            }
+            if self.jdbc_password.is_some() {
+                bail!("`catalog.jdbc.password` must not be set when `hosted_catalog` is set");
+            }
+            return Ok(());
+        }
+
         if self.catalog_type.is_none() {
             bail!("`catalog.type` must be set");
         }
@@ -316,6 +342,7 @@ impl Connection for IcebergConnection {
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
             enable_config_load: Some(false),
+            hosted_catalog: self.hosted_catalog,
         };
 
         let mut java_map = HashMap::new();
@@ -357,8 +384,8 @@ impl Connection for ConfluentSchemaRegistryConnection {
     }
 }
 
-impl EnforceSecretOnCloud for ConfluentSchemaRegistryConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ConfluentSchemaRegistryConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "schema.registry.password",
     };
 }
@@ -378,8 +405,8 @@ impl Connection for ElasticsearchConnection {
     }
 }
 
-impl EnforceSecretOnCloud for ElasticsearchConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ElasticsearchConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "elasticsearch.password",
     };
 }

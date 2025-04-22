@@ -41,6 +41,7 @@ use risingwave_pb::hummock::PbVnodeWatermark;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
+pub(crate) use crate::vector::{DistanceMeasurement, OnNearestItemFn, Vector};
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -322,9 +323,15 @@ pub struct NewReadSnapshotOptions {
     pub table_id: TableId,
 }
 
+#[derive(Clone)]
+pub struct NewVectorWriterOptions {
+    pub table_id: TableId,
+}
+
 pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     type Local: LocalStateStore;
-    type ReadSnapshot: StateStoreRead + Clone;
+    type ReadSnapshot: StateStoreRead + StateStoreReadVector + Clone;
+    type VectorWriter: StateStoreWriteVector;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -346,12 +353,17 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
         options: NewReadSnapshotOptions,
     ) -> impl StorageFuture<'_, Self::ReadSnapshot>;
+
+    fn new_vector_writer(
+        &self,
+        options: NewVectorWriterOptions,
+    ) -> impl Future<Output = Self::VectorWriter> + Send + '_;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreGet + StaticSendSync {
+pub trait LocalStateStore: StateStoreGet + StateStoreWriteEpochControl + StaticSendSync {
     type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
@@ -390,6 +402,12 @@ pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
+    // Updates the vnode bitmap corresponding to the local state store
+    // Returns the previous vnode bitmap
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
+}
+
+pub trait StateStoreWriteEpochControl: StaticSendSync {
     fn flush(&mut self) -> impl StorageFuture<'_, usize>;
 
     fn try_flush(&mut self) -> impl StorageFuture<'_, ()>;
@@ -406,10 +424,24 @@ pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
+}
 
-    // Updates the vnode bitmap corresponding to the local state store
-    // Returns the previous vnode bitmap
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
+pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
+    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+}
+
+pub struct VectorNearestOptions {
+    pub top_n: usize,
+    pub measure: DistanceMeasurement,
+}
+
+pub trait StateStoreReadVector: StaticSendSync {
+    fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> impl StorageFuture<'_, Vec<O>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory

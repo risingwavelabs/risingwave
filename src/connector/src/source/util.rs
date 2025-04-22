@@ -62,7 +62,7 @@ pub mod dummy {
     use serde::Deserialize;
     use with_options::WithOptions;
 
-    use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+    use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::parser::ParserConfig;
     use crate::source::{
@@ -76,7 +76,7 @@ pub mod dummy {
         _marker: PhantomData<T>,
     }
 
-    impl<T> EnforceSecretOnCloud for DummyProperties<T> {}
+    impl<T> EnforceSecret for DummyProperties<T> {}
 
     /// See [`crate::source::util::dummy`].
     pub struct DummySplitEnumerator<T> {

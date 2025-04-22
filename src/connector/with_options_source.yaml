@@ -170,6 +170,11 @@ IcebergProperties:
     comments: enable config load.
     required: false
     default: Default::default
+  - name: hosted_catalog
+    field_type: bool
+    comments: This is only used by iceberg engine to enable the hosted catalog.
+    required: false
+    default: Default::default
   - name: catalog.jdbc.user
     field_type: String
     required: false

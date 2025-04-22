@@ -37,7 +37,7 @@ use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
 use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions};
+use risingwave_storage::store::*;
 use serial_test::serial;
 
 use super::compactor_tests::tests::get_hummock_storage;

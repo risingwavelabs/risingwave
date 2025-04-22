@@ -269,8 +269,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
-                let align_init_epoch = sink.is_coordinated_sink();
-
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -280,7 +278,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
-                    align_init_epoch,
                 );
 
                 SinkExecutor::new(

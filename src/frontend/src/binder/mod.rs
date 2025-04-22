@@ -387,13 +387,6 @@ impl Binder {
         Self::new_inner(session, BindFor::System, vec![])
     }
 
-    pub fn new_for_stream_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Stream, param_types)
-    }
-
     fn is_for_stream(&self) -> bool {
         matches!(self.bind_for, BindFor::Stream)
     }
