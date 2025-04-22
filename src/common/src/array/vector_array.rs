@@ -17,13 +17,14 @@ use std::fmt::Debug;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 
-use super::{Array, ArrayBuilder, ListArray, ListArrayBuilder, ListRef, ListValue};
-use crate::bitmap::Bitmap;
+use super::{Array, ArrayBuilder, ListRef, ListValue};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, Scalar, ScalarRef, ToText};
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VectorArrayBuilder {
-    inner: ListArrayBuilder,
+    bitmap: BitmapBuilder,
+    values: Vec<f32>,
     elem_size: usize,
 }
 
@@ -45,30 +46,49 @@ impl ArrayBuilder for VectorArrayBuilder {
             panic!("VectorArrayBuilder only supports Vector type");
         };
         Self {
-            inner: ListArrayBuilder::with_type(capacity, DataType::List(DataType::Float32.into())),
+            bitmap: BitmapBuilder::with_capacity(capacity),
+            values: Vec::with_capacity(capacity),
             elem_size,
         }
     }
 
     fn append_n(&mut self, n: usize, value: Option<VectorRef<'_>>) {
-        self.inner.append_n(n, value.map(|v| v.inner))
+        match value {
+            None => {
+                self.bitmap.append_n(n, false);
+                self.values
+                    .extend(std::iter::repeat_n(f32::NAN, n * self.elem_size));
+            }
+            Some(v) => {
+                assert_eq!(self.elem_size, v.as_slice().len());
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    self.values.extend(v.as_slice());
+                }
+            }
+        }
     }
 
     fn append_array(&mut self, other: &VectorArray) {
-        self.inner.append_array(&other.inner)
+        assert_eq!(self.elem_size, other.elem_size);
+        self.bitmap.append_bitmap(&other.bitmap);
+        self.values.extend_from_slice(&other.values);
     }
 
     fn pop(&mut self) -> Option<()> {
-        self.inner.pop()
+        self.bitmap.pop()?;
+        self.values.truncate(self.values.len() - self.elem_size);
+        Some(())
     }
 
     fn len(&self) -> usize {
-        self.inner.len()
+        self.bitmap.len()
     }
 
     fn finish(self) -> VectorArray {
         VectorArray {
-            inner: self.inner.finish(),
+            bitmap: self.bitmap.finish(),
+            values: self.values.into(),
             elem_size: self.elem_size,
         }
     }
@@ -76,13 +96,14 @@ impl ArrayBuilder for VectorArrayBuilder {
 
 #[derive(Debug, Clone)]
 pub struct VectorArray {
-    inner: ListArray,
+    bitmap: Bitmap,
+    values: Box<[f32]>,
     elem_size: usize,
 }
 
 impl EstimateSize for VectorArray {
     fn estimated_heap_size(&self) -> usize {
-        self.inner.estimated_heap_size()
+        todo!("VECTOR_PLACEHOLDER")
     }
 }
 
@@ -93,31 +114,31 @@ impl Array for VectorArray {
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         VectorRef {
-            inner: unsafe { self.inner.raw_value_at_unchecked(idx) },
+            values: unsafe {
+                self.values
+                    .get_unchecked((idx * self.elem_size)..((idx + 1) * self.elem_size))
+            },
         }
     }
 
     fn len(&self) -> usize {
-        self.inner.len()
+        self.bitmap.len()
     }
 
     fn to_protobuf(&self) -> PbArray {
-        let mut pb_array = self.inner.to_protobuf();
-        pb_array.set_array_type(risingwave_pb::data::PbArrayType::Vector);
-        pb_array.list_array_data.as_mut().unwrap().elem_size = Some(self.elem_size as _);
-        pb_array
+        todo!("VECTOR_PLACEHOLDER")
     }
 
     fn null_bitmap(&self) -> &Bitmap {
-        self.inner.null_bitmap()
+        &self.bitmap
     }
 
     fn into_null_bitmap(self) -> Bitmap {
-        self.inner.into_null_bitmap()
+        self.bitmap
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
-        self.inner.set_bitmap(bitmap)
+        self.bitmap = bitmap;
     }
 
     fn data_type(&self) -> DataType {
@@ -127,22 +148,15 @@ impl Array for VectorArray {
 
 impl VectorArray {
     pub fn from_protobuf(
-        pb_array: &risingwave_pb::data::PbArray,
+        _pb_array: &risingwave_pb::data::PbArray,
     ) -> super::ArrayResult<super::ArrayImpl> {
-        let inner = ListArray::from_protobuf(pb_array)?.into_list();
-        let elem_size = pb_array
-            .list_array_data
-            .as_ref()
-            .unwrap()
-            .elem_size
-            .unwrap() as _;
-        Ok(Self { inner, elem_size }.into())
+        todo!("VECTOR_PLACEHOLDER")
     }
 }
 
 #[derive(Clone, EstimateSize)]
 pub struct VectorVal {
-    inner: ListValue,
+    values: Box<[f32]>,
 }
 
 impl Debug for VectorVal {
@@ -173,7 +187,7 @@ impl Scalar for VectorVal {
 
     fn as_scalar_ref(&self) -> VectorRef<'_> {
         VectorRef {
-            inner: self.inner.as_scalar_ref(),
+            values: &self.values,
         }
     }
 }
@@ -194,27 +208,29 @@ impl VectorVal {
                     .map_err(|_| format!("invalid f32: {s}"))
                     .and_then(|f| {
                         if f.is_finite() {
-                            Ok(crate::types::F32::from(f))
+                            Ok(f)
                         } else {
                             Err(format!("{f} not allowed in vector"))
                         }
                     })
             })
-            .collect::<Result<ListValue, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         if inner.len() != size {
             return Err(format!("expected {} dimensions, not {}", size, inner.len()));
         }
-        Ok(Self { inner })
+        Ok(Self {
+            values: inner.into(),
+        })
     }
 
-    pub fn from_inner(inner: ListValue) -> Self {
-        Self { inner }
+    pub fn from_inner(_inner: ListValue) -> Self {
+        todo!("VECTOR_PLACEHOLDER")
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct VectorRef<'a> {
-    inner: ListRef<'a>,
+    values: &'a [f32],
 }
 
 impl Debug for VectorRef<'_> {
@@ -248,11 +264,11 @@ impl ToText for VectorRef<'_> {
 
     fn write_with_type<W: std::fmt::Write>(&self, _ty: &DataType, f: &mut W) -> std::fmt::Result {
         write!(f, "[")?;
-        for (i, item) in self.inner.iter().enumerate() {
+        for (i, item) in self.values.iter().enumerate() {
             if i > 0 {
                 write!(f, ",")?;
             }
-            item.write_with_type(&DataType::Float32, f)?;
+            write!(f, "{item}")?;
         }
         write!(f, "]")
     }
@@ -263,17 +279,21 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 
     fn to_owned_scalar(&self) -> VectorVal {
         VectorVal {
-            inner: self.inner.to_owned_scalar(),
+            values: self.values.into(),
         }
     }
 
-    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.inner.hash_scalar(state)
+    fn hash_scalar<H: std::hash::Hasher>(&self, _state: &mut H) {
+        todo!("VECTOR_PLACEHOLDER")
     }
 }
 
 impl<'a> VectorRef<'a> {
+    pub fn as_slice(self) -> &'a [f32] {
+        self.values
+    }
+
     pub fn into_inner(self) -> ListRef<'a> {
-        self.inner
+        todo!("VECTOR_PLACEHOLDER")
     }
 }
