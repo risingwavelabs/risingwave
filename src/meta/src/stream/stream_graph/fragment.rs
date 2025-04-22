@@ -26,9 +26,8 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_cont, visit_stream_node_cont_mut,
+    self, visit_stream_node, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
@@ -1141,12 +1140,60 @@ impl CompleteStreamFragmentGraph {
             for (dispatch_strategy, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
+                let mut res = None;
+
+                stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
+                    let columns = match node_body {
+                        NodeBody::StreamScan(stream_scan) => {
+                            stream_scan.upstream_column_ids.clone()
+                        }
+                        _ => return,
+                    };
+                    res = Some(columns);
+                });
+
+                let columns = res.context("failed to locate downstream scan")?;
+
+                let mut upstream_columns = None;
+
+                let node = graph
+                    .fragments
+                    .get(&table_fragment_id)
+                    .unwrap()
+                    .node
+                    .as_ref()
+                    .unwrap();
+
+                stream_graph_visitor::visit_stream_node(node, |node_body| {
+                    if let NodeBody::Materialize(materialize) = node_body {
+                        let columns = materialize.column_ids().clone();
+                        upstream_columns = Some(columns);
+                    }
+                });
+
+                let upstream_columns =
+                    upstream_columns.context("failed to locate upstream materialize")?;
+
+                let output_indices = columns
+                    .iter()
+                    .map(|c| {
+                        upstream_columns
+                            .iter()
+                            .position(|&id| id == *c)
+                            .map(|i| i as u32)
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .context("column not found in the upstream materialize")?;
+
                 let edge = StreamFragmentEdge {
                     id: EdgeId::DownstreamExternal(DownstreamExternalEdgeId {
                         original_upstream_fragment_id: original_table_fragment_id,
                         downstream_fragment_id: id,
                     }),
-                    dispatch_strategy: dispatch_strategy.clone(),
+                    dispatch_strategy: DispatchStrategy {
+                        output_indices,
+                        ..dispatch_strategy.clone()
+                    },
                 };
 
                 extra_downstreams
