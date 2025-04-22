@@ -32,7 +32,7 @@ impl SourceManager {
 
         let prev_splits = prev_actor_ids
             .iter()
-            .flat_map(|actor_id| core.actor_splits.get(actor_id).unwrap())
+            .flat_map(|actor_id| core.actor_splits.get(actor_id).into_iter().flatten())
             .map(|split| (split.id(), split.clone()))
             .collect();
 
@@ -45,7 +45,7 @@ impl SourceManager {
             fragment_id,
             empty_actor_splits,
             &prev_splits,
-            // pre-allocate splits is the first time getting splits and it does not have scale-in scene
+            // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
