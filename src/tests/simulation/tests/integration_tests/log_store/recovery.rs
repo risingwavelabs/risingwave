@@ -132,6 +132,8 @@ async fn test_recover_synced_log_store() -> Result<()> {
             let count: usize = result.parse()?;
             if count == result_count {
                 if i == 0 {
+                    // If count is immediately equal to result_count,
+                    // it likely means there's no lag in the logstore.
                     bail!("Expected some retries")
                 }
                 if i == 9 {
@@ -169,16 +171,13 @@ async fn test_recover_synced_log_store() -> Result<()> {
     assert_eq!(count, result_count);
 
     // compare results
-
     let mut first = ALIGNED_MV_NAME;
     let mut second = UNALIGNED_MV_NAME;
     for i in 0..2 {
-        let compare_sql = format!("(select * from {first} except select * from {second}) order by part_id");
+        let compare_sql = format!("select * from {first} except select * from {second}");
         let mut session = cluster.start_session();
         let result = session.run(compare_sql).await?;
         if !result.is_empty() {
-            let second_results = session.run(format!("select * from {second} order by part_id")).await?;
-            println!("{first} results: {second_results}");
             panic!("{second} missing the following results from {first}: {result}");
         }
         std::mem::swap(&mut first, &mut second);
