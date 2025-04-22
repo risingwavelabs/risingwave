@@ -16,7 +16,7 @@ genawaiter = "0.99"
 rust_decimal = "1"
 serde_json = "1"
 # 0.2.12 failed to compile with nightly-2024-10-11
-libm = "=0.2.11"
+libm = "=0.2.13"
 
 [package.metadata.cargo-machete]
 ignored = ["chrono"]
