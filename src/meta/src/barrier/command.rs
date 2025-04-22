@@ -69,7 +69,7 @@ pub struct Reschedule {
     pub added_actors: HashMap<WorkerId, Vec<ActorId>>,
 
     /// Removed actors in this fragment.
-    pub removed_actors: Vec<ActorId>,
+    pub removed_actors: HashSet<ActorId>,
 
     /// Vnode bitmap updates for some actors in this fragment.
     pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
@@ -835,8 +835,23 @@ impl Command {
                             .get(&upstream_fragment_id)
                             .expect("should contain");
 
+                        let upstream_reschedule = reschedules.get(&upstream_fragment_id);
+
                         // Record updates for all actors.
                         for &actor_id in upstream_actor_ids {
+                            let added_downstream_actor_id = if upstream_reschedule
+                                .map(|reschedule| !reschedule.removed_actors.contains(&actor_id))
+                                .unwrap_or(true)
+                            {
+                                reschedule
+                                    .added_actors
+                                    .values()
+                                    .flatten()
+                                    .cloned()
+                                    .collect()
+                            } else {
+                                Default::default()
+                            };
                             // Index with the dispatcher id to check duplicates.
                             dispatcher_update
                                 .try_insert(
@@ -848,15 +863,12 @@ impl Command {
                                             .upstream_dispatcher_mapping
                                             .as_ref()
                                             .map(|m| m.to_protobuf()),
-                                        added_downstream_actor_id: reschedule
-                                            .added_actors
-                                            .values()
-                                            .flatten()
-                                            .cloned()
-                                            .collect(),
+                                        added_downstream_actor_id,
                                         removed_downstream_actor_id: reschedule
                                             .removed_actors
-                                            .clone(),
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
                                     },
                                 )
                                 .unwrap();
@@ -915,7 +927,9 @@ impl Command {
                                             .collect(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors
-                                            .clone(),
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
                                     },
                                 )
                                 .unwrap();

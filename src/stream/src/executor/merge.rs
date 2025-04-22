@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
+use futures::future::try_join_all;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use prometheus::Histogram;
 use risingwave_common::array::StreamChunkBuilder;
@@ -304,10 +305,8 @@ impl MergeExecutor {
 
                         if !update.added_upstream_actors.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = update
-                                .added_upstream_actors
-                                .iter()
-                                .map(|upstream_actor| {
+                            let new_upstreams: Vec<_> = try_join_all(
+                                update.added_upstream_actors.iter().map(|upstream_actor| {
                                     new_input(
                                         &self.local_barrier_manager,
                                         self.metrics.clone(),
@@ -316,9 +315,10 @@ impl MergeExecutor {
                                         upstream_actor,
                                         new_upstream_fragment_id,
                                     )
-                                })
-                                .try_collect()
-                                .context("failed to create upstream receivers")?;
+                                }),
+                            )
+                            .await
+                            .context("failed to create upstream receivers")?;
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
@@ -674,6 +674,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use futures::FutureExt;
+    use futures::future::try_join_all;
     use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -682,7 +683,6 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
     };
-    use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status, Streaming};
@@ -691,6 +691,7 @@ mod tests {
     use crate::executor::exchange::input::{Input, LocalInput, RemoteInput};
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
+    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
@@ -911,7 +912,6 @@ mod tests {
         let actor_id = 233;
         let (untouched, old, new) = (234, 235, 238); // upstream actors
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let ctx = barrier_test_env.shared_context.clone();
         let metrics = Arc::new(StreamingMetrics::unused());
 
         // untouched -> actor_id
@@ -920,9 +920,8 @@ mod tests {
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
-        let inputs: Vec<_> = [untouched, old]
-            .into_iter()
-            .map(|upstream_actor_id| {
+        let inputs: Vec<_> =
+            try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
                 new_input(
                     &barrier_test_env.local_barrier_manager,
                     metrics.clone(),
@@ -931,8 +930,9 @@ mod tests {
                     &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
                 )
-            })
-            .try_collect()
+                .await
+            }))
+            .await
             .unwrap();
 
         let merge_updates = maplit::hashmap! {
@@ -978,11 +978,7 @@ mod tests {
         .boxed()
         .execute();
 
-        // 2. Take downstream receivers.
-        let txs = [untouched, old, new]
-            .into_iter()
-            .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
-            .collect::<HashMap<_, _>>();
+        let mut txs = HashMap::new();
         macro_rules! send {
             ($actors:expr, $msg:expr) => {
                 for actor in $actors {
@@ -1010,6 +1006,29 @@ mod tests {
             };
         }
 
+        macro_rules! collect_upstream_tx {
+            ($actors:expr) => {
+                for upstream_id in $actors {
+                    let mut output_requests = barrier_test_env
+                        .take_pending_new_output_requests(upstream_id)
+                        .await;
+                    assert_eq!(output_requests.len(), 1);
+                    let (downstream_actor_id, request) = output_requests.pop().unwrap();
+                    assert_eq!(actor_id, downstream_actor_id);
+                    let NewOutputRequest::Local(tx) = request else {
+                        unreachable!()
+                    };
+                    txs.insert(upstream_id, tx);
+                }
+            };
+        }
+
+        assert_recv_pending!();
+        barrier_test_env.flush_all_events().await;
+
+        // 2. Take downstream receivers.
+        collect_upstream_tx!([untouched, old]);
+
         // 3. Send a chunk.
         send!([untouched, old], Message::Chunk(build_test_chunk(1)).into());
         assert_eq!(2, recv!().unwrap().as_chunk().unwrap().cardinality()); // We should be able to receive the chunk twice.
@@ -1020,6 +1039,8 @@ mod tests {
             Message::Barrier(b1.clone().into_dispatcher()).into()
         );
         assert_recv_pending!(); // We should not receive the barrier, since merger is waiting for the new upstream new.
+
+        collect_upstream_tx!([new]);
 
         send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
@@ -1092,7 +1113,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
-        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -1120,17 +1140,15 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let remote_input = {
-            let pool = ComputeClientPool::for_test();
             RemoteInput::new(
-                pool,
+                &test_env.local_barrier_manager,
                 addr.into(),
                 (0, 0),
                 (0, 0),
-                test_env.shared_context.database_id,
                 Arc::new(StreamingMetrics::unused()),
-                BATCHED_PERMITS,
-                "for_test".into(),
             )
+            .await
+            .unwrap()
         };
 
         test_env.inject_barrier(&exchange_client_test_barrier(), [remote_input.actor_id()]);
