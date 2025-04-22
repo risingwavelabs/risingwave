@@ -516,10 +516,10 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
+        let commit_iceberg = CommitIcebergImpl { catalog, table };
         // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
-            catalog,
-            table,
+            commit_iceberg,
             is_exactly_once: self.config.is_exactly_once.unwrap_or_default(),
             last_commit_epoch: 0,
             sink_id: self.param.sink_id.sink_id(),
@@ -1388,8 +1388,7 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
     }
 }
 pub struct IcebergSinkCommitter {
-    catalog: Arc<dyn Catalog>,
-    table: Table,
+    commit_iceberg: CommitIcebergImpl,
     pub last_commit_epoch: u64,
     pub(crate) is_exactly_once: bool,
     pub(crate) sink_id: u32,
@@ -1402,7 +1401,12 @@ pub struct IcebergSinkCommitter {
     pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
 }
 
-impl IcebergSinkCommitter {
+pub struct CommitIcebergImpl {
+    catalog: Arc<dyn Catalog>,
+    table: Table,
+}
+
+impl CommitIcebergImpl {
     // Reload table and guarantee current schema_id and partition_spec_id matches
     // given `schema_id` and `partition_spec_id`
     async fn reload_table(
@@ -1430,6 +1434,114 @@ impl IcebergSinkCommitter {
             )));
         }
         Ok(table)
+    }
+
+    async fn begin_txn(
+        &mut self,
+        write_results: Vec<IcebergCommitResult>,
+        snapshot_id: Option<i64>,
+    ) -> Result<i64> {
+        let expect_schema_id = write_results[0].schema_id;
+        let expect_partition_spec_id = write_results[0].partition_spec_id;
+
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = Self::reload_table(
+            self.catalog.as_ref(),
+            self.table.identifier(),
+            expect_schema_id,
+            expect_partition_spec_id,
+        )
+        .await?;
+        let txn = Transaction::new(&self.table);
+        // Only generate new snapshot id when first commit.
+        let snapshot_id = match snapshot_id {
+            Some(previous_snapshot_id) => previous_snapshot_id,
+            None => txn.generate_unique_snapshot_id(),
+        };
+
+        Ok(snapshot_id)
+    }
+
+    async fn do_commit(
+        &mut self,
+        write_results: Vec<IcebergCommitResult>,
+        snapshot_id: i64,
+        commit_retry_num: u32,
+    ) -> Result<()> {
+        // # TODO:
+        // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
+        // because retry logic involved reapply the commit metadata.
+        // For now, we just retry the commit operation.
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
+            .map(jitter)
+            .take(commit_retry_num as usize);
+
+        let expect_schema_id = write_results[0].schema_id;
+        let expect_partition_spec_id = write_results[0].partition_spec_id;
+
+        let Some(schema) = self.table.metadata().schema_by_id(expect_schema_id) else {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Can't find schema by id {}",
+                expect_schema_id
+            )));
+        };
+        let Some(partition_spec) = self
+            .table
+            .metadata()
+            .partition_spec_by_id(expect_partition_spec_id)
+        else {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Can't find partition spec by id {}",
+                expect_partition_spec_id
+            )));
+        };
+
+        let partition_type = partition_spec
+            .as_ref()
+            .clone()
+            .partition_type(schema)
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+        let data_files = write_results
+            .into_iter()
+            .flat_map(|r| {
+                r.data_files.into_iter().map(|f| {
+                    f.try_into(expect_partition_spec_id, &partition_type, schema)
+                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))
+                })
+            })
+            .collect::<Result<Vec<DataFile>>>()?;
+
+        let catalog = self.catalog.clone();
+        let table_ident = self.table.identifier().clone();
+        let table = Retry::spawn(retry_strategy, || async {
+            let table = Self::reload_table(
+                catalog.as_ref(),
+                &table_ident,
+                expect_schema_id,
+                expect_partition_spec_id,
+            )
+            .await?;
+            let txn = Transaction::new(&table);
+            let mut append_action = txn
+                .fast_append(Some(snapshot_id), None, vec![])
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            append_action
+                .add_data_files(data_files.clone())
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+            let tx = append_action.apply().await.map_err(|err| {
+                tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })?;
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
+                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })
+        })
+        .await?;
+        self.table = table;
+        Ok(())
     }
 }
 
@@ -1616,45 +1728,11 @@ impl IcebergSinkCommitter {
             tracing::info!("Doing iceberg re commit.");
         }
         self.last_commit_epoch = epoch;
-        let expect_schema_id = write_results[0].schema_id;
-        let expect_partition_spec_id = write_results[0].partition_spec_id;
+        let snapshot_id = self
+            .commit_iceberg
+            .begin_txn(write_results.clone(), snapshot_id)
+            .await?;
 
-        // Load the latest table to avoid concurrent modification with the best effort.
-        self.table = Self::reload_table(
-            self.catalog.as_ref(),
-            self.table.identifier(),
-            expect_schema_id,
-            expect_partition_spec_id,
-        )
-        .await?;
-        let Some(schema) = self.table.metadata().schema_by_id(expect_schema_id) else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Can't find schema by id {}",
-                expect_schema_id
-            )));
-        };
-        let Some(partition_spec) = self
-            .table
-            .metadata()
-            .partition_spec_by_id(expect_partition_spec_id)
-        else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Can't find partition spec by id {}",
-                expect_partition_spec_id
-            )));
-        };
-        let partition_type = partition_spec
-            .as_ref()
-            .clone()
-            .partition_type(schema)
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-
-        let txn = Transaction::new(&self.table);
-        // Only generate new snapshot id when first commit.
-        let snapshot_id = match snapshot_id {
-            Some(previous_snapshot_id) => previous_snapshot_id,
-            None => txn.generate_unique_snapshot_id(),
-        };
         if self.is_exactly_once && is_first_commit {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
@@ -1677,51 +1755,9 @@ impl IcebergSinkCommitter {
             .await?;
         }
 
-        let data_files = write_results
-            .into_iter()
-            .flat_map(|r| {
-                r.data_files.into_iter().map(|f| {
-                    f.try_into(expect_partition_spec_id, &partition_type, schema)
-                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))
-                })
-            })
-            .collect::<Result<Vec<DataFile>>>()?;
-        // # TODO:
-        // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
-        // because retry logic involved reapply the commit metadata.
-        // For now, we just retry the commit operation.
-        let retry_strategy = ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(60))
-            .map(jitter)
-            .take(self.commit_retry_num as usize);
-        let catalog = self.catalog.clone();
-        let table_ident = self.table.identifier().clone();
-        let table = Retry::spawn(retry_strategy, || async {
-            let table = Self::reload_table(
-                catalog.as_ref(),
-                &table_ident,
-                expect_schema_id,
-                expect_partition_spec_id,
-            )
+        self.commit_iceberg
+            .do_commit(write_results, snapshot_id, self.commit_retry_num)
             .await?;
-            let txn = Transaction::new(&table);
-            let mut append_action = txn
-                .fast_append(Some(snapshot_id), None, vec![])
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-            append_action
-                .add_data_files(data_files.clone())
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-            let tx = append_action.apply().await.map_err(|err| {
-                tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })?;
-            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
-                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })
-        })
-        .await?;
-        self.table = table;
 
         if let Some(commit_notifier) = &mut self.commit_notifier {
             if commit_notifier.send(()).is_err() {
