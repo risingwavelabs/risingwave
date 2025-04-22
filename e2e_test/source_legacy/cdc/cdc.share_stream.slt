@@ -70,7 +70,7 @@ create table products_test ( id INT PRIMARY KEY,
 ) from mysql_mytest table 'products';
 
 # wrong database name
-statement error The database name `wrong_mytest` in the FROM clause does not contain the database name `mytest` in source definition
+statement error The database name `wrong_mytest` in the FROM clause is not included in the database name `mytest` in source definition
 create table products_test (
  id INT,
  name STRING,
