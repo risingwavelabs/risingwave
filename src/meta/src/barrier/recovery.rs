@@ -155,6 +155,7 @@ impl GlobalBarrierManager {
 
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
+                self.env.stream_client_pool().invalidate_all();
                 let recovery_result: MetaResult<_> = try {
                     if let Some(err) = &err {
                         self.context
