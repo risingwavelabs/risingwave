@@ -224,11 +224,7 @@ impl BuildingFragment {
                 NodeBody::SourceBackfill(backfill) => (
                     backfill.upstream_source_id.into(),
                     // FIXME: only pass required columns instead of all columns here
-                    backfill
-                        .columns
-                        .iter()
-                        .map(|c| c.column_desc.as_ref().unwrap().column_id)
-                        .collect(),
+                    backfill.column_ids(),
                 ),
                 _ => return,
             };
@@ -956,14 +952,16 @@ impl CompleteStreamFragmentGraph {
         {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
-                for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                    let (up_fragment_id, edge) = match job_type {
-                        StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                            let source_fragment = upstream_root_fragments
-                                .get(&upstream_table_id)
-                                .context("upstream source fragment not found")?;
-                            let source_job_id = GlobalFragmentId::new(source_fragment.fragment_id);
 
+                for (&upstream_table_id, required_columns) in &fragment.upstream_table_columns {
+                    let upstream_fragment = upstream_root_fragments
+                        .get(&upstream_table_id)
+                        .context("upstream fragment not found")?;
+                    let upstream_root_fragment_id =
+                        GlobalFragmentId::new(upstream_fragment.fragment_id);
+
+                    let edge = match job_type {
+                        StreamingJobType::Table(TableJobType::SharedCdcSource) => {
                             // we traverse all fragments in the graph, and we should find out the
                             // CdcFilter fragment and add an edge between upstream source fragment and it.
                             assert_ne!(
@@ -972,13 +970,14 @@ impl CompleteStreamFragmentGraph {
                             );
 
                             tracing::debug!(
-                                ?source_job_id,
-                                ?output_columns,
+                                ?upstream_root_fragment_id,
+                                ?required_columns,
                                 identity = ?fragment.inner.get_node().unwrap().get_identity(),
                                 current_frag_id=?id,
                                 "CdcFilter with upstream source fragment"
                             );
-                            let edge = StreamFragmentEdge {
+
+                            StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
@@ -990,23 +989,15 @@ impl CompleteStreamFragmentGraph {
                                     dist_key_indices: vec![], // not used for `NoShuffle`
                                     output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
                                 },
-                            };
-
-                            (source_job_id, edge)
+                            }
                         }
+
+                        // handle MV on MV/Source
                         StreamingJobType::MaterializedView
                         | StreamingJobType::Sink
                         | StreamingJobType::Index => {
-                            // handle MV on MV/Source
-
-                            // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
-                            // of the new materialized view.
-                            let upstream_fragment = upstream_root_fragments
-                                .get(&upstream_table_id)
-                                .context("upstream materialized view fragment not found")?;
-                            let upstream_root_fragment_id =
-                                GlobalFragmentId::new(upstream_fragment.fragment_id);
-
+                            // Build the extra edges between the upstream `Materialize` and
+                            // the downstream `StreamScan` of the new job.
                             if upstream_fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32
                                 != 0
                             {
@@ -1017,18 +1008,13 @@ impl CompleteStreamFragmentGraph {
                                         nodes.get_node_body().unwrap().as_materialize().unwrap();
                                     let all_column_ids = mview_node.column_ids();
                                     let dist_key_indices = mview_node.dist_key_indices();
-                                    let output_indices = output_columns
-                                        .iter()
-                                        .map(|c| {
-                                            all_column_ids
-                                                .iter()
-                                                .position(|&id| id == *c)
-                                                .map(|i| i as u32)
-                                        })
-                                        .collect::<Option<Vec<_>>>()
-                                        .context(
-                                            "BUG: column not found in the upstream materialized view",
-                                        )?;
+                                    let output_indices = gen_output_indices(
+                                        required_columns,
+                                        all_column_ids,
+                                    )
+                                    .context(
+                                        "BUG: column not found in the upstream materialized view",
+                                    )?;
                                     (dist_key_indices, output_indices)
                                 };
                                 let dispatch_strategy = mv_on_mv_dispatch_strategy(
@@ -1036,44 +1022,33 @@ impl CompleteStreamFragmentGraph {
                                     dist_key_indices,
                                     output_indices,
                                 );
-                                let edge = StreamFragmentEdge {
+
+                                StreamFragmentEdge {
                                     id: EdgeId::UpstreamExternal {
                                         upstream_table_id,
                                         downstream_fragment_id: id,
                                     },
                                     dispatch_strategy,
-                                };
-
-                                (upstream_root_fragment_id, edge)
-                            } else if upstream_fragment.fragment_type_mask
+                                }
+                            }
+                            // Build the extra edges between the upstream `Source` and
+                            // the downstream `SourceBackfill` of the new job.
+                            else if upstream_fragment.fragment_type_mask
                                 & FragmentTypeFlag::Source as u32
                                 != 0
                             {
-                                let source_fragment = upstream_root_fragments
-                                    .get(&upstream_table_id)
-                                    .context("upstream source fragment not found")?;
-                                let source_job_id =
-                                    GlobalFragmentId::new(source_fragment.fragment_id);
-
                                 let output_indices = {
                                     let nodes = &upstream_fragment.nodes;
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
                                     let all_column_ids = source_node.column_ids().unwrap();
-                                    output_columns
-                                        .iter()
-                                        .map(|c| {
-                                            all_column_ids
-                                                .iter()
-                                                .position(|&id| id == *c)
-                                                .map(|i| i as u32)
-                                        })
-                                        .collect::<Option<Vec<_>>>()
-                                        .context("column not found in the upstream source node")?
+                                    gen_output_indices(required_columns, all_column_ids).context(
+                                        "BUG: column not found in the upstream source node",
+                                    )?
                                 };
 
-                                let edge = StreamFragmentEdge {
+                                StreamFragmentEdge {
                                     id: EdgeId::UpstreamExternal {
                                         upstream_table_id,
                                         downstream_fragment_id: id,
@@ -1085,9 +1060,7 @@ impl CompleteStreamFragmentGraph {
                                         dist_key_indices: vec![], // not used for `NoShuffle`
                                         output_indices,
                                     },
-                                };
-
-                                (source_job_id, edge)
+                                }
                             } else {
                                 bail!(
                                     "the upstream fragment should be a MView or Source, got fragment type: {:b}",
@@ -1105,14 +1078,14 @@ impl CompleteStreamFragmentGraph {
 
                     // put the edge into the extra edges
                     extra_downstreams
-                        .entry(up_fragment_id)
+                        .entry(upstream_root_fragment_id)
                         .or_insert_with(HashMap::new)
                         .try_insert(id, edge.clone())
                         .unwrap();
                     extra_upstreams
                         .entry(id)
                         .or_insert_with(HashMap::new)
-                        .try_insert(up_fragment_id, edge)
+                        .try_insert(upstream_root_fragment_id, edge)
                         .unwrap();
                 }
             }
@@ -1140,48 +1113,69 @@ impl CompleteStreamFragmentGraph {
             for (dispatcher_type, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
-                let mut res = None;
+                // Similar to `extract_upstream_table_columns_except_cross_db_backfill`.
+                let output_columns = || {
+                    let mut res = None;
 
-                stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
-                    let columns = match node_body {
-                        NodeBody::StreamScan(stream_scan) => {
-                            stream_scan.upstream_column_ids.clone()
-                        }
-                        _ => return,
-                    };
-                    res = Some(columns);
-                });
+                    stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
+                        let columns = match node_body {
+                            NodeBody::StreamScan(stream_scan) => {
+                                stream_scan.upstream_column_ids.clone()
+                            }
+                            NodeBody::SourceBackfill(source_backfill) => {
+                                // FIXME: only pass required columns instead of all columns here
+                                source_backfill.column_ids()
+                            }
+                            _ => return,
+                        };
+                        res = Some(columns);
+                    });
 
-                let output_columns = res.context("failed to locate downstream scan")?;
+                    res.context("failed to locate downstream scan")
+                };
 
-                let nodes = graph
-                    .fragments
-                    .get(&table_fragment_id)
-                    .unwrap()
-                    .node
-                    .as_ref()
-                    .unwrap();
+                let table_fragment = graph.fragments.get(&table_fragment_id).unwrap();
+                let nodes = table_fragment.node.as_ref().unwrap();
 
-                let (dist_key_indices, output_indices) = {
-                    let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
-                    let all_column_ids = mview_node.column_ids();
-                    let dist_key_indices = mview_node.dist_key_indices();
-                    let output_indices = output_columns
-                        .iter()
-                        .map(|c| {
-                            all_column_ids
-                                .iter()
-                                .position(|&id| id == *c)
-                                .map(|i| i as u32)
-                        })
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            MetaError::invalid_parameter(
-                                "unable to drop or alter the column due to \
-                                 being referenced by downstream materialized views or sinks",
-                            )
-                        })?;
-                    (dist_key_indices, output_indices)
+                let (dist_key_indices, output_indices) = match job_type {
+                    StreamingJobType::Table(TableJobType::General) => {
+                        let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
+                        let all_column_ids = mview_node.column_ids();
+                        let dist_key_indices = mview_node.dist_key_indices();
+                        let output_indices = gen_output_indices(&output_columns()?, all_column_ids)
+                            .ok_or_else(|| {
+                                MetaError::invalid_parameter(
+                                    "unable to drop the column due to \
+                                     being referenced by downstream materialized views or sinks",
+                                )
+                            })?;
+                        (dist_key_indices, output_indices)
+                    }
+                    StreamingJobType::Table(TableJobType::SharedCdcSource) => {
+                        assert_eq!(*dispatcher_type, DispatcherType::NoShuffle);
+                        (
+                            vec![], // not used for `NoShuffle`
+                            (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
+                        )
+                    }
+                    StreamingJobType::Source => {
+                        let source_node = nodes.get_node_body().unwrap().as_source().unwrap();
+                        let all_column_ids = source_node.column_ids().unwrap();
+                        let output_indices = gen_output_indices(&output_columns()?, all_column_ids)
+                            .ok_or_else(|| {
+                                MetaError::invalid_parameter(
+                                    "unable to drop the column due to \
+                                     being referenced by downstream materialized views or sinks",
+                                )
+                            })?;
+                        assert_eq!(*dispatcher_type, DispatcherType::NoShuffle);
+                        (
+                            vec![], // not used for `NoShuffle`
+                            output_indices,
+                        )
+                    }
+
+                    _ => bail!("unsupported job type for replacement: {job_type:?}"),
                 };
 
                 let edge = StreamFragmentEdge {
@@ -1225,6 +1219,19 @@ impl CompleteStreamFragmentGraph {
             extra_upstreams,
         })
     }
+}
+
+/// Generate the `output_indices` for [`DispatchStrategy`].
+fn gen_output_indices(required_columns: &Vec<i32>, upstream_columns: Vec<i32>) -> Option<Vec<u32>> {
+    required_columns
+        .iter()
+        .map(|c| {
+            upstream_columns
+                .iter()
+                .position(|&id| id == *c)
+                .map(|i| i as u32)
+        })
+        .collect()
 }
 
 fn mv_on_mv_dispatch_strategy(
