@@ -151,9 +151,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .collect_vec();
 
         let mut upstream = self.upstream.execute();
-        let mut upstream = transform_upstream(upstream, &self.output_columns)
-            .boxed()
-            .peekable();
+        let mut upstream = transform_upstream(upstream, &self.output_columns).boxed();
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
@@ -243,6 +241,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             table_reader.expect("table reader must created"),
         );
 
+        let mut upstream = upstream.peekable();
         let mut last_binlog_offset: Option<CdcOffset> = state
             .last_cdc_offset
             .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
