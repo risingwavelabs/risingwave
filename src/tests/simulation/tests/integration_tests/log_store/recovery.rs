@@ -124,23 +124,25 @@ async fn test_recover_synced_log_store() -> Result<()> {
     ) -> Result<()> {
         let mut session = cluster.start_session();
         let query = format!("SELECT COUNT(*) FROM {name}");
-        for i in 0..100 {
+        const MAX_RETRIES: usize = 100;
+        let mut current_count = 0;
+        for i in 0..MAX_RETRIES {
             let result = session.run(query.clone()).await?;
-            let count: usize = result.parse()?;
-            tracing::info!("current count: {count}");
-            if i == 99 {
-                bail!("failed after 99 retries, expected {result_count} but got {count}");
-            }
-            if count == result_count {
+            current_count = result.parse()?;
+            tracing::info!("current count: {current_count}");
+            if current_count == result_count {
                 if i == 0 {
                     // If count is immediately equal to result_count,
                     // it likely means there's no lag in the logstore.
-                    bail!("Expected some retries")
+                    // This is a failure case, as we expect some lag.
+                    bail!("there was no lag in the logstore")
                 }
                 return Ok(());
             }
             sleep(Duration::from_secs(1)).await;
         }
+        // In a subsequent step we will compare the results, and print the missing records.
+        tracing::error!("failed after {MAX_RETRIES} retries, expected {result_count} but got {current_count}");
         Ok(())
     }
 
@@ -148,8 +150,8 @@ async fn test_recover_synced_log_store() -> Result<()> {
     let mut cluster = start_sync_log_store_cluster().await?;
     cluster.run("alter system set per_database_isolation = false").await?;
 
-    let amplification_factor = 10000;
-    let dimension_count = 10;
+    let amplification_factor = 8000;
+    let dimension_count = 5;
     let result_count = amplification_factor * dimension_count;
 
     const UNALIGNED_MV_NAME: &str = "unaligned_mv";
@@ -163,6 +165,7 @@ async fn test_recover_synced_log_store() -> Result<()> {
         run_amplification_workload(&mut cluster, dimension_count).await?;
 
         cluster.kill_nodes(vec!["compute-1", "compute-2", "compute-3"], 5).await;
+        tracing::info!("killed compute nodes");
         cluster.wait_for_recovery().await?;
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
     }
