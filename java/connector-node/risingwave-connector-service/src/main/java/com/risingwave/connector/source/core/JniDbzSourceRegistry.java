@@ -15,15 +15,22 @@
 package com.risingwave.connector.source.core;
 
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Global registry for all JNI Debezium source handlers. */
 public class JniDbzSourceRegistry {
+    static final Logger LOG = LoggerFactory.getLogger(JniDbzSourceRegistry.class);
+
     private static final ConcurrentHashMap<Long, JniDbzSourceHandler> sourceHandlers =
             new ConcurrentHashMap<>();
 
     public static void register(JniDbzSourceHandler handler) {
         var sourceId = handler.getSourceId();
-        sourceHandlers.put(sourceId, handler);
+        var prev = sourceHandlers.put(sourceId, handler);
+        if (prev != null) {
+            LOG.info("Replacing existing source handler for source ID {}", sourceId);
+        }
     }
 
     public static JniDbzSourceHandler getSourceHandler(long sourceId) {
@@ -38,6 +45,11 @@ public class JniDbzSourceRegistry {
         // TODO: use a more robust way to handle this, e.g., may include the current term
         // ID of the cluster in the key.
         var sourceId = handler.getSourceId();
-        sourceHandlers.remove(sourceId, handler);
+        var removed = sourceHandlers.remove(sourceId, handler);
+        if (!removed) {
+            LOG.info(
+                    "Source handler for source ID {} does not match the one in the registry when unregistering (it may have been replaced)",
+                    sourceId);
+        }
     }
 }
