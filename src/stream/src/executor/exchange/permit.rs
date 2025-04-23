@@ -16,6 +16,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::config::StreamingConfig;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{AcquireError, Semaphore, SemaphorePermit, mpsc};
 
@@ -53,6 +54,14 @@ pub fn channel(
             max_chunk_permits,
         },
         Receiver { rx, permits },
+    )
+}
+
+pub fn channel_from_config(config: &StreamingConfig) -> (Sender, Receiver) {
+    channel(
+        config.developer.exchange_initial_permits,
+        config.developer.exchange_batched_permits,
+        config.developer.exchange_concurrent_barriers,
     )
 }
 
