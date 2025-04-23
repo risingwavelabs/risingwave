@@ -1702,8 +1702,8 @@ impl fmt::Display for Statement {
 impl Statement {
     /// Converts(unparses) the statement to a SQL string.
     ///
-    /// Compared to [`Statement::to_string`] which panics if the unparsed SQL is invalid
-    /// (not parsable), this function returns an error.
+    /// Compared to `to_string` which panics if the unparsed SQL is invalid (not parsable),
+    /// this function returns an error.
     pub fn try_to_string(&self) -> Result<String, ParserError> {
         let sql = self.to_string_unchecked();
         do_validate_parsable(self, &sql)?;
@@ -1712,11 +1712,11 @@ impl Statement {
 
     /// Converts(unparses) the statement to a SQL string.
     ///
-    /// Compared to [`Statement::to_string`] which panics if the unparsed SQL is invalid
-    /// (not parsable), this function skips the validation.
+    /// Compared to `to_string` which panics if the unparsed SQL is invalid (not parsable),
+    /// this function skips the validation.
     ///
-    /// Always prefer [`Statement::try_to_string`] or [`Statement::to_string`] to expose
-    /// potential incorrectness in [`Display`] implementation.
+    /// Always prefer [`Statement::try_to_string`] or `to_string` to expose potential
+    /// incorrectness in [`Display`] implementation.
     pub fn to_string_unchecked(&self) -> String {
         VALIDATE_PARSABLE.sync_scope(false, || self.to_string())
     }
