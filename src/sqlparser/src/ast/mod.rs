@@ -1666,22 +1666,61 @@ pub enum DescribeKind {
     Fragments,
 }
 
+tokio::task_local! {
+    /// A flag indicating whether to validate the unparsed SQL to be parsable
+    /// in [`Statement::fmt`] implementation. True by default.
+    static VALIDATE_PARSABLE: bool
+}
+fn should_validate_parsable() -> bool {
+    VALIDATE_PARSABLE.try_with(|x| *x).unwrap_or(true)
+}
+
+fn do_validate_parsable(stmt: &Statement, sql: &str) -> Result<(), ParserError> {
+    // TODO(#20713): expand this check to all statements
+    if matches!(
+        stmt,
+        Statement::CreateTable { .. } | Statement::CreateSource { .. }
+    ) {
+        let _ = Parser::parse_sql(&sql)?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut buf = String::new();
-        self.fmt_inner(&mut buf)?;
-        // TODO(#20713): expand this check to all statements
-        if matches!(
-            self,
-            Statement::CreateTable { .. } | Statement::CreateSource { .. }
-        ) {
-            let _ = Parser::parse_sql(&buf).expect("normalized SQL should be parsable");
+        if should_validate_parsable() {
+            let mut buf = String::new();
+            self.fmt_inner(&mut buf)?;
+            do_validate_parsable(self, &buf).expect("normalized SQL should be parsable");
+            f.write_str(&buf)
+        } else {
+            self.fmt_inner(f)
         }
-        f.write_str(&buf)
     }
 }
 
 impl Statement {
+    /// Converts(unparses) the statement to a string.
+    ///
+    /// Compared to [`Statement::to_string`] which panics if the unparsed SQL is invalid
+    /// (not parsable), this function returns an error.
+    pub fn try_to_string(&self) -> Result<String, ParserError> {
+        let sql = self.to_string_unchecked();
+        do_validate_parsable(self, &sql)?;
+        Ok(sql)
+    }
+
+    /// Converts(unparses) the statement to a string.
+    ///
+    /// Compared to [`Statement::to_string`] which panics if the unparsed SQL is invalid
+    /// (not parsable), this function skips the validation.
+    ///
+    /// Always prefer [`Statement::try_to_string`] or [`Statement::to_string`] to expose
+    /// potential incorrectness in [`Display`] implementation.
+    pub fn to_string_unchecked(&self) -> String {
+        VALIDATE_PARSABLE.sync_scope(false, || self.to_string())
+    }
+
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
     #[allow(clippy::cognitive_complexity)]
