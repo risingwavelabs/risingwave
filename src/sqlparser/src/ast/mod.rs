@@ -1700,7 +1700,7 @@ impl fmt::Display for Statement {
 }
 
 impl Statement {
-    /// Converts(unparses) the statement to a string.
+    /// Converts(unparses) the statement to a SQL string.
     ///
     /// Compared to [`Statement::to_string`] which panics if the unparsed SQL is invalid
     /// (not parsable), this function returns an error.
@@ -1710,7 +1710,7 @@ impl Statement {
         Ok(sql)
     }
 
-    /// Converts(unparses) the statement to a string.
+    /// Converts(unparses) the statement to a SQL string.
     ///
     /// Compared to [`Statement::to_string`] which panics if the unparsed SQL is invalid
     /// (not parsable), this function skips the validation.
