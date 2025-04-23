@@ -571,6 +571,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
             let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
             let mut clean_state = log_store_stream.peek().await.is_none();
+            tracing::debug!(?clean_state);
 
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
@@ -787,6 +788,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 while let Some((epoch, item)) = stream.try_next().await? {
                     match item {
                         KvLogStoreItem::Barrier { vnodes, .. } => {
+                            tracing::trace!(epoch, "read logstore barrier");
                             // update the progress
                             progress.apply_aligned(vnodes, epoch, None);
                             continue;
@@ -854,6 +856,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         break;
                     }
                     LogStoreBufferItem::Barrier { .. } => {
+                        tracing::trace!(item_epoch, "read buffer barrier");
                         progress.apply_aligned(read_state.vnodes().clone(), item_epoch, None);
                         continue;
                     }
