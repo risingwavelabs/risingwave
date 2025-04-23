@@ -365,6 +365,11 @@ create source pg_source with (
  slot.name = 'pg_slot'
 );
 
+query TT
+show create source pg_source;
+----
+fuck
+
 # test postgres backfill data types
 statement ok
 CREATE TABLE IF NOT EXISTS postgres_all_types(
