@@ -1,0 +1,39 @@
+# description: SELECT * REPLACE
+# group: [projection]
+
+statement ok
+DROP TABLE IF EXISTS tbl
+
+statement ok
+create table tbl as select i as rowid, case when i%2=0 then null else i end as i from generate_series(0, 9) tbl(i);
+
+statement ok
+FLUSH
+
+query II
+select i, coalesce(rowid+i, rowid) from tbl ORDER BY rowid;
+----
+NULL	0
+1	2
+NULL	2
+3	6
+NULL	4
+5	10
+NULL	6
+7	14
+NULL	8
+9	18
+
+query IIII
+select i, rowid, rowid+i, COALESCE(rowid+i, NULL) IS NULL OR rowid+3=6 from tbl ORDER BY rowid;
+----
+NULL	0	NULL	t
+1	1	2	f
+NULL	2	NULL	t
+3	3	6	t
+NULL	4	NULL	t
+5	5	10	f
+NULL	6	NULL	t
+7	7	14	f
+NULL	8	NULL	t
+9	9	18	f
