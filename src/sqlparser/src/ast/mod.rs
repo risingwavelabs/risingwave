@@ -1681,7 +1681,7 @@ fn do_validate_parsable(stmt: &Statement, sql: &str) -> Result<(), ParserError> 
         stmt,
         Statement::CreateTable { .. } | Statement::CreateSource { .. }
     ) {
-        let _ = Parser::parse_sql(&sql)?;
+        let _ = Parser::parse_sql(sql)?;
     }
     Ok(())
 }
