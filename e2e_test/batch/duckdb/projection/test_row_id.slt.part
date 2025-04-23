@@ -1,0 +1,87 @@
+# description: Test Row IDs
+# group: [projection]
+
+statement ok
+DROP TABLE IF EXISTS a
+
+statement ok
+create table a(rowid integer, i integer);
+
+statement ok
+insert into a values (0, 42), (1, 44);
+
+statement ok
+FLUSH
+
+# we can query row ids
+query II
+SELECT * FROM a order by rowid
+----
+0	42
+1	44
+
+query I
+SELECT rowid+1 FROM a WHERE CASE WHEN i=42 THEN rowid=0 ELSE rowid=1 END order by rowid;
+----
+1
+2
+
+# rowid isn't expanded in *
+query I
+SELECT i FROM a order by rowid
+----
+42
+44
+
+# we can't update rowids
+statement error
+UPDATE a SET rowid=5
+
+# we also can't insert with explicit row ids
+statement error
+INSERT INTO a (id, rowid, i)  VALUES (3, 5, 6)
+
+# we can use rowid as column name
+statement ok
+drop table if exists b
+
+statement ok
+create table b(rowid integer);
+
+statement ok
+insert into b values (42), (22);
+
+statement ok
+FLUSH
+
+# this rowid is expanded
+query I
+SELECT * FROM b ORDER BY 1
+----
+22
+42
+
+# selecting rowid just selects the column
+query I
+SELECT rowid FROM b ORDER BY 1
+----
+22
+42
+
+# now we can update
+statement ok
+UPDATE b SET "rowid"=5
+
+# and insert
+statement ok
+INSERT INTO b (rowid) VALUES (5)
+
+statement ok
+FLUSH
+
+query I
+SELECT * FROM b
+----
+5
+5
+5
