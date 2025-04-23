@@ -375,6 +375,11 @@ create source pg_source with (
  slot.name = 'pg_slot'
 );
 
+query T
+select definition from rw_relation_info;
+----
+creat
+
 # test postgres backfill data types
 statement ok
 CREATE TABLE IF NOT EXISTS postgres_all_types(
