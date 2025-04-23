@@ -52,6 +52,10 @@ public class JniDbzSourceHandler {
         }
     }
 
+    public long getSourceId() {
+        return config.getSourceId();
+    }
+
     public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
             throws Exception {
 
@@ -102,7 +106,7 @@ public class JniDbzSourceHandler {
     public void start() {
         try {
             // register handler to the registry
-            JniDbzSourceRegistry.register(config.getSourceId(), this);
+            JniDbzSourceRegistry.register(this);
 
             // Start the engine
             var startOk = runner.start();
@@ -110,8 +114,6 @@ public class JniDbzSourceHandler {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
-                // remove the handler from registry
-                JniDbzSourceRegistry.unregister(config.getSourceId());
                 return;
             }
 
@@ -154,7 +156,7 @@ public class JniDbzSourceHandler {
             }
         } finally {
             // remove the handler from registry
-            JniDbzSourceRegistry.unregister(config.getSourceId());
+            JniDbzSourceRegistry.unregister(this);
         }
     }
 
