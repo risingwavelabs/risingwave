@@ -19,6 +19,7 @@ mv target/ci-sim target/sim
 TEST_PATTERN="$@"
 
 echo "--- Run integration tests in deterministic simulation mode"
+
 seq "$TEST_NUM" | parallel --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
  cargo nextest run \
  $NEXTEST_PARTITION_ARG \
