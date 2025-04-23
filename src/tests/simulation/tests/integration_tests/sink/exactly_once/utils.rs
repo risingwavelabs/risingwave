@@ -37,6 +37,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::coordinate::CoordinatedLogSinker;
 use risingwave_connector::sink::iceberg::exactly_once_util::*;
+use risingwave_connector::sink::iceberg::{CommitIceberg, IcebergSinkCommitter};
 use risingwave_connector::sink::test_sink::{
     TestSinkRegistryGuard, register_build_coordinated_sink, register_build_sink,
 };
@@ -324,6 +325,52 @@ impl SinkWriter for CoordinatedTestWriter {
     }
 }
 
+#[async_trait]
+
+    async fn begin_txn(
+        &mut self,
+        write_results: Vec<Self::CommitResult>,
+        snapshot_id: Option<i64>,
+    ) -> risingwave_connector::sink::Result<i64> {
+        let snapshot_id = match snapshot_id {
+            Some(previous_snapshot_id) => previous_snapshot_id,
+            None => generate_unique_snapshot_id(),
+        };
+        Ok(snapshot_id)
+    }
+
+    async fn do_commit(
+        &mut self,
+        write_results: Vec<Self::CommitResult>,
+        snapshot_id: i64,
+        commit_retry_num: u32,
+    ) -> risingwave_connector::sink::Result<()> {
+        let file_ids = metadatas.into_iter().map(|metadata| {
+            let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
+            usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
+        });
+        self.store.insert_many(
+            snapshot_id,
+            file_ids
+                .into_iter()
+                .map(|file_id| self.staging_store.get(file_id))
+                .flatten(),
+        );
+        Ok(())
+    }
+
+    async fn is_snapshot_id_in_iceberg(
+        &self,
+        snapshot_id: i64,
+    ) -> risingwave_connector::sink::Result<bool> {
+        Ok(self
+            .store
+            .inner()
+            .snapshot_id_to_data
+            .contains_key(&snapshot_id))
+    }
+}
+
 /// `SimulationTestIcebergCommitter` mocks the behavior of the Iceberg committer
 /// with exactly-once semantics. During the commit process, it first pre-commits
 /// metadata to the meta store. After a successful commit, it deletes the previously
@@ -593,16 +640,6 @@ impl SimulationTestIcebergCommitter {
     }
 }
 
-impl SimulationTestIcebergCommitter {
-    async fn is_snapshot_id_in_iceberg(&self, snapshot_id: i64) -> Result<bool> {
-        Ok(self
-            .store
-            .inner()
-            .snapshot_id_to_data
-            .contains_key(&snapshot_id))
-    }
-}
-
 pub fn simple_name_of_id(id: i32) -> String {
     format!("name-{}", id)
 }
@@ -684,14 +721,25 @@ impl SimulationTestIcebergExactlyOnceSink {
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     move |db, sink_param| {
-                        Box::new(SimulationTestIcebergCommitter {
-                            err_rate_vec: err_rate_vec.clone(),
+                        let writer = CoordinatedTestWriter {
                             store: store.clone(),
-                            last_commit_epoch: 0,
+                            parallelism_counter: parallelism_counter.clone(),
+                            err_rate: err_rate.clone(),
                             staging_store: staging_store.clone(),
-                            db: db.clone(),
+                            staging: Default::default(),
+                        };
+                        Box::new(IcebergSinkCommitter {
+                            commit_iceberg: writer,
+                            is_exactly_once: true,
+                            last_commit_epoch: 0,
+                            sink_id: sink_param.sink_id.sink_id(),
+                            param: param.clone(),
+                            db,
+                            commit_notifier: None,
+                            _compact_task_guard: None,
+                            commit_retry_num: 3,
                             committed_epoch_subscriber: None,
-                            sink_id: sink_param.sink_id,
+                            // err_rate_vec: err_rate_vec.clone(),
                         })
                     }
                 },
