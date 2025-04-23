@@ -77,6 +77,21 @@ impl ExternalStorageTable {
         }
     }
 
+    #[cfg(test)]
+    pub fn for_test_undefined() -> Self {
+        Self {
+            table_id: 1.into(),
+            table_name: "for_test_table_name".into(),
+            schema_name: "for_test_schema_name".into(),
+            database_name: "for_test_database_name".into(),
+            config: ExternalTableConfig::default(),
+            table_type: CdcTableType::Undefined,
+            schema: Schema::empty().to_owned(),
+            pk_order_types: vec![],
+            pk_indices: vec![],
+        }
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
