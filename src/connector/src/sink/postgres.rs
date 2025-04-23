@@ -403,6 +403,7 @@ impl PostgresSinkWriter {
             &self.pk_indices,
             parameters,
             remaining,
+            true,
         )
         .await?;
         transaction.commit().await?;
@@ -442,6 +443,7 @@ impl PostgresSinkWriter {
             &self.pk_indices,
             delete_parameters,
             delete_remaining_parameter,
+            false,
         )
         .await?;
         let (insert_parameters, insert_remaining_parameter) = insert_parameter_buffer.into_parts();
@@ -453,6 +455,7 @@ impl PostgresSinkWriter {
             &self.pk_indices,
             insert_parameters,
             insert_remaining_parameter,
+            false,
         )
         .await?;
         transaction.commit().await?;
@@ -468,6 +471,7 @@ impl PostgresSinkWriter {
         pk_indices: &[usize],
         parameters: Vec<Vec<Option<ScalarAdapter>>>,
         remaining_parameter: Vec<Option<ScalarAdapter>>,
+        append_only: bool,
     ) -> Result<()> {
         let column_length = match op {
             Op::Insert => schema.len(),
@@ -485,7 +489,13 @@ impl PostgresSinkWriter {
                 schema.fields(),
             );
             let statement = match op {
-                Op::Insert => create_insert_sql(schema, table_name, rows_length),
+                Op::Insert => {
+                    if append_only {
+                        create_insert_sql(schema, table_name, rows_length)
+                    } else {
+                        create_upsert_sql(schema, table_name, pk_indices, rows_length)
+                    }
+                }
                 Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
                 _ => unreachable!(),
             };
@@ -502,7 +512,13 @@ impl PostgresSinkWriter {
                 "flattened parameters are unaligned"
             );
             let statement = match op {
-                Op::Insert => create_insert_sql(schema, table_name, rows_length),
+                Op::Insert => {
+                    if append_only {
+                        create_insert_sql(schema, table_name, rows_length)
+                    } else {
+                        create_upsert_sql(schema, table_name, pk_indices, rows_length)
+                    }
+                }
                 Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
                 _ => unreachable!(),
             };
@@ -585,6 +601,46 @@ fn create_delete_sql(
     format!("DELETE FROM {table_name} WHERE {parameters}")
 }
 
+fn create_upsert_sql(
+    schema: &Schema,
+    table_name: &str,
+    pk_indices: &[usize],
+    number_of_rows: usize,
+) -> String {
+    let number_of_columns = schema.len();
+    let columns: String = schema
+        .fields()
+        .iter()
+        .map(|field| field.name.clone())
+        .collect_vec()
+        .join(", ");
+    let parameters: String = (0..number_of_rows)
+        .map(|i| {
+            let row_parameters = (0..number_of_columns)
+                .map(|j| format!("${}", i * number_of_columns + j + 1))
+                .join(", ");
+            format!("({row_parameters})")
+        })
+        .collect_vec()
+        .join(", ");
+    let pk_columns = pk_indices
+        .iter()
+        .map(|i| schema.fields()[*i].name.clone())
+        .collect_vec()
+        .join(", ");
+    let update_parameters: String = (0..number_of_columns)
+        .filter(|i| !pk_indices.contains(i))
+        .map(|i| {
+            let column = schema.fields()[i].name.clone();
+            format!("{column} = EXCLUDED.{column}")
+        })
+        .collect_vec()
+        .join(", ");
+    format!(
+        "INSERT INTO {table_name} ({columns}) VALUES {parameters} on conflict ({pk_columns}) do update set {update_parameters}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Display;
@@ -645,6 +701,28 @@ mod tests {
         check(
             sql,
             expect!["DELETE FROM test_table WHERE (b = $1) OR (b = $2) OR (b = $3)"],
+        );
+    }
+
+    #[test]
+    fn test_create_upsert_sql() {
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "a".to_owned(),
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "b".to_owned(),
+            },
+        ]);
+        let table_name = "test_table";
+        let sql = create_upsert_sql(&schema, table_name, &[1], 3);
+        check(
+            sql,
+            expect![
+                "INSERT INTO test_table (a, b) VALUES ($1, $2), ($3, $4), ($5, $6) on conflict (b) do update set a = EXCLUDED.a"
+            ],
         );
     }
 }
