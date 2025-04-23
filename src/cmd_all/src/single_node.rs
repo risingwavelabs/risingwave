@@ -241,7 +241,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
-        compactor_opts: Some(compactor_opts),
+        compactor_opts: None, // Some(compactor_opts),
     }
 }
 

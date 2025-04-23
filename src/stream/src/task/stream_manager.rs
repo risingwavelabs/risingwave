@@ -578,6 +578,7 @@ impl StreamActorManager {
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
+        tracing::warn!("task-stream-env: {:#?}", env.state_store());
         let executor = dispatch_state_store!(env.state_store(), store, {
             self.create_nodes_inner(
                 fragment_id,

@@ -1050,6 +1050,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         chunk_size: usize,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<DataChunk>> + Send> {
+        // self.store.new_read_snapshot(epoch, options);
+
         let iter = self
             .chunk_iter_with_pk_bounds(
                 epoch,

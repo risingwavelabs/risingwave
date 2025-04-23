@@ -146,8 +146,8 @@ pub struct VectorVal {
 }
 
 impl Debug for VectorVal {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("VECTOR_PLACEHOLDER")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
     }
 }
 

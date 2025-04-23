@@ -103,6 +103,8 @@ pub struct StateTableInner<
     /// State store backend.
     local_store: S::Local,
 
+    vector_writer: Option<S::VectorWriter>,
+
     /// State store for accessing snapshot data
     store: S,
 
@@ -189,6 +191,17 @@ where
     /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
+        // tracing::warn!(r#"state_table init!
+        //     table_id: {},
+        //     data_types: {:?},
+        //     i2o_mapping: {:?},
+        //     pk_indices: {:?},
+        //     value_indices: {:?},
+        //     output_indices: {:?},
+        // "#, self.table_id, self.data_types, self.i2o_mapping, self.pk_indices, self.value_indices, self.output_indices);
+        if let Some(vector_writer) = &mut self.vector_writer {
+            vector_writer.init(InitOptions::new(epoch)).await?;
+        }
         assert_eq!(None, self.epoch.replace(epoch), "should not init for twice");
         Ok(())
     }
@@ -378,7 +391,10 @@ where
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
-            .collect();
+            .collect_vec();
+        let is_vector_index = pk_data_types
+            .iter()
+            .any(|ty| matches!(ty, DataType::Vector(_)));
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
         let input_value_indices = table_catalog
@@ -431,6 +447,16 @@ where
             )
         };
         let local_state_store = store.new_local(new_local_options).await;
+        tracing::warn!("state_store TypeId: {:?}", std::any::type_name_of_val(&store));
+        let vector_writer = if is_vector_index {
+            Some(
+                store
+                    .new_vector_writer(NewVectorWriterOptions { table_id })
+                    .await,
+            )
+        } else {
+            None
+        };
 
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
@@ -515,6 +541,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            vector_writer,
             store,
             epoch: None,
             pk_serde,
@@ -939,6 +966,22 @@ where
         // when using vis to set rows empty or not.
         // If we are to use the vis optimization, we should skip this.
         let key_chunk = chunk.project(self.pk_indices());
+
+        if let Some(vector_writer) = &mut self.vector_writer {
+            let vec_col = key_chunk.column_at(0).as_vector();
+            use risingwave_common::array::Array as _;
+            for vec in vec_col.iter() {
+                let Some(vec) = vec else {
+                    continue;
+                };
+                let vec = vec.into_inner().iter().map(|f| f.unwrap().into_float32().0).collect_vec();
+                let vec = risingwave_storage::vector::Vector::new(&vec);
+                let info = Bytes::new(); // TODO: value
+                vector_writer.insert(vec, info).unwrap(); // TODO: unwrap_or_else handle_memtable_error
+            }
+            return;
+        }
+
         let vnode_and_pks = key_chunk
             .rows_with_holes()
             .zip_eq_fast(vnodes.iter())
