@@ -66,7 +66,7 @@ use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
-tokio::task_local! {
+task_local::task_local! {
     pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
 }
 
@@ -1666,7 +1666,7 @@ pub enum DescribeKind {
     Fragments,
 }
 
-tokio::task_local! {
+task_local::task_local! {
     /// A flag indicating whether to validate the unparsed SQL to be parsable
     /// in [`Statement::fmt`] implementation. True by default.
     static VALIDATE_PARSABLE: bool
