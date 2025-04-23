@@ -82,3 +82,9 @@ SELECT cast(cast(a AS VARCHAR) as INTEGER) FROM test order by rowid;
 11
 12
 13
+
+statement ok
+drop table if exists a
+
+statement ok
+drop table if exists test

@@ -31,3 +31,6 @@ SELECT COALESCE(a, b::INT) FROM vals order by id;
 
 statement error
 SELECT COALESCE(NULL, b::INT) FROM vals
+
+statement ok
+DROP TABLE IF EXISTS vals

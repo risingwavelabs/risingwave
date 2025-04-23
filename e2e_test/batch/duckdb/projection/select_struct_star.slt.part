@@ -51,3 +51,12 @@ DROP TABLE IF EXISTS b
 # # Binder Error: Ambiguous reference to column name "i" (use: "b.i" or "a.i")
 # statement error
 # SELECT i.* FROM a, b;
+
+statement ok
+DROP TABLE IF EXISTS test
+
+statement ok
+DROP TABLE IF EXISTS a
+
+statement ok
+DROP TABLE IF EXISTS b

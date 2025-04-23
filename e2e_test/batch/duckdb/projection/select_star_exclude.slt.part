@@ -138,3 +138,6 @@ FLUSH
 
 # statement error
 # SELECT integers.* EXCLUDE (blabla) FROM integers
+
+statement ok
+DROP TABLE IF EXISTS integers

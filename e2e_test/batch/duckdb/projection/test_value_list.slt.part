@@ -142,3 +142,9 @@ INSERT INTO varchars (v) VALUES (1, 2), ('hello'), (DEFAULT, DEFAULT);
 # operation on default not allowed
 statement error
 INSERT INTO varchars (v) VALUES (DEFAULT IS NULL);
+
+statement ok
+drop table if exists test
+
+statement ok
+drop table if exists varchars

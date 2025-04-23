@@ -215,3 +215,12 @@ query I
 SELECT a FROM strtest WHERE b >= 'h' order by id
 ----
 2
+
+statement ok
+DROP TABLE IF EXISTS exprtest
+
+statement ok
+DROP TABLE IF EXISTS intest
+
+statement ok
+drop table if exists strtest

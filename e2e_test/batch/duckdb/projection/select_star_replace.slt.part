@@ -51,3 +51,6 @@ FLUSH
 # statement error
 # SELECT * EXCLUDE (i) REPLACE (i+100 AS i) FROM integers
 # ----
+
+statement ok
+DROP TABLE IF EXISTS integers

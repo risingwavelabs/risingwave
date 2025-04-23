@@ -85,3 +85,9 @@ SELECT * FROM b
 5
 5
 5
+
+statement ok
+drop table if exists a
+
+statement ok
+drop table if exists b
