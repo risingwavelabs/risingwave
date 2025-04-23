@@ -152,8 +152,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .cloned()
             .collect_vec();
 
-        let mut upstream =
-            transform_upstream(self.upstream.execute(), self.output_columns.clone()).boxed();
+        let mut upstream = self.upstream.execute();
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
@@ -204,6 +203,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
+
+        // Make sure to use mapping_message after transform_upstream.
+        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
         loop {
             if let Some(msg) =
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
