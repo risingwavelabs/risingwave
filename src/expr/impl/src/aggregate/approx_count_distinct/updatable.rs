@@ -14,7 +14,7 @@
 
 use super::*;
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 struct SparseCount {
     inner: Vec<(u8, u64)>,
 }
@@ -87,7 +87,7 @@ impl EstimateSize for SparseCount {
     }
 }
 
-#[derive(Clone, Debug, EstimateSize)]
+#[derive(Clone, Debug, EstimateSize, PartialEq, Eq)]
 pub(super) struct UpdatableBucket<const DENSE_BITS: usize = 16> {
     dense_counts: [u64; DENSE_BITS],
     sparse_counts: SparseCount,
