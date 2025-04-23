@@ -21,7 +21,8 @@ public class JniDbzSourceRegistry {
     private static final ConcurrentHashMap<Long, JniDbzSourceHandler> sourceHandlers =
             new ConcurrentHashMap<>();
 
-    public static void register(long sourceId, JniDbzSourceHandler handler) {
+    public static void register(JniDbzSourceHandler handler) {
+        var sourceId = handler.getSourceId();
         sourceHandlers.put(sourceId, handler);
     }
 
@@ -29,7 +30,14 @@ public class JniDbzSourceRegistry {
         return sourceHandlers.get(sourceId);
     }
 
-    public static void unregister(long sourceId) {
-        sourceHandlers.remove(sourceId);
+    public static void unregister(JniDbzSourceHandler handler) {
+        // Only unregister if the handler is the same object as the one in the registry.
+        // This is crucial because there could be a race condition where multiple engines
+        // operate with the same source ID during recovery. We don't want the cleanup
+        // process of the stale one to remove the new one.
+        // TODO: use a more robust way to handle this, e.g., may include the current term
+        // ID of the cluster in the key.
+        var sourceId = handler.getSourceId();
+        sourceHandlers.remove(sourceId, handler);
     }
 }
