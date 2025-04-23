@@ -49,6 +49,15 @@ async fn start_sync_log_store_cluster() -> Result<Cluster> {
         .await
 }
 
+// NOTE(kwannoel): To troubleshoot, recommend running with the following logging configuration:
+// ```sh
+// RUST_LOG='\
+//   risingwave_stream::executor::sync_kv_log_store=trace,\
+//   integration_tests::log_store::recovery=info,\
+//   risingwave_stream::common::log_store_impl::kv_log_store=trace\
+// '\
+// ./risedev sit-test test_recover_synced_log_store >out.log 2>&1
+// ```
 #[tokio::test]
 async fn test_recover_synced_log_store() -> Result<()> {
     async fn setup_base_tables(
