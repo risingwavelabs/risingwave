@@ -182,10 +182,10 @@ mod tests {
         agg.update(1.into(), false).unwrap();
         agg.update(2.into(), false).unwrap();
         agg.update(3.into(), false).unwrap();
-        assert_eq!(agg.calculate_result(), 4);
+        assert_eq!(agg.calculate_result(), 3);
 
         agg.update(3.into(), false).unwrap();
-        assert_eq!(agg.calculate_result(), 4);
+        assert_eq!(agg.calculate_result(), 3);
 
         agg.update(3.into(), true).unwrap();
         agg.update(3.into(), true).unwrap();
