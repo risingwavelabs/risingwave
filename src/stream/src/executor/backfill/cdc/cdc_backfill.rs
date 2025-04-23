@@ -899,13 +899,15 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_storage::memory::MemoryStateStore;
-    use crate::executor::{ActorContext, Barrier, CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable, Message};
 
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::StateTable;
     use crate::executor::source::default_source_internal_table;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::{
+        ActorContext, Barrier, CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable, Message,
+    };
 
     #[tokio::test]
     async fn test_transform_upstream_chunk() {
@@ -973,7 +975,7 @@ mod tests {
         let pk_indices = vec![1];
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), pk_indices.clone());
-        let output_indices = vec![1, 0, 4]; //reorder
+        let output_indices = vec![1, 0, 4]; // reorder
         let output_columns = vec![
             ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
             ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
