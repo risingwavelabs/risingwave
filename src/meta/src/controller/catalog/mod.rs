@@ -241,6 +241,7 @@ impl CatalogController {
         let job_id = subscription_id as i32;
         let (subscription, obj) = Subscription::find_by_id(job_id)
             .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
@@ -381,12 +382,23 @@ impl CatalogController {
         } else {
             filter_condition
         };
+        let objects: Vec<PartialObject> = Object::find()
+            .select_only()
+            .filter(filter_condition.clone())
+            .into_partial_model()
+            .all(&txn)
+            .await?;
 
         Object::delete_many()
             .filter(filter_condition)
             .exec(&txn)
             .await?;
         txn.commit().await?;
+        let object_group = build_object_group_for_delete(objects);
+
+        let _version = self
+            .notify_frontend(NotificationOperation::Delete, object_group)
+            .await;
         Ok(())
     }
 
@@ -838,6 +850,7 @@ impl CatalogControllerInner {
     async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
         let subscription_objs = Subscription::find()
             .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .all(&self.db)
             .await?;
 

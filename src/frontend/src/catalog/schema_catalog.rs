@@ -340,10 +340,10 @@ impl SchemaCatalog {
     }
 
     pub fn drop_subscription(&mut self, id: SubscriptionId) {
-        let subscription_ref = self.subscription_by_id.remove(&id).unwrap();
-        self.subscription_by_name
-            .remove(&subscription_ref.name)
-            .unwrap();
+        let subscription_ref = self.subscription_by_id.remove(&id);
+        if let Some(subscription_ref) = subscription_ref {
+            self.subscription_by_name.remove(&subscription_ref.name);
+        }
     }
 
     pub fn update_subscription(&mut self, prost: &PbSubscription) {
