@@ -51,9 +51,6 @@ async fn start_sync_log_store_cluster() -> Result<Cluster> {
 
 #[tokio::test]
 async fn test_recover_synced_log_store() -> Result<()> {
-    init_logger();
-    let mut cluster = start_sync_log_store_cluster().await?;
-
     async fn setup_base_tables(
         cluster: &mut Cluster,
         amplification_factor: usize,
@@ -127,17 +124,18 @@ async fn test_recover_synced_log_store() -> Result<()> {
     ) -> Result<()> {
         let mut session = cluster.start_session();
         let query = format!("SELECT COUNT(*) FROM {name}");
-        for i in 0..10 {
+        for i in 0..100 {
             let result = session.run(query.clone()).await?;
             let count: usize = result.parse()?;
+            tracing::info!("current count: {count}");
+            if i == 99 {
+                bail!("failed after 99 retries, expected {result_count} but got {count}");
+            }
             if count == result_count {
                 if i == 0 {
                     // If count is immediately equal to result_count,
                     // it likely means there's no lag in the logstore.
                     bail!("Expected some retries")
-                }
-                if i == 9 {
-                    bail!("failed after 9 retries, expected {result_count} but got {count} after 9 tries");
                 }
                 return Ok(());
             }
@@ -146,6 +144,10 @@ async fn test_recover_synced_log_store() -> Result<()> {
         Ok(())
     }
 
+    init_logger();
+    let mut cluster = start_sync_log_store_cluster().await?;
+    cluster.run("alter system set per_database_isolation = false").await?;
+
     let amplification_factor = 10000;
     let dimension_count = 10;
     let result_count = amplification_factor * dimension_count;
@@ -153,9 +155,9 @@ async fn test_recover_synced_log_store() -> Result<()> {
     const UNALIGNED_MV_NAME: &str = "unaligned_mv";
     const ALIGNED_MV_NAME: &str = "aligned_mv";
 
+
     // unaligned join workload
     {
-        cluster.run("alter system set per_database_isolation = false").await?;
         setup_base_tables(&mut cluster, amplification_factor, dimension_count).await?;
         setup_mv(&mut cluster, UNALIGNED_MV_NAME, true).await?;
         run_amplification_workload(&mut cluster, dimension_count).await?;

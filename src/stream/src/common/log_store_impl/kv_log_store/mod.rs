@@ -50,6 +50,7 @@ use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
+#[derive(Debug)]
 pub(crate) enum LogStoreVnodeProgress {
     None,
     PerVnode(HashMap<VirtualNode, (Epoch, Option<SeqId>)>),
