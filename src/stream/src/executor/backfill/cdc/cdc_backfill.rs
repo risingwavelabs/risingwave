@@ -207,22 +207,24 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
                     .await?
             {
-                match msg {
-                    Message::Barrier(barrier) => {
-                        // commit state to bump the epoch of state table
-                        state_impl.commit_state(barrier.epoch).await?;
-                        yield Message::Barrier(barrier);
-                    }
-                    Message::Chunk(chunk) => {
-                        if need_backfill {
-                            // ignore chunk if we need backfill, since we can read the data from the snapshot
-                        } else {
-                            // forward the chunk to downstream
-                            yield Message::Chunk(chunk);
+                if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                    match msg {
+                        Message::Barrier(barrier) => {
+                            // commit state to bump the epoch of state table
+                            state_impl.commit_state(barrier.epoch).await?;
+                            yield Message::Barrier(barrier);
                         }
-                    }
-                    Message::Watermark(_) => {
-                        // ignore watermark
+                        Message::Chunk(chunk) => {
+                            if need_backfill {
+                                // ignore chunk if we need backfill, since we can read the data from the snapshot
+                            } else {
+                                // forward the chunk to downstream
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                        Message::Watermark(_) => {
+                            // ignore watermark
+                        }
                     }
                 }
             } else {
