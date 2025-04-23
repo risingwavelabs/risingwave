@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -488,7 +488,7 @@ impl PostgresSinkWriter {
                 parameters,
                 schema.fields(),
             );
-            let statement = match op {
+            let statement_str = match op {
                 Op::Insert => {
                     if append_only {
                         create_insert_sql(schema, table_name, rows_length)
@@ -499,9 +499,12 @@ impl PostgresSinkWriter {
                 Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
                 _ => unreachable!(),
             };
-            let statement = transaction.prepare(&statement).await?;
+            let statement = transaction.prepare(&statement_str).await?;
             for parameter in parameters {
-                transaction.execute_raw(&statement, parameter).await?;
+                transaction
+                    .execute_raw(&statement, parameter)
+                    .await
+                    .with_context(|| format!("failed to run statement: {}", statement_str,))?;
             }
         }
         if !remaining_parameter.is_empty() {
@@ -511,7 +514,7 @@ impl PostgresSinkWriter {
                 0,
                 "flattened parameters are unaligned"
             );
-            let statement = match op {
+            let statement_str = match op {
                 Op::Insert => {
                     if append_only {
                         create_insert_sql(schema, table_name, rows_length)
@@ -522,12 +525,13 @@ impl PostgresSinkWriter {
                 Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
                 _ => unreachable!(),
             };
-            tracing::trace!("binding statement: {:?}", statement);
-            let statement = transaction.prepare(&statement).await?;
+            tracing::trace!("binding statement: {:?}", statement_str);
+            let statement = transaction.prepare(&statement_str).await?;
             tracing::trace!("binding parameters: {:?}", remaining_parameter);
             transaction
                 .execute_raw(&statement, remaining_parameter)
-                .await?;
+                .await
+                .with_context(|| format!("failed to run statement: {}", statement_str))?;
         }
         Ok(())
     }
