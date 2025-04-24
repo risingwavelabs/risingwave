@@ -25,7 +25,6 @@ use risingwave_meta_model::{
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
@@ -352,7 +351,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             dependent_table_id: value.0.dependent_table_id as _,
-            subscription_state: PbSubscriptionState::Init as _,
+            subscription_state: value.0.subscription_state as _,
         }
     }
 }
