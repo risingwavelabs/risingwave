@@ -30,7 +30,7 @@ impl DockerServiceConfig for PostgresConfig {
 
     fn args(&self) -> Vec<String> {
         // Enable CDC.
-        ["-c", "wal_level=logical", "-c", "max_replication_slots=30"]
+        ["-c", "wal_level=logical", "-c", "max_replication_slots=30", "-c", "log_statement=all"]
             .map(String::from)
             .to_vec()
     }
