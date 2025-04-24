@@ -19,7 +19,6 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::risingwave_cmd;
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{CompactorConfig, ExecuteContext, Task, add_meta_node, add_tempo_endpoint};
 
@@ -65,7 +64,7 @@ impl Task for CompactorService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = risingwave_cmd("compactor")?;
+        let mut cmd = ctx.risingwave_cmd("compactor")?;
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
