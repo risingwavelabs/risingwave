@@ -159,7 +159,7 @@ async fn test_recover_synced_log_store() -> Result<()> {
     let mut cluster = start_sync_log_store_cluster().await?;
     cluster.run("alter system set per_database_isolation = false").await?;
 
-    let amplification_factor = 8000;
+    let amplification_factor = 10000;
     let dimension_count = 5;
     let result_count = amplification_factor * dimension_count;
 
