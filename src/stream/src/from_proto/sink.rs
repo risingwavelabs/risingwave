@@ -176,8 +176,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             properties_with_secret.insert("host".to_owned(), jdbc_url.host);
             properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
             properties_with_secret.insert("database".to_owned(), jdbc_url.db_name);
-            properties_with_secret.insert("user".to_owned(), jdbc_url.username);
-            properties_with_secret.insert("password".to_owned(), jdbc_url.password);
+            if let Some(username) = jdbc_url.username {
+                properties_with_secret.insert("user".to_owned(), username);
+            }
+            if let Some(password) = jdbc_url.password {
+                properties_with_secret.insert("password".to_owned(), password);
+            }
             if let Some(table_name) = properties_with_secret.get("table.name") {
                 properties_with_secret.insert("table".to_owned(), table_name.clone());
             }
@@ -329,8 +333,8 @@ struct JdbcUrl {
     host: String,
     port: u16,
     db_name: String,
-    username: String,
-    password: String,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
@@ -365,15 +369,13 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
             password = Some(value.to_string());
         }
     }
-    let username = username.ok_or_else(|| anyhow!("missing username in jdbc url"))?;
-    let password = password.ok_or_else(|| anyhow!("missing password in jdbc url"))?;
 
     Ok(JdbcUrl {
         host: host.to_owned(),
         port,
         db_name: db_name.to_owned(),
-        username: username.to_owned(),
-        password: password.to_owned(),
+        username,
+        password,
     })
 }
 
