@@ -420,6 +420,7 @@ impl PostgresSinkWriter {
             Op::Insert,
             &mut transaction,
             &self.schema,
+            &self.config.schema,
             &self.config.table,
             &self.pk_indices,
             parameters,
@@ -460,6 +461,7 @@ impl PostgresSinkWriter {
             Op::Delete,
             &mut transaction,
             &self.schema,
+            &self.config.schema,
             &self.config.table,
             &self.pk_indices,
             delete_parameters,
@@ -472,6 +474,7 @@ impl PostgresSinkWriter {
             Op::Insert,
             &mut transaction,
             &self.schema,
+            &self.config.schema,
             &self.config.table,
             &self.pk_indices,
             insert_parameters,
@@ -488,6 +491,7 @@ impl PostgresSinkWriter {
         op: Op,
         transaction: &mut tokio_postgres::Transaction<'_>,
         schema: &Schema,
+        schema_name: &str,
         table_name: &str,
         pk_indices: &[usize],
         parameters: Vec<Vec<Option<ScalarAdapter>>>,
@@ -512,12 +516,14 @@ impl PostgresSinkWriter {
             let statement_str = match op {
                 Op::Insert => {
                     if append_only {
-                        create_insert_sql(schema, table_name, rows_length)
+                        create_insert_sql(schema, schema_name, table_name, rows_length)
                     } else {
-                        create_upsert_sql(schema, table_name, pk_indices, rows_length)
+                        create_upsert_sql(schema, schema_name, table_name, pk_indices, rows_length)
                     }
                 }
-                Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
+                Op::Delete => {
+                    create_delete_sql(schema, schema_name, table_name, pk_indices, rows_length)
+                }
                 _ => unreachable!(),
             };
             let statement = transaction.prepare(&statement_str).await?;
@@ -538,12 +544,14 @@ impl PostgresSinkWriter {
             let statement_str = match op {
                 Op::Insert => {
                     if append_only {
-                        create_insert_sql(schema, table_name, rows_length)
+                        create_insert_sql(schema, schema_name, table_name, rows_length)
                     } else {
-                        create_upsert_sql(schema, table_name, pk_indices, rows_length)
+                        create_upsert_sql(schema, schema_name, table_name, pk_indices, rows_length)
                     }
                 }
-                Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
+                Op::Delete => {
+                    create_delete_sql(schema, schema_name, table_name, pk_indices, rows_length)
+                }
                 _ => unreachable!(),
             };
             tracing::trace!("binding statement: {:?}", statement_str);
@@ -577,7 +585,17 @@ impl LogSinker for PostgresSinkWriter {
     }
 }
 
-fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -> String {
+fn create_insert_sql(
+    schema: &Schema,
+    schema_name: &str,
+    table_name: &str,
+    number_of_rows: usize,
+) -> String {
+    let normalized_table_name = format!(
+        "{}.{}",
+        quote_identifier(schema_name),
+        quote_identifier(table_name)
+    );
     let number_of_columns = schema.len();
     let columns: String = schema
         .fields()
@@ -593,20 +611,26 @@ fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -
         })
         .collect_vec()
         .join(", ");
-    format!("INSERT INTO {table_name} ({columns}) VALUES {parameters}")
+    format!("INSERT INTO {normalized_table_name} ({columns}) VALUES {parameters}")
 }
 
 fn create_delete_sql(
     schema: &Schema,
+    schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
     number_of_rows: usize,
 ) -> String {
+    let normalized_table_name = format!(
+        "{}.{}",
+        quote_identifier(schema_name),
+        quote_identifier(table_name)
+    );
     let number_of_pk = pk_indices.len();
     let pk = {
         let pk_symbols = pk_indices
             .iter()
-            .map(|pk_index| &schema.fields()[*pk_index].name)
+            .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
             .join(", ");
         format!("({})", pk_symbols)
     };
@@ -619,47 +643,37 @@ fn create_delete_sql(
         })
         .collect_vec()
         .join(", ");
-    format!("DELETE FROM {table_name} WHERE {pk} in ({parameters})")
+    format!("DELETE FROM {normalized_table_name} WHERE {pk} in ({parameters})")
 }
 
 fn create_upsert_sql(
     schema: &Schema,
+    schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
     number_of_rows: usize,
 ) -> String {
     let number_of_columns = schema.len();
-    let columns: String = schema
-        .fields()
-        .iter()
-        .map(|field| field.name.clone())
-        .collect_vec()
-        .join(", ");
-    let parameters: String = (0..number_of_rows)
-        .map(|i| {
-            let row_parameters = (0..number_of_columns)
-                .map(|j| format!("${}", i * number_of_columns + j + 1))
-                .join(", ");
-            format!("({row_parameters})")
-        })
-        .collect_vec()
-        .join(", ");
+    let insert_sql = create_insert_sql(schema, schema_name, table_name, number_of_rows);
     let pk_columns = pk_indices
         .iter()
-        .map(|i| schema.fields()[*i].name.clone())
+        .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
         .collect_vec()
         .join(", ");
     let update_parameters: String = (0..number_of_columns)
         .filter(|i| !pk_indices.contains(i))
         .map(|i| {
-            let column = schema.fields()[i].name.clone();
+            let column = quote_identifier(&schema.fields()[i].name);
             format!("{column} = EXCLUDED.{column}")
         })
         .collect_vec()
         .join(", ");
-    format!(
-        "INSERT INTO {table_name} ({columns}) VALUES {parameters} on conflict ({pk_columns}) do update set {update_parameters}"
-    )
+    format!("{insert_sql} on conflict ({pk_columns}) do update set {update_parameters}")
+}
+
+/// Quote an identifier for PostgreSQL.
+fn quote_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace("\"", "\"\""))
 }
 
 #[cfg(test)]
@@ -689,11 +703,14 @@ mod tests {
                 name: "b".to_owned(),
             },
         ]);
+        let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_insert_sql(&schema, table_name, 3);
+        let sql = create_insert_sql(&schema, schema_name, table_name, 3);
         check(
             sql,
-            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2), ($3, $4), ($5, $6)"],
+            expect![[
+                r#"INSERT INTO "test_schema"."test_table" (a, b) VALUES ($1, $2), ($3, $4), ($5, $6)"#
+            ]],
         );
     }
 
@@ -709,17 +726,22 @@ mod tests {
                 name: "b".to_owned(),
             },
         ]);
+        let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_delete_sql(&schema, table_name, &[1], 3);
+        let sql = create_delete_sql(&schema, schema_name, table_name, &[1], 3);
         check(
             sql,
-            expect!["DELETE FROM test_table WHERE (b) in (($1), ($2), ($3))"],
+            expect![[
+                r#"DELETE FROM "test_schema"."test_table" WHERE ("b") in (($1), ($2), ($3))"#
+            ]],
         );
         let table_name = "test_table";
-        let sql = create_delete_sql(&schema, table_name, &[0, 1], 3);
+        let sql = create_delete_sql(&schema, schema_name, table_name, &[0, 1], 3);
         check(
             sql,
-            expect!["DELETE FROM test_table WHERE (a, b) in (($1, $2), ($3, $4), ($5, $6))"],
+            expect![[
+                r#"DELETE FROM "test_schema"."test_table" WHERE ("a", "b") in (($1, $2), ($3, $4), ($5, $6))"#
+            ]],
         );
     }
 
@@ -735,13 +757,14 @@ mod tests {
                 name: "b".to_owned(),
             },
         ]);
+        let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_upsert_sql(&schema, table_name, &[1], 3);
+        let sql = create_upsert_sql(&schema, schema_name, table_name, &[1], 3);
         check(
             sql,
-            expect![
-                "INSERT INTO test_table (a, b) VALUES ($1, $2), ($3, $4), ($5, $6) on conflict (b) do update set a = EXCLUDED.a"
-            ],
+            expect![[
+                r#"INSERT INTO "test_schema"."test_table" (a, b) VALUES ($1, $2), ($3, $4), ($5, $6) on conflict ("b") do update set "a" = EXCLUDED."a""#
+            ]],
         );
     }
 }
