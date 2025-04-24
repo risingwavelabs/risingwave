@@ -268,6 +268,8 @@ struct ParameterBuffer<'a> {
     estimated_parameter_size: usize,
     /// current parameter buffer to be filled.
     current_parameter_buffer: Vec<Option<ScalarAdapter>>,
+    /// Parameter upper bound
+    parameter_upper_bound: usize,
 }
 
 impl<'a> ParameterBuffer<'a> {
@@ -277,20 +279,21 @@ impl<'a> ParameterBuffer<'a> {
     const MAX_PARAMETERS: usize = 32768;
 
     /// `flattened_chunk_size` is the number of datums in a single chunk.
-    fn new(schema_types: &'a [PgType], flattened_chunk_size: usize) -> Self {
-        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, flattened_chunk_size);
+    fn new(schema_types: &'a [PgType], parameter_upper_bound: usize) -> Self {
+        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, parameter_upper_bound);
         Self {
             parameters: vec![],
             column_length: schema_types.len(),
             schema_types,
             estimated_parameter_size,
             current_parameter_buffer: Vec::with_capacity(estimated_parameter_size),
+            parameter_upper_bound,
         }
     }
 
     fn add_row(&mut self, row: impl Row) {
         assert_eq!(row.len(), self.column_length);
-        if self.current_parameter_buffer.len() + self.column_length >= Self::MAX_PARAMETERS {
+        if self.current_parameter_buffer.len() + self.column_length >= self.parameter_upper_bound {
             self.new_buffer();
         }
         for (i, datum_ref) in row.iter().enumerate() {
@@ -412,7 +415,6 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut transaction = self.client.transaction().await?;
         // 1d flattened array of parameters to be inserted.
         let mut parameter_buffer = ParameterBuffer::new(
             &self.schema_types,
@@ -431,6 +433,8 @@ impl PostgresSinkWriter {
             }
         }
         let (parameters, remaining) = parameter_buffer.into_parts();
+
+        let mut transaction = self.client.transaction().await?;
         Self::execute_parameter(
             Op::Insert,
             &mut transaction,
@@ -450,11 +454,20 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut transaction = self.client.transaction().await?;
         // 1d flattened array of parameters to be inserted.
         let mut insert_parameter_buffer = ParameterBuffer::new(
             &self.schema_types,
-            chunk.cardinality() * chunk.data_types().len(),
+            // NOTE(kwannoel):
+            // insert on conflict do update may have multiple
+            // rows on the same PK.
+            // In that case they could encounter the following PG error:
+            // ERROR: ON CONFLICT DO UPDATE command cannot affect row a second time
+            // HINT: Ensure that no rows proposed for insertion within the same command have duplicate constrained values
+            // Given that JDBC sink does not batch their insert on conflict do update,
+            // we can keep the behaviour consistent.
+            //
+            // We may opt for an optimization flag to toggle this behaviour in the future.
+            chunk.data_types().len(),
         );
         let mut delete_parameter_buffer =
             ParameterBuffer::new(&self.pk_types, chunk.cardinality() * self.pk_indices.len());
@@ -471,6 +484,7 @@ impl PostgresSinkWriter {
         }
 
         let (delete_parameters, delete_remaining_parameter) = delete_parameter_buffer.into_parts();
+        let mut transaction = self.client.transaction().await?;
         Self::execute_parameter(
             Op::Delete,
             &mut transaction,
