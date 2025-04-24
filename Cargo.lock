@@ -11954,11 +11954,11 @@ dependencies = [
  "console",
  "itertools 0.14.0",
  "libtest-mimic",
- "madsim-tokio",
  "matches",
  "serde",
  "serde_with 3.8.1",
  "serde_yaml",
+ "task-local",
  "thiserror 1.0.63",
  "tracing",
  "tracing-subscriber",
@@ -14229,6 +14229,15 @@ name = "target-lexicon"
 version = "0.12.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
+
+[[package]]
+name = "task-local"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2c821daee0efdf6414970c8185a1c22e259a7ed87b2fd9f7d3c5f5503fd2863"
+dependencies = [
+ "pin-project-lite",
+]
 
 [[package]]
 name = "tempfile"

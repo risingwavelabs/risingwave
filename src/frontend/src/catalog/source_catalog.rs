@@ -119,7 +119,7 @@ impl SourceCatalog {
     /// Returns the SQL definition when the source was created, purified with best effort.
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()
-            .map(|stmt| stmt.to_string())
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.create_sql())
     }
 
