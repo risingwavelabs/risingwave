@@ -1127,7 +1127,8 @@ impl GroupMergeValidator {
             let l0_sub_level_count_after_merge =
                 group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
             if GroupStateValidator::write_stop_l0_file_count(
-                l0_sub_level_count_after_merge,
+                (l0_sub_level_count_after_merge as f64
+                    * opts.compaction_group_merge_dimension_threshold) as usize,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
@@ -1139,7 +1140,8 @@ impl GroupMergeValidator {
             let l0_file_count_after_merge =
                 group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
             if GroupStateValidator::write_stop_l0_file_count(
-                l0_file_count_after_merge,
+                (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                    as usize,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
@@ -1152,7 +1154,8 @@ impl GroupMergeValidator {
                 group_levels.l0.total_file_size + next_group_levels.l0.total_file_size;
 
             if GroupStateValidator::write_stop_l0_size(
-                l0_size_after_merge,
+                (l0_size_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                    as u64,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
@@ -1163,7 +1166,8 @@ impl GroupMergeValidator {
 
             // check whether the group is in the emergency state after merge
             if GroupStateValidator::emergency_l0_file_count(
-                l0_sub_level_count_after_merge,
+                (l0_sub_level_count_after_merge as f64
+                    * opts.compaction_group_merge_dimension_threshold) as usize,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
