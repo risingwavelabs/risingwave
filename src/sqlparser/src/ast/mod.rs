@@ -1709,7 +1709,8 @@ impl Statement {
     }
 
     // NOTE: This function should not check the validity of the unparsed SQL (and panic).
-    //       Thus, do not recursively call `Statement::fmt`. Call `fmt_unchecked` instead.
+    //       Thus, do not directly format a statement with `write!` or `format!`. Recursively
+    //       call `fmt_unchecked` on the inner statements instead.
     //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
