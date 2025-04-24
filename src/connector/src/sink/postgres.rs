@@ -149,7 +149,11 @@ impl Sink for PostgresSink {
                 &self.config.ssl_root_cert,
                 self.is_append_only,
             )
-            .await?;
+            .await
+            .context(format!(
+                "failed to connect to database: {}, schema: {}, table: {}",
+                &self.config.database, &self.config.schema, &self.config.table
+            ))?;
 
             // Check that names and types match, order of columns doesn't matter.
             {
