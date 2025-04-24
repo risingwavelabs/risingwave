@@ -244,6 +244,7 @@ impl CatalogController {
         let job_id = subscription_id as i32;
         let (subscription, obj) = Subscription::find_by_id(job_id)
             .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
@@ -860,6 +861,7 @@ impl CatalogControllerInner {
     async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
         let subscription_objs = Subscription::find()
             .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .all(&self.db)
             .await?;
 
