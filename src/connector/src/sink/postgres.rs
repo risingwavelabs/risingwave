@@ -293,7 +293,7 @@ impl<'a> ParameterBuffer<'a> {
 
     fn add_row(&mut self, row: impl Row) {
         assert_eq!(row.len(), self.column_length);
-        if self.current_parameter_buffer.len() + self.column_length >= self.parameter_upper_bound {
+        if self.current_parameter_buffer.len() + self.column_length > self.parameter_upper_bound {
             self.new_buffer();
         }
         for (i, datum_ref) in row.iter().enumerate() {
