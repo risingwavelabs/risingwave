@@ -131,6 +131,7 @@ impl Strong {
             | ExprType::SecToTimestamptz
             | ExprType::AtTimeZone
             | ExprType::DateTrunc
+            | ExprType::DateBin
             | ExprType::CharToTimestamptz
             | ExprType::CharToDate
             | ExprType::CastWithTimeZone

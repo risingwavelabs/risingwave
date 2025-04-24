@@ -221,6 +221,7 @@ impl Binder {
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
+                ("date_bin", raw_call(ExprType::DateBin)),
                 ("date_part", raw_call(ExprType::DatePart)),
                 ("make_date", raw_call(ExprType::MakeDate)),
                 ("make_time", raw_call(ExprType::MakeTime)),

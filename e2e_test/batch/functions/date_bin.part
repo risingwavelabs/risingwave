@@ -1,0 +1,44 @@
+query T
+SELECT date_bin(
+  '2 days'::interval,
+  '2021-01-02 12:00:00+08'::TIMESTAMPTZ,
+  '2021-01-01 00:00:00+00'::TIMESTAMPTZ
+);
+----
+2021-01-01 00:00:00+00:00
+
+query T
+SELECT date_bin(
+  '3 hours'::interval,
+  '2021-01-01 05:45:00'::TIMESTAMP,
+  '2021-01-01 00:00:00'::TIMESTAMP
+);
+----
+2021-01-01 03:00:00
+
+query T
+SELECT date_bin(
+  '30 minutes'::interval,
+  '2021-01-01 02:17:00-05'::TIMESTAMPTZ,
+  '2021-01-01 01:00:00-05'::TIMESTAMPTZ
+);
+----
+2021-01-01 07:00:00+00:00
+
+query T
+SELECT date_bin(
+  '1 hour'::interval,
+  '2021-06-15 13:30:00'::TIMESTAMP,
+  '2021-06-15 00:00:00+02'::TIMESTAMPTZ
+);
+----
+2021-06-15 13:00:00+00:00
+
+query T
+SELECT date_bin(
+  '15 minutes'::interval,
+  '2021-12-31 23:59:59+00'::TIMESTAMPTZ,
+  '2021-12-31 22:00:00'::TIMESTAMP
+);
+----
+2021-12-31 23:45:00+00:00
