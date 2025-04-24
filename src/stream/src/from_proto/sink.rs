@@ -371,7 +371,7 @@ mod tests {
         assert_eq!(jdbc_url.host, "localhost");
         assert_eq!(jdbc_url.port, 5432);
         assert_eq!(jdbc_url.db_name, "test");
-        assert_eq!(jdbc_url.username, "postgres");
-        assert_eq!(jdbc_url.password, "postgres");
+        assert_eq!(jdbc_url.username, Some("postgres"));
+        assert_eq!(jdbc_url.password, Some("postgres"));
     }
 }
