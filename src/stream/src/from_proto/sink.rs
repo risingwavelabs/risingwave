@@ -141,8 +141,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             && let Some(url) = properties_with_secret.get("jdbc.url")
             && url.starts_with("jdbc:postgresql:")
         {
+            tracing::info!("switching to native postgres connector");
             let jdbc_url = parse_jdbc_url(url)
                 .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id.sink_id)))?;
+            properties_with_secret.insert(CONNECTOR_TYPE_KEY.to_owned(), "postgres".to_owned());
             properties_with_secret.insert("host".to_owned(), jdbc_url.host);
             properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
             properties_with_secret.insert("database".to_owned(), jdbc_url.db_name);
@@ -331,7 +333,9 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     let port = url
         .port()
         .ok_or_else(|| anyhow!("missing port in jdbc url"))?;
-    let db_name = url.path();
+    let Some(db_name) = url.path().strip_prefix('/') else {
+        bail!("missing db_name in jdbc url");
+    };
     let mut username = None;
     let mut password = None;
     for (key, value) in url.query_pairs() {
@@ -364,7 +368,7 @@ mod tests {
         let jdbc_url = parse_jdbc_url(url).unwrap();
         assert_eq!(jdbc_url.host, "localhost");
         assert_eq!(jdbc_url.port, 5432);
-        assert_eq!(jdbc_url.db_name, "/test");
+        assert_eq!(jdbc_url.db_name, "test");
         assert_eq!(jdbc_url.username, "postgres");
         assert_eq!(jdbc_url.password, "postgres");
     }
