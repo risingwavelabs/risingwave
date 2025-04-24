@@ -150,8 +150,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .cloned()
             .collect_vec();
 
-        let mut upstream =
-            transform_upstream(self.upstream.execute(), self.output_columns.clone()).boxed();
+        let mut upstream = self.upstream.execute();
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
@@ -202,27 +201,32 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
+
+        // Make sure to use mapping_message after transform_upstream.
+        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
         loop {
             if let Some(msg) =
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
                     .await?
             {
-                match msg {
-                    Message::Barrier(barrier) => {
-                        // commit state to bump the epoch of state table
-                        state_impl.commit_state(barrier.epoch).await?;
-                        yield Message::Barrier(barrier);
-                    }
-                    Message::Chunk(chunk) => {
-                        if need_backfill {
-                            // ignore chunk if we need backfill, since we can read the data from the snapshot
-                        } else {
-                            // forward the chunk to downstream
-                            yield Message::Chunk(chunk);
+                if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                    match msg {
+                        Message::Barrier(barrier) => {
+                            // commit state to bump the epoch of state table
+                            state_impl.commit_state(barrier.epoch).await?;
+                            yield Message::Barrier(barrier);
                         }
-                    }
-                    Message::Watermark(_) => {
-                        // ignore watermark
+                        Message::Chunk(chunk) => {
+                            if need_backfill {
+                                // ignore chunk if we need backfill, since we can read the data from the snapshot
+                            } else {
+                                // forward the chunk to downstream
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                        Message::Watermark(_) => {
+                            // ignore watermark
+                        }
                     }
                 }
             } else {
@@ -888,13 +892,21 @@ mod tests {
     use std::str::FromStr;
 
     use futures::{StreamExt, pin_mut};
-    use risingwave_common::array::{DataChunk, Op, StreamChunk};
+    use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::{DataType, Datum, JsonbVal};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::iter_util::ZipEqFast;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::prelude::StateTable;
+    use crate::executor::source::default_source_internal_table;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::{
+        ActorContext, Barrier, CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable, Message,
+    };
 
     #[tokio::test]
     async fn test_transform_upstream_chunk() {
@@ -948,5 +960,97 @@ mod tests {
         if let Some(message) = parsed_stream.next().await {
             println!("chunk: {:#?}", message.unwrap());
         }
+    }
+
+    #[tokio::test]
+    async fn test_build_reader_and_poll_upstream() {
+        let actor_context = ActorContext::for_test(1);
+        let external_storage_table = ExternalStorageTable::for_test_undefined();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Jsonb),   // debezium json payload
+            Field::unnamed(DataType::Varchar), // _rw_offset
+            Field::unnamed(DataType::Varchar), // _rw_table_name
+        ]);
+        let pk_indices = vec![1];
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let output_indices = vec![1, 0, 4]; //reorder
+        let output_columns = vec![
+            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
+            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("O_TOTALPRICE", ColumnId::new(4), DataType::Decimal),
+            ColumnDesc::named("O_DUMMY", ColumnId::new(5), DataType::Int64),
+            ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
+        ];
+        let store = MemoryStateStore::new();
+        let state_table =
+            StateTable::from_table_catalog(&default_source_internal_table(0x2333), store, None)
+                .await;
+        let cdc = CdcBackfillExecutor::new(
+            actor_context,
+            external_storage_table,
+            source,
+            output_indices,
+            output_columns,
+            None,
+            StreamingMetrics::unused().into(),
+            state_table,
+            None,
+            CdcScanOptions {
+                // We want to mark backfill as finished. However it's not straightforward to do so.
+                // Here we disable_backfill instead.
+                disable_backfill: true,
+                ..CdcScanOptions::default()
+            },
+        );
+        // cdc.state_impl.init_epoch(EpochPair::new(test_epoch(4), test_epoch(3))).await.unwrap();
+        // cdc.state_impl.mutate_state(None, None, 0, true).await.unwrap();
+        // cdc.state_impl.commit_state(EpochPair::new(test_epoch(5), test_epoch(4))).await.unwrap();
+        let s = cdc.execute_inner();
+        pin_mut!(s);
+
+        // send first barrier
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(8)));
+        // send chunk
+        {
+            let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_DUMMY": 100 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
+            let datums: Vec<Datum> = vec![
+                Some(JsonbVal::from_str(payload).unwrap().into()),
+                Some("file: 1.binlog, pos: 100".to_owned().into()),
+                Some("mydb.orders".to_owned().into()),
+            ];
+            let mut builders = schema.create_array_builders(8);
+            for (builder, datum) in builders.iter_mut().zip_eq_fast(datums.iter()) {
+                builder.append(datum.clone());
+            }
+            let columns = builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect();
+            // one row chunk
+            let chunk = StreamChunk::from_parts(vec![Op::Insert], DataChunk::new(columns, 1));
+
+            tx.push_chunk(chunk);
+        }
+        let _first_barrier = s.next().await.unwrap();
+        let upstream_change_log = s.next().await.unwrap().unwrap();
+        let Message::Chunk(chunk) = upstream_change_log else {
+            panic!("expect chunk");
+        };
+        assert_eq!(chunk.columns().len(), 3);
+        assert_eq!(chunk.rows().count(), 1);
+        assert_eq!(
+            chunk.columns()[0].as_int64().iter().collect::<Vec<_>>(),
+            vec![Some(44485)]
+        );
+        assert_eq!(
+            chunk.columns()[1].as_int64().iter().collect::<Vec<_>>(),
+            vec![Some(5)]
+        );
+        assert_eq!(
+            chunk.columns()[2].as_int64().iter().collect::<Vec<_>>(),
+            vec![Some(100)]
+        );
     }
 }
