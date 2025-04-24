@@ -526,7 +526,10 @@ impl PostgresSinkWriter {
                 }
                 _ => unreachable!(),
             };
-            let statement = transaction.prepare(&statement_str).await?;
+            let statement = transaction
+                .prepare(&statement_str)
+                .await
+                .with_context(|| format!("failed to run statement: {}", statement_str))?;
             for parameter in parameters {
                 transaction
                     .execute_raw(&statement, parameter)
@@ -555,7 +558,10 @@ impl PostgresSinkWriter {
                 _ => unreachable!(),
             };
             tracing::trace!("binding statement: {:?}", statement_str);
-            let statement = transaction.prepare(&statement_str).await?;
+            let statement = transaction
+                .prepare(&statement_str)
+                .await
+                .with_context(|| format!("failed to run statement: {}", statement_str))?;
             tracing::trace!("binding parameters: {:?}", remaining_parameter);
             transaction
                 .execute_raw(&statement, remaining_parameter)
