@@ -64,9 +64,9 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::connector_service::{sink_metadata::Metadata, SinkMetadata};
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
-use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
 use sea_orm::DatabaseConnection;
 use serde_derive::Deserialize;
 use serde_json::from_value;
@@ -1391,20 +1391,20 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
     }
 }
 pub struct IcebergSinkCommitter<C: CommitIceberg> {
-    commit_iceberg: C,
+    pub commit_iceberg: C,
     pub last_commit_epoch: u64,
-    pub(crate) is_exactly_once: bool,
-    pub(crate) sink_id: u32,
-    pub(crate) param: SinkParam,
-    pub(crate) db: DatabaseConnection,
-    commit_notifier: Option<mpsc::UnboundedSender<()>>,
-    commit_retry_num: u32,
-    _compact_task_guard: Option<oneshot::Sender<()>>,
-    pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
+    pub is_exactly_once: bool,
+    pub  sink_id: u32,
+    pub param: SinkParam,
+    pub db: DatabaseConnection,
+    pub commit_notifier: Option<mpsc::UnboundedSender<()>>,
+    pub commit_retry_num: u32,
+    pub _compact_task_guard: Option<oneshot::Sender<()>>,
+    pub committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
 }
 
 pub trait CommitResultTrait: Clone + Send + Sync {
-    fn as_self(&self) -> Self; 
+    fn as_self(&self) -> Self;
 }
 
 impl CommitResultTrait for IcebergCommitResult {
@@ -1415,7 +1415,6 @@ impl CommitResultTrait for IcebergCommitResult {
 
 #[async_trait::async_trait]
 pub trait CommitIceberg {
-    type CommitResult: CommitResultTrait;
 
     async fn begin_txn(
         &mut self,
@@ -1442,45 +1441,36 @@ pub struct CommitIcebergImpl {
 }
 
 
-// #[derive(Debug, Clone)]
-// pub enum IcebergCommitDataEnum {
-//     Real(Vec<IcebergCommitResult>,),
-//     Mock(Vec<SinkMetadata>),
-// }
-
 #[async_trait::async_trait]
 impl CommitIceberg for CommitIcebergImpl {
-    type CommitResult = IcebergCommitResult;
 
     async fn begin_txn(
         &mut self,
         commit_data: Vec<SinkMetadata>,
         snapshot_id: Option<i64>,
     ) -> Result<i64> {
-
         let write_results: Vec<IcebergCommitResult> = commit_data
-        .iter()
-        .map(IcebergCommitResult::try_from)
-        .collect::<Result<Vec<IcebergCommitResult>>>()?;
-
-    // Skip if no data to commit
-    if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
-        tracing::debug!( "no data to commit");
-    }
-
-    // guarantee that all write results has same schema_id and partition_spec_id
-    if write_results
-        .iter()
-        .any(|r| r.schema_id != write_results[0].schema_id)
-        || write_results
             .iter()
-            .any(|r| r.partition_spec_id != write_results[0].partition_spec_id)
-    {
-        return Err(SinkError::Iceberg(anyhow!(
-            "schema_id and partition_spec_id should be the same in all write results"
-        )));
+            .map(IcebergCommitResult::try_from)
+            .collect::<Result<Vec<IcebergCommitResult>>>()?;
 
-    }
+        // Skip if no data to commit
+        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+            tracing::debug!("no data to commit");
+        }
+
+        // guarantee that all write results has same schema_id and partition_spec_id
+        if write_results
+            .iter()
+            .any(|r| r.schema_id != write_results[0].schema_id)
+            || write_results
+                .iter()
+                .any(|r| r.partition_spec_id != write_results[0].partition_spec_id)
+        {
+            return Err(SinkError::Iceberg(anyhow!(
+                "schema_id and partition_spec_id should be the same in all write results"
+            )));
+        }
 
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
@@ -1510,9 +1500,9 @@ impl CommitIceberg for CommitIcebergImpl {
         commit_retry_num: u32,
     ) -> Result<()> {
         let write_results: Vec<IcebergCommitResult> = commit_data
-        .iter()
-        .map(IcebergCommitResult::try_from)
-        .collect::<Result<Vec<IcebergCommitResult>>>()?;
+            .iter()
+            .map(IcebergCommitResult::try_from)
+            .collect::<Result<Vec<IcebergCommitResult>>>()?;
 
         // # TODO:
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
@@ -1638,8 +1628,7 @@ impl CommitIcebergImpl {
 }
 
 #[async_trait::async_trait]
-impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for IcebergSinkCommitter<C>
-{
+impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for IcebergSinkCommitter<C> {
     async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         if self.is_exactly_once {
             self.committed_epoch_subscriber = Some(subscriber);
@@ -1657,10 +1646,12 @@ impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for Iceberg
                 {
                     let write_results_bytes: Vec<Vec<u8>> = deserialize_metadata(sealized_bytes);
                     let mut sink_metadatas: Vec<SinkMetadata> = vec![];
-    
+
                     for each in write_results_bytes {
                         sink_metadatas.push(SinkMetadata {
-                            metadata: Some(Metadata::Serialized(SerializedMetadata { metadata: each })),
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: each,
+                            })),
                         });
                     }
                     match (
@@ -1752,8 +1743,7 @@ impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for Iceberg
                         committed_epoch_subscriber(self.param.sink_id).await?;
                     // The exactly once commit process needs to start after the data corresponding to the current epoch is persisted in the log store.
                     if committed_epoch >= epoch {
-                        self.commit_iceberg_inner(epoch, metadata, None)
-                            .await?;
+                        self.commit_iceberg_inner(epoch, metadata, None).await?;
                     } else {
                         tracing::info!(
                             "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
@@ -1767,8 +1757,7 @@ impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for Iceberg
                             );
                             // If next_epoch meets the condition, execute commit immediately
                             if next_committed_epoch >= epoch {
-                                self.commit_iceberg_inner(epoch, metadata, None)
-                                    .await?;
+                                self.commit_iceberg_inner(epoch, metadata, None).await?;
                                 break;
                             }
                         }
@@ -1779,8 +1768,7 @@ impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for Iceberg
                 ),
             }
         } else {
-            self.commit_iceberg_inner(epoch, metadata, None)
-                .await?;
+            self.commit_iceberg_inner(epoch, metadata, None).await?;
         }
 
         Ok(())
@@ -1788,8 +1776,7 @@ impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for Iceberg
 }
 
 /// Methods Required to Achieve Exactly Once Semantics
-impl<C: CommitIceberg> IcebergSinkCommitter<C>
-{ 
+impl<C: CommitIceberg> IcebergSinkCommitter<C> {
     async fn re_commit(
         &mut self,
         epoch: u64,
@@ -1797,7 +1784,7 @@ impl<C: CommitIceberg> IcebergSinkCommitter<C>
         snapshot_id: i64,
     ) -> Result<()> {
         tracing::info!("Starting iceberg re commit in epoch {epoch}.");
-        
+
         self.commit_iceberg_inner(epoch, commit_data, Some(snapshot_id))
             .await?;
         Ok(())
@@ -1822,15 +1809,15 @@ impl<C: CommitIceberg> IcebergSinkCommitter<C>
             .begin_txn(commit_data.clone(), snapshot_id)
             .await?;
 
-        
         if self.is_exactly_once && is_first_commit {
             // persist pre commit metadata and snapshot id in system table.
             let mut pre_commit_metadata_bytes = Vec::new();
             for each_parallelism_write_result in commit_data.clone() {
                 // let each_parallelism_write_result_bytes: Vec<u8> =
                 //     each_parallelism_write_result.try_into()?;
-                    let Metadata::Serialized(serialized) = each_parallelism_write_result.metadata.unwrap();
-                    
+                let Metadata::Serialized(serialized) =
+                    each_parallelism_write_result.metadata.unwrap();
+
                 pre_commit_metadata_bytes.push(serialized.metadata);
             }
 

@@ -326,10 +326,10 @@ impl SinkWriter for CoordinatedTestWriter {
 }
 
 #[async_trait]
-
+impl CommitIceberg for CoordinatedTestWriter {
     async fn begin_txn(
         &mut self,
-        write_results: Vec<Self::CommitResult>,
+        commit_data: Vec<SinkMetadata>,
         snapshot_id: Option<i64>,
     ) -> risingwave_connector::sink::Result<i64> {
         let snapshot_id = match snapshot_id {
@@ -341,11 +341,11 @@ impl SinkWriter for CoordinatedTestWriter {
 
     async fn do_commit(
         &mut self,
-        write_results: Vec<Self::CommitResult>,
+        commit_data: Vec<SinkMetadata>,
         snapshot_id: i64,
         commit_retry_num: u32,
     ) -> risingwave_connector::sink::Result<()> {
-        let file_ids = metadatas.into_iter().map(|metadata| {
+        let file_ids = commit_data.into_iter().map(|metadata| {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
             usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
         });
@@ -370,7 +370,6 @@ impl SinkWriter for CoordinatedTestWriter {
             .contains_key(&snapshot_id))
     }
 }
-
 /// `SimulationTestIcebergCommitter` mocks the behavior of the Iceberg committer
 /// with exactly-once semantics. During the commit process, it first pre-commits
 /// metadata to the meta store. After a successful commit, it deletes the previously
@@ -396,249 +395,249 @@ pub struct SimulationTestIcebergCommitter {
     sink_id: SinkId,
 }
 
-#[async_trait]
-impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
-    async fn init(
-        &mut self,
-        subscriber: SinkCommittedEpochSubscriber,
-    ) -> risingwave_connector::sink::Result<Option<u64>> {
-        self.committed_epoch_subscriber = Some(subscriber);
-        if iceberg_sink_has_pre_commit_metadata(&self.db, self.sink_id.sink_id()).await? {
-            println!(
-                "Sink id = {}: System table not empty! Recovery occurs!",
-                self.sink_id.sink_id()
-            );
-            let ordered_metadata_list_by_end_epoch =
-                get_pre_commit_info_by_sink_id(&self.db, self.sink_id.sink_id()).await?;
-            let mut last_recommit_epoch = 0;
-            for (end_epoch, sealized_bytes, snapshot_id, committed) in
-                ordered_metadata_list_by_end_epoch
-            {
-                let write_results_bytes: Vec<Vec<u8>> = deserialize_metadata(sealized_bytes);
-                let mut sink_metadatas: Vec<SinkMetadata> = vec![];
+// #[async_trait]
+// impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
+//     async fn init(
+//         &mut self,
+//         subscriber: SinkCommittedEpochSubscriber,
+//     ) -> risingwave_connector::sink::Result<Option<u64>> {
+//         self.committed_epoch_subscriber = Some(subscriber);
+//         if iceberg_sink_has_pre_commit_metadata(&self.db, self.sink_id.sink_id()).await? {
+//             println!(
+//                 "Sink id = {}: System table not empty! Recovery occurs!",
+//                 self.sink_id.sink_id()
+//             );
+//             let ordered_metadata_list_by_end_epoch =
+//                 get_pre_commit_info_by_sink_id(&self.db, self.sink_id.sink_id()).await?;
+//             let mut last_recommit_epoch = 0;
+//             for (end_epoch, sealized_bytes, snapshot_id, committed) in
+//                 ordered_metadata_list_by_end_epoch
+//             {
+//                 let write_results_bytes: Vec<Vec<u8>> = deserialize_metadata(sealized_bytes);
+//                 let mut sink_metadatas: Vec<SinkMetadata> = vec![];
 
-                for each in write_results_bytes {
-                    sink_metadatas.push(SinkMetadata {
-                        metadata: Some(Metadata::Serialized(SerializedMetadata { metadata: each })),
-                    });
-                }
+//                 for each in write_results_bytes {
+//                     sink_metadatas.push(SinkMetadata {
+//                         metadata: Some(Metadata::Serialized(SerializedMetadata { metadata: each })),
+//                     });
+//                 }
 
-                if thread_rng().random_ratio(self.err_rate_vec[0].load(Relaxed), u32::MAX) {
-                    println!("Error injection point 0 -- Error occur during recovery.");
-                    self.store.inner().err_events.push('0');
-                    self.store.inc_err();
-                    return Err(SinkError::Internal(anyhow::anyhow!("fail to recovery")));
-                }
-                match (
-                    committed,
-                    self.is_snapshot_id_in_iceberg(snapshot_id).await?,
-                ) {
-                    (true, _) => {
-                        println!(
-                            "Sink id = {}: all data in log store has been written into external sink, do nothing when recovery.",
-                            self.sink_id.sink_id()
-                        );
-                    }
-                    (false, true) => {
-                        // skip
-                        println!(
-                            "Sink id = {}: all pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed.",
-                            self.sink_id.sink_id()
-                        );
-                        mark_row_is_committed_by_sink_id_and_end_epoch(
-                            &self.db,
-                            self.sink_id.sink_id(),
-                            end_epoch,
-                        )
-                        .await?;
-                    }
-                    (false, false) => {
-                        println!(
-                            "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
-                            self.sink_id.sink_id()
-                        );
-                        self.re_commit(end_epoch, sink_metadatas, snapshot_id)
-                            .await?;
-                    }
-                }
+//                 if thread_rng().random_ratio(self.err_rate_vec[0].load(Relaxed), u32::MAX) {
+//                     println!("Error injection point 0 -- Error occur during recovery.");
+//                     self.store.inner().err_events.push('0');
+//                     self.store.inc_err();
+//                     return Err(SinkError::Internal(anyhow::anyhow!("fail to recovery")));
+//                 }
+//                 match (
+//                     committed,
+//                     self.is_snapshot_id_in_iceberg(snapshot_id).await?,
+//                 ) {
+//                     (true, _) => {
+//                         println!(
+//                             "Sink id = {}: all data in log store has been written into external sink, do nothing when recovery.",
+//                             self.sink_id.sink_id()
+//                         );
+//                     }
+//                     (false, true) => {
+//                         // skip
+//                         println!(
+//                             "Sink id = {}: all pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed.",
+//                             self.sink_id.sink_id()
+//                         );
+//                         mark_row_is_committed_by_sink_id_and_end_epoch(
+//                             &self.db,
+//                             self.sink_id.sink_id(),
+//                             end_epoch,
+//                         )
+//                         .await?;
+//                     }
+//                     (false, false) => {
+//                         println!(
+//                             "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
+//                             self.sink_id.sink_id()
+//                         );
+//                         self.re_commit(end_epoch, sink_metadatas, snapshot_id)
+//                             .await?;
+//                     }
+//                 }
 
-                last_recommit_epoch = end_epoch;
-            }
-            println!(
-                "Sink id = {}: Recovery finished! Rewind log store from end_epoch = {}",
-                self.sink_id.sink_id(),
-                last_recommit_epoch
-            );
-            return Ok(Some(last_recommit_epoch));
-        } else {
-            println!(
-                "Sink id = {}: init iceberg coodinator, and system table is empty.",
-                self.sink_id.sink_id()
-            );
-            return Ok(None);
-        }
-    }
+//                 last_recommit_epoch = end_epoch;
+//             }
+//             println!(
+//                 "Sink id = {}: Recovery finished! Rewind log store from end_epoch = {}",
+//                 self.sink_id.sink_id(),
+//                 last_recommit_epoch
+//             );
+//             return Ok(Some(last_recommit_epoch));
+//         } else {
+//             println!(
+//                 "Sink id = {}: init iceberg coodinator, and system table is empty.",
+//                 self.sink_id.sink_id()
+//             );
+//             return Ok(None);
+//         }
+//     }
 
-    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
-    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
-    /// to be passed between different gRPC node, so in this general trait, the metadata is
-    /// serialized bytes.
-    async fn commit(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-    ) -> risingwave_connector::sink::Result<()> {
-        // wait epoch
-        assert!(self.committed_epoch_subscriber.is_some());
-        match self.committed_epoch_subscriber.clone() {
-            Some(committed_epoch_subscriber) => {
-                // Get the latest committed_epoch and the receiver
-                let (committed_epoch, mut rw_futures_utilrx) =
-                    committed_epoch_subscriber(self.sink_id).await?;
-                // The exactly once commit process needs to start after the data corresponding to the current epoch is persisted in the log store.
-                if committed_epoch >= epoch {
-                    self.commit_inner(epoch, metadata, None).await?;
-                } else {
-                    println!(
-                        "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
-                        committed_epoch, epoch
-                    );
-                    while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
-                        println!("Received next committed epoch: {}", next_committed_epoch);
-                        // If next_epoch meets the condition, execute commit immediately
-                        if next_committed_epoch >= epoch {
-                            self.commit_inner(epoch, metadata, None).await?;
-                            break;
-                        }
-                    }
-                }
-            }
-            None => unreachable!(
-                "Exactly once sink must wait epoch before committing, committed_epoch_subscriber is not initialized."
-            ),
-        }
-        Ok(())
-    }
-}
+//     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
+//     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
+//     /// to be passed between different gRPC node, so in this general trait, the metadata is
+//     /// serialized bytes.
+//     async fn commit(
+//         &mut self,
+//         epoch: u64,
+//         metadata: Vec<SinkMetadata>,
+//     ) -> risingwave_connector::sink::Result<()> {
+//         // wait epoch
+//         assert!(self.committed_epoch_subscriber.is_some());
+//         match self.committed_epoch_subscriber.clone() {
+//             Some(committed_epoch_subscriber) => {
+//                 // Get the latest committed_epoch and the receiver
+//                 let (committed_epoch, mut rw_futures_utilrx) =
+//                     committed_epoch_subscriber(self.sink_id).await?;
+//                 // The exactly once commit process needs to start after the data corresponding to the current epoch is persisted in the log store.
+//                 if committed_epoch >= epoch {
+//                     self.commit_inner(epoch, metadata, None).await?;
+//                 } else {
+//                     println!(
+//                         "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
+//                         committed_epoch, epoch
+//                     );
+//                     while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
+//                         println!("Received next committed epoch: {}", next_committed_epoch);
+//                         // If next_epoch meets the condition, execute commit immediately
+//                         if next_committed_epoch >= epoch {
+//                             self.commit_inner(epoch, metadata, None).await?;
+//                             break;
+//                         }
+//                     }
+//                 }
+//             }
+//             None => unreachable!(
+//                 "Exactly once sink must wait epoch before committing, committed_epoch_subscriber is not initialized."
+//             ),
+//         }
+//         Ok(())
+//     }
+// }
 
-impl SimulationTestIcebergCommitter {
-    async fn commit_inner(
-        &mut self,
-        epoch: u64,
-        metadatas: Vec<SinkMetadata>,
-        snapshot_id: Option<i64>,
-    ) -> risingwave_connector::sink::Result<()> {
-        let is_first_commit = snapshot_id.is_none();
-        if !is_first_commit {
-            println!("Doing iceberg re commit.");
-        }
-        self.last_commit_epoch = epoch;
+// impl SimulationTestIcebergCommitter {
+//     async fn commit_inner(
+//         &mut self,
+//         epoch: u64,
+//         metadatas: Vec<SinkMetadata>,
+//         snapshot_id: Option<i64>,
+//     ) -> risingwave_connector::sink::Result<()> {
+//         let is_first_commit = snapshot_id.is_none();
+//         if !is_first_commit {
+//             println!("Doing iceberg re commit.");
+//         }
+//         self.last_commit_epoch = epoch;
 
-        let snapshot_id = match snapshot_id {
-            Some(previous_snapshot_id) => previous_snapshot_id,
-            None => generate_unique_snapshot_id(),
-        };
+//         let snapshot_id = match snapshot_id {
+//             Some(previous_snapshot_id) => previous_snapshot_id,
+//             None => generate_unique_snapshot_id(),
+//         };
 
-        if thread_rng().random_ratio(self.err_rate_vec[1].load(Relaxed), u32::MAX) {
-            println!("Error injection point 1 -- Error occur before pre commit to meta store.");
-            self.store.inc_err();
-            self.store.inner().err_events.push('1');
-            return Err(SinkError::Internal(anyhow::anyhow!(
-                "fail to pre commit to meta store"
-            )));
-        }
+//         if thread_rng().random_ratio(self.err_rate_vec[1].load(Relaxed), u32::MAX) {
+//             println!("Error injection point 1 -- Error occur before pre commit to meta store.");
+//             self.store.inc_err();
+//             self.store.inner().err_events.push('1');
+//             return Err(SinkError::Internal(anyhow::anyhow!(
+//                 "fail to pre commit to meta store"
+//             )));
+//         }
 
-        if is_first_commit {
-            // persist pre commit metadata and snapshot id in system table.
-            let mut pre_commit_metadata_bytes = Vec::new();
-            for metadata in metadatas.clone() {
-                let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
+//         if is_first_commit {
+//             // persist pre commit metadata and snapshot id in system table.
+//             let mut pre_commit_metadata_bytes = Vec::new();
+//             for metadata in metadatas.clone() {
+//                 let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
 
-                pre_commit_metadata_bytes.push(serialized.metadata);
-            }
+//                 pre_commit_metadata_bytes.push(serialized.metadata);
+//             }
 
-            let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
+//             let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
 
-            persist_pre_commit_metadata(
-                self.sink_id.sink_id(),
-                self.db.clone(),
-                self.last_commit_epoch,
-                epoch,
-                pre_commit_metadata_bytes,
-                snapshot_id,
-            )
-            .await?;
-        }
-        if thread_rng().random_ratio(self.err_rate_vec[2].load(Relaxed), u32::MAX) {
-            println!(
-                "Error injection point 2 -- Error occur before commit to external sink and after pre commit."
-            );
-            self.store.inc_err();
-            self.store.inner().err_events.push('2');
-            return Err(SinkError::Internal(anyhow::anyhow!(
-                "fail to commit to external sink."
-            )));
-        }
-        let file_ids = metadatas.into_iter().map(|metadata| {
-            let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
-            usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
-        });
-        self.store.insert_many(
-            snapshot_id,
-            file_ids
-                .into_iter()
-                .map(|file_id| self.staging_store.get(file_id))
-                .flatten(),
-        );
-        println!("Succeeded to commit to mock iceberg table in epoch {epoch}.");
+//             persist_pre_commit_metadata(
+//                 self.sink_id.sink_id(),
+//                 self.db.clone(),
+//                 self.last_commit_epoch,
+//                 epoch,
+//                 pre_commit_metadata_bytes,
+//                 snapshot_id,
+//             )
+//             .await?;
+//         }
+//         if thread_rng().random_ratio(self.err_rate_vec[2].load(Relaxed), u32::MAX) {
+//             println!(
+//                 "Error injection point 2 -- Error occur before commit to external sink and after pre commit."
+//             );
+//             self.store.inc_err();
+//             self.store.inner().err_events.push('2');
+//             return Err(SinkError::Internal(anyhow::anyhow!(
+//                 "fail to commit to external sink."
+//             )));
+//         }
+//         let file_ids = metadatas.into_iter().map(|metadata| {
+//             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
+//             usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
+//         });
+//         self.store.insert_many(
+//             snapshot_id,
+//             file_ids
+//                 .into_iter()
+//                 .map(|file_id| self.staging_store.get(file_id))
+//                 .flatten(),
+//         );
+//         println!("Succeeded to commit to mock iceberg table in epoch {epoch}.");
 
-        if thread_rng().random_ratio(self.err_rate_vec[3].load(Relaxed), u32::MAX) {
-            println!(
-                "Error injection point 3 -- Error occur after commit to external sink and before mark row deleted."
-            );
-            self.store.inc_err();
-            self.store.inner().err_events.push('3');
-            return Err(SinkError::Internal(anyhow::anyhow!(
-                "fail to mark row deleted."
-            )));
-        }
+//         if thread_rng().random_ratio(self.err_rate_vec[3].load(Relaxed), u32::MAX) {
+//             println!(
+//                 "Error injection point 3 -- Error occur after commit to external sink and before mark row deleted."
+//             );
+//             self.store.inc_err();
+//             self.store.inner().err_events.push('3');
+//             return Err(SinkError::Internal(anyhow::anyhow!(
+//                 "fail to mark row deleted."
+//             )));
+//         }
 
-        mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch)
-            .await?;
-        println!(
-            "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
-            self.sink_id, epoch
-        );
+//         mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch)
+//             .await?;
+//         println!(
+//             "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
+//             self.sink_id, epoch
+//         );
 
-        if thread_rng().random_ratio(self.err_rate_vec[4].load(Relaxed), u32::MAX) {
-            println!(
-                "Error injection point 4 -- Error occur after mark committed before deleting previous item."
-            );
-            self.store.inc_err();
-            self.store.inner().err_events.push('4');
-            return Err(SinkError::Internal(anyhow::anyhow!(
-                "fail to delete previous item in meta store."
-            )));
-        }
+//         if thread_rng().random_ratio(self.err_rate_vec[4].load(Relaxed), u32::MAX) {
+//             println!(
+//                 "Error injection point 4 -- Error occur after mark committed before deleting previous item."
+//             );
+//             self.store.inc_err();
+//             self.store.inner().err_events.push('4');
+//             return Err(SinkError::Internal(anyhow::anyhow!(
+//                 "fail to delete previous item in meta store."
+//             )));
+//         }
 
-        delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch).await?;
-        self.store.inner().err_events.push('x');
-        Ok(())
-    }
+//         delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch).await?;
+//         self.store.inner().err_events.push('x');
+//         Ok(())
+//     }
 
-    async fn re_commit(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        snapshot_id: i64,
-    ) -> risingwave_connector::sink::Result<()> {
-        println!("Starting mock iceberg re commit in epoch {}.", epoch);
-        self.commit_inner(epoch, metadata, Some(snapshot_id))
-            .await?;
+//     async fn re_commit(
+//         &mut self,
+//         epoch: u64,
+//         metadata: Vec<SinkMetadata>,
+//         snapshot_id: i64,
+//     ) -> risingwave_connector::sink::Result<()> {
+//         println!("Starting mock iceberg re commit in epoch {}.", epoch);
+//         self.commit_inner(epoch, metadata, Some(snapshot_id))
+//             .await?;
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
 pub fn simple_name_of_id(id: i32) -> String {
     format!("name-{}", id)
@@ -720,6 +719,7 @@ impl SimulationTestIcebergExactlyOnceSink {
                     let err_rate = err_rate_for_coordinator.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
+                    let parallelism_counter = parallelism_counter.clone();
                     move |db, sink_param| {
                         let writer = CoordinatedTestWriter {
                             store: store.clone(),
@@ -733,7 +733,7 @@ impl SimulationTestIcebergExactlyOnceSink {
                             is_exactly_once: true,
                             last_commit_epoch: 0,
                             sink_id: sink_param.sink_id.sink_id(),
-                            param: param.clone(),
+                            param: sink_param.clone(),
                             db,
                             commit_notifier: None,
                             _compact_task_guard: None,
@@ -747,7 +747,7 @@ impl SimulationTestIcebergExactlyOnceSink {
         };
         Self {
             _sink_guard,
-            parallelism_counter,
+            parallelism_counter: parallelism_counter.clone(),
             store,
             err_rate: err_rate_for_coordinator.clone(),
         }
