@@ -102,7 +102,7 @@ development = ["expect-test", "pretty_assertions"]
 [workspace.dependencies]
 # Switch to a crate-io version after new foyer version is released.
 # foyer = { version = "0.16.1", features = ["serde", "tracing", "nightly"] }
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "f907ffb85d9b76d8a6d4c8dcc9fc9f1c18757601", features = [
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "88a3ede5bb6a27fb4bb59b406a2568e436dc4174", features = [
     "serde",
     "tracing",
     "nightly",
