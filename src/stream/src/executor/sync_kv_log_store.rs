@@ -873,7 +873,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
         let (_, chunk, epoch) = future.await?;
         progress.apply_aligned(read_state.vnodes().clone(), epoch, Some(end_seq_id));
-        tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
+        tracing::trace!(end_seq_id, "read flushed chunk of size: {}", chunk.cardinality());
         *self = ReadFuture::Idle;
         Ok(chunk)
     }
