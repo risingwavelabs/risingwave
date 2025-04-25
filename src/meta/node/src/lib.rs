@@ -24,7 +24,9 @@ use clap::Parser;
 use educe::Educe;
 pub use error::{MetaError, MetaResult};
 use redact::Secret;
-use risingwave_common::config::OverrideConfig;
+use risingwave_common::config::{
+    GLOBAL_KINESIS_CLIENT_CONFIG, OverrideConfig, init_global_kinesis_client_config,
+};
 use risingwave_common::license::LicenseKey;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
@@ -336,6 +338,18 @@ pub fn start(
                 .max(config.meta.compaction_task_max_progress_interval_secs * 1000);
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
+
+        if let Err(current) = init_global_kinesis_client_config(&config.streaming.developer) {
+            info!(?current, "Fail to set kinesis config.");
+        }
+        if let Some(kinesis_client_config) = GLOBAL_KINESIS_CLIENT_CONFIG.get() {
+            info!(
+                ?kinesis_client_config,
+                "Effective global kinesis config found."
+            );
+        } else {
+            info!("No effective global kinesis config found.");
+        }
 
         rpc_serve(
             add_info,

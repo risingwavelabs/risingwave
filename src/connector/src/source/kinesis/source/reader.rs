@@ -23,6 +23,7 @@ use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
+use risingwave_common::config::GLOBAL_KINESIS_CLIENT_CONFIG;
 use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult as Result;
@@ -126,6 +127,15 @@ impl SplitReader for KinesisSplitReader {
 impl KinesisSplitReader {
     #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
+        let (retry_on_eof_interval_ms, retry_on_error_interval_ms) =
+            if let Some(kinesis_client_config) = GLOBAL_KINESIS_CLIENT_CONFIG.get() {
+                (
+                    kinesis_client_config.kinesis_client_rw_retry_on_eof_interval_ms,
+                    kinesis_client_config.kinesis_client_rw_retry_on_error_interval_ms,
+                )
+            } else {
+                (1000, 200)
+            };
         self.new_shard_iter().await?;
         let mut provisioned_throughput_exceeded_start_time: Option<Instant> = None;
         loop {
@@ -135,7 +145,7 @@ impl KinesisSplitReader {
                     self.shard_id,
                     self.latest_offset.as_ref().unwrap_or(&"None".to_owned())
                 );
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_millis(retry_on_eof_interval_ms)).await;
                 self.new_shard_iter().await?;
             }
             match self.get_records().await {
@@ -174,7 +184,7 @@ impl KinesisSplitReader {
                         break;
                     }
                     if chunk.is_empty() {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        tokio::time::sleep(Duration::from_millis(retry_on_error_interval_ms)).await;
                         continue;
                     }
                     self.latest_offset = Some(chunk.last().unwrap().offset.clone());
@@ -199,7 +209,7 @@ impl KinesisSplitReader {
                         self.shard_id
                     );
                     self.new_shard_iter().await?;
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    tokio::time::sleep(Duration::from_millis(retry_on_error_interval_ms)).await;
                     continue;
                 }
                 Err(SdkError::ServiceError(e))
@@ -219,7 +229,7 @@ impl KinesisSplitReader {
                     }
 
                     self.new_shard_iter().await?;
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    tokio::time::sleep(Duration::from_millis(retry_on_error_interval_ms)).await;
                     continue;
                 }
                 Err(SdkError::DispatchFailure(e)) => {
@@ -239,7 +249,7 @@ impl KinesisSplitReader {
                         self.shard_id
                     );
                     self.new_shard_iter().await?;
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    tokio::time::sleep(Duration::from_millis(retry_on_error_interval_ms)).await;
                     continue;
                 }
                 Err(e) => {

@@ -187,6 +187,15 @@ stream_enable_explain_analyze_stats = true
 stream_iceberg_list_interval_sec = 1
 stream_iceberg_fetch_batch_size = 1024
 stream_iceberg_sink_positional_delete_cache_size = 1024
+stream_kinesis_client_rw_retry_on_eof_interval_ms = 1000
+stream_kinesis_client_rw_retry_on_error_interval_ms = 200
+stream_kinesis_client_connect_timeout_ms = 10000
+stream_kinesis_client_read_timeout_ms = 10000
+stream_kinesis_client_operation_timeout_ms = 10000
+stream_kinesis_client_operation_attempt_timeout_ms = 30000
+stream_kinesis_client_retry_max_attempts = 3
+stream_kinesis_client_retry_initial_backoff = 1000
+stream_kinesis_client_retry_max_backoff = 20000
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5

@@ -23,8 +23,8 @@ use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
-    StorageMemoryConfig, load_config,
+    AsyncStackTraceOption, GLOBAL_KINESIS_CLIENT_CONFIG, MAX_CONNECTION_WINDOW_SIZE, MetricLevel,
+    STREAM_WINDOW_SIZE, StorageMemoryConfig, init_global_kinesis_client_config, load_config,
 };
 use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
@@ -163,6 +163,18 @@ pub async fn compute_node_serve(
         embedded_compactor_enabled,
         reserved_memory_bytes,
     );
+
+    if let Err(current) = init_global_kinesis_client_config(&config.streaming.developer) {
+        info!(?current, "Fail to set kinesis config.");
+    }
+    if let Some(kinesis_client_config) = GLOBAL_KINESIS_CLIENT_CONFIG.get() {
+        info!(
+            ?kinesis_client_config,
+            "Effective global kinesis config found."
+        );
+    } else {
+        info!("No effective global kinesis config found.");
+    }
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
