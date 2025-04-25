@@ -143,6 +143,15 @@ stream_exchange_connection_pool_size = 1
 stream_enable_auto_schema_change = true
 stream_enable_shared_source = true
 stream_switch_jdbc_pg_to_native = false
+stream_kinesis_client_rw_retry_on_eof_interval_ms = 1000
+stream_kinesis_client_rw_retry_on_error_interval_ms = 200
+stream_kinesis_client_connect_timeout_ms = 10000
+stream_kinesis_client_read_timeout_ms = 10000
+stream_kinesis_client_operation_timeout_ms = 10000
+stream_kinesis_client_operation_attempt_timeout_ms = 30000
+stream_kinesis_client_retry_max_attempts = 3
+stream_kinesis_client_retry_initial_backoff = 1000
+stream_kinesis_client_retry_max_backoff = 20000
 
 [storage]
 share_buffers_sync_parallelism = 1
