@@ -177,7 +177,7 @@ arrow-udf-runtime = "0.7.0"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { version = "0.22", features = ["s3", "gcs", "datafusion"] }
+deltalake = { version = "0.23", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.14.0"
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }
