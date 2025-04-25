@@ -606,7 +606,7 @@ fn create_insert_sql(
     let columns: String = schema
         .fields()
         .iter()
-        .map(|field| field.name.clone())
+        .map(|field| quote_identifier(&field.name))
         .join(", ");
     let parameters: String = (0..number_of_rows)
         .map(|i| {
@@ -715,7 +715,7 @@ mod tests {
         check(
             sql,
             expect![[
-                r#"INSERT INTO "test_schema"."test_table" (a, b) VALUES ($1, $2), ($3, $4), ($5, $6)"#
+                r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2), ($3, $4), ($5, $6)"#
             ]],
         );
     }
@@ -769,7 +769,7 @@ mod tests {
         check(
             sql,
             expect![[
-                r#"INSERT INTO "test_schema"."test_table" (a, b) VALUES ($1, $2), ($3, $4), ($5, $6) on conflict ("b") do update set "a" = EXCLUDED."a""#
+                r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2), ($3, $4), ($5, $6) on conflict ("b") do update set "a" = EXCLUDED."a""#
             ]],
         );
     }
