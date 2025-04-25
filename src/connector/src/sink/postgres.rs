@@ -321,6 +321,7 @@ pub struct PostgresSinkWriter {
     pk_indices: Vec<usize>,
     is_append_only: bool,
     client: tokio_postgres::Client,
+    pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
     schema: Schema,
 }
@@ -328,7 +329,7 @@ pub struct PostgresSinkWriter {
 impl PostgresSinkWriter {
     async fn new(
         config: PostgresConfig,
-        mut schema: Schema,
+        schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
@@ -343,8 +344,10 @@ impl PostgresSinkWriter {
         )
         .await?;
 
+        let pk_indices_lookup = pk_indices.iter().copied().collect::<HashSet<_>>();
+
         // Rewrite schema types for serialization
-        let schema_types = {
+        let (pk_types, schema_types) = {
             let name_to_type = PostgresExternalTable::type_mapping(
                 &config.user,
                 &config.password,
@@ -359,7 +362,8 @@ impl PostgresSinkWriter {
             )
             .await?;
             let mut schema_types = Vec::with_capacity(schema.fields.len());
-            for field in &mut schema.fields[..] {
+            let mut pk_types = Vec::with_capacity(pk_indices.len());
+            for (i, field) in schema.fields.iter().enumerate() {
                 let field_name = &field.name;
                 let actual_data_type = name_to_type.get(field_name).map(|t| (*t).clone());
                 let actual_data_type = actual_data_type
@@ -370,9 +374,12 @@ impl PostgresSinkWriter {
                         ))
                     })?
                     .clone();
+                if pk_indices_lookup.contains(&i) {
+                    pk_types.push(actual_data_type.clone())
+                }
                 schema_types.push(actual_data_type);
             }
-            schema_types
+            (pk_types, schema_types)
         };
 
         let writer = Self {
@@ -380,6 +387,7 @@ impl PostgresSinkWriter {
             pk_indices,
             is_append_only,
             client,
+            pk_types,
             schema_types,
             schema,
         };
@@ -441,7 +449,7 @@ impl PostgresSinkWriter {
             chunk.cardinality() * chunk.data_types().len(),
         );
         let mut delete_parameter_buffer = ParameterBuffer::new(
-            &self.schema_types,
+            &self.pk_types,
             chunk.cardinality() * self.pk_indices.len(),
         );
         // 1d flattened array of parameters to be deleted.
