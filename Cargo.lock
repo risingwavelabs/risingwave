@@ -3847,9 +3847,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake"
-version = "0.20.1"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cdaf5eed6cf6be7d94ce89ee9d7325324fc7c6c0b1ca8b911b0a5d95f6b1af5"
+checksum = "b12986bb181170e5bd15d6c49ed73488c444d7e9d5a08afcf37e7e69504f93ae"
 dependencies = [
  "deltalake-aws",
  "deltalake-core",
@@ -3858,9 +3858,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake-aws"
-version = "0.3.1"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e9d1a7b1f51be9509d29a4bfd95686646c973710a00d210707ec3672cb00a9a"
+checksum = "ad95533e1e5041622bff91c9eca1430aacb0469e1dbd40ce46f67f78a93d2784"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -3886,9 +3886,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake-core"
-version = "0.20.1"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ebab21c8c8820f9accb3ee74cc6ab7d930adf44323f39b7a764fd34e34aa7f4"
+checksum = "5a95bfec2cdf24ccc7b9d7dda2d92f5d91ed892e79d0928f61fc5e7e4e27be5e"
 dependencies = [
  "arrow 52.2.0",
  "arrow-arith 52.2.0",
@@ -3952,9 +3952,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake-gcp"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0994a88f86d5db28fc42f9d5e190dbb45c59a42dadaa0ca28a7c75cd4074be7a"
+checksum = "bf89930ee6a31c58277cd908155ba88f5b447a351edb70c764b99291ec1f8106"
 dependencies = [
  "async-trait",
  "bytes",
