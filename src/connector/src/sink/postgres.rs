@@ -498,21 +498,17 @@ impl PostgresSinkWriter {
         remaining_parameter: Vec<Option<ScalarAdapter>>,
         append_only: bool,
     ) -> Result<()> {
-        let column_length = match op {
-            Op::Insert => schema.len(),
-            Op::Delete => pk_indices.len(),
-            _ => unreachable!(),
-        };
-        if !parameters.is_empty() {
-            let parameter_length = parameters[0].len();
-            let rows_length = parameter_length / column_length;
-            assert_eq!(
-                parameter_length % column_length,
-                0,
-                "flattened parameters are unaligned, parameters={:#?} columns={:#?}",
-                parameters,
-                schema.fields(),
-            );
+        async fn prepare_statement(
+            transaction: &mut tokio_postgres::Transaction<'_>,
+            op: Op,
+            schema: &Schema,
+            schema_name: &str,
+            table_name: &str,
+            pk_indices: &[usize],
+            rows_length: usize,
+            append_only: bool,
+        ) -> Result<(String, tokio_postgres::Statement)> {
+            assert!(rows_length > 0, "parameters are empty");
             let statement_str = match op {
                 Op::Insert => {
                     if append_only {
@@ -530,6 +526,36 @@ impl PostgresSinkWriter {
                 .prepare(&statement_str)
                 .await
                 .with_context(|| format!("failed to run statement: {}", statement_str))?;
+            Ok((statement_str, statement))
+        }
+
+        let column_length = match op {
+            Op::Insert => schema.len(),
+            Op::Delete => pk_indices.len(),
+            _ => unreachable!(),
+        };
+
+        if !parameters.is_empty() {
+            let parameter_length = parameters[0].len();
+            assert_eq!(
+                parameter_length % column_length,
+                0,
+                "flattened parameters are unaligned, parameter_length={} column_length={}",
+                parameter_length,
+                column_length,
+            );
+            let rows_length = parameter_length / column_length;
+            let (statement_str, statement) = prepare_statement(
+                transaction,
+                op,
+                schema,
+                schema_name,
+                table_name,
+                pk_indices,
+                rows_length,
+                append_only,
+            )
+            .await?;
             for parameter in parameters {
                 transaction
                     .execute_raw(&statement, parameter)
@@ -538,30 +564,24 @@ impl PostgresSinkWriter {
             }
         }
         if !remaining_parameter.is_empty() {
-            let rows_length = remaining_parameter.len() / column_length;
+            let parameter_length = remaining_parameter.len();
             assert_eq!(
-                remaining_parameter.len() % column_length,
+                parameter_length % column_length,
                 0,
                 "flattened parameters are unaligned"
             );
-            let statement_str = match op {
-                Op::Insert => {
-                    if append_only {
-                        create_insert_sql(schema, schema_name, table_name, rows_length)
-                    } else {
-                        create_upsert_sql(schema, schema_name, table_name, pk_indices, rows_length)
-                    }
-                }
-                Op::Delete => {
-                    create_delete_sql(schema, schema_name, table_name, pk_indices, rows_length)
-                }
-                _ => unreachable!(),
-            };
-            tracing::trace!("binding statement: {:?}", statement_str);
-            let statement = transaction
-                .prepare(&statement_str)
-                .await
-                .with_context(|| format!("failed to run statement: {}", statement_str))?;
+            let rows_length = remaining_parameter.len() / column_length;
+            let (statement_str, statement) = prepare_statement(
+                transaction,
+                op,
+                schema,
+                schema_name,
+                table_name,
+                pk_indices,
+                rows_length,
+                append_only,
+            )
+            .await?;
             tracing::trace!("binding parameters: {:?}", remaining_parameter);
             transaction
                 .execute_raw(&statement, remaining_parameter)
@@ -597,6 +617,10 @@ fn create_insert_sql(
     table_name: &str,
     number_of_rows: usize,
 ) -> String {
+    assert!(
+        number_of_rows > 0,
+        "number of parameters must be greater than 0"
+    );
     let normalized_table_name = format!(
         "{}.{}",
         quote_identifier(schema_name),
@@ -627,6 +651,10 @@ fn create_delete_sql(
     pk_indices: &[usize],
     number_of_rows: usize,
 ) -> String {
+    assert!(
+        number_of_rows > 0,
+        "number of parameters must be greater than 0"
+    );
     let normalized_table_name = format!(
         "{}.{}",
         quote_identifier(schema_name),
