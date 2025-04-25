@@ -537,6 +537,34 @@ pub mod verify {
             Ok(())
         }
 
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
+            if let Some(expected) = &mut self.expected {
+                assert_eq!(ret, expected.update_vnode_bitmap(vnodes).await?);
+            }
+            Ok(ret)
+        }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            let ret = self.actual.get_table_watermark(vnode);
+            if let Some(expected) = &self.expected {
+                assert_eq!(ret, expected.get_table_watermark(vnode));
+            }
+            ret
+        }
+
+        fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+            VerifyStateStore {
+                actual: self.actual.new_flushed_snapshot_reader(),
+                expected: self.expected.as_ref().map(E::new_flushed_snapshot_reader),
+                _phantom: Default::default(),
+            }
+        }
+    }
+
+    impl<A: StateStoreWriteEpochControl, E: StateStoreWriteEpochControl> StateStoreWriteEpochControl
+        for VerifyStateStore<A, E>
+    {
         async fn flush(&mut self) -> StorageResult<usize> {
             if let Some(expected) = &mut self.expected {
                 expected.flush().await?;
@@ -564,30 +592,6 @@ pub mod verify {
                 expected.seal_current_epoch(next_epoch, opts.clone());
             }
             self.actual.seal_current_epoch(next_epoch, opts);
-        }
-
-        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-            let ret = self.actual.update_vnode_bitmap(vnodes.clone()).await?;
-            if let Some(expected) = &mut self.expected {
-                assert_eq!(ret, expected.update_vnode_bitmap(vnodes).await?);
-            }
-            Ok(ret)
-        }
-
-        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-            let ret = self.actual.get_table_watermark(vnode);
-            if let Some(expected) = &self.expected {
-                assert_eq!(ret, expected.get_table_watermark(vnode));
-            }
-            ret
-        }
-
-        fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-            VerifyStateStore {
-                actual: self.actual.new_flushed_snapshot_reader(),
-                expected: self.expected.as_ref().map(E::new_flushed_snapshot_reader),
-                _phantom: Default::default(),
-            }
         }
     }
 
@@ -1008,7 +1012,9 @@ mod dyn_state_store {
     // For LocalStateStore
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
-    pub trait DynLocalStateStore: DynStateStoreGet + StaticSendSync {
+    pub trait DynLocalStateStore:
+        DynStateStoreGet + DynStateStoreWriteEpochControl + StaticSendSync
+    {
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1032,6 +1038,13 @@ mod dyn_state_store {
 
         fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>>;
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
+    }
+
+    #[async_trait::async_trait]
+    pub trait DynStateStoreWriteEpochControl: StaticSendSync {
         async fn flush(&mut self) -> StorageResult<usize>;
 
         async fn try_flush(&mut self) -> StorageResult<()>;
@@ -1039,10 +1052,6 @@ mod dyn_state_store {
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
-
-        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>>;
-
-        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes>;
     }
 
     #[async_trait::async_trait]
@@ -1080,6 +1089,17 @@ mod dyn_state_store {
             self.delete(key, old_val)
         }
 
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            self.update_vnode_bitmap(vnodes).await
+        }
+
+        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+            self.get_table_watermark(vnode)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreWriteEpochControl> DynStateStoreWriteEpochControl for S {
         async fn flush(&mut self) -> StorageResult<usize> {
             self.flush().await
         }
@@ -1094,14 +1114,6 @@ mod dyn_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             self.seal_current_epoch(next_epoch, opts)
-        }
-
-        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-            self.update_vnode_bitmap(vnodes).await
-        }
-
-        fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-            self.get_table_watermark(vnode)
         }
     }
 
@@ -1149,27 +1161,32 @@ mod dyn_state_store {
             (*self.0).delete(key, old_val)
         }
 
+        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+            (*self.0).update_vnode_bitmap(vnodes).await
+        }
+    }
+
+    impl<P> StateStoreWriteEpochControl for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsMut<dyn DynStateStoreWriteEpochControl> + StaticSendSync,
+    {
         fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-            (*self.0).flush()
+            self.as_mut().flush()
         }
 
         fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            (*self.0).try_flush()
+            self.as_mut().try_flush()
         }
 
         fn init(
             &mut self,
             options: InitOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            (*self.0).init(options)
+            self.as_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-            (*self.0).seal_current_epoch(next_epoch, opts)
-        }
-
-        async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-            (*self.0).update_vnode_bitmap(vnodes).await
+            self.as_mut().seal_current_epoch(next_epoch, opts)
         }
     }
 
@@ -1233,6 +1250,20 @@ mod dyn_state_store {
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
     state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynStateStoreGet);
+
+    macro_rules! state_store_pointer_dyn_as_mut {
+        ($pointer:ident < dyn $source_dyn_trait:ident > , $target_dyn_trait:ident) => {
+            impl AsMut<dyn $target_dyn_trait>
+                for StateStorePointer<$pointer<dyn $source_dyn_trait>>
+            {
+                fn as_mut(&mut self) -> &mut dyn $target_dyn_trait {
+                    (&mut *self.0) as _
+                }
+            }
+        };
+    }
+
+    state_store_pointer_dyn_as_mut!(Box<dyn DynLocalStateStore>, DynStateStoreWriteEpochControl);
 
     #[derive(Clone)]
     pub struct StateStorePointer<P>(pub(crate) P);
