@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -60,7 +60,7 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     read_committed: $read_committed,
                     ..Default::default()
                 },
