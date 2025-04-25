@@ -57,7 +57,7 @@ pub struct SqlServerConfig {
     pub password: String,
     #[serde(rename = "sqlserver.database")]
     pub database: String,
-    #[serde(rename = "sqlserver.schema", default = "default_schema")]
+    #[serde(rename = "sqlserver.schema", default = "sql_server_default_schema")]
     pub schema: String,
     #[serde(rename = "sqlserver.table")]
     pub table: String,
@@ -70,7 +70,7 @@ pub struct SqlServerConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
-fn default_schema() -> String {
+pub fn sql_server_default_schema() -> String {
     "dbo".to_owned()
 }
 
