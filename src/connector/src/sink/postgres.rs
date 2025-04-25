@@ -320,6 +320,7 @@ impl<'a> ParameterBuffer<'a> {
 pub struct PostgresSinkWriter {
     config: PostgresConfig,
     pk_indices: Vec<usize>,
+    pk_indices_lookup: HashSet<usize>,
     is_append_only: bool,
     client: tokio_postgres::Client,
     pk_types: Vec<PgType>,
@@ -386,6 +387,7 @@ impl PostgresSinkWriter {
         let writer = Self {
             config,
             pk_indices,
+            pk_indices_lookup,
             is_append_only,
             client,
             pk_types,
@@ -432,6 +434,7 @@ impl PostgresSinkWriter {
             &self.config.schema,
             &self.config.table,
             &self.pk_indices,
+            &self.pk_indices_lookup,
             parameters,
             remaining,
             true,
@@ -471,6 +474,7 @@ impl PostgresSinkWriter {
             &self.config.schema,
             &self.config.table,
             &self.pk_indices,
+            &self.pk_indices_lookup,
             delete_parameters,
             delete_remaining_parameter,
             false,
@@ -484,6 +488,7 @@ impl PostgresSinkWriter {
             &self.config.schema,
             &self.config.table,
             &self.pk_indices,
+            &self.pk_indices_lookup,
             insert_parameters,
             insert_remaining_parameter,
             false,
@@ -501,6 +506,7 @@ impl PostgresSinkWriter {
         schema_name: &str,
         table_name: &str,
         pk_indices: &[usize],
+        pk_indices_lookup: &HashSet<usize>,
         parameters: Vec<Vec<Option<ScalarAdapter>>>,
         remaining_parameter: Vec<Option<ScalarAdapter>>,
         append_only: bool,
@@ -512,6 +518,7 @@ impl PostgresSinkWriter {
             schema_name: &str,
             table_name: &str,
             pk_indices: &[usize],
+            pk_indices_lookup: &HashSet<usize>,
             rows_length: usize,
             append_only: bool,
         ) -> Result<(String, tokio_postgres::Statement)> {
@@ -521,7 +528,14 @@ impl PostgresSinkWriter {
                     if append_only {
                         create_insert_sql(schema, schema_name, table_name, rows_length)
                     } else {
-                        create_upsert_sql(schema, schema_name, table_name, pk_indices, rows_length)
+                        create_upsert_sql(
+                            schema,
+                            schema_name,
+                            table_name,
+                            pk_indices,
+                            pk_indices_lookup,
+                            rows_length,
+                        )
                     }
                 }
                 Op::Delete => {
@@ -559,6 +573,7 @@ impl PostgresSinkWriter {
                 schema_name,
                 table_name,
                 pk_indices,
+                pk_indices_lookup,
                 rows_length,
                 append_only,
             )
@@ -585,6 +600,7 @@ impl PostgresSinkWriter {
                 schema_name,
                 table_name,
                 pk_indices,
+                pk_indices_lookup,
                 rows_length,
                 append_only,
             )
@@ -692,6 +708,7 @@ fn create_upsert_sql(
     schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
+    pk_indices_lookup: &HashSet<usize>,
     number_of_rows: usize,
 ) -> String {
     let number_of_columns = schema.len();
@@ -702,7 +719,7 @@ fn create_upsert_sql(
         .collect_vec()
         .join(", ");
     let update_parameters: String = (0..number_of_columns)
-        .filter(|i| !pk_indices.contains(i))
+        .filter(|i| !pk_indices_lookup.contains(i))
         .map(|i| {
             let column = quote_identifier(&schema.fields()[i].name);
             format!("{column} = EXCLUDED.{column}")
@@ -800,7 +817,15 @@ mod tests {
         ]);
         let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_upsert_sql(&schema, schema_name, table_name, &[1], 3);
+        let pk_indices_lookup = HashSet::from_iter([1]);
+        let sql = create_upsert_sql(
+            &schema,
+            schema_name,
+            table_name,
+            &[1],
+            &pk_indices_lookup,
+            3,
+        );
         check(
             sql,
             expect![[
