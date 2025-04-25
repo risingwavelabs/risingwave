@@ -730,8 +730,7 @@ impl Catalog {
         schema_name: &str,
         table_name: &str,
     ) -> CatalogResult<&Arc<SystemTableCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)
-            .unwrap()
+        self.get_schema_by_name(db_name, schema_name)?
             .get_system_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
     }
