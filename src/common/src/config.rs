@@ -20,6 +20,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
+use std::sync::OnceLock;
 
 use anyhow::Context;
 use clap::ValueEnum;
@@ -1099,6 +1100,33 @@ pub struct StreamingDeveloperConfig {
     /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
+
+    #[serde(default = "default::developer::kinesis_client_rw_retry_on_eof_interval_ms")]
+    pub kinesis_client_rw_retry_on_eof_interval_ms: u64,
+
+    #[serde(default = "default::developer::kinesis_client_rw_retry_on_error_interval_ms")]
+    pub kinesis_client_rw_retry_on_error_interval_ms: u64,
+
+    #[serde(default = "default::developer::kinesis_client_connect_timeout_ms")]
+    pub kinesis_client_connect_timeout_ms: u64,
+
+    #[serde(default = "default::developer::kinesis_client_read_timeout_ms")]
+    pub kinesis_client_read_timeout_ms: u64,
+
+    #[serde(default = "default::developer::kinesis_client_operation_timeout_ms")]
+    pub kinesis_client_operation_timeout_ms: u64,
+
+    #[serde(default = "default::developer::kinesis_client_operation_attempt_timeout_ms")]
+    pub kinesis_client_operation_attempt_timeout_ms: u64,
+
+    #[serde(default = "default::developer::kinesis_client_retry_max_attempts")]
+    pub kinesis_client_retry_max_attempts: u32,
+
+    #[serde(default = "default::developer::kinesis_client_retry_initial_backoff")]
+    pub kinesis_client_retry_initial_backoff: u64,
+
+    #[serde(default = "default::developer::kinesis_client_retry_max_backoff")]
+    pub kinesis_client_retry_max_backoff: u64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2043,6 +2071,42 @@ pub mod default {
         pub fn switch_jdbc_pg_to_native() -> bool {
             false
         }
+
+        pub fn kinesis_client_rw_retry_on_error_interval_ms() -> u64 {
+            200
+        }
+
+        pub fn kinesis_client_rw_retry_on_eof_interval_ms() -> u64 {
+            1000
+        }
+
+        pub fn kinesis_client_connect_timeout_ms() -> u64 {
+            1000 * 10
+        }
+
+        pub fn kinesis_client_read_timeout_ms() -> u64 {
+            1000 * 10
+        }
+
+        pub fn kinesis_client_operation_timeout_ms() -> u64 {
+            1000 * 10
+        }
+
+        pub fn kinesis_client_operation_attempt_timeout_ms() -> u64 {
+            1000 * 30
+        }
+
+        pub fn kinesis_client_retry_max_attempts() -> u32 {
+            3
+        }
+
+        pub fn kinesis_client_retry_initial_backoff() -> u64 {
+            1000
+        }
+
+        pub fn kinesis_client_retry_max_backoff() -> u64 {
+            1000 * 20
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -2812,4 +2876,39 @@ mod tests {
             );
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct KinesisClientConfig {
+    pub kinesis_client_rw_retry_on_eof_interval_ms: u64,
+    pub kinesis_client_rw_retry_on_error_interval_ms: u64,
+    pub kinesis_client_connect_timeout_ms: u64,
+    pub kinesis_client_read_timeout_ms: u64,
+    pub kinesis_client_operation_timeout_ms: u64,
+    pub kinesis_client_operation_attempt_timeout_ms: u64,
+    pub kinesis_client_retry_max_attempts: u32,
+    pub kinesis_client_retry_initial_backoff: u64,
+    pub kinesis_client_retry_max_backoff: u64,
+}
+
+pub static GLOBAL_KINESIS_CLIENT_CONFIG: OnceLock<KinesisClientConfig> = OnceLock::new();
+
+pub fn init_global_kinesis_client_config(
+    config: &StreamingDeveloperConfig,
+) -> Result<(), KinesisClientConfig> {
+    let kinesis_client_config = KinesisClientConfig {
+        kinesis_client_rw_retry_on_eof_interval_ms: config
+            .kinesis_client_rw_retry_on_eof_interval_ms,
+        kinesis_client_rw_retry_on_error_interval_ms: config
+            .kinesis_client_rw_retry_on_error_interval_ms,
+        kinesis_client_connect_timeout_ms: config.kinesis_client_connect_timeout_ms,
+        kinesis_client_read_timeout_ms: config.kinesis_client_read_timeout_ms,
+        kinesis_client_operation_timeout_ms: config.kinesis_client_operation_timeout_ms,
+        kinesis_client_operation_attempt_timeout_ms: config
+            .kinesis_client_operation_attempt_timeout_ms,
+        kinesis_client_retry_max_attempts: config.kinesis_client_retry_max_attempts,
+        kinesis_client_retry_initial_backoff: config.kinesis_client_retry_initial_backoff,
+        kinesis_client_retry_max_backoff: config.kinesis_client_retry_max_backoff,
+    };
+    GLOBAL_KINESIS_CLIENT_CONFIG.set(kinesis_client_config)
 }

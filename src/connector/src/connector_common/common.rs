@@ -56,8 +56,12 @@ pub struct AwsPrivateLinkItem {
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_sdk_kinesis::config::{AsyncSleep, SharedAsyncSleep, Sleep};
+use aws_smithy_types::retry::RetryConfig;
+use aws_smithy_types::timeout::TimeoutConfig;
 use aws_types::region::Region;
 use aws_types::SdkConfig;
+use risingwave_common::config::GLOBAL_KINESIS_CLIENT_CONFIG;
 use risingwave_common::util::env_var::env_var_is_true;
 
 /// A flatten config map for aws auth.
@@ -540,6 +544,15 @@ pub struct KinesisCommon {
     pub assume_role_external_id: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct AsyncSleepImpl;
+
+impl AsyncSleep for AsyncSleepImpl {
+    fn sleep(&self, duration: Duration) -> Sleep {
+        Sleep::new(async move { tokio::time::sleep(duration).await })
+    }
+}
+
 impl KinesisCommon {
     pub(crate) async fn build_client(&self) -> ConnectorResult<KinesisClient> {
         let config = AwsAuthProps {
@@ -556,6 +569,34 @@ impl KinesisCommon {
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
         if let Some(endpoint) = &config.endpoint {
             builder = builder.endpoint_url(endpoint);
+        }
+        if let Some(client_config) = GLOBAL_KINESIS_CLIENT_CONFIG.get() {
+            let sleep_impl = SharedAsyncSleep::new(AsyncSleepImpl);
+            builder.set_sleep_impl(Some(sleep_impl));
+            let timeout_config = TimeoutConfig::builder()
+                .connect_timeout(Duration::from_millis(
+                    client_config.kinesis_client_connect_timeout_ms,
+                ))
+                .read_timeout(Duration::from_millis(
+                    client_config.kinesis_client_read_timeout_ms,
+                ))
+                .operation_timeout(Duration::from_millis(
+                    client_config.kinesis_client_operation_timeout_ms,
+                ))
+                .operation_attempt_timeout(Duration::from_millis(
+                    client_config.kinesis_client_operation_attempt_timeout_ms,
+                ))
+                .build();
+            builder.set_timeout_config(Some(timeout_config));
+            let retry_config = RetryConfig::standard()
+                .with_max_attempts(client_config.kinesis_client_retry_max_attempts)
+                .with_initial_backoff(Duration::from_millis(
+                    client_config.kinesis_client_retry_initial_backoff,
+                ))
+                .with_max_backoff(Duration::from_millis(
+                    client_config.kinesis_client_retry_max_backoff,
+                ));
+            builder.set_retry_config(Some(retry_config));
         }
         Ok(KinesisClient::from_conf(builder.build()))
     }
