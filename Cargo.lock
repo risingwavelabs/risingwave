@@ -3741,9 +3741,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake"
-version = "0.23.2"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "258ea17ff3de424995ed51ebfb7e74bae9f307b2b513fa1ab71a2c26c772cb01"
+checksum = "4b4f6cf45636a1020edfc537d82524eb5c06578602442b23fc02717a44c193ec"
 dependencies = [
  "deltalake-aws",
  "deltalake-core",
@@ -3752,9 +3752,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake-aws"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b27a8c942f1d9492851d8685e1394978ab1a6801fcdab7848b109ddb2d3f1300"
+checksum = "cd5a819e95c40bd32b26e56a140bcf9b6bc2797b8c39fb761bed44f830a8265d"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -3767,7 +3767,6 @@ dependencies = [
  "chrono",
  "deltalake-core",
  "futures",
- "lazy_static",
  "maplit",
  "object_store",
  "regex",
@@ -3780,9 +3779,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake-core"
-version = "0.23.2"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87fd79bb5c1837e7c02f429d02fd14a2a214329fa066142eade663b8ce7bc817"
+checksum = "44bef195d284f2c188d79be36caadbe2e3d994238c68ca7d3d2bf3b9a777b124"
 dependencies = [
  "arrow",
  "arrow-arith 53.4.1",
@@ -3815,16 +3814,15 @@ dependencies = [
  "fix-hidden-lifetime-bug",
  "futures",
  "hashbrown 0.15.2",
+ "humantime",
  "indexmap 2.9.0",
  "itertools 0.14.0",
- "lazy_static",
  "libc",
  "maplit",
  "num-bigint",
  "num-traits",
  "num_cpus",
  "object_store",
- "once_cell",
  "parking_lot 0.12.1",
  "parquet 53.4.1",
  "percent-encoding",
@@ -3835,6 +3833,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlparser",
+ "strum 0.27.1",
  "thiserror 2.0.3",
  "tokio",
  "tracing",
@@ -3846,15 +3845,14 @@ dependencies = [
 
 [[package]]
 name = "deltalake-gcp"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12604b4219ed1b792dfecb4774f272dfbcaf78ce72e33d9363a6cf6e354feadd"
+checksum = "b58ce9754a7f3bea0c56f4b86a2ca4d0e640c0cc6e30986e92579cb0c6116bb5"
 dependencies = [
  "async-trait",
  "bytes",
  "deltalake-core",
  "futures",
- "lazy_static",
  "object_store",
  "regex",
  "thiserror 2.0.3",
