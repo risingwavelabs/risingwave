@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 
+use super::generic::GenericPlanNode;
 use super::utils::{Distill, childless_record};
 use super::{
     BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
@@ -257,54 +258,68 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
 
-        // Extract UDFs to `MaterializedExprs` operator
-        let mut udf_field_names = BTreeMap::new();
-        let mut udf_expr_indices = HashSet::new();
-        let udf_exprs: Vec<_> = self
-            .exprs()
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, expr)| {
-                if expr.has_user_defined_function() {
-                    udf_expr_indices.insert(idx);
-                    if let Some(name) = self.core.field_names.get(&idx) {
-                        udf_field_names.insert(idx, name.clone());
-                    }
-                    Some(expr.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let enable_materialized_exprs = self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_enable_materialized_expressions();
 
-        let stream_plan = if !udf_exprs.is_empty() {
-            // Create `MaterializedExprs` for UDFs
-            let mat_exprs_plan: PlanRef =
-                StreamMaterializedExprs::new(new_input.clone(), udf_exprs, udf_field_names).into();
-
-            let input_len = new_input.schema().len();
-            let mut udf_pos = 0;
-
-            // Create final expressions list with UDFs replaced by `InputRef`s
-            let final_exprs = self
+        let stream_plan = if enable_materialized_exprs {
+            // Extract UDFs to `MaterializedExprs` operator
+            let mut udf_field_names = BTreeMap::new();
+            let mut udf_expr_indices = HashSet::new();
+            let udf_exprs: Vec<_> = self
                 .exprs()
                 .iter()
                 .enumerate()
-                .map(|(idx, expr)| {
-                    if udf_expr_indices.contains(&idx) {
-                        let output_idx = input_len + udf_pos;
-                        udf_pos += 1;
-                        InputRef::new(output_idx, expr.return_type()).into()
+                .filter_map(|(idx, expr)| {
+                    if expr.has_user_defined_function() {
+                        udf_expr_indices.insert(idx);
+                        if let Some(name) = self.core.field_names.get(&idx) {
+                            udf_field_names.insert(idx, name.clone());
+                        }
+                        Some(expr.clone())
                     } else {
-                        expr.clone()
+                        None
                     }
                 })
                 .collect();
 
-            let core = generic::Project::new(final_exprs, mat_exprs_plan);
-            StreamProject::new(core).into()
+            if !udf_exprs.is_empty() {
+                // Create `MaterializedExprs` for UDFs
+                let mat_exprs_plan: PlanRef =
+                    StreamMaterializedExprs::new(new_input.clone(), udf_exprs, udf_field_names)
+                        .into();
+
+                let input_len = new_input.schema().len();
+                let mut udf_pos = 0;
+
+                // Create final expressions list with UDFs replaced by `InputRef`s
+                let final_exprs = self
+                    .exprs()
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, expr)| {
+                        if udf_expr_indices.contains(&idx) {
+                            let output_idx = input_len + udf_pos;
+                            udf_pos += 1;
+                            InputRef::new(output_idx, expr.return_type()).into()
+                        } else {
+                            expr.clone()
+                        }
+                    })
+                    .collect();
+
+                let core = generic::Project::new(final_exprs, mat_exprs_plan);
+                StreamProject::new(core).into()
+            } else {
+                // No UDFs, create a regular `StreamProject`
+                let core = generic::Project::new(self.exprs().clone(), new_input);
+                StreamProject::new(core).into()
+            }
         } else {
-            // No UDFs, create a regular `StreamProject`
+            // Materialized expressions feature is not enabled, create a regular `StreamProject`
             let core = generic::Project::new(self.exprs().clone(), new_input);
             StreamProject::new(core).into()
         };
