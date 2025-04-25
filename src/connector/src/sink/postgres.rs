@@ -448,10 +448,8 @@ impl PostgresSinkWriter {
             &self.schema_types,
             chunk.cardinality() * chunk.data_types().len(),
         );
-        let mut delete_parameter_buffer = ParameterBuffer::new(
-            &self.pk_types,
-            chunk.cardinality() * self.pk_indices.len(),
-        );
+        let mut delete_parameter_buffer =
+            ParameterBuffer::new(&self.pk_types, chunk.cardinality() * self.pk_indices.len());
         // 1d flattened array of parameters to be deleted.
         for (op, row) in chunk.rows() {
             match op {
