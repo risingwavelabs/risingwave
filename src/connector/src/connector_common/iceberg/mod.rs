@@ -22,8 +22,12 @@ use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_K
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
-use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
+use iceberg::io::{
+    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
+    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD,
+};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use phf::{Set, phf_set};
 use risingwave_common::bail;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -32,6 +36,7 @@ use with_options::WithOptions;
 
 use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
 #[serde_as]
@@ -52,6 +57,13 @@ pub struct IcebergCommon {
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
+
+    #[serde(rename = "azblob.account_name")]
+    pub azblob_account_name: Option<String>,
+    #[serde(rename = "azblob.account_key")]
+    pub azblob_account_key: Option<String>,
+    #[serde(rename = "azblob.endpoint_url")]
+    pub azblob_endpoint_url: Option<String>,
 
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
@@ -79,14 +91,30 @@ pub struct IcebergCommon {
     /// A Bearer token which will be used for interaction with the server.
     #[serde(rename = "catalog.token")]
     pub token: Option<String>,
-    /// `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
     /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
-    #[serde(rename = "catalog.oauth2-server-uri")]
+    #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
     /// Additional scope for OAuth2.
     #[serde(rename = "catalog.scope")]
     pub scope: Option<String>,
+
+    /// The signing region to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_region")]
+    pub rest_signing_region: Option<String>,
+
+    /// The signing name to use when signing requests to the REST catalog.
+    #[serde(rename = "catalog.rest.signing_name")]
+    pub rest_signing_name: Option<String>,
+
+    /// Whether to use SigV4 for signing requests to the REST catalog.
+    #[serde(
+        rename = "catalog.rest.sigv4_enabled",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub rest_sigv4_enabled: Option<bool>,
 
     #[serde(
         rename = "s3.path.style.access",
@@ -97,6 +125,25 @@ pub struct IcebergCommon {
     /// enable config load.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
+}
+
+impl EnforceSecret for IcebergCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "s3.access.key",
+        "s3.secret.key",
+        "gcs.credential",
+        "catalog.credential",
+        "catalog.token",
+        "catalog.oauth2_server_uri",
+    };
 }
 
 impl IcebergCommon {
@@ -145,12 +192,34 @@ impl IcebergCommon {
                 }
             }
 
+            if let (
+                Some(azblob_account_name),
+                Some(azblob_account_key),
+                Some(azblob_endpoint_url),
+            ) = (
+                &self.azblob_account_name,
+                &self.azblob_account_key,
+                &self.azblob_endpoint_url,
+            ) {
+                iceberg_configs.insert(AZBLOB_ACCOUNT_NAME.to_owned(), azblob_account_name.clone());
+                iceberg_configs.insert(AZBLOB_ACCOUNT_KEY.to_owned(), azblob_account_key.clone());
+                iceberg_configs.insert(AZBLOB_ENDPOINT.to_owned(), azblob_endpoint_url.clone());
+
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("azblob unsupported in {} catalog", &catalog_type);
+                }
+            }
+
             match &self.warehouse_path {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() && (catalog_type == "rest" || catalog_type == "rest_rust") {
+                        if (url.is_err() || is_s3_tables)
+                            && (catalog_type == "rest" || catalog_type == "rest_rust")
+                        {
                             // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
+                            // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                             // so we allow it to pass here.
                             (None, None)
                         } else {
@@ -251,6 +320,32 @@ impl IcebergCommon {
                     if let Some(scope) = &self.scope {
                         java_catalog_configs.insert("scope".to_owned(), scope.clone());
                     }
+                    if let Some(rest_signing_region) = &self.rest_signing_region {
+                        java_catalog_configs.insert(
+                            "rest.signing-region".to_owned(),
+                            rest_signing_region.clone(),
+                        );
+                    }
+                    if let Some(rest_signing_name) = &self.rest_signing_name {
+                        java_catalog_configs
+                            .insert("rest.signing-name".to_owned(), rest_signing_name.clone());
+                    }
+                    if let Some(rest_sigv4_enabled) = self.rest_sigv4_enabled {
+                        java_catalog_configs.insert(
+                            "rest.sigv4-enabled".to_owned(),
+                            rest_sigv4_enabled.to_string(),
+                        );
+
+                        if let Some(access_key) = &self.access_key {
+                            java_catalog_configs
+                                .insert("rest.access-key-id".to_owned(), access_key.clone());
+                        }
+
+                        if let Some(secret_key) = &self.secret_key {
+                            java_catalog_configs
+                                .insert("rest.secret-access-key".to_owned(), secret_key.clone());
+                        }
+                    }
                 }
                 Some("glue") => {
                     if !enable_config_load {
@@ -335,6 +430,14 @@ impl IcebergCommon {
                             .warehouse(warehouse)
                             .credential(self.gcs_credential.clone())
                             .enable_config_load(self.enable_config_load)
+                            .build(),
+                    ),
+                    "azblob" => StorageCatalogConfig::Azblob(
+                        storage_catalog::StorageCatalogAzblobConfig::builder()
+                            .warehouse(warehouse)
+                            .account_name(self.azblob_account_name.clone())
+                            .account_key(self.azblob_account_key.clone())
+                            .endpoint(self.azblob_endpoint_url.clone())
                             .build(),
                     ),
                     scheme => bail!("Unsupported warehouse scheme: {}", scheme),

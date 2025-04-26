@@ -14,16 +14,18 @@
 
 use std::collections::VecDeque;
 use std::marker::PhantomData;
+use std::num::NonZero;
 use std::ops::Deref;
 use std::pin::pin;
 use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
 use jni::JavaVM;
+use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -50,6 +52,7 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, unbounded_channel};
@@ -57,14 +60,16 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
+use super::SinkCommittedEpochSubscriber;
 use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
-use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::writer::SinkWriter;
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
     SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
@@ -76,21 +81,24 @@ macro_rules! def_remote_sink {
             //todo!, delete java impl
             // { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
             // { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
-            { Cassandra, CassandraSink, "cassandra" }
-            { Jdbc, JdbcSink, "jdbc" }
-            { DeltaLake, DeltaLakeSink, "deltalake" }
-            { HttpJava, HttpJavaSink, "http" }
+            { Cassandra, CassandraSink, "cassandra", [ "cassandra.url" ] }
+            { Jdbc, JdbcSink, "jdbc", [ "jdbc.url" ] }
         }
     };
-    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ] }) => {
         #[derive(Debug)]
         pub struct $variant_name;
         impl RemoteSinkTrait for $variant_name {
             const SINK_NAME: &'static str = $sink_name;
         }
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+                $($enforce_secret_prop),*
+            };
+        }
         pub type $sink_type_name = RemoteSink<$variant_name>;
     };
-    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, |$desc:ident| $body:expr }) => {
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ], |$desc:ident| $body:expr }) => {
         #[derive(Debug)]
         pub struct $variant_name;
         impl RemoteSinkTrait for $variant_name {
@@ -98,6 +106,11 @@ macro_rules! def_remote_sink {
             fn default_sink_decouple($desc: &SinkDesc) -> bool {
                 $body
             }
+        }
+        impl EnforceSecret for $variant_name {
+            const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+                $($enforce_secret_prop),*
+            };
         }
         pub type $sink_type_name = RemoteSink<$variant_name>;
     };
@@ -116,7 +129,7 @@ macro_rules! def_remote_sink {
 
 def_remote_sink!();
 
-pub trait RemoteSinkTrait: Send + Sync + 'static {
+pub trait RemoteSinkTrait: EnforceSecret + Send + Sync + 'static {
     const SINK_NAME: &'static str;
     fn default_sink_decouple() -> bool {
         true
@@ -127,6 +140,10 @@ pub trait RemoteSinkTrait: Send + Sync + 'static {
 pub struct RemoteSink<R: RemoteSinkTrait> {
     param: SinkParam,
     _phantom: PhantomData<R>,
+}
+
+impl<R: RemoteSinkTrait> EnforceSecret for RemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
 }
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
@@ -309,7 +326,8 @@ impl RemoteLogSinker {
 
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
         let sink_writer_metrics = self.sink_writer_metrics;
@@ -402,7 +420,7 @@ impl LogSinker for RemoteLogSinker {
                                         epoch,
                                         chunk_id: batch_id as _,
                                     },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -421,7 +439,7 @@ impl LogSinker for RemoteLogSinker {
                                 truncate_matched_offset(
                                     &mut sent_offset_queue,
                                     TruncateOffset::Barrier { epoch },
-                                    log_reader,
+                                    &mut log_reader,
                                     &sink_writer_metrics,
                                 )?;
                             }
@@ -454,7 +472,7 @@ impl LogSinker for RemoteLogSinker {
                                         batch_id: chunk_id as u64,
                                         chunk,
                                     })
-                                    .instrument_await(format!(
+                                    .instrument_await(span!(
                                         "log_sinker_send_chunk (chunk {chunk_id})"
                                     ))
                                     .await?;
@@ -462,7 +480,7 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Chunk { epoch, chunk_id }, None));
                             }
-                            LogStoreReadItem::Barrier { is_checkpoint } => {
+                            LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                                 let offset = TruncateOffset::Barrier { epoch };
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;
@@ -471,7 +489,7 @@ impl LogSinker for RemoteLogSinker {
                                     let start_time = Instant::now();
                                     request_tx
                                         .barrier(epoch, true)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_commit_checkpoint (epoch {epoch})"
                                         ))
                                         .await?;
@@ -479,7 +497,7 @@ impl LogSinker for RemoteLogSinker {
                                 } else {
                                     request_tx
                                         .barrier(epoch, false)
-                                        .instrument_await(format!(
+                                        .instrument_await(span!(
                                             "log_sinker_send_barrier (epoch {epoch})"
                                         ))
                                         .await?;
@@ -489,7 +507,6 @@ impl LogSinker for RemoteLogSinker {
                                 sent_offset_queue
                                     .push_back((TruncateOffset::Barrier { epoch }, start_time));
                             }
-                            LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                         }
                     }
                 }
@@ -509,6 +526,10 @@ pub struct CoordinatedRemoteSink<R: RemoteSinkTrait> {
     _phantom: PhantomData<R>,
 }
 
+impl<R: RemoteSinkTrait> EnforceSecret for CoordinatedRemoteSink<R> {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = R::ENFORCE_SECRET_PROPERTIES;
+}
+
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
     type Error = SinkError;
 
@@ -522,7 +543,7 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     type Coordinator = RemoteCoordinator;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
@@ -533,29 +554,20 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let metrics = SinkWriterMetrics::new(&writer_param);
-        Ok(CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
+        CoordinatedLogSinker::new(
+            &writer_param,
             self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
             CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
+            NonZero::new(1).unwrap(),
         )
-        .await?
-        .into_log_sinker(metrics))
+        .await
     }
 
     fn is_coordinated_sink(&self) -> bool {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }
@@ -675,8 +687,8 @@ impl RemoteCoordinator {
 
 #[async_trait]
 impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self) -> Result<()> {
-        Ok(())
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        Ok(None)
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

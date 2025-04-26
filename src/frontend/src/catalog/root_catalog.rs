@@ -28,7 +28,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
-use super::subscription_catalog::SubscriptionCatalog;
+use super::subscription_catalog::{SubscriptionCatalog, SubscriptionState};
 use super::view_catalog::ViewCatalog;
 use super::{
     CatalogError, CatalogResult, ConnectionId, SecretId, SinkId, SourceId, SubscriptionId, ViewId,
@@ -730,8 +730,7 @@ impl Catalog {
         schema_name: &str,
         table_name: &str,
     ) -> CatalogResult<&Arc<SystemTableCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)
-            .unwrap()
+        self.get_schema_by_name(db_name, schema_name)?
             .get_system_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
     }
@@ -985,10 +984,12 @@ impl Catalog {
             Err(CatalogError::duplicated("sink", relation_name.to_owned()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::duplicated("view", relation_name.to_owned()))
-        } else if schema.get_subscription_by_name(relation_name).is_some() {
-            Err(CatalogError::duplicated(
+        } else if let Some(subscription) = schema.get_subscription_by_name(relation_name) {
+            let is_not_created = subscription.subscription_state != SubscriptionState::Created;
+            Err(CatalogError::Duplicated(
                 "subscription",
                 relation_name.to_owned(),
+                is_not_created,
             ))
         } else {
             Ok(())

@@ -18,7 +18,7 @@ use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::*;
-use crate::executor::ProjectExecutor;
+use crate::executor::project::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 

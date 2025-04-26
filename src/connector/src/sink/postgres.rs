@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
@@ -31,6 +32,7 @@ use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
 use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
@@ -57,6 +59,12 @@ pub struct PostgresConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+impl EnforceSecret for PostgresConfig {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
+        "password", "ssl.root.cert"
+    };
 }
 
 fn default_max_batch_rows() -> usize {
@@ -105,6 +113,17 @@ impl PostgresSink {
             pk_indices,
             is_append_only,
         })
+    }
+}
+
+impl EnforceSecret for PostgresSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            PostgresConfig::enforce_one(prop)?;
+        }
+        Ok(())
     }
 }
 
@@ -326,7 +345,7 @@ impl PostgresSinkWriter {
 
         // Rewrite schema types for serialization
         let schema_types = {
-            let pg_table = PostgresExternalTable::connect(
+            let name_to_type = PostgresExternalTable::type_mapping(
                 &config.user,
                 &config.password,
                 &config.host,
@@ -339,7 +358,6 @@ impl PostgresSinkWriter {
                 is_append_only,
             )
             .await?;
-            let name_to_type = pg_table.column_name_to_pg_type();
             let mut schema_types = Vec::with_capacity(schema.fields.len());
             for field in &mut schema.fields[..] {
                 let field_name = &field.name;
@@ -522,7 +540,8 @@ impl PostgresSinkWriter {
 
 #[async_trait]
 impl LogSinker for PostgresSinkWriter {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
@@ -533,7 +552,6 @@ impl LogSinker for PostgresSinkWriter {
                 LogStoreReadItem::Barrier { .. } => {
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }
         }
     }

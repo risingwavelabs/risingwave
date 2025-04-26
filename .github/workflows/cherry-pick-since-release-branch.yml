@@ -1,30 +1,70 @@
-name: PR for release branch
+name: PR for release branches
 on:
   pull_request:
     branches:
       - main
     types: ["closed", "labeled"]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to cherry-pick"
+        required: true
+        type: number
+      base_version:
+        description: "Base version to cherry-pick since"
+        default: "2.1"
+        required: true
+        type: string
+
+env:
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   get-target-release-branches:
     if: |
-      github.event.pull_request.merged &&
-      ((github.event.action == 'labeled' && startsWith(github.event.label.name, 'need-cherry-pick-since')) ||
-      (github.event.action == 'closed' && contains(toJson(github.event.pull_request.labels), 'need-cherry-pick-since')))
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged &&
+       ((github.event.action == 'labeled' && startsWith(github.event.label.name, 'need-cherry-pick-since')) ||
+       (github.event.action == 'closed' && contains(toJson(github.event.pull_request.labels), 'need-cherry-pick-since')))) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       branches: ${{ steps.filter-release-branches.outputs.branches }}
+      pr_number: ${{ steps.filter-release-branches.outputs.pr_number }}
+      pr_sha: ${{ steps.filter-release-branches.outputs.pr_sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures all branches are fetched
+          fetch-depth: 0 # Ensures all branches are fetched
 
       - name: Get all release branches including label version and higher
         id: filter-release-branches
         run: |
-          label="${{ github.event.label.name }}"
-          base_version=$(echo "$label" | sed 's/need-cherry-pick-since-release-//')
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # For manual workflow dispatch
+            base_version="${{ github.event.inputs.base_version }}"
+            pr_number="${{ github.event.inputs.pr_number }}"
+            echo "Using manually provided base version: $base_version for PR #$pr_number"
+            # Get the PR merge commit SHA
+            pr_sha=$(gh pr view $pr_number --repo ${{ github.repository }} --json mergeCommit --jq .mergeCommit.oid)
+            echo "PR merge commit SHA: $pr_sha"
+            echo "pr_sha=$pr_sha" >> "$GITHUB_OUTPUT"
+          else
+            # For automatic trigger from PR events
+            if [[ "${{ github.event.action }}" == 'labeled' ]]; then
+              label="${{ github.event.label.name }}"
+            else
+              labels='${{ toJson(github.event.pull_request.labels) }}'
+              label=$(echo "$labels" | jq -r '.[] | select(.name | contains("need-cherry-pick-since")).name' | sort -V | head -n 1)
+            fi
+            base_version=$(echo "$label" | sed 's/need-cherry-pick-since-release-//')
+            pr_number="${{ github.event.number }}"
+          fi
+
+          # Output the PR number for use in downstream jobs
+          echo "PR number: $pr_number"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
           echo "Base version from label: $base_version"
 
@@ -55,7 +95,7 @@ jobs:
             for branch in "${target_branches[@]}"; do
               echo "$branch"
             done
-            echo "branches=$(printf '%s\n' "${target_branches[@]}" | jq -R . | jq -s .)" >> "$GITHUB_OUTPUT"
+            echo "branches=$(printf '%s\n' "${target_branches[@]}" | jq -R . | jq -s -c .)" >> "$GITHUB_OUTPUT"
           fi
 
   release_pull_request:
@@ -72,9 +112,12 @@ jobs:
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
         with:
+          # For automatic trigger from PR events, `pr_sha` is unset,
+          # and it will use the triggering SHA (GITHUB_SHA) instead.
+          commit_sha: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
           pr_branch: ${{ matrix.branch }}
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', github.event.number, matrix.branch) }}
+          pr_labels: "cherry-pick"
+          pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', needs.get-target-release-branches.outputs.pr_number, matrix.branch) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -82,3 +125,4 @@ permissions:
   issues: write
   pull-requests: write
   contents: write
+  actions: write

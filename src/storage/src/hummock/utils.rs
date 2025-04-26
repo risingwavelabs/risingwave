@@ -43,7 +43,9 @@ use crate::hummock::CachePolicy;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreKeyedRow, StateStoreRead};
+use crate::store::{
+    OpConsistencyLevel, ReadOptions, StateStoreGet, StateStoreKeyedRow, StateStoreRead,
+};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -378,12 +380,23 @@ pub(crate) fn sanity_check_enabled() -> bool {
     SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
 }
 
+async fn get_from_state_store(
+    state_store: &impl StateStoreGet,
+    key: TableKey<Bytes>,
+    read_options: ReadOptions,
+) -> StorageResult<Option<Bytes>> {
+    state_store
+        .on_key_value(key, read_options, |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
+}
+
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -392,11 +405,10 @@ pub(crate) async fn do_insert_sanity_check(
     }
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    let stored_value = inner.get(key.clone(), read_options).await?;
+    let stored_value = get_from_state_store(inner, key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
@@ -414,7 +426,6 @@ pub(crate) async fn do_delete_sanity_check(
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -427,11 +438,10 @@ pub(crate) async fn do_delete_sanity_check(
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
-    match inner.get(key.clone(), read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -459,7 +469,6 @@ pub(crate) async fn do_update_sanity_check(
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    table_id: TableId,
     table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
@@ -472,12 +481,11 @@ pub(crate) async fn do_update_sanity_check(
     };
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
-        table_id,
         cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
 
-    match inner.get(key.clone(), read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
@@ -535,7 +543,7 @@ pub(crate) fn filter_with_delete_range<'a>(
             range_end
         );
     }
-    kv_iter.filter(move |(ref key, _)| {
+    kv_iter.filter(move |(key, _)| {
         if let Some(range_bound) = range {
             if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
                 == Ordering::Less
@@ -815,7 +823,7 @@ mod tests {
 
     use futures::FutureExt;
     use futures::future::join_all;
-    use rand::random;
+    use rand::random_range;
 
     use crate::hummock::utils::MemoryLimiter;
 
@@ -859,7 +867,7 @@ mod tests {
             let limiter = memory_limiter.clone();
             let h = tokio::spawn(async move {
                 let mut buffers = vec![];
-                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
+                let mut current_buffer_usage = random_range(2..=9);
                 for _ in 0..1000 {
                     if buffers.len() < current_buffer_usage
                         && let Some(tracker) = limiter.try_require_memory(QUOTA)
@@ -867,7 +875,7 @@ mod tests {
                         buffers.push(tracker);
                     } else {
                         buffers.clear();
-                        current_buffer_usage = (random::<usize>() % 8) + 2;
+                        current_buffer_usage = random_range(2..=9);
                         let req = limiter.require_memory(QUOTA);
                         match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
                             Ok(tracker) => {
@@ -878,7 +886,7 @@ mod tests {
                             }
                         }
                     }
-                    let sleep_time = random::<u64>() % 3 + 1;
+                    let sleep_time = random_range(1..=3);
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 }
             });

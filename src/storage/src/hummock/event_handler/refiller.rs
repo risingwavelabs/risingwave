@@ -28,6 +28,7 @@ use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
@@ -200,13 +201,21 @@ pub struct CacheRefillConfig {
 
 impl CacheRefillConfig {
     pub fn from_storage_opts(options: &StorageOpts) -> Self {
-        Self {
-            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
-            data_refill_levels: options
+        let data_refill_levels = match Feature::ElasticDiskCache.check_available() {
+            Ok(_) => options
                 .cache_refill_data_refill_levels
                 .iter()
                 .copied()
                 .collect(),
+            Err(e) => {
+                tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                HashSet::new()
+            }
+        };
+
+        Self {
+            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
@@ -598,7 +607,7 @@ impl CacheRefillTask {
 
             let mut writer = sstable_store.block_cache().storage_writer(key);
 
-            if writer.pick() {
+            if writer.pick().admitted() {
                 admits += 1;
             }
 

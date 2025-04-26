@@ -6,6 +6,7 @@ import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "secret.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
@@ -323,6 +324,23 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
+message AlterConnectorPropsRequest {
+  enum AlterConnectorPropsObject {
+    UNSPECIFIED = 0;
+    SOURCE = 1;
+    SINK = 2;
+    CONNECTION = 3;
+  }
+
+  uint32 object_id = 1;
+  map<string, string> changed_props = 2;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  optional uint32 connector_conn_ref = 4;
+  AlterConnectorPropsObject object_type = 5;
+}
+
+message AlterConnectorPropsResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -337,6 +355,7 @@ service StreamManagerService {
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
+  rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
 }
 
 // Below for cluster service.
@@ -674,6 +693,7 @@ message SystemParams {
   optional uint64 time_travel_retention_ms = 18;
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
+  optional bool enforce_secret = 21;
 }
 
 message GetSystemParamsRequest {}
@@ -785,6 +805,38 @@ message EventLog {
     string connector = 3;
     string error = 4;
   }
+  message EventRecovery {
+    message GlobalRecoveryStart {
+      string reason = 1;
+    }
+    message GlobalRecoverySuccess {
+      string reason = 1;
+      float duration_secs = 2;
+      repeated uint32 running_database_ids = 3;
+      repeated uint32 recovering_database_ids = 4;
+    }
+    message GlobalRecoveryFailure {
+      string reason = 1;
+      string error = 2;
+    }
+    message DatabaseRecoveryStart {
+      uint32 database_id = 1;
+    }
+    message DatabaseRecoveryFailure {
+      uint32 database_id = 1;
+    }
+    message DatabaseRecoverySuccess {
+      uint32 database_id = 1;
+    }
+    oneof recovery_event {
+      GlobalRecoveryStart global_start = 1;
+      GlobalRecoverySuccess global_success = 2;
+      GlobalRecoveryFailure global_failure = 3;
+      DatabaseRecoveryStart database_start = 4;
+      DatabaseRecoveryFailure database_failure = 5;
+      DatabaseRecoverySuccess database_success = 6;
+    }
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -799,6 +851,7 @@ message EventLog {
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
     EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
     EventLog.EventSinkFail sink_fail = 11;
+    EventRecovery recovery = 12;
   }
 }
 
@@ -885,4 +938,22 @@ message ListRateLimitsResponse {
     string node_name = 5;
   }
   repeated RateLimitInfo rate_limits = 1;
+}
+
+service HostedIcebergCatalogService {
+  rpc ListIcebergTables(ListIcebergTablesRequest) returns (ListIcebergTablesResponse);
+}
+
+message ListIcebergTablesRequest {}
+
+message ListIcebergTablesResponse {
+  message IcebergTable {
+    string catalog_name = 1;
+    string table_namespace = 2;
+    string table_name = 3;
+    optional string metadata_location = 4;
+    optional string previous_metadata_location = 5;
+    optional string iceberg_type = 6;
+  }
+  repeated IcebergTable iceberg_tables = 1;
 }

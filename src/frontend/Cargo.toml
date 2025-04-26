@@ -52,10 +52,10 @@ pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 quick-xml = { version = "0.37", features = ["serialize"] }
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
@@ -75,7 +75,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10.7"
-smallvec = { version = "1.13.1", features = ["serde"] }
+smallvec = { version = "1.15.0", features = ["serde"] }
 speedate = "0.15.0"
 tempfile = "3"
 thiserror = "1"

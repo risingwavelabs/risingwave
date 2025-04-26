@@ -64,28 +64,28 @@ pub struct MetaMetrics {
     // ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
-    pub barrier_latency: LabelGuardedHistogramVec<1>,
+    pub barrier_latency: LabelGuardedHistogramVec,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
     /// Latency between each barrier send
-    pub barrier_send_latency: LabelGuardedHistogramVec<1>,
+    pub barrier_send_latency: LabelGuardedHistogramVec,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
-    pub all_barrier_nums: LabelGuardedIntGaugeVec<1>,
+    pub all_barrier_nums: LabelGuardedIntGaugeVec,
     /// The number of in-flight barriers
-    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec<1>,
+    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
     pub last_committed_barrier_time: IntGaugeVec,
 
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
-    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
+    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
-    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
+    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec, // (table_id, )
     /// The lags between the upstream epoch and the downstream epoch.
-    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
+    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec, // (table_id, )
     /// The number of inflight barriers of `table_id`
-    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec<1>, // (table_id, _)
+    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec, // (table_id, _)
 
     // ********************************** Recovery ************************************
     pub recovery_failure_cnt: IntCounterVec,
@@ -144,6 +144,10 @@ pub struct MetaMetrics {
     pub total_object_count: IntGauge,
     /// Total size of objects that includes dangling objects.
     pub total_object_size: IntGauge,
+    /// Number of objects per table change log.
+    pub table_change_log_object_count: IntGaugeVec,
+    /// Size of objects per table change log.
+    pub table_change_log_object_size: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -179,7 +183,7 @@ pub struct MetaMetrics {
 
     // ********************************** Source ************************************
     /// supervisor for which source is still up.
-    pub source_is_up: LabelGuardedIntGaugeVec<2>,
+    pub source_is_up: LabelGuardedIntGaugeVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
@@ -197,9 +201,9 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
 
@@ -490,6 +494,22 @@ impl MetaMetrics {
             "Total size of objects that includes dangling objects. Note that the metric is updated right before full GC. So subsequent full GC may reduce the actual value significantly, without updating the metric.",
             registry
         ).unwrap();
+
+        let table_change_log_object_count = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_count",
+            "per table change log object count",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let table_change_log_object_size = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_size",
+            "per table change log object size",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
 
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
@@ -821,6 +841,8 @@ impl MetaMetrics {
             current_version_object_size,
             total_object_count,
             total_object_size,
+            table_change_log_object_count,
+            table_change_log_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -927,7 +949,7 @@ pub fn start_worker_info_monitor(
                     let role = if m.is_leader { "leader" } else { "follower" };
                     meta_metrics
                         .meta_type
-                        .with_label_values(&[&m.id, role])
+                        .with_label_values(&[m.id.as_str(), role])
                         .set(1);
                 });
             }

@@ -114,9 +114,9 @@ pub struct JoinHashMapMetrics {
     insert_cache_miss_count: usize,
 
     // Metrics
-    join_lookup_total_count_metric: LabelGuardedIntCounter<4>,
-    join_lookup_miss_count_metric: LabelGuardedIntCounter<4>,
-    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<4>,
+    join_lookup_total_count_metric: LabelGuardedIntCounter,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter,
 }
 
 impl JoinHashMapMetrics {
@@ -256,7 +256,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             &self.state.pk_indices,
             &mut self.state.table,
         );
-        let degrees = if let Some(ref degree_state) = degree_state {
+        let degrees = if let Some(degree_state) = degree_state {
             Some(fetch_degrees(key, &self.join_key_data_types, &degree_state.table).await?)
         } else {
             None

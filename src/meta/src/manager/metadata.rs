@@ -120,7 +120,7 @@ impl ActiveStreamingWorkerNodes {
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
-        let ret = loop {
+        loop {
             let notification = self
                 .rx
                 .recv()
@@ -201,9 +201,7 @@ impl ActiveStreamingWorkerNodes {
                     continue;
                 }
             }
-        };
-
-        ret
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -475,7 +473,7 @@ impl MetadataManager {
 
     pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
-            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
+            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect(), false)
             .await
     }
 
@@ -483,6 +481,16 @@ impl MetadataManager {
         self.catalog_controller
             .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
             .await
+    }
+
+    pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
+        Ok(self
+            .catalog_controller
+            .get_sink_state_table_ids(sink_id)
+            .await?
+            .into_iter()
+            .map(|id| (id as u32).into())
+            .collect())
     }
 
     pub async fn get_table_catalog_by_cdc_table_id(
@@ -693,6 +701,18 @@ impl MetadataManager {
             .into_iter()
             .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
             .collect())
+    }
+
+    pub async fn update_sink_props_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        props: BTreeMap<String, String>,
+    ) -> MetaResult<HashMap<String, String>> {
+        let new_props = self
+            .catalog_controller
+            .update_sink_props_by_sink_id(sink_id, props)
+            .await?;
+        Ok(new_props)
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

@@ -10,7 +10,11 @@ MAVEN_DOWNLOAD_PATH = "${PREFIX_TMP}/maven.tar.gz"
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_BUILD_RW_CONNECTOR" ] }
+condition = { env_set = [
+  "ENABLE_BUILD_RW_CONNECTOR",
+], files_not_exist = [
+  "${PREFIX_BIN}/maven",
+] }
 description = "Download Maven"
 script = '''
 #!/usr/bin/env bash

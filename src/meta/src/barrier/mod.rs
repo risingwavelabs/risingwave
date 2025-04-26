@@ -23,15 +23,16 @@ use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
 
 use self::notifier::Notifier;
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
+use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActorWithDispatchers, StreamJobFragments};
+use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
 mod checkpoint;
 mod command;
 mod complete_task;
 mod context;
+mod edge_builder;
 mod info;
 mod manager;
 mod notifier;
@@ -100,10 +101,12 @@ pub(crate) enum BarrierManagerRequest {
 #[derive(Debug)]
 struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
-    database_fragment_infos: HashMap<DatabaseId, InflightDatabaseInfo>,
+    database_job_infos: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
+    state_table_log_epochs: HashMap<TableId, Vec<Vec<u64>>>,
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
-    stream_actors: HashMap<ActorId, StreamActorWithDispatchers>,
+    stream_actors: HashMap<ActorId, StreamActor>,
+    fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
@@ -112,18 +115,21 @@ struct BarrierWorkerRuntimeInfoSnapshot {
 impl BarrierWorkerRuntimeInfoSnapshot {
     fn validate_database_info(
         database_id: DatabaseId,
-        database_info: &InflightDatabaseInfo,
+        database_jobs: &HashMap<TableId, InflightStreamingJobInfo>,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
-        stream_actors: &HashMap<ActorId, StreamActorWithDispatchers>,
+        stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<()> {
         {
-            for fragment in database_info.fragment_infos() {
-                for (actor_id, worker_id) in &fragment.actors {
-                    if !active_streaming_nodes.current().contains_key(worker_id) {
+            for fragment in database_jobs.values().flat_map(|job| job.fragment_infos()) {
+                for (actor_id, actor) in &fragment.actors {
+                    if !active_streaming_nodes
+                        .current()
+                        .contains_key(&actor.worker_id)
+                    {
                         return Err(anyhow!(
                             "worker_id {} of actor {} do not exist",
-                            worker_id,
+                            actor.worker_id,
                             actor_id
                         )
                         .into());
@@ -142,28 +148,35 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                     }
                 }
             }
-            let mut committed_epochs = database_info.existing_table_ids().map(|table_id| {
-                (
-                    table_id,
-                    *state_table_committed_epochs
-                        .get(&table_id)
-                        .expect("checked exist"),
-                )
-            });
-            let (first_table, first_epoch) = committed_epochs.next().ok_or_else(|| {
-                anyhow!("database {} has no state table after recovery", database_id)
-            })?;
-            for (table_id, epoch) in committed_epochs {
-                if epoch != first_epoch {
-                    return Err(anyhow!(
-                        "database {} has tables with different table ids. {}:{}, {}:{}",
-                        database_id,
-                        first_table,
-                        first_epoch,
+            for (job_id, job) in database_jobs {
+                let mut committed_epochs = job.existing_table_ids().map(|table_id| {
+                    (
                         table_id,
-                        epoch
+                        *state_table_committed_epochs
+                            .get(&table_id)
+                            .expect("checked exist"),
                     )
-                    .into());
+                });
+                let (first_table, first_epoch) = committed_epochs.next().ok_or_else(|| {
+                    anyhow!(
+                        "job {} in database {} has no state table after recovery",
+                        job_id,
+                        database_id
+                    )
+                })?;
+                for (table_id, epoch) in committed_epochs {
+                    if epoch != first_epoch {
+                        return Err(anyhow!(
+                            "job {} in database {} has tables with different table ids. {}:{}, {}:{}",
+                            job_id,
+                            database_id,
+                            first_table,
+                            first_epoch,
+                            table_id,
+                            epoch
+                        )
+                        .into());
+                    }
                 }
             }
         }
@@ -171,10 +184,10 @@ impl BarrierWorkerRuntimeInfoSnapshot {
     }
 
     fn validate(&self) -> MetaResult<()> {
-        for (database_id, database_info) in &self.database_fragment_infos {
+        for (database_id, job_infos) in &self.database_job_infos {
             Self::validate_database_info(
                 *database_id,
-                database_info,
+                job_infos,
                 &self.active_streaming_nodes,
                 &self.stream_actors,
                 &self.state_table_committed_epochs,
@@ -186,10 +199,12 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
-    database_fragment_info: InflightDatabaseInfo,
+    job_infos: HashMap<TableId, InflightStreamingJobInfo>,
     state_table_committed_epochs: HashMap<TableId, u64>,
+    state_table_log_epochs: HashMap<TableId, Vec<Vec<u64>>>,
     subscription_info: InflightSubscriptionInfo,
-    stream_actors: HashMap<ActorId, StreamActorWithDispatchers>,
+    stream_actors: HashMap<ActorId, StreamActor>,
+    fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
 }
@@ -202,7 +217,7 @@ impl DatabaseRuntimeInfoSnapshot {
     ) -> MetaResult<()> {
         BarrierWorkerRuntimeInfoSnapshot::validate_database_info(
             database_id,
-            &self.database_fragment_info,
+            &self.job_infos,
             active_streaming_nodes,
             &self.stream_actors,
             &self.state_table_committed_epochs,

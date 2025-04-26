@@ -167,18 +167,19 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     ))
                 })?;
 
+            let sink_type_str = sink_type.to_string().to_lowercase();
             match_sink_name_str!(
-                sink_type.to_lowercase().as_str(),
+                sink_type_str.as_str(),
                 SinkType,
                 Ok(SinkType::SINK_NAME),
-                |other| {
+                |other: &str| {
                     Err(StreamExecutorError::from((
                         SinkError::Config(anyhow!("unsupported sink connector {}", other)),
                         sink_id.sink_id,
                     )))
                 }
-            )
-        }?;
+            )?
+        };
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
             Some(f) => Some(
@@ -224,6 +225,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_id,
             sink_name,
             connector: connector.to_owned(),
+            streaming_config: params.env.config().as_ref().clone(),
         };
 
         let log_store_identity = format!(
@@ -267,8 +269,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
-                let align_init_epoch = sink.is_coordinated_sink();
-
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -278,7 +278,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
-                    align_init_epoch,
                 );
 
                 SinkExecutor::new(

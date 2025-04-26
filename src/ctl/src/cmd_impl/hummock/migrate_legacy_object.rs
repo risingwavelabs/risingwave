@@ -67,6 +67,10 @@ pub async fn migrate_legacy_object(
                 source_dir,
                 "{legacy_path} versus {source_dir}"
             );
+            if legacy_path.ends_with('/') {
+                tracing::warn!(legacy_path, "skip directory");
+                continue;
+            }
             let new_path = format!("{}{}", target_dir, &legacy_path[source_dir.len()..]);
             from_to.push((legacy_path, new_path));
         } else {

@@ -37,12 +37,13 @@ use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
+use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
-    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -54,8 +55,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
-pub mod agg_common;
-pub mod aggregation;
+pub mod aggregate;
 pub mod asof_join;
 mod backfill;
 mod barrier_recv;
@@ -66,10 +66,10 @@ mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
+pub mod eowc;
 pub mod error;
 mod expand;
 mod filter;
-mod hash_agg;
 pub mod hash_join;
 mod hop_window;
 mod join;
@@ -81,17 +81,12 @@ mod nested_loop_temporal_join;
 mod no_op;
 mod now;
 mod over_window;
-mod project;
-mod project_set;
+pub mod project;
 mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
-mod simple_agg;
 mod sink;
-mod sort;
-mod sort_buffer;
 pub mod source;
-mod stateless_simple_agg;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
@@ -131,7 +126,6 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
-pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
@@ -144,17 +138,13 @@ pub use nested_loop_temporal_join::NestedLoopTemporalJoinExecutor;
 pub use no_op::NoOpExecutor;
 pub use now::*;
 pub use over_window::*;
-pub use project::ProjectExecutor;
-pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use row_merge::RowMergeExecutor;
-pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
-pub use sort::*;
-pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
+pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
@@ -194,6 +184,20 @@ pub struct ExecutorInfo {
 
     /// Identity of the executor.
     pub identity: String,
+
+    /// The executor id of the executor.
+    pub id: u64,
+}
+
+impl ExecutorInfo {
+    pub fn new(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            identity,
+            id,
+        }
+    }
 }
 
 /// [`Execute`] describes the methods an executor should implement to handle control messages.
@@ -307,6 +311,7 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
@@ -511,7 +516,8 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
-            | Mutation::DropSubscriptions { .. } => false,
+            | Mutation::DropSubscriptions { .. }
+            | Mutation::ConnectorPropsChange(_) => false,
         }
     }
 
@@ -736,6 +742,24 @@ impl Mutation {
                     )
                     .collect(),
             }),
+            Mutation::ConnectorPropsChange(map) => {
+                PbMutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
+                    connector_props_infos: map
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                ConnectorPropsInfo {
+                                    connector_props_info: options
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+            }
         }
     }
 
@@ -854,6 +878,24 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
+            PbMutation::ConnectorPropsChange(alter_connector_props) => {
+                Mutation::ConnectorPropsChange(
+                    alter_connector_props
+                        .connector_props_infos
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                options
+                                    .connector_props_info
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

@@ -573,19 +573,33 @@ where
     ///
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
-    pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.newly_added_sst_infos()
+    pub fn newly_added_object_ids(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> HashSet<HummockSstableObjectId> {
+        self.newly_added_sst_infos(exclude_table_change_log)
             .map(|sst| sst.object_id())
             .collect()
     }
 
-    pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.newly_added_sst_infos()
+    pub fn newly_added_sst_ids(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> HashSet<HummockSstableObjectId> {
+        self.newly_added_sst_infos(exclude_table_change_log)
             .map(|sst| sst.sst_id())
             .collect()
     }
 
-    pub fn newly_added_sst_infos(&self) -> impl Iterator<Item = &'_ T> {
+    pub fn newly_added_sst_infos(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> impl Iterator<Item = &'_ T> {
+        let may_table_change_delta = if exclude_table_change_log {
+            None
+        } else {
+            Some(self.change_log_delta.values())
+        };
         self.group_deltas
             .values()
             .flat_map(|group_deltas| {
@@ -603,11 +617,17 @@ where
                     sst_slice.into_iter().flatten()
                 })
             })
-            .chain(self.change_log_delta.values().flat_map(|delta| {
-                // TODO: optimization: strip table change log
-                let new_log = &delta.new_log;
-                new_log.new_value.iter().chain(new_log.old_value.iter())
-            }))
+            .chain(
+                may_table_change_delta
+                    .map(|v| {
+                        v.flat_map(|delta| {
+                            let new_log = &delta.new_log;
+                            new_log.new_value.iter().chain(new_log.old_value.iter())
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
     }
 }
 

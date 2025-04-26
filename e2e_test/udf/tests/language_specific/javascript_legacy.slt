@@ -1,0 +1,31 @@
+statement ok
+create function int_42_legacy() returns int language javascript as $$
+    return 42;
+$$;
+
+query I
+select int_42_legacy();
+----
+42
+
+statement ok
+drop function int_42_legacy;
+
+statement ok
+create function series_legacy(n int) returns table (x int) language javascript as $$
+    for(let i = 0; i < n; i++) {
+        yield i;
+    }
+$$;
+
+query I
+select series_legacy(5);
+----
+0
+1
+2
+3
+4
+
+statement ok
+drop function series_legacy;

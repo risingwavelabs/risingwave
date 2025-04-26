@@ -528,7 +528,6 @@ impl Condition {
                     false
                 }
             });
-
         // optimize for single row conjunctions. More optimisations may come later
         // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
         // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
@@ -1330,13 +1329,13 @@ mod tests {
 
         let ty = DataType::Int32;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let left: ExprImpl = FunctionCall::new(
             ExprType::LessThanOrEqual,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
             ],
         )
         .unwrap()
@@ -1346,12 +1345,12 @@ mod tests {
             ExprType::LessThan,
             vec![
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
@@ -1363,9 +1362,9 @@ mod tests {
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty,
                 )
                 .into(),
@@ -1392,9 +1391,9 @@ mod tests {
 
         let ty = DataType::Int32;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
-        let x: ExprImpl = InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into();
+        let x: ExprImpl = InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into();
 
         let left: ExprImpl = FunctionCall::new(ExprType::Equal, vec![x.clone(), x.clone()])
             .unwrap()
@@ -1404,12 +1403,12 @@ mod tests {
             ExprType::LessThan,
             vec![
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
@@ -1421,9 +1420,9 @@ mod tests {
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty,
                 )
                 .into(),

@@ -15,11 +15,10 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::LogStoreResult;
@@ -31,9 +30,7 @@ use risingwave_storage::store::{
 };
 
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{
-    FlushInfo, ReaderTruncationOffsetType, SeqIdType,
-};
+use crate::common::log_store_impl::kv_log_store::{FlushInfo, LogStoreVnodeProgress, SeqId};
 
 pub(crate) struct LogStoreReadState<S: StateStoreRead> {
     pub(super) table_id: TableId,
@@ -44,6 +41,10 @@ pub(crate) struct LogStoreReadState<S: StateStoreRead> {
 impl<S: StateStoreRead> LogStoreReadState<S> {
     pub(crate) fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         self.serde.update_vnode_bitmap(vnode_bitmap);
+    }
+
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        self.serde.vnodes()
     }
 }
 
@@ -90,8 +91,8 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         self.epoch.expect("should have init")
     }
 
-    pub(crate) fn is_dirty(&self) -> bool {
-        self.state_store.is_dirty()
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        self.serde.vnodes()
     }
 
     pub(crate) fn start_writer(&mut self, record_vnode: bool) -> LogStoreStateWriter<'_, S> {
@@ -110,18 +111,36 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
     pub(crate) fn seal_current_epoch(
         &mut self,
         next_epoch: u64,
-        truncate_offset: Option<ReaderTruncationOffsetType>,
+        progress: LogStoreVnodeProgress,
     ) -> LogStorePostSealCurrentEpoch<'_, S> {
         assert!(!self.on_post_seal);
-        let watermark = truncate_offset
-            .map(|truncation_offset| {
+        let watermark = match progress {
+            LogStoreVnodeProgress::PerVnode(progress) => progress
+                .into_iter()
+                .map(|(vnode, (epoch, seq_id))| {
+                    let bitmap = {
+                        let mut bitmap = BitmapBuilder::zeroed(self.serde.vnodes().len());
+                        bitmap.set(vnode.to_index(), true);
+                        bitmap.finish()
+                    };
+                    VnodeWatermark::new(
+                        bitmap.into(),
+                        self.serde
+                            .serialize_truncation_offset_watermark((epoch, seq_id)),
+                    )
+                })
+                .collect(),
+            LogStoreVnodeProgress::Aligned(vnodes, epoch, seq_id) => {
                 vec![VnodeWatermark::new(
-                    self.serde.vnodes().clone(),
+                    vnodes,
                     self.serde
-                        .serialize_truncation_offset_watermark(truncation_offset),
+                        .serialize_truncation_offset_watermark((epoch, seq_id)),
                 )]
-            })
-            .unwrap_or_default();
+            }
+            LogStoreVnodeProgress::None => {
+                vec![]
+            }
+        };
         self.state_store.seal_current_epoch(
             next_epoch,
             SealCurrentEpochOptions {
@@ -139,15 +158,6 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
 
         self.on_post_seal = true;
         LogStorePostSealCurrentEpoch { inner: self }
-    }
-
-    pub(crate) fn aligned_init_range_start(&self) -> Option<Bytes> {
-        (0..self.serde.vnodes().len())
-            .flat_map(|vnode| {
-                self.state_store
-                    .get_table_watermark(VirtualNode::from_index(vnode))
-            })
-            .max()
     }
 }
 
@@ -181,8 +191,8 @@ impl<S: LocalStateStore> LogStoreWriteState<S> {
         mut self,
         chunk: StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> LogStoreStateWriteChunkFuture<S> {
         async move {
             let result = try {
@@ -210,11 +220,12 @@ impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
         &mut self,
         chunk: &StreamChunk,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> LogStoreResult<()> {
+        tracing::trace!(epoch, start_seq_id, end_seq_id, "write_chunk");
         for (i, (op, row)) in chunk.rows().enumerate() {
-            let seq_id = start_seq_id + (i as SeqIdType);
+            let seq_id = start_seq_id + (i as SeqId);
             assert!(seq_id <= end_seq_id);
             let (vnode, key, value) = self.inner.serde.serialize_data_row(epoch, seq_id, op, row);
             if let Some(written_vnodes) = &mut self.written_vnodes {

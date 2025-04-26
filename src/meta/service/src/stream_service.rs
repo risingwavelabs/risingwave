@@ -24,6 +24,7 @@ use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -487,5 +488,40 @@ impl StreamManagerService for StreamServiceImpl {
             .list_rate_limits()
             .await?;
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
+    }
+
+    async fn alter_connector_props(
+        &self,
+        request: Request<AlterConnectorPropsRequest>,
+    ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
+        let request = request.into_inner();
+        if request.object_type != (AlterConnectorPropsObject::Sink as i32) {
+            unimplemented!()
+        }
+
+        let new_config = self
+            .metadata_manager
+            .update_sink_props_by_sink_id(
+                request.object_id as i32,
+                request.changed_props.clone().into_iter().collect(),
+            )
+            .await?;
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.object_id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
+
+        let mut mutation = HashMap::default();
+        mutation.insert(request.object_id, new_config.clone());
+
+        let _i = self
+            .barrier_scheduler
+            .run_command(database_id, Command::ConnectorPropsChange(mutation))
+            .await?;
+
+        Ok(Response::new(AlterConnectorPropsResponse {}))
     }
 }

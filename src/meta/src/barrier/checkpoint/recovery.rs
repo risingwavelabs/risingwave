@@ -18,24 +18,25 @@ use std::task::{Context, Poll};
 
 use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::meta::event_log::{Event, EventRecovery};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
 use crate::MetaResult;
+use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
-use crate::barrier::checkpoint::{CheckpointControl, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::creating_job::CreatingStreamingJobControl;
+use crate::barrier::checkpoint::{BarrierWorkerState, CheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
-use crate::barrier::info::InflightDatabaseInfo;
-use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::barrier::rpc::{ControlStreamManager, DatabaseInitialBarrierCollector};
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
-use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
@@ -74,9 +75,7 @@ enum DatabaseRecoveringStage {
         backoff_future: Option<RetryBackoffFuture>,
     },
     Initializing {
-        remaining_workers: NodeToCollect,
-        database: DatabaseCheckpointControl,
-        prev_epoch: u64,
+        initial_barrier_collector: Box<DatabaseInitialBarrierCollector>,
     },
 }
 
@@ -114,8 +113,13 @@ impl DatabaseRecoveryMetrics {
     }
 }
 
+const INITIAL_RESET_REQUEST_ID: u32 = 0;
+
 impl DatabaseRecoveringState {
-    pub(super) fn resetting(database_id: DatabaseId) -> Self {
+    pub(super) fn resetting(
+        database_id: DatabaseId,
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> Self {
         let mut retry_backoff_strategy = get_retry_backoff_strategy();
         let backoff_future = retry_backoff_strategy.next().unwrap();
         let metrics = DatabaseRecoveryMetrics::new(database_id);
@@ -123,12 +127,13 @@ impl DatabaseRecoveringState {
 
         Self {
             stage: DatabaseRecoveringStage::Resetting {
-                remaining_workers: Default::default(),
+                remaining_workers: control_stream_manager
+                    .reset_database(database_id, INITIAL_RESET_REQUEST_ID),
                 reset_resps: Default::default(),
-                reset_request_id: 0,
+                reset_request_id: INITIAL_RESET_REQUEST_ID,
                 backoff_future: Some(backoff_future),
             },
-            next_reset_request_id: 1,
+            next_reset_request_id: INITIAL_RESET_REQUEST_ID + 1,
             retry_backoff_strategy,
             metrics,
         }
@@ -154,17 +159,14 @@ impl DatabaseRecoveringState {
                 // ignore the collected barrier on resetting or backoff
             }
             DatabaseRecoveringStage::Initializing {
-                remaining_workers,
-                prev_epoch,
-                ..
+                initial_barrier_collector,
             } => {
                 let worker_id = resp.worker_id as WorkerId;
-                assert!(remaining_workers.remove(&worker_id).is_some());
-                assert_eq!(resp.epoch, *prev_epoch);
+                initial_barrier_collector.collect_resp(resp);
                 info!(
                     ?database_id,
                     worker_id,
-                    ?remaining_workers,
+                    remaining_workers = ?initial_barrier_collector,
                     "initializing database barrier collected"
                 );
             }
@@ -180,8 +182,9 @@ impl DatabaseRecoveringState {
                 true
             }
             DatabaseRecoveringStage::Initializing {
-                remaining_workers, ..
-            } => is_valid_after_worker_err(remaining_workers, worker_id),
+                initial_barrier_collector,
+                ..
+            } => initial_barrier_collector.is_valid_after_worker_err(worker_id),
         }
     }
 
@@ -244,9 +247,10 @@ impl DatabaseRecoveringState {
                 }
             }
             DatabaseRecoveringStage::Initializing {
-                remaining_workers, ..
+                initial_barrier_collector,
+                ..
             } => {
-                if remaining_workers.is_empty() {
+                if initial_barrier_collector.is_collected() {
                     return Poll::Ready(RecoveringStateAction::EnterRunning);
                 }
             }
@@ -254,10 +258,18 @@ impl DatabaseRecoveringState {
         Poll::Pending
     }
 
-    pub(super) fn checkpoint_control(&self) -> Option<&DatabaseCheckpointControl> {
+    pub(super) fn database_state(
+        &self,
+    ) -> Option<(
+        &BarrierWorkerState,
+        &HashMap<TableId, CreatingStreamingJobControl>,
+    )> {
         match &self.stage {
             DatabaseRecoveringStage::Resetting { .. } => None,
-            DatabaseRecoveringStage::Initializing { database, .. } => Some(database),
+            DatabaseRecoveringStage::Initializing {
+                initial_barrier_collector,
+                ..
+            } => Some(initial_barrier_collector.database_state()),
         }
     }
 }
@@ -296,6 +308,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
         barrier_complete_output: Option<BarrierCompleteOutput>,
         control_stream_manager: &mut ControlStreamManager,
     ) {
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
             self.control.ack_completed(output);
         }
@@ -306,10 +319,13 @@ impl DatabaseStatusAction<'_, EnterReset> {
             .expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(_) => {
-                let reset_request_id = 0;
+                let reset_request_id = INITIAL_RESET_REQUEST_ID;
                 let remaining_workers =
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
                 let metrics = DatabaseRecoveryMetrics::new(self.database_id);
+                event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                    EventRecovery::database_recovery_start(self.database_id.database_id),
+                )]);
                 *database_status =
                     DatabaseCheckpointControlStatus::Recovering(DatabaseRecoveringState {
                         stage: DatabaseRecoveringStage::Resetting {
@@ -328,6 +344,9 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     unreachable!("should not enter resetting again")
                 }
                 DatabaseRecoveringStage::Initializing { .. } => {
+                    event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+                        EventRecovery::database_recovery_failure(self.database_id.database_id),
+                    )]);
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(self.database_id, reset_request_id);
@@ -382,11 +401,8 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
-    pub(crate) fn inflight_infos(
-        &self,
-    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo, &InflightDatabaseInfo)> + '_
-    {
-        self.control.inflight_infos()
+    pub(crate) fn control(&self) -> &CheckpointControl {
+        &*self.control
     }
 
     pub(crate) fn enter(
@@ -411,20 +427,27 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             },
         };
         let DatabaseRuntimeInfoSnapshot {
-            database_fragment_info,
+            job_infos,
             mut state_table_committed_epochs,
+            mut state_table_log_epochs,
             subscription_info,
-            mut stream_actors,
+            stream_actors,
+            fragment_relations,
             mut source_splits,
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            control_stream_manager.add_partial_graph(self.database_id, None)?;
+            let mut builder =
+                FragmentEdgeBuilder::new(job_infos.values().flatten(), control_stream_manager);
+            builder.add_relations(&fragment_relations);
+            let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
-                database_fragment_info,
+                job_infos,
                 &mut state_table_committed_epochs,
-                &mut stream_actors,
+                &mut state_table_log_epochs,
+                &mut edges,
+                &stream_actors,
                 &mut source_splits,
                 &mut background_jobs,
                 subscription_info,
@@ -433,12 +456,10 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             )?
         };
         match result {
-            Ok((remaining_workers, database, prev_epoch)) => {
-                info!(?remaining_workers, database_id = ?self.database_id, "database enter initializing");
+            Ok(initial_barrier_collector) => {
+                info!(node_to_collect = ?initial_barrier_collector, database_id = ?self.database_id, "database enter initializing");
                 status.stage = DatabaseRecoveringStage::Initializing {
-                    remaining_workers,
-                    database,
-                    prev_epoch,
+                    initial_barrier_collector: initial_barrier_collector.into(),
                 };
             }
             Err(e) => {
@@ -474,6 +495,10 @@ pub(crate) struct EnterRunning;
 impl DatabaseStatusAction<'_, EnterRunning> {
     pub(crate) fn enter(self) {
         info!(database_id = ?self.database_id, "database enter running");
+        let event_log_manager_ref = self.control.env.event_log_manager_ref();
+        event_log_manager_ref.add_event_logs(vec![Event::Recovery(
+            EventRecovery::database_recovery_success(self.database_id.database_id),
+        )]);
         let database_status = self
             .control
             .databases
@@ -490,27 +515,31 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     reset_request_id: 0,
                     backoff_future: None,
                 };
-                if let Some(recovery_timer) = state.metrics.recovery_timer.take() {
-                    recovery_timer.observe_duration();
-                } else if cfg!(debug_assertions) {
-                    panic!(
-                        "take database {} recovery latency for twice",
-                        self.database_id
-                    )
-                } else {
-                    warn!(database_id = %self.database_id,"failed to take recovery latency")
+                match state.metrics.recovery_timer.take() {
+                    Some(recovery_timer) => {
+                        recovery_timer.observe_duration();
+                    }
+                    _ => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "take database {} recovery latency for twice",
+                                self.database_id
+                            )
+                        } else {
+                            warn!(database_id = %self.database_id,"failed to take recovery latency")
+                        }
+                    }
                 }
                 match replace(&mut state.stage, temp_place_holder) {
                     DatabaseRecoveringStage::Resetting { .. } => {
                         unreachable!("can only enter running during initializing")
                     }
                     DatabaseRecoveringStage::Initializing {
-                        remaining_workers,
-                        database,
-                        ..
+                        initial_barrier_collector,
                     } => {
-                        assert!(remaining_workers.is_empty());
-                        *database_status = DatabaseCheckpointControlStatus::Running(database);
+                        *database_status = DatabaseCheckpointControlStatus::Running(
+                            initial_barrier_collector.finish(),
+                        );
                     }
                 }
             }

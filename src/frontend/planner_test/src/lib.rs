@@ -268,7 +268,7 @@ impl TestCase {
             frontend.session_ref()
         };
 
-        if let Some(ref config_map) = self.with_config_map() {
+        if let Some(config_map) = self.with_config_map() {
             for (key, val) in config_map {
                 session.set_config(key, val.to_owned()).unwrap();
             }
@@ -827,7 +827,7 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan)?;
+                    let graph = build_graph(stream_plan, None)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }

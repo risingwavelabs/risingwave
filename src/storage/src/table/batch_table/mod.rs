@@ -17,7 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
 use foyer::CacheHint;
 use futures::future::try_join_all;
@@ -51,7 +51,7 @@ use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{ColumnMapping, find_columns_by_ids};
 use crate::store::{
     NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions, ReadLogOptions, ReadOptions,
-    StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
+    StateStoreGet, StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
 use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
@@ -370,8 +370,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
-        let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        let read_committed = wait_epoch.is_read_committed();
         self.store
             .try_wait_epoch(
                 wait_epoch,
@@ -397,9 +395,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            read_version_from_backup: read_backup,
-            read_committed,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
@@ -412,58 +407,31 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 },
             )
             .await?;
-        if let Some((full_key, value)) = read_snapshot
-            .get_keyed_row(serialized_pk, read_options)
+        // TODO: may avoid the clone here when making the `on_key_value_fn` non-static
+        let row_serde = self.row_serde.clone();
+        match read_snapshot
+            .on_key_value(serialized_pk, read_options, move |key, value| {
+                let row = row_serde.deserialize(value)?;
+                Ok((key.epoch_with_gap.pure_epoch(), row))
+            })
             .await?
         {
-            let row = self.row_serde.deserialize(&value)?;
-            let result_row_in_value = self.mapping.project(OwnedRow::new(row));
+            Some((epoch, row)) => {
+                let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
-            match &self.key_output_indices {
-                Some(key_output_indices) => {
-                    let result_row_in_key =
-                        pk.project(&self.output_row_in_key_indices).into_owned_row();
-                    let mut result_row_vec = vec![];
-                    for idx in &self.output_indices {
-                        if let Some(epoch_idx) = self.epoch_idx
-                            && *idx == epoch_idx
-                        {
-                            let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
-                            result_row_vec
-                                .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
-                        } else if self.value_output_indices.contains(idx) {
-                            let item_position_in_value_indices = &self
-                                .value_output_indices
-                                .iter()
-                                .position(|p| idx == p)
-                                .unwrap();
-                            result_row_vec.push(
-                                result_row_in_value
-                                    .datum_at(*item_position_in_value_indices)
-                                    .to_owned_datum(),
-                            );
-                        } else {
-                            let item_position_in_pk_indices =
-                                key_output_indices.iter().position(|p| idx == p).unwrap();
-                            result_row_vec.push(
-                                result_row_in_key
-                                    .datum_at(item_position_in_pk_indices)
-                                    .to_owned_datum(),
-                            );
-                        }
-                    }
-                    let result_row = OwnedRow::new(result_row_vec);
-                    Ok(Some(result_row))
-                }
-                None => match &self.epoch_idx {
-                    Some(epoch_idx) => {
+                match &self.key_output_indices {
+                    Some(key_output_indices) => {
+                        let result_row_in_key =
+                            pk.project(&self.output_row_in_key_indices).into_owned_row();
                         let mut result_row_vec = vec![];
                         for idx in &self.output_indices {
-                            if idx == epoch_idx {
-                                let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                            if let Some(epoch_idx) = self.epoch_idx
+                                && *idx == epoch_idx
+                            {
+                                let epoch = Epoch::from(epoch);
                                 result_row_vec
                                     .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
-                            } else {
+                            } else if self.value_output_indices.contains(idx) {
                                 let item_position_in_value_indices = &self
                                     .value_output_indices
                                     .iter()
@@ -474,16 +442,49 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                                         .datum_at(*item_position_in_value_indices)
                                         .to_owned_datum(),
                                 );
+                            } else {
+                                let item_position_in_pk_indices =
+                                    key_output_indices.iter().position(|p| idx == p).unwrap();
+                                result_row_vec.push(
+                                    result_row_in_key
+                                        .datum_at(item_position_in_pk_indices)
+                                        .to_owned_datum(),
+                                );
                             }
                         }
                         let result_row = OwnedRow::new(result_row_vec);
                         Ok(Some(result_row))
                     }
-                    None => Ok(Some(result_row_in_value.into_owned_row())),
-                },
+                    None => match &self.epoch_idx {
+                        Some(epoch_idx) => {
+                            let mut result_row_vec = vec![];
+                            for idx in &self.output_indices {
+                                if idx == epoch_idx {
+                                    let epoch = Epoch::from(epoch);
+                                    result_row_vec.push(risingwave_common::types::Datum::from(
+                                        epoch.as_scalar(),
+                                    ));
+                                } else {
+                                    let item_position_in_value_indices = &self
+                                        .value_output_indices
+                                        .iter()
+                                        .position(|p| idx == p)
+                                        .unwrap();
+                                    result_row_vec.push(
+                                        result_row_in_value
+                                            .datum_at(*item_position_in_value_indices)
+                                            .to_owned_datum(),
+                                    );
+                                }
+                            }
+                            let result_row = OwnedRow::new(result_row_vec);
+                            Ok(Some(result_row))
+                        }
+                        None => Ok(Some(result_row_in_value.into_owned_row())),
+                    },
+                }
             }
-        } else {
-            Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -603,7 +604,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
+    {
         let vnodes = match vnode_hint {
             // If `vnode_hint` is set, we can only access this single vnode.
             Some(vnode) => {
@@ -635,7 +637,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
-                    wait_epoch,
                     vnode,
                     prefetch_options,
                 )
@@ -645,7 +646,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                     &read_snapshot,
                     prefix_hint.clone(),
                     (start_bound.as_ref(), end_bound.as_ref()),
-                    wait_epoch,
                     vnode,
                     prefetch_options,
                 )
@@ -661,10 +661,10 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         read_snapshot: &S::ReadSnapshot,
         prefix_hint: Option<Bytes>,
         encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
-        wait_epoch: HummockReadEpoch,
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send + use<K, S, SD>>
+    {
         let cache_policy = match &encoded_key_range {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
@@ -676,15 +676,10 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
 
         {
             let prefix_hint = prefix_hint.clone();
-            let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-            let read_committed = wait_epoch.is_read_committed();
             {
                 let read_options = ReadOptions {
                     prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
-                    table_id: self.table_id,
-                    read_version_from_backup: read_backup,
-                    read_committed,
                     prefetch_options,
                     cache_policy,
                 };
@@ -914,7 +909,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         start_pk: Option<&OwnedRow>,
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
+    {
         let start_bound = if let Some(start_pk) = start_pk {
             let mut bytes = BytesMut::new();
             self.pk_serializer.serialize(start_pk, &mut bytes);
@@ -937,7 +933,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 &read_snapshot,
                 None,
                 (start_bound.as_ref(), Unbounded),
-                epoch,
                 vnode,
                 prefetch_options,
             )
@@ -956,13 +951,14 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .await
     }
 
-    async fn batch_iter_log_inner<K: CopyFromSlice>(
+    pub async fn batch_iter_vnode_log(
         &self,
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
         start_pk: Option<&OwnedRow>,
         vnode: VirtualNode,
-    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>>> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static + use<S, SD>>
+    {
         let start_bound = if let Some(start_pk) = start_pk {
             let mut bytes = BytesMut::new();
             self.pk_serializer.serialize(start_pk, &mut bytes);
@@ -971,8 +967,60 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         } else {
             Unbounded
         };
-        let table_key_range =
-            prefixed_range_with_vnode::<&Bytes>((start_bound.as_ref(), Unbounded), vnode);
+        let stream = self
+            .batch_iter_log_inner::<()>(
+                start_epoch,
+                end_epoch,
+                (start_bound.as_ref(), Unbounded),
+                vnode,
+            )
+            .await?;
+        Ok(stream.map_ok(|(_, row)| row))
+    }
+
+    pub async fn batch_iter_log_with_pk_bounds(
+        &self,
+        start_epoch: u64,
+        end_epoch: HummockReadEpoch,
+        ordered: bool,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        pk_prefix: impl Row,
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send> {
+        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
+        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
+        let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
+        build_vnode_stream(
+            |vnode| {
+                self.batch_iter_log_inner(
+                    start_epoch,
+                    end_epoch,
+                    (start_key.as_ref(), end_key.as_ref()),
+                    vnode,
+                )
+            },
+            |vnode| {
+                self.batch_iter_log_inner(
+                    start_epoch,
+                    end_epoch,
+                    (start_key.as_ref(), end_key.as_ref()),
+                    vnode,
+                )
+            },
+            &vnodes,
+            ordered,
+        )
+        .await
+    }
+
+    async fn batch_iter_log_inner<K: CopyFromSlice>(
+        &self,
+        start_epoch: u64,
+        end_epoch: HummockReadEpoch,
+        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
+        vnode: VirtualNode,
+    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>> + Send + use<K, S, SD>>
+    {
+        let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
         let read_options = ReadLogOptions {
             table_id: self.table_id,
         };
@@ -989,35 +1037,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         .into_stream::<K>();
 
         Ok(iter)
-    }
-
-    pub async fn batch_iter_vnode_log(
-        &self,
-        start_epoch: u64,
-        end_epoch: HummockReadEpoch,
-        start_pk: Option<&OwnedRow>,
-        vnode: VirtualNode,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>>> {
-        let stream = self
-            .batch_iter_log_inner::<()>(start_epoch, end_epoch, start_pk, vnode)
-            .await?;
-        Ok(stream.map_ok(|(_, row)| row))
-    }
-
-    pub async fn batch_iter_log_with_pk_bounds(
-        &self,
-        start_epoch: u64,
-        end_epoch: HummockReadEpoch,
-        ordered: bool,
-    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
-        let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
-        build_vnode_stream(
-            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
-            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
-            &vnodes,
-            ordered,
-        )
-        .await
     }
 
     /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
@@ -1116,7 +1135,7 @@ impl<SI: StateStoreIter, SD: ValueRowSerde> BatchTableInnerIterInner<SI, SD> {
         while let Some((k, v)) = self
             .iter
             .try_next()
-            .verbose_instrument_await("storage_table_iter_next")
+            .instrument_await("storage_table_iter_next".verbose())
             .await?
         {
             let (table_key, value, epoch_with_gap) = (k.user_key.table_key, v, k.epoch_with_gap);

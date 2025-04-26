@@ -20,7 +20,9 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
+use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::metrics::LabelGuardedMetric;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 
@@ -81,16 +83,42 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             let source_ctx = self.source_ctx.clone();
 
             let object_name = split.name.clone();
-
+            let actor_id = source_ctx.actor_id.to_string();
+            let fragment_id = source_ctx.fragment_id.to_string();
+            let source_id = source_ctx.source_id.to_string();
+            let source_name = source_ctx.source_name.clone();
+            let file_source_input_row_count = self
+                .source_ctx
+                .metrics
+                .file_source_input_row_count
+                .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
             let chunk_stream;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                let actor_id = source_ctx.actor_id.to_string();
+                let source_id = source_ctx.source_id.to_string();
+                let split_id = split.id();
+                let source_name = source_ctx.source_name.clone();
+                let parquet_source_skip_row_count_metrics: LabelGuardedMetric<
+                    GenericCounter<prometheus::core::AtomicU64>,
+                > = self
+                    .source_ctx
+                    .metrics
+                    .parquet_source_skip_row_count
+                    .with_guarded_label_values(&[
+                        actor_id.as_str(),
+                        source_id.as_str(),
+                        &split_id,
+                        source_name.as_str(),
+                    ]);
                 chunk_stream = read_parquet_file(
                     self.connector.op.clone(),
-                    object_name,
+                    object_name.clone(),
                     self.columns.clone(),
                     Some(self.parser_config.common.rw_columns.clone()),
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
+                    Some(file_source_input_row_count.clone()),
+                    Some(parquet_source_skip_row_count_metrics),
                 )
                 .await?;
             } else {
@@ -104,6 +132,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     split,
                     self.source_ctx.clone(),
                     self.connector.compression_format.clone(),
+                    file_source_input_row_count.clone(),
                 );
 
                 let parser =
@@ -125,18 +154,30 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
         compression_format: CompressionFormat,
+        file_source_input_row_count_metrics: LabelGuardedMetric<
+            GenericCounter<prometheus::core::AtomicU64>,
+        >,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
         let source_id = source_ctx.source_id.to_string();
         let source_name = source_ctx.source_name.clone();
+        let split_id = split.id();
         let object_name = split.name.clone();
         let start_offset = split.offset;
-        let reader = op
-            .read_with(&object_name)
-            .range(start_offset as u64..)
-            .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-            .await?;
+        // After a recovery occurs, for gzip-compressed files, it is necessary to read from the beginning each time,
+        // other files can continue reading from the last read `start_offset`.
+        let reader = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => op.read_with(&object_name).into_future().await?,
+
+            false => {
+                op.read_with(&object_name)
+                    .range(start_offset as u64..)
+                    .into_future()
+                    .await?
+            }
+        };
+
         let stream_reader = StreamReader::new(reader.map_err(std::io::Error::other));
 
         let mut buf_reader: Pin<Box<dyn AsyncBufRead + Send>> = match compression_format {
@@ -155,16 +196,19 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             }
         };
 
-        let mut offset = start_offset;
+        let mut offset = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => 0,
+            false => start_offset,
+        };
         let partition_input_bytes_metrics = source_ctx
             .metrics
             .partition_input_bytes
             .with_guarded_label_values(&[
-                &actor_id,
-                &source_id,
-                split.id().as_ref(),
-                &source_name,
-                &fragment_id,
+                actor_id.as_str(),
+                source_id.as_str(),
+                &split_id,
+                source_name.as_str(),
+                fragment_id.as_str(),
             ]);
 
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
@@ -177,32 +221,36 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 // EOF
                 break;
             }
+            let msg_offset = (offset + n_read).to_string();
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
+            if (object_name.ends_with(".gz") || object_name.ends_with(".gzip"))
+                && offset + n_read <= start_offset
+            {
+                // For gzip compressed files, the reader needs to read from the beginning each time,
+                // but it needs to skip the previously read part and start yielding chunks from a position greater than or equal to start_offset.
+            } else {
+                batch.push(SourceMessage {
+                    key: None,
+                    payload: Some(std::mem::take(&mut line_buf).into_bytes()),
+                    offset: msg_offset,
+                    split_id: split.id(),
+                    meta: SourceMeta::Empty,
+                });
+            }
 
-            // FIXME(rc): Here we have to use `offset + n_read`, i.e. the offset of the next line,
-            // as the *message offset*, because we check whether a file is finished by comparing the
-            // message offset with the file size in `FsFetchExecutor::into_stream`. However, we must
-            // understand that this message offset is not semantically consistent with the offset of
-            // other source connectors.
-            let msg_offset = (offset + n_read).to_string();
-            batch.push(SourceMessage {
-                key: None,
-                payload: Some(std::mem::take(&mut line_buf).into_bytes()),
-                offset: msg_offset,
-                split_id: split.id(),
-                meta: SourceMeta::Empty,
-            });
             offset += n_read;
             partition_input_bytes_metrics.inc_by(n_read as _);
 
             if batch.len() >= max_chunk_size {
+                file_source_input_row_count_metrics.inc_by(max_chunk_size as _);
                 yield std::mem::replace(&mut batch, Vec::with_capacity(max_chunk_size));
             }
         }
 
         if !batch.is_empty() {
             batch.shrink_to_fit();
+            file_source_input_row_count_metrics.inc_by(batch.len() as _);
             yield batch;
         }
     }

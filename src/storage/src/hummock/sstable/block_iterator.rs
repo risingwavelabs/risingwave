@@ -258,8 +258,8 @@ impl BlockIterator {
     /// Searches the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&mut self, key: FullKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
-        let res = self
-            .block
+
+        self.block
             .search_restart_partition_point(
                 |&RestartPoint {
                      offset: probe,
@@ -288,9 +288,7 @@ impl BlockIterator {
                 },
             )
             // Prevent from underflowing when given is smaller than the first.
-            .saturating_sub(1);
-
-        res
+            .saturating_sub(1)
     }
 
     /// Seeks to the restart point that the given `key` belongs to.

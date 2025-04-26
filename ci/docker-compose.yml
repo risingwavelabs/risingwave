@@ -14,7 +14,7 @@ services:
       timeout: 5s
       retries: 5
     command:
-      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=30"]
+      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20"]
 
   mysql:
     image: mysql:8.0
@@ -86,7 +86,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     depends_on:
       - mysql
       - mysql-meta
@@ -100,9 +100,10 @@ services:
       - nats-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     depends_on:
       - mysql
       - mysql-meta
@@ -123,30 +124,45 @@ services:
       - sqlserver-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
-  rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+  iceberg-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    depends_on:
+      - mysql
+      - db
+      - message_queue
+      - schemaregistry
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
+
+  rw-build-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     depends_on:
       - mysql-meta
       - db
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   iceberg-engine-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     depends_on:
       - db
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -157,7 +173,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
     depends_on:
       db:
         condition: service_healthy
@@ -175,13 +191,13 @@ services:
     # Systems that we don't provide support for:
     # - Ubuntu 18.04: 2.27 (Already EOL 2023-05-31)
     # - Amazon Linux 2: 2.26 (Originally EOL 2023-06-30, superseded by AL2023)
-    image: quay.io/pypa/manylinux_2_28_x86_64
+    image: quay.io/pypa/manylinux_2_28_x86_64:2025.03.23-1
     working_dir: /mnt
     volumes:
       - ..:/mnt
 
   release-env-arm:
-    image: quay.io/pypa/manylinux_2_28_aarch64
+    image: quay.io/pypa/manylinux_2_28_aarch64:2025.03.23-1
     working_dir: /mnt
     volumes:
       - ..:/mnt

@@ -26,6 +26,7 @@ use risingwave_common::config::{
     AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
     StorageMemoryConfig, load_config,
 };
+use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
@@ -204,6 +205,7 @@ pub async fn compute_node_serve(
             .ok(),
     };
 
+    LicenseManager::get().refresh(system_params.license_key());
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
@@ -349,6 +351,7 @@ pub async fn compute_node_serve(
     // Initialize batch environment.
     let batch_client_pool = Arc::new(ComputeClientPool::new(
         config.batch_exchange_connection_pool_size(),
+        config.batch.developer.compute_client_config.clone(),
     ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
@@ -368,6 +371,7 @@ pub async fn compute_node_serve(
     // Initialize the streaming environment.
     let stream_client_pool = Arc::new(ComputeClientPool::new(
         config.streaming_exchange_connection_pool_size(),
+        config.streaming.developer.compute_client_config.clone(),
     ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),

@@ -453,6 +453,15 @@ IcebergConfig:
   - name: gcs.credential
     field_type: String
     required: false
+  - name: azblob.account_name
+    field_type: String
+    required: false
+  - name: azblob.account_key
+    field_type: String
+    required: false
+  - name: azblob.endpoint_url
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
@@ -490,10 +499,10 @@ IcebergConfig:
       token for accessing iceberg catalog, only applicable in rest catalog.
       A Bearer token which will be used for interaction with the server.
     required: false
-  - name: catalog.oauth2-server-uri
+  - name: catalog.oauth2_server_uri
     field_type: String
     comments: |-
-      `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+      `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
       Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
     required: false
   - name: catalog.scope
@@ -502,6 +511,19 @@ IcebergConfig:
       scope for accessing iceberg catalog, only applicable in rest catalog.
       Additional scope for OAuth2.
     required: false
+  - name: catalog.rest.signing_region
+    field_type: String
+    comments: The signing region to use when signing requests to the REST catalog.
+    required: false
+  - name: catalog.rest.signing_name
+    field_type: String
+    comments: The signing name to use when signing requests to the REST catalog.
+    required: false
+  - name: catalog.rest.sigv4_enabled
+    field_type: bool
+    comments: Whether to use SigV4 for signing requests to the REST catalog.
+    required: false
+    default: Default::default
   - name: s3.path.style.access
     field_type: bool
     required: false
@@ -509,6 +531,11 @@ IcebergConfig:
   - name: enable_config_load
     field_type: bool
     comments: enable config load.
+    required: false
+    default: Default::default
+  - name: hosted_catalog
+    field_type: bool
+    comments: This is only used by iceberg engine to enable the hosted catalog.
     required: false
     default: Default::default
   - name: primary_key
@@ -529,6 +556,11 @@ IcebergConfig:
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: create_table_if_not_exists
     field_type: bool
+    required: false
+    default: Default::default
+  - name: is_exactly_once
+    field_type: bool
+    comments: Whether it is exactly_once, the default is not.
     required: false
     default: Default::default
   - name: commit_retry_num
@@ -665,6 +697,10 @@ KafkaConfig:
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+  - name: properties.socket.keepalive.enable
+    field_type: bool
+    required: false
+    default: 'true'
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -919,7 +955,7 @@ MqttConfig:
     field_type: u32
     comments: The max size of messages received by the MQTT client
     required: false
-  - name: tls.client_key
+  - name: tls.ca
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
@@ -1159,6 +1195,10 @@ SqlServerConfig:
   - name: sqlserver.database
     field_type: String
     required: true
+  - name: sqlserver.schema
+    field_type: String
+    required: false
+    default: '"dbo" . to_owned ()'
   - name: sqlserver.table
     field_type: String
     required: true

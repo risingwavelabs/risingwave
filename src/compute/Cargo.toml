@@ -21,9 +21,8 @@ http = "1"
 itertools = { workspace = true }
 maplit = "1.0.2"
 pprof = { version = "0.14", features = ["flamegraph"] }
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 prost = { workspace = true }
-regex = "1"
 risingwave_batch = { workspace = true }
 risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }

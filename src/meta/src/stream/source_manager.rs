@@ -34,7 +34,6 @@ use risingwave_connector::source::{
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -53,6 +52,8 @@ use crate::rpc::metrics::MetaMetrics;
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
+// ALTER CONNECTOR parameters, specifying the new parameters to be set for each connector_id
+pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
 
 /// `SourceManager` keeps fetching the latest split metadata from the external source services ([`worker::ConnectorSourceWorker::tick`]),
 /// and sends a split assignment command if split changes detected ([`Self::tick`]).

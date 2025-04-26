@@ -63,6 +63,7 @@ compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
 periodic_scheduling_compaction_group_merge_interval_sec = 600
+compaction_group_merge_dimension_threshold = 1.2
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -107,6 +108,15 @@ meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
 meta_hummock_gc_history_insert_batch_size = 1000
 meta_hummock_time_travel_filter_out_objects_batch_size = 1000
 
+[meta.developer.meta_compute_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_stream_client_config]
+connect_timeout_secs = 5
+
+[meta.developer.meta_frontend_client_config]
+connect_timeout_secs = 5
+
 [meta.meta_store_config]
 max_connections = 10
 min_connections = 1
@@ -128,6 +138,10 @@ batch_output_channel_size = 64
 batch_receiver_channel_size = 1000
 batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+batch_local_execute_buffer_size = 64
+
+[batch.developer.batch_compute_client_config]
+connect_timeout_secs = 5
 
 [frontend]
 max_total_query_size_bytes = 1073741824
@@ -170,6 +184,12 @@ stream_switch_jdbc_pg_to_native = false
 stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
 stream_enable_explain_analyze_stats = true
+stream_iceberg_list_interval_sec = 1
+stream_iceberg_fetch_batch_size = 1024
+stream_iceberg_sink_positional_delete_cache_size = 1024
+
+[streaming.developer.stream_compute_client_config]
+connect_timeout_secs = 5
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -203,7 +223,7 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
-time_travel_version_cache_capacity = 2
+time_travel_version_cache_capacity = 10
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
@@ -221,7 +241,16 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-recover_mode = "None"
+recover_mode = "Quiet"
+
+[storage.data_file_cache.throttle]
+write_iops = 100000
+read_iops = 100000
+write_throughput = 1073741824
+read_throughput = 1073741824
+
+[storage.data_file_cache.throttle.iops_counter]
+PerIoSize = 131072
 
 [storage.data_file_cache.runtime_config.Unified]
 worker_threads = 0
@@ -237,7 +266,16 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-recover_mode = "None"
+recover_mode = "Quiet"
+
+[storage.meta_file_cache.throttle]
+write_iops = 100000
+read_iops = 100000
+write_throughput = 1073741824
+read_throughput = 1073741824
+
+[storage.meta_file_cache.throttle.iops_counter]
+PerIoSize = 131072
 
 [storage.meta_file_cache.runtime_config.Unified]
 worker_threads = 0
@@ -305,6 +343,7 @@ license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
 per_database_isolation = true
+enforce_secret = false
 
 [udf]
 enable_embedded_python_udf = false

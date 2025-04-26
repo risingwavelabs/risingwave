@@ -58,7 +58,7 @@ message UpdateMutation {
     //   In this case, all the upstream actors should be removed and replaced by the `new` ones.
     optional uint32 new_upstream_fragment_id = 5;
     // Added upstream actors.
-    repeated uint32 added_upstream_actor_id = 3;
+    repeated common.ActorInfo added_upstream_actors = 3;
     // Removed upstream actors.
     // Note: this is empty for replace job.
     repeated uint32 removed_upstream_actor_id = 4;
@@ -110,6 +110,13 @@ message DropSubscriptionsMutation {
   repeated SubscriptionUpstreamInfo info = 1;
 }
 
+message ConnectorPropsChangeMutation {
+  message ConnectorPropsInfo {
+    map<string, string> connector_props_info = 1;
+  }
+  map<uint32, ConnectorPropsInfo> connector_props_infos = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -129,6 +136,8 @@ message BarrierMutation {
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
+    // Alter sink/connector/source props
+    ConnectorPropsChangeMutation connector_props_change = 13;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
@@ -870,6 +879,12 @@ message SyncLogStoreNode {
   uint32 buffer_size = 3;
 }
 
+message MaterializedExprsNode {
+  repeated expr.ExprNode exprs = 1;
+  catalog.Table state_table = 2;
+  optional uint32 state_clean_col_idx = 3;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -920,6 +935,7 @@ message StreamNode {
     RowMergeNode row_merge = 146;
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
+    MaterializedExprsNode materialized_exprs = 149;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

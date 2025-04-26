@@ -43,7 +43,6 @@ pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
     offsets: Vec<u32>,
     value: Box<ArrayBuilderImpl>,
-    len: usize,
 }
 
 impl ArrayBuilder for ListArrayBuilder {
@@ -74,7 +73,6 @@ impl ArrayBuilder for ListArrayBuilder {
             bitmap: BitmapBuilder::with_capacity(capacity),
             offsets,
             value: Box::new(value_type.create_array_builder(capacity)),
-            len: 0,
         }
     }
 
@@ -102,7 +100,6 @@ impl ArrayBuilder for ListArrayBuilder {
                 }
             }
         }
-        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -111,14 +108,12 @@ impl ArrayBuilder for ListArrayBuilder {
         self.offsets
             .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
         self.value.append_array(&other.value);
-        self.len += other.len();
     }
 
     fn pop(&mut self) -> Option<()> {
         self.bitmap.pop()?;
         let start = self.offsets.pop().unwrap();
         let end = *self.offsets.last().unwrap();
-        self.len -= 1;
         for _ in end..start {
             self.value.pop().unwrap();
         }
@@ -144,7 +139,6 @@ impl ListArrayBuilder {
         let last = *self.offsets.last().unwrap();
         self.offsets
             .push(last.checked_add(row.len() as u32).expect("offset overflow"));
-        self.len += 1;
         for v in row.iter() {
             self.value.append(v);
         }
@@ -181,10 +175,12 @@ impl Array for ListArray {
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        ListRef {
-            array: &self.value,
-            start: *self.offsets.get_unchecked(idx),
-            end: *self.offsets.get_unchecked(idx + 1),
+        unsafe {
+            ListRef {
+                array: &self.value,
+                start: *self.offsets.get_unchecked(idx),
+                end: *self.offsets.get_unchecked(idx + 1),
+            }
         }
     }
 
@@ -649,7 +645,7 @@ impl Row for ListRef<'_> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.array.value_at_unchecked(self.start as usize + index)
+        unsafe { self.array.value_at_unchecked(self.start as usize + index) }
     }
 
     fn len(&self) -> usize {

@@ -387,13 +387,6 @@ impl Binder {
         Self::new_inner(session, BindFor::System, vec![])
     }
 
-    pub fn new_for_stream_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Stream, param_types)
-    }
-
     fn is_for_stream(&self) -> bool {
         matches!(self.bind_for, BindFor::Stream)
     }
@@ -435,6 +428,7 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -455,6 +449,7 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,

@@ -34,12 +34,13 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
-    CompatibleFormatEncode, Expr, FormatEncodeOptions, Ident, ObjectName, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
+    CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
 
@@ -242,22 +243,6 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
-pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
-    let mut query = gen_query_from_table_name(from_name);
-    query.order_by = pk_names
-        .into_iter()
-        .map(|pk| {
-            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
-            OrderByExpr {
-                expr,
-                asc: None,
-                nulls_first: None,
-            }
-        })
-        .collect();
-    query
-}
-
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
     Epoch::from_unix_millis(unix_millis).0
 }
@@ -296,6 +281,7 @@ fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
     match connection_type {
         PbConnectionType::Kafka => KAFKA_CONNECTOR,
         PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
+        PbConnectionType::Elasticsearch => ES_SINK,
         _ => unreachable!(),
     }
 }

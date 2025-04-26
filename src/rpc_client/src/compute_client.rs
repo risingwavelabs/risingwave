@@ -18,7 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::catalog::DatabaseId;
-use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
@@ -67,11 +67,11 @@ pub struct ComputeClient {
 }
 
 impl ComputeClient {
-    pub async fn new(addr: HostAddr) -> Result<Self> {
+    pub async fn new(addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .connect_timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))
             .monitored_connect(
                 "grpc-compute-client",
                 TcpConfig {
@@ -222,11 +222,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn stack_trace(&self) -> Result<StackTraceResponse> {
+    pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .stack_trace(StackTraceRequest::default())
+            .stack_trace(req)
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())
@@ -305,8 +305,8 @@ impl ComputeClient {
 
 #[async_trait]
 impl RpcClient for ComputeClient {
-    async fn new_client(host_addr: HostAddr) -> Result<Self> {
-        Self::new(host_addr).await
+    async fn new_client(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
+        Self::new(host_addr, opts).await
     }
 }
 

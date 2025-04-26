@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 use async_recursion::async_recursion;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::future::join_all;
 use futures::stream::BoxStream;
 use futures::{FutureExt, TryFutureExt};
@@ -30,7 +30,6 @@ use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -44,7 +43,7 @@ use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::{StateStore, dispatch_state_store};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tonic::Status;
 
@@ -54,17 +53,16 @@ use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Execute, Executor,
-    ExecutorInfo, MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor,
-    WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
+    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::barrier_manager::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
 use crate::task::{
-    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager, StreamEnvironment,
-    UpDownActorIds,
+    ActorId, FragmentId, LocalBarrierManager, NewOutputRequest, StreamActorManager,
+    StreamEnvironment, UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -148,8 +146,6 @@ pub struct ExecutorParams {
 
     /// `watermark_epoch` field in `MemoryManager`
     pub watermark_epoch: AtomicU64Ref,
-
-    pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
 }
@@ -273,7 +269,7 @@ impl LocalBarrierWorker {
         if let Some(hummock) = self.actor_manager.env.state_store().as_hummock() {
             hummock
                 .clear_shared_buffer()
-                .verbose_instrument_await("store_clear_shared_buffer")
+                .instrument_await("store_clear_shared_buffer".verbose())
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();
@@ -286,32 +282,6 @@ impl LocalBarrierWorker {
 }
 
 impl StreamActorManager {
-    /// Create dispatchers with downstream information registered before
-    fn create_dispatcher(
-        &self,
-        env: StreamEnvironment,
-        input: Executor,
-        dispatchers: &[stream_plan::Dispatcher],
-        actor_id: ActorId,
-        fragment_id: FragmentId,
-        shared_context: &Arc<SharedContext>,
-    ) -> StreamResult<DispatchExecutor> {
-        let dispatcher_impls = dispatchers
-            .iter()
-            .map(|dispatcher| DispatcherImpl::new(shared_context, actor_id, dispatcher))
-            .try_collect()?;
-
-        Ok(DispatchExecutor::new(
-            input,
-            dispatcher_impls,
-            actor_id,
-            fragment_id,
-            shared_context.clone(),
-            self.streaming_metrics.clone(),
-            env.config().developer.chunk_size,
-        ))
-    }
-
     fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> u64 {
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
@@ -332,14 +302,15 @@ impl StreamActorManager {
             schema,
             pk_indices,
             identity,
+            id: executor_id,
         }
     }
 
-    fn create_snapshot_backfill_input(
+    async fn create_snapshot_backfill_input(
         &self,
         upstream_node: &StreamNode,
         actor_context: &ActorContextRef,
-        shared_context: &Arc<SharedContext>,
+        local_barrier_manager: &LocalBarrierManager,
         chunk_size: usize,
     ) -> StreamResult<MergeExecutorInput> {
         let info = Self::get_executor_info(
@@ -352,13 +323,14 @@ impl StreamActorManager {
         });
 
         MergeExecutorBuilder::new_input(
-            shared_context.clone(),
+            local_barrier_manager.clone(),
             self.streaming_metrics.clone(),
             actor_context.clone(),
             info,
             upstream_merge,
             chunk_size,
         )
+        .await
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -368,19 +340,20 @@ impl StreamActorManager {
         node: &StreamScanNode,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        shared_context: &Arc<SharedContext>,
         env: StreamEnvironment,
         local_barrier_manager: &LocalBarrierManager,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = env.config().developer.chunk_size;
-        let upstream = self.create_snapshot_backfill_input(
-            upstream_node,
-            actor_context,
-            shared_context,
-            chunk_size,
-        )?;
+        let upstream = self
+            .create_snapshot_backfill_input(
+                upstream_node,
+                actor_context,
+                local_barrier_manager,
+                chunk_size,
+            )
+            .await?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
 
@@ -442,7 +415,7 @@ impl StreamActorManager {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[async_recursion]
     async fn create_nodes_inner(
         &self,
@@ -454,7 +427,6 @@ impl StreamActorManager {
         vnode_bitmap: Option<Bitmap>,
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
-        shared_context: &Arc<SharedContext>,
         local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<Executor> {
         if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
@@ -466,7 +438,6 @@ impl StreamActorManager {
                     stream_scan,
                     actor_context,
                     vnode_bitmap,
-                    shared_context,
                     env,
                     local_barrier_manager,
                     store,
@@ -506,7 +477,6 @@ impl StreamActorManager {
                     vnode_bitmap.clone(),
                     has_stateful || is_stateful,
                     subtasks,
-                    shared_context,
                     local_barrier_manager,
                 )
                 .await?,
@@ -542,7 +512,6 @@ impl StreamActorManager {
             vnode_bitmap,
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
-            shared_context: shared_context.clone(),
             local_barrier_manager: local_barrier_manager.clone(),
         };
 
@@ -550,7 +519,6 @@ impl StreamActorManager {
 
         // Wrap the executor for debug purpose.
         let wrapped = WrapperExecutor::new(
-            operator_id,
             executor,
             actor_context.clone(),
             env.config().developer.enable_executor_row_count,
@@ -575,7 +543,6 @@ impl StreamActorManager {
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
-    #[expect(clippy::too_many_arguments)]
     async fn create_nodes(
         &self,
         fragment_id: FragmentId,
@@ -583,7 +550,6 @@ impl StreamActorManager {
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        shared_context: &Arc<SharedContext>,
         local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
@@ -598,7 +564,6 @@ impl StreamActorManager {
                 vnode_bitmap,
                 false,
                 &mut subtasks,
-                shared_context,
                 local_barrier_manager,
             )
             .await
@@ -612,9 +577,9 @@ impl StreamActorManager {
         actor: BuildActorInfo,
         fragment_id: FragmentId,
         node: Arc<StreamNode>,
-        shared_context: Arc<SharedContext>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         local_barrier_manager: LocalBarrierManager,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         {
             let actor_id = actor.actor_id;
@@ -638,19 +603,20 @@ impl StreamActorManager {
                     self.env.clone(),
                     &actor_context,
                     vnode_bitmap,
-                    &shared_context,
                     &local_barrier_manager,
                 )
                 .await?;
 
-            let dispatcher = self.create_dispatcher(
-                self.env.clone(),
+            let dispatcher = DispatchExecutor::new(
                 executor,
-                &actor.dispatchers,
+                new_output_request_rx,
+                actor.dispatchers,
                 actor_id,
                 fragment_id,
-                &shared_context,
-            )?;
+                local_barrier_manager.clone(),
+                self.streaming_metrics.clone(),
+            )
+            .await?;
             let actor = Actor::new(
                 dispatcher,
                 subtasks,
@@ -671,8 +637,8 @@ impl StreamActorManager {
         fragment_id: FragmentId,
         node: Arc<StreamNode>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
-        current_shared_context: Arc<SharedContext>,
         local_barrier_manager: LocalBarrierManager,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
         {
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -689,9 +655,9 @@ impl StreamActorManager {
                         actor,
                         fragment_id,
                         node,
-                        current_shared_context,
                         related_subscriptions,
-                        barrier_manager.clone()
+                        barrier_manager.clone(),
+                        new_output_request_rx
                     ).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
@@ -769,27 +735,9 @@ impl StreamActorManager {
     }
 }
 
-impl LocalBarrierWorker {
-    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
-    /// now.
-    pub fn update_actor_info(
-        &mut self,
-        database_id: DatabaseId,
-        new_actor_infos: impl Iterator<Item = ActorInfo>,
-    ) {
-        Self::get_or_insert_database_shared_context(
-            &mut self.state.current_shared_context,
-            database_id,
-            &self.actor_manager,
-            &self.term_id,
-        )
-        .add_actors(new_actor_infos);
-    }
-}
-
 #[cfg(test)]
 pub mod test_utils {
-    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
 

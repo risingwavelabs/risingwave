@@ -179,11 +179,14 @@ where
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if let Err(err) = self.wait_init_notification().await {
-                        tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
-                        continue;
-                    } else {
-                        break;
+                    match self.wait_init_notification().await {
+                        Err(err) => {
+                            tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
+                            continue;
+                        }
+                        _ => {
+                            break;
+                        }
                     }
                 }
                 Err(_) => {

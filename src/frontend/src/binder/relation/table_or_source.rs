@@ -95,6 +95,11 @@ impl Binder {
             )
         };
 
+        // check db_name if exists first
+        if let Some(db_name) = db_name {
+            let _ = self.catalog.get_database_by_name(db_name)?;
+        }
+
         // start to bind
         let (ret, columns) = {
             match schema_name {
@@ -223,8 +228,23 @@ impl Binder {
         mode: AclMode,
         owner: UserId,
     ) -> Result<()> {
+        // security invoker is disabled for view, ignore privilege check.
+        if self.context.disable_security_invoker {
+            return Ok(());
+        }
+
         match self.bind_for {
             BindFor::Stream | BindFor::Batch => {
+                // reject sources for cross-db access
+                if matches!(self.bind_for, BindFor::Stream)
+                    && self.database_id != database_id
+                    && matches!(object, PbObject::SourceId(_))
+                {
+                    return Err(PermissionDenied(
+                        "SOURCE is not allowed for cross-db access".to_owned(),
+                    )
+                    .into());
+                }
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
                     if user.is_super || user.id == owner {
                         return Ok(());
@@ -335,7 +355,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query(*query).map_err(|e| {
+        let query = self.bind_query_for_view(*query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,
