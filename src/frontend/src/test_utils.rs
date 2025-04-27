@@ -1137,6 +1137,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
     }
+
+    async fn get_fragment_by_id(&self, _fragment_id: u32) -> RpcResult<Option<TableFragmentInfo>> {
+        Ok(None)
+    }
+    
+    async fn get_fragment_job_id(&self, _fragment_ids: Vec<i32>) -> RpcResult<Vec<i32>> {
+        Ok(vec![])
+    }
 }
 
 #[cfg(test)]

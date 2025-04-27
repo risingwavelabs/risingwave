@@ -4435,13 +4435,25 @@ impl Parser<'_> {
     }
 
     pub fn parse_describe(&mut self) -> ModalResult<Statement> {
-        let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENTS]) {
+        let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENTS, Keyword::FRAGMENT]) {
             Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
+            Some(Keyword::FRAGMENT) => DescribeKind::Fragment,
             None => DescribeKind::Plain,
             Some(_) => unreachable!(),
         };
         let name = self.parse_object_name()?;
-        Ok(Statement::Describe { name, kind })
+        
+        // Parse optional WITH clause for options
+        let options = if self.parse_keyword(Keyword::WITH) {
+            self.expect_token(&Token::LParen)?;
+            let options = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_token(&Token::RParen)?;
+            Some(options)
+        } else {
+            None
+        };
+        
+        Ok(Statement::Describe { name, kind, options })
     }
 
     /// Parse a query expression, i.e. a `SELECT` statement optionally

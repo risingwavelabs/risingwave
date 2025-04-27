@@ -1,0 +1,27 @@
+# Test DESCRIBE FRAGMENT with different options
+
+# Setup test table and materialized view
+statement ok
+CREATE TABLE test_fragment_table (id INT PRIMARY KEY, value INT);
+
+statement ok
+CREATE MATERIALIZED VIEW test_fragment_mv AS 
+SELECT id, SUM(value) as total FROM test_fragment_table GROUP BY id;
+
+# Get a fragment ID to test with
+query I
+SELECT fragment_id FROM rw_fragments LIMIT 1;
+----
+$fragment_id
+
+# Test basic DESCRIBE FRAGMENT
+statement ok
+DESCRIBE FRAGMENT $fragment_id;
+
+# Test DESCRIBE FRAGMENT with VERBOSE option
+statement ok
+DESCRIBE FRAGMENT $fragment_id WITH (VERBOSE);
+
+# Test with non-existent fragment ID
+statement error
+DESCRIBE FRAGMENT 99999999;

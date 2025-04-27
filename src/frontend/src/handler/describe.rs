@@ -241,7 +241,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
 
 pub fn infer_describe(kind: &DescribeKind) -> Vec<PgFieldDescriptor> {
     match kind {
-        DescribeKind::Fragments => vec![PgFieldDescriptor::new(
+        DescribeKind::Fragments | DescribeKind::Fragment => vec![PgFieldDescriptor::new(
             "Fragments".to_owned(),
             DataType::Varchar.to_oid(),
             DataType::Varchar.type_len(),
@@ -252,6 +252,7 @@ pub fn infer_describe(kind: &DescribeKind) -> Vec<PgFieldDescriptor> {
 pub async fn handle_describe_fragments(
     handler_args: HandlerArgs,
     object_name: ObjectName,
+    options: Option<Vec<risingwave_sqlparser::ast::Ident>>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let job_id = {
@@ -299,13 +300,47 @@ pub async fn handle_describe_fragments(
 
     let meta_client = session.env().meta_client();
     let fragments = &meta_client.list_table_fragments(&[job_id]).await?[&job_id];
-    let res = generate_fragments_string(fragments)?;
+    let verbose = options.as_ref().map(|opts| opts.iter().any(|opt| opt.real_value() == "VERBOSE"));
+    let res = generate_fragments_string(fragments, verbose)?;
+pub async fn handle_describe_fragment(
+    handler_args: HandlerArgs,
+    fragment_id_name: ObjectName,
+    options: Option<Vec<risingwave_sqlparser::ast::Ident>>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    
+    let fragment_id_str = fragment_id_name.to_string();
+    let fragment_id = fragment_id_str.parse::<u32>().map_err(|_| {
+        ErrorCode::InvalidInputSyntax(format!(
+            "fragment ID must be a positive integer, got: {}", 
+            fragment_id_str
+        ))
+    })?;
+    
+    let meta_client = session.env().meta_client();
+    let fragment_info = meta_client.get_fragment_by_id(fragment_id).await?;
+    
+    match fragment_info {
+        Some(info) => {
+            let verbose = options.as_ref().map(|opts| opts.iter().any(|opt| opt.real_value() == "VERBOSE"));
+            let res = generate_fragments_string(&info, verbose)?;
+            Ok(res)
+        }
+        None => {
+            Err(ErrorCode::ItemNotFound(
+                format!("fragment {}", fragment_id)
+            ).into())
+        }
+    }
+}
+
     Ok(res)
 }
 
 /// The implementation largely copied from `crate::utils::stream_graph_formatter::StreamGraphFormatter`.
 /// The input is different, so we need separate implementation.
-fn generate_fragments_string(fragments: &TableFragmentInfo) -> Result<RwPgResponse> {
+fn generate_fragments_string(fragments: &TableFragmentInfo, verbose: Option<bool>) -> Result<RwPgResponse> {
+    let verbose = verbose.unwrap_or(true);
     let mut config = PrettyConfig {
         need_boundaries: false,
         width: 80,
@@ -318,9 +353,12 @@ fn generate_fragments_string(fragments: &TableFragmentInfo) -> Result<RwPgRespon
     for fragment in fragments.fragments.iter().sorted_by_key(|f| f.id) {
         let mut res = String::new();
         let actor_ids = fragment.actors.iter().map(|a| a.id).format(",");
-        res.push_str(&format!("Fragment {} (Actor {})\n", fragment.id, actor_ids));
+        
+        let relation_name = String::new();
+        
+        res.push_str(&format!("Fragment {}{} (Actor {})\n", fragment.id, relation_name, actor_ids));
         let node = &fragment.actors[0].node;
-        let node = explain_node(node.as_ref().unwrap(), true);
+        let node = explain_node(node.as_ref().unwrap(), verbose);
         let width = config.unicode(&mut res, &node);
         max_width = max(width, max_width);
         config.width = max_width;

@@ -1471,6 +1471,8 @@ pub enum Statement {
         /// relation name
         name: ObjectName,
         kind: DescribeKind,
+        /// Optional parameters for verbosity control
+        options: Option<Vec<Ident>>,
     },
     /// SHOW OBJECT COMMAND
     ShowObjects {
@@ -1664,6 +1666,9 @@ pub enum DescribeKind {
 
     /// `DESCRIBE FRAGMENTS <name>`
     Fragments,
+    
+    /// `DESCRIBE FRAGMENT <fragment_id>`
+    Fragment,
 }
 
 impl fmt::Display for Statement {
@@ -1750,7 +1755,7 @@ impl Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::Describe { name, kind } => {
+            Statement::Describe { name, kind, options } => {
                 write!(f, "DESCRIBE {}", name)?;
                 match kind {
                     DescribeKind::Plain => {}
@@ -1758,6 +1763,23 @@ impl Statement {
                     DescribeKind::Fragments => {
                         write!(f, " FRAGMENTS")?;
                     }
+                    
+                    DescribeKind::Fragment => {
+                        write!(f, " FRAGMENT")?;
+                    }
+                }
+                
+                if let Some(opts) = options {
+                    write!(f, " WITH (")?;
+                    let mut first = true;
+                    for opt in opts {
+                        if !first {
+                            write!(f, ", ")?;
+                        }
+                        first = false;
+                        write!(f, "{}", opt)?;
+                    }
+                    write!(f, ")")?;
                 }
                 Ok(())
             }
