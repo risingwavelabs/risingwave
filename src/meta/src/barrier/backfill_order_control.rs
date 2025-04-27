@@ -52,14 +52,7 @@ pub struct BackfillOrderState {
 pub fn get_nodes_with_backfill_dependencies(
     backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
 ) -> HashSet<FragmentId> {
-    let mut nodes_with_dependencies = HashSet::new();
-
-    for children in backfill_orders.values() {
-        for child in children {
-            nodes_with_dependencies.insert(*child);
-        }
-    }
-    nodes_with_dependencies
+    backfill_orders.values().flatten().copied().collect()
 }
 
 // constructor
