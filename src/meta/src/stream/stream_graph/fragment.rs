@@ -703,7 +703,8 @@ impl StreamFragmentGraph {
         for (fragment_id, fragment) in &self.fragments {
             let fragment_id = fragment_id.as_global_id();
             let fragment_mask = fragment.fragment_type_mask;
-            let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
+            // TODO(kwannoel): Support source scan
+            let candidates = [FragmentTypeFlag::StreamScan];
             let has_some_scan = candidates
                 .into_iter()
                 .any(|flag| (fragment_mask & flag as u32) > 0);
@@ -717,13 +718,7 @@ impl StreamFragmentGraph {
                             // each fragment should have only 1 scan node.
                             false
                         }
-                        Some(NodeBody::SourceBackfill(source_backfill)) => {
-                            let source_id = source_backfill.upstream_source_id;
-                            let fragments = mapping.entry(source_id).or_default();
-                            fragments.push(fragment_id);
-                            // each fragment should have only 1 scan node.
-                            false
-                        }
+                        // TODO(kwannoel): Support source scan
                         _ => true,
                     }
                 })
