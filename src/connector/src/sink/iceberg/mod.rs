@@ -415,7 +415,7 @@ impl IcebergSink {
                                 UnboundPartitionField::builder()
                                     .source_id(id)
                                     .transform(transform)
-                                    .name(column.to_owned())
+                                    .name(format!("_p_{}", column))
                                     .field_id(i as i32)
                                     .build(),
                             ),
