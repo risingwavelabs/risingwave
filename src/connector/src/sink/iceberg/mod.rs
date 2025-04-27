@@ -973,7 +973,6 @@ impl SinkWriter for IcebergSinkWriter {
 
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        println!("真实的代码write_batch");
         // Try to build writer if it's None.
         match &mut self.writer {
             IcebergWriterDispatch::PartitionAppendOnly {
@@ -1215,7 +1214,7 @@ const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
 
 #[derive(Default, Clone)]
-pub struct IcebergCommitResult {
+struct IcebergCommitResult {
     schema_id: i32,
     partition_spec_id: i32,
     data_files: Vec<SerializedDataFile>,
