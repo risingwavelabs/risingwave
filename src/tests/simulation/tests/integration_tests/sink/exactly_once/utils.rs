@@ -13,46 +13,32 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::Write;
-use std::iter::once;
 use std::mem::take;
 use std::num::NonZero;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicI64, AtomicU32, AtomicUsize};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU32, AtomicUsize};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::future::pending;
-use futures::stream::{BoxStream, empty, select_all};
-use futures::{FutureExt, StreamExt, stream};
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::{Rng, rng as thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, ScalarImpl, Serial};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::coordinate::CoordinatedLogSinker;
 use risingwave_connector::sink::iceberg::exactly_once_util::*;
+use risingwave_connector::sink::iceberg::{CommitIceberg, IcebergSinkCommitter};
 use risingwave_connector::sink::test_sink::{
-    TestSinkRegistryGuard, register_build_coordinated_sink, register_build_sink,
+    TestSinkRegistryGuard, register_build_coordinated_sink,
 };
 use risingwave_connector::sink::writer::SinkWriter;
 use risingwave_connector::sink::{SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError};
-use risingwave_connector::source::test_source::{
-    BoxSource, TestSourceRegistryGuard, TestSourceSplit, register_test_source,
-};
-use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Model};
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
-use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
-    Set,
-};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait};
 use tokio::task::yield_now;
 use tokio::time::sleep;
 
@@ -73,6 +59,15 @@ pub struct TestSinkStoreInner {
     snapshot_id_to_data: BTreeMap<i64, HashMap<i32, Vec<String>>>,
     epochs: Vec<u64>,
 
+    // Using different error rates at various points allows for more convenient construction of corner cases.
+    // The `err_rate_vec` is used during the exactly once testing to inject errors at multiple points in the Iceberg commit process, simulating errors occurring at any time.
+    // Specifically, errors will be injected at the following stages:
+    //   0: During the recovery phase.
+    //   1: Before the pre-commit phase.
+    //   2: Between pre-committing and committing to external sink.
+    //   3: Between committing to external sink and marking the data as committed.
+    //   4: Between marking the data as committed and deleting the system table.
+    err_rate_vec: Vec<Arc<AtomicU32>>,
     checkpoint_count: usize,
     err_count: usize,
     // err_events is used to record the history and sequence of error injections, facilitating the inspection of whether specific corner cases are triggered.
@@ -87,7 +82,7 @@ pub struct TestSinkStore {
 }
 
 impl TestSinkStore {
-    pub fn new() -> Self {
+    pub fn new(err_rate_vec: Vec<Arc<AtomicU32>>) -> Self {
         let max_record_error_count = 1024 * 1024 / 4;
         let err_events: Vec<char> = Vec::with_capacity(max_record_error_count);
         Self {
@@ -96,6 +91,7 @@ impl TestSinkStore {
                 snapshot_id_to_data: BTreeMap::new(),
                 epochs: Vec::new(),
                 checkpoint_count: 0,
+                err_rate_vec,
                 err_count: 0,
                 err_events,
             })),
@@ -112,10 +108,6 @@ impl TestSinkStore {
         for (id, names) in pairs {
             entry.entry(id).or_default().extend(names);
         }
-    }
-
-    pub fn insert(&self, id: i32, name: String) {
-        self.inner().id_name.entry(id).or_default().push(name);
     }
 
     pub fn begin_epoch(&self, epoch: u64) {
@@ -276,9 +268,8 @@ impl StagingDataStore {
 }
 
 pub struct CoordinatedTestWriter {
-    store: TestSinkStore,
+    pub(crate) store: TestSinkStore,
     parallelism_counter: Arc<AtomicUsize>,
-    err_rate: Arc<AtomicU32>,
     staging: HashMap<i32, Vec<String>>,
     staging_store: StagingDataStore,
 }
@@ -333,15 +324,6 @@ impl SinkWriter for CoordinatedTestWriter {
 /// other logic remains consistent with the real Iceberg committer.
 pub struct SimulationTestIcebergCommitter {
     store: TestSinkStore,
-    // Using different error rates at various points allows for more convenient construction of corner cases.
-    // The `err_rate_vec` is used during the exactly once testing to inject errors at multiple points in the Iceberg commit process, simulating errors occurring at any time.
-    // Specifically, errors will be injected at the following stages:
-    //   0: During the recovery phase.
-    //   1: Before the pre-commit phase.
-    //   2: Between pre-committing and committing to external sink.
-    //   3: Between committing to external sink and marking the data as committed.
-    //   4: Between marking the data as committed and deleting the system table.
-    err_rate_vec: Vec<Arc<AtomicU32>>,
     last_commit_epoch: u64,
     staging_store: StagingDataStore,
     db: DatabaseConnection,
@@ -376,7 +358,9 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
                     });
                 }
 
-                if thread_rng().random_ratio(self.err_rate_vec[0].load(Relaxed), u32::MAX) {
+                if thread_rng()
+                    .random_ratio(self.store.inner().err_rate_vec[0].load(Relaxed), u32::MAX)
+                {
                     println!("Error injection point 0 -- Error occur during recovery.");
                     self.store.inner().err_events.push('0');
                     self.store.inc_err();
@@ -492,7 +476,7 @@ impl SimulationTestIcebergCommitter {
             None => generate_unique_snapshot_id(),
         };
 
-        if thread_rng().random_ratio(self.err_rate_vec[1].load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[1].load(Relaxed), u32::MAX) {
             println!("Error injection point 1 -- Error occur before pre commit to meta store.");
             self.store.inc_err();
             self.store.inner().err_events.push('1');
@@ -522,7 +506,7 @@ impl SimulationTestIcebergCommitter {
             )
             .await?;
         }
-        if thread_rng().random_ratio(self.err_rate_vec[2].load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[2].load(Relaxed), u32::MAX) {
             println!(
                 "Error injection point 2 -- Error occur before commit to external sink and after pre commit."
             );
@@ -545,7 +529,7 @@ impl SimulationTestIcebergCommitter {
         );
         println!("Succeeded to commit to mock iceberg table in epoch {epoch}.");
 
-        if thread_rng().random_ratio(self.err_rate_vec[3].load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[3].load(Relaxed), u32::MAX) {
             println!(
                 "Error injection point 3 -- Error occur after commit to external sink and before mark row deleted."
             );
@@ -563,7 +547,7 @@ impl SimulationTestIcebergCommitter {
             self.sink_id, epoch
         );
 
-        if thread_rng().random_ratio(self.err_rate_vec[4].load(Relaxed), u32::MAX) {
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[4].load(Relaxed), u32::MAX) {
             println!(
                 "Error injection point 4 -- Error occur after mark committed before deleting previous item."
             );
@@ -629,6 +613,82 @@ impl Drop for SimulationTestIcebergExactlyOnceSink {
     }
 }
 
+#[async_trait]
+impl CommitIceberg for CoordinatedTestWriter {
+    async fn begin_txn(
+        &mut self,
+        commit_data: Vec<SinkMetadata>,
+        snapshot_id: Option<i64>,
+    ) -> risingwave_connector::sink::Result<i64> {
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[1].load(Relaxed), u32::MAX) {
+            println!("Error injection point 1 -- Error occur before pre commit to meta store.");
+            self.store.inc_err();
+            self.store.inner().err_events.push('1');
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to pre commit to meta store"
+            )));
+        }
+        let snapshot_id = match snapshot_id {
+            Some(previous_snapshot_id) => previous_snapshot_id,
+            None => generate_unique_snapshot_id(),
+        };
+        Ok(snapshot_id)
+    }
+
+    async fn do_commit(
+        &mut self,
+        commit_data: Vec<SinkMetadata>,
+        snapshot_id: i64,
+        commit_retry_num: u32,
+    ) -> risingwave_connector::sink::Result<()> {
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[2].load(Relaxed), u32::MAX) {
+            println!(
+                "Error injection point 2 -- Error occur before commit to external sink and after pre commit."
+            );
+            self.store.inc_err();
+            self.store.inner().err_events.push('2');
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to commit to external sink."
+            )));
+        }
+
+        let file_ids = commit_data.into_iter().map(|metadata| {
+            let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
+            usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
+        });
+        self.store.insert_many(
+            snapshot_id,
+            file_ids
+                .into_iter()
+                .map(|file_id| self.staging_store.get(file_id))
+                .flatten(),
+        );
+
+        if thread_rng().random_ratio(self.store.inner().err_rate_vec[3].load(Relaxed), u32::MAX) {
+            println!(
+                "Error injection point 3 -- Error occur after commit to external sink and before mark row deleted."
+            );
+            self.store.inc_err();
+            self.store.inner().err_events.push('3');
+            return Err(SinkError::Internal(anyhow::anyhow!(
+                "fail to mark row deleted."
+            )));
+        }
+        Ok(())
+    }
+
+    async fn is_snapshot_id_in_iceberg(
+        &self,
+        snapshot_id: i64,
+    ) -> risingwave_connector::sink::Result<bool> {
+        Ok(self
+            .store
+            .inner()
+            .snapshot_id_to_data
+            .contains_key(&snapshot_id))
+    }
+}
+
 impl SimulationTestIcebergExactlyOnceSink {
     pub fn register_new_with_err_rate(err_rate_list: Vec<f64>) -> Self {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
@@ -642,7 +702,7 @@ impl SimulationTestIcebergExactlyOnceSink {
 
         let err_rate_for_coordinator = Arc::new(AtomicU32::new(0));
 
-        let store = TestSinkStore::new();
+        let store = TestSinkStore::new(err_rate_vec);
 
         let _sink_guard = {
             let staging_store = StagingDataStore::default();
@@ -653,14 +713,12 @@ impl SimulationTestIcebergExactlyOnceSink {
                     let store = store.clone();
                     let staging_store = staging_store.clone();
                     use risingwave_connector::sink::SinkWriterMetrics;
-                    use risingwave_connector::sink::writer::SinkWriterExt;
                     move |param, writer_param| {
                         parallelism_counter.fetch_add(1, Relaxed);
                         let metrics = SinkWriterMetrics::new(&writer_param);
                         let writer = CoordinatedTestWriter {
                             store: store.clone(),
                             parallelism_counter: parallelism_counter.clone(),
-                            err_rate: err_rate.clone(),
                             staging_store: staging_store.clone(),
                             staging: Default::default(),
                         };
@@ -685,7 +743,6 @@ impl SimulationTestIcebergExactlyOnceSink {
                     let staging_store = staging_store.clone();
                     move |db, sink_param| {
                         Box::new(SimulationTestIcebergCommitter {
-                            err_rate_vec: err_rate_vec.clone(),
                             store: store.clone(),
                             last_commit_epoch: 0,
                             staging_store: staging_store.clone(),
@@ -711,6 +768,90 @@ impl SimulationTestIcebergExactlyOnceSink {
         }
         assert_eq!(self.parallelism_counter.load(Relaxed), parallelism);
         Ok(())
+    }
+
+    /// Register with `IcebergSinkCommitter`, where the Coordinator substitutes only the commit step
+    /// with the mocked `TestSinkStore` during the commit process.
+    pub fn register_with_iceberg_committer_with_err_rate(err_rate_list: Vec<f64>) -> Self {
+        let parallelism_counter = Arc::new(AtomicUsize::new(0));
+        let mut err_rate_vec: Vec<Arc<AtomicU32>> = Vec::new();
+
+        for err_rate in err_rate_list {
+            let scaled_err_rate = (u32::MAX as f64 * err_rate) as u32;
+            let arc_err_rate = Arc::new(AtomicU32::new(scaled_err_rate));
+            err_rate_vec.push(arc_err_rate);
+        }
+
+        let err_rate_for_coordinator = Arc::new(AtomicU32::new(0));
+
+        let store = TestSinkStore::new(err_rate_vec);
+
+        let _sink_guard = {
+            let staging_store = StagingDataStore::default();
+            register_build_coordinated_sink(
+                {
+                    let parallelism_counter = parallelism_counter.clone();
+                    let store = store.clone();
+                    let staging_store = staging_store.clone();
+                    use risingwave_connector::sink::SinkWriterMetrics;
+                    move |param, writer_param| {
+                        parallelism_counter.fetch_add(1, Relaxed);
+                        let metrics = SinkWriterMetrics::new(&writer_param);
+                        let writer = CoordinatedTestWriter {
+                            store: store.clone(),
+                            parallelism_counter: parallelism_counter.clone(),
+                            staging_store: staging_store.clone(),
+                            staging: Default::default(),
+                        };
+                        async move {
+                            let log_sinker = risingwave_connector::sink::boxed::boxed_log_sinker(
+                                CoordinatedLogSinker::new(
+                                    &writer_param,
+                                    param,
+                                    writer,
+                                    NonZero::new(1).unwrap(),
+                                )
+                                .await?,
+                            );
+                            Ok(log_sinker)
+                        }
+                        .boxed()
+                    }
+                },
+                {
+                    let err_rate = err_rate_for_coordinator.clone();
+                    let store = store.clone();
+                    let staging_store = staging_store.clone();
+                    let parallelism_counter = parallelism_counter.clone();
+                    move |db, sink_param| {
+                        let committer_inner = CoordinatedTestWriter {
+                            store: store.clone(),
+                            parallelism_counter: parallelism_counter.clone(),
+                            staging_store: staging_store.clone(),
+                            staging: Default::default(),
+                        };
+                        Box::new(IcebergSinkCommitter {
+                            commit_iceberg: committer_inner,
+                            is_exactly_once: true,
+                            last_commit_epoch: 0,
+                            sink_id: sink_param.sink_id.sink_id(),
+                            param: sink_param.clone(),
+                            db,
+                            commit_notifier: None,
+                            _compact_task_guard: None,
+                            commit_retry_num: 3,
+                            committed_epoch_subscriber: None,
+                        })
+                    }
+                },
+            )
+        };
+        Self {
+            _sink_guard,
+            parallelism_counter: parallelism_counter.clone(),
+            store,
+            err_rate: err_rate_for_coordinator.clone(),
+        }
     }
 }
 
