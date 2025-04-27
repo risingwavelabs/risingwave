@@ -321,7 +321,7 @@ pub enum Mutation {
         subscriptions_to_drop: Vec<(u32, TableId)>,
     },
     StartFragmentBackfill {
-        fragment_ids: Vec<FragmentId>,
+        fragment_ids: HashSet<FragmentId>,
     },
 }
 
@@ -791,7 +791,7 @@ impl Mutation {
             }
             Mutation::StartFragmentBackfill { fragment_ids } => {
                 PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
-                    fragment_ids: fragment_ids.clone(),
+                    fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
         }
@@ -940,7 +940,11 @@ impl Mutation {
             }
             PbMutation::StartFragmentBackfill(start_fragment_backfill) => {
                 Mutation::StartFragmentBackfill {
-                    fragment_ids: start_fragment_backfill.fragment_ids.clone(),
+                    fragment_ids: start_fragment_backfill
+                        .fragment_ids
+                        .iter()
+                        .copied()
+                        .collect(),
                 }
             }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
