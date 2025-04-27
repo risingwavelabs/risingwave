@@ -28,9 +28,7 @@ use risingwave_storage::StateStore;
 use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, SealCurrentEpochOptions, TryWaitEpochOptions,
-};
+use risingwave_storage::store::*;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{TestIngestBatch, gen_key_from_bytes, with_hummock_storage};

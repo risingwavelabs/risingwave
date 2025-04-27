@@ -95,6 +95,11 @@ impl Binder {
             )
         };
 
+        // check db_name if exists first
+        if let Some(db_name) = db_name {
+            let _ = self.catalog.get_database_by_name(db_name)?;
+        }
+
         // start to bind
         let (ret, columns) = {
             match schema_name {
