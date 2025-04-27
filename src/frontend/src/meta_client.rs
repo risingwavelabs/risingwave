@@ -65,7 +65,7 @@ pub trait FrontendMetaClient: Send + Sync {
         &self,
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>>;
-    
+
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<TableFragmentInfo>>;
 
     async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>>;
@@ -186,14 +186,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .0
             .get_fragment_job_id(vec![fragment_id as i32])
             .await?;
-        
+
         if job_ids.is_empty() {
             return Ok(None);
         }
-        
+
         let job_id = job_ids[0];
         let table_fragments = self.list_table_fragments(&[job_id as u32]).await?;
-        
+
         if let Some(table_fragment) = table_fragments.get(&(job_id as u32)) {
             let mut result = table_fragment.clone();
             result.fragments = table_fragment
@@ -202,17 +202,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 .filter(|f| f.id == fragment_id)
                 .cloned()
                 .collect();
-            
+
             if result.fragments.is_empty() {
                 return Ok(None);
             }
-            
+
             Ok(Some(result))
         } else {
             Ok(None)
         }
     }
-    
+
     async fn get_fragment_job_id(&self, fragment_ids: Vec<i32>) -> Result<Vec<i32>> {
         self.0.get_fragment_job_id(fragment_ids).await
     }

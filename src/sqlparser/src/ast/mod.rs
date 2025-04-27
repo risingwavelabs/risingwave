@@ -1666,7 +1666,7 @@ pub enum DescribeKind {
 
     /// `DESCRIBE FRAGMENTS <name>`
     Fragments,
-    
+
     /// `DESCRIBE FRAGMENT <fragment_id>`
     Fragment,
 }
@@ -1763,12 +1763,12 @@ impl Statement {
                     DescribeKind::Fragments => {
                         write!(f, " FRAGMENTS")?;
                     }
-                    
+
                     DescribeKind::Fragment => {
                         write!(f, " FRAGMENT")?;
                     }
                 }
-                
+
                 if let Some(opts) = options {
                     write!(f, " WITH (")?;
                     let mut first = true;

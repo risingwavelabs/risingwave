@@ -4442,7 +4442,7 @@ impl Parser<'_> {
             Some(_) => unreachable!(),
         };
         let name = self.parse_object_name()?;
-        
+
         // Parse optional WITH clause for options
         let options = if self.parse_keyword(Keyword::WITH) {
             self.expect_token(&Token::LParen)?;
@@ -4452,7 +4452,7 @@ impl Parser<'_> {
         } else {
             None
         };
-        
+
         Ok(Statement::Describe { name, kind, options })
     }
 

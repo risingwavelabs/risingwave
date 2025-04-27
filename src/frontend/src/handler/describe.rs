@@ -308,18 +308,18 @@ pub async fn handle_describe_fragment(
     options: Option<Vec<risingwave_sqlparser::ast::Ident>>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    
+
     let fragment_id_str = fragment_id_name.to_string();
     let fragment_id = fragment_id_str.parse::<u32>().map_err(|_| {
         ErrorCode::InvalidInputSyntax(format!(
-            "fragment ID must be a positive integer, got: {}", 
+            "fragment ID must be a positive integer, got: {}",
             fragment_id_str
         ))
     })?;
-    
+
     let meta_client = session.env().meta_client();
     let fragment_info = meta_client.get_fragment_by_id(fragment_id).await?;
-    
+
     match fragment_info {
         Some(info) => {
             let verbose = options.as_ref().map(|opts| opts.iter().any(|opt| opt.real_value() == "VERBOSE"));
@@ -351,9 +351,9 @@ fn generate_fragments_string(fragments: &TableFragmentInfo, verbose: Option<bool
     for fragment in fragments.fragments.iter().sorted_by_key(|f| f.id) {
         let mut res = String::new();
         let actor_ids = fragment.actors.iter().map(|a| a.id).format(",");
-        
+
         let relation_name = String::new();
-        
+
         res.push_str(&format!("Fragment {}{} (Actor {})\n", fragment.id, relation_name, actor_ids));
         let node = &fragment.actors[0].node;
         let node = explain_node(node.as_ref().unwrap(), verbose);
