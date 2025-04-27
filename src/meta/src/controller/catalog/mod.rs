@@ -385,23 +385,12 @@ impl CatalogController {
         } else {
             filter_condition
         };
-        let objects: Vec<PartialObject> = Object::find()
-            .select_only()
-            .filter(filter_condition.clone())
-            .into_partial_model()
-            .all(&txn)
-            .await?;
-
         Object::delete_many()
             .filter(filter_condition)
             .exec(&txn)
             .await?;
         txn.commit().await?;
-        let object_group = build_object_group_for_delete(objects);
-
-        let _version = self
-            .notify_frontend(NotificationOperation::Delete, object_group)
-            .await;
+        // We don't need to notify the frontend, because the Init subscription is not send to frontend.
         Ok(())
     }
 
