@@ -564,7 +564,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let log_store_stream = read_state
                 .read_persisted_log_store(
                     self.metrics.persistent_log_read_metrics.clone(),
-                    initial_write_epoch.prev,
+                    initial_write_epoch.curr,
                     LogStoreReadStateStreamRangeStart::Unbounded,
                 )
                 .await?;
