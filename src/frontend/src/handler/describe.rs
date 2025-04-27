@@ -333,8 +333,6 @@ pub async fn handle_describe_fragment(
         }
     }
 }
-
-    Ok(res)
 }
 
 /// The implementation largely copied from `crate::utils::stream_graph_formatter::StreamGraphFormatter`.
