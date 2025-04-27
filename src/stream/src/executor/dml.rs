@@ -178,7 +178,7 @@ impl DmlExecutor {
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
+        let mut stream = StreamReaderWithPause::<true, TxnMsg>::new(upstream, reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
