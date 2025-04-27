@@ -1091,7 +1091,6 @@ impl SinkWriter for IcebergSinkWriter {
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
-        println!("不，真实的这里？");
         // Skip it if not checkpoint
         if !is_checkpoint {
             return Ok(None);
@@ -1275,55 +1274,6 @@ impl IcebergCommitResult {
             bail!("Can't create iceberg sink write result from empty data!")
         }
     }
-
-    fn try_from_sealized_bytes(value: Vec<u8>) -> Result<Self> {
-        let mut values = if let serde_json::Value::Object(value) =
-            serde_json::from_slice::<serde_json::Value>(&value)
-                .context("Can't parse iceberg sink metadata")?
-        {
-            value
-        } else {
-            bail!("iceberg sink metadata should be an object");
-        };
-
-        let schema_id;
-        if let Some(serde_json::Value::Number(value)) = values.remove(SCHEMA_ID) {
-            schema_id = value
-                .as_u64()
-                .ok_or_else(|| anyhow!("schema_id should be a u64"))?;
-        } else {
-            bail!("iceberg sink metadata should have schema_id");
-        }
-
-        let partition_spec_id;
-        if let Some(serde_json::Value::Number(value)) = values.remove(PARTITION_SPEC_ID) {
-            partition_spec_id = value
-                .as_u64()
-                .ok_or_else(|| anyhow!("partition_spec_id should be a u64"))?;
-        } else {
-            bail!("iceberg sink metadata should have partition_spec_id");
-        }
-
-        let data_files: Vec<SerializedDataFile>;
-        if let serde_json::Value::Array(values) = values
-            .remove(DATA_FILES)
-            .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
-        {
-            data_files = values
-                .into_iter()
-                .map(from_value::<SerializedDataFile>)
-                .collect::<std::result::Result<_, _>>()
-                .unwrap();
-        } else {
-            bail!("iceberg sink metadata should have data_files object");
-        }
-
-        Ok(Self {
-            schema_id: schema_id as i32,
-            partition_spec_id: partition_spec_id as i32,
-            data_files,
-        })
-    }
 }
 
 impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
@@ -1396,7 +1346,7 @@ pub struct IcebergSinkCommitter<C: CommitIceberg> {
     pub commit_iceberg: C,
     pub last_commit_epoch: u64,
     pub is_exactly_once: bool,
-    pub  sink_id: u32,
+    pub sink_id: u32,
     pub param: SinkParam,
     pub db: DatabaseConnection,
     pub commit_notifier: Option<mpsc::UnboundedSender<()>>,
@@ -1415,15 +1365,21 @@ impl CommitResultTrait for IcebergCommitResult {
     }
 }
 
+/// The `CommitIceberg` trait defines the behavior of the Iceberg sink during committing.
+///
+/// The previous logic has been abstracted into a trait to allow for more granular mocking in simulation tests.
+/// This enables testing to only mock the behavior related to committing to Iceberg,
+/// thus allowing for greater reuse of the real code and narrowing down the parts that need to be mocked.
 #[async_trait::async_trait]
 pub trait CommitIceberg {
-
+    /// Begin transaction and return a `snapshot_id` to be used for committing.
     async fn begin_txn(
         &mut self,
         commit_data: Vec<SinkMetadata>,
         snapshot_id: Option<i64>,
     ) -> Result<i64>;
 
+    /// Commit to the real iceberg or mock external sink.
     async fn do_commit(
         &mut self,
         commit_data: Vec<SinkMetadata>,
@@ -1431,21 +1387,19 @@ pub trait CommitIceberg {
         commit_retry_num: u32,
     ) -> Result<()>;
 
-    /// During pre-commit metadata, we record the `snapshot_id` corresponding to each batch of files.
-    /// Therefore, the logic for checking whether all files in this batch are present in Iceberg
-    /// has been changed to verifying if their corresponding `snapshot_id` exists in Iceberg.
+    /// Check data in iceberg or mock external sink.
     async fn is_snapshot_id_in_iceberg(&self, snapshot_id: i64) -> Result<bool>;
 }
+
+/// It is used for committing to the actual Iceberg warehouse.
 pub struct CommitIcebergImpl {
     pub(crate) config: IcebergConfig,
     catalog: Arc<dyn Catalog>,
     table: Table,
 }
 
-
 #[async_trait::async_trait]
 impl CommitIceberg for CommitIcebergImpl {
-
     async fn begin_txn(
         &mut self,
         commit_data: Vec<SinkMetadata>,
