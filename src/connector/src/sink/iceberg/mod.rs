@@ -973,6 +973,7 @@ impl SinkWriter for IcebergSinkWriter {
 
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        println!("真实的代码write_batch");
         // Try to build writer if it's None.
         match &mut self.writer {
             IcebergWriterDispatch::PartitionAppendOnly {
@@ -1090,6 +1091,7 @@ impl SinkWriter for IcebergSinkWriter {
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+        println!("不，真实的这里？");
         // Skip it if not checkpoint
         if !is_checkpoint {
             return Ok(None);
@@ -1711,29 +1713,6 @@ impl<C: CommitIceberg + Send + Sync + 'static> SinkCommitCoordinator for Iceberg
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
-        // let write_results: Vec<IcebergCommitResult> = metadata
-        //     .iter()
-        //     .map(IcebergCommitResult::try_from)
-        //     .collect::<Result<Vec<IcebergCommitResult>>>()?;
-
-        // // Skip if no data to commit
-        // if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
-        //     tracing::debug!(?epoch, "no data to commit");
-        //     return Ok(());
-        // }
-
-        // // guarantee that all write results has same schema_id and partition_spec_id
-        // if write_results
-        //     .iter()
-        //     .any(|r| r.schema_id != write_results[0].schema_id)
-        //     || write_results
-        //         .iter()
-        //         .any(|r| r.partition_spec_id != write_results[0].partition_spec_id)
-        // {
-        //     return Err(SinkError::Iceberg(anyhow!(
-        //         "schema_id and partition_spec_id should be the same in all write results"
-        //     )));
-        // }
         if self.is_exactly_once {
             assert!(self.committed_epoch_subscriber.is_some());
             match self.committed_epoch_subscriber.clone() {
