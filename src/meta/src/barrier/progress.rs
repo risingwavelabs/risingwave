@@ -322,7 +322,6 @@ impl CreateMviewProgressTracker {
     pub fn recover(
         mviews: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments))>,
         version_stats: &HummockVersionStats,
-        mut backfill_order_map: HashMap<TableId, BackfillOrderState>,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -337,12 +336,10 @@ impl CreateMviewProgressTracker {
                 backfill_upstream_types.insert(actor, backfill_upstream_type);
             }
 
-            let backfill_order_state = backfill_order_map.remove(&creating_table_id);
             pending_backfill_nodes.extend(table_fragments.fragment_ids());
 
             let progress = Self::recover_progress(
                 states,
-                backfill_order_state,
                 backfill_upstream_types,
                 table_fragments.upstream_table_counts(),
                 definition,
@@ -368,7 +365,6 @@ impl CreateMviewProgressTracker {
     /// and then it will just report progress like newly created executors.
     fn recover_progress(
         states: HashMap<ActorId, BackfillState>,
-        backfill_order_state: Option<BackfillOrderState>,
         backfill_upstream_types: HashMap<ActorId, BackfillUpstreamType>,
         upstream_mv_count: HashMap<TableId, usize>,
         definition: String,
@@ -378,7 +374,7 @@ impl CreateMviewProgressTracker {
             calculate_total_key_count(&upstream_mv_count, version_stats);
         Progress {
             states,
-            backfill_order_state,
+            backfill_order_state: None,
             backfill_upstream_types,
             done_count: 0, // Fill only after first barrier pass
             upstream_mv_count,

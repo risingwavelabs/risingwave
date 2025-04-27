@@ -669,8 +669,6 @@ impl ControlStreamManager {
             node_to_collect
         };
 
-        // FIXME(kwannoel): recover this for background ddl
-        let recovered_backfill_order_map = HashMap::new();
         let tracker = CreateMviewProgressTracker::recover(
             background_mviews
                 .iter()
@@ -678,7 +676,6 @@ impl ControlStreamManager {
                     (*table_id, (definition.clone(), stream_job_fragments))
                 }),
             hummock_version_stats,
-            recovered_backfill_order_map,
         );
 
         let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
