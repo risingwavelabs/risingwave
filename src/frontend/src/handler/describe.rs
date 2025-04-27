@@ -22,7 +22,9 @@ use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::types::{DataType, Fields};
 use risingwave_expr::bail;
+use risingwave_pb::meta::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::table_fragments::fragment;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_sqlparser::ast::{DescribeKind, ObjectName, display_comma_separated};
 
@@ -249,6 +251,7 @@ pub fn infer_describe(kind: &DescribeKind) -> Vec<PgFieldDescriptor> {
         DescribeKind::Plain => fields_to_descriptors(ShowColumnRow::fields()),
     }
 }
+
 pub async fn handle_describe_fragments(
     handler_args: HandlerArgs,
     object_name: ObjectName,
@@ -367,6 +370,76 @@ fn explain_node<'a>(node: &StreamNode, verbose: bool) -> Pretty<'a> {
         .map(|input| explain_node(input, verbose))
         .collect();
     Pretty::simple_record(one_line_explain, fields, children)
+}
+
+pub async fn handle_describe_fragment(
+    handler_args: HandlerArgs,
+    fragment_id: u32,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let meta_client = session.env().meta_client();
+    let distribution = &meta_client
+        .get_fragment_by_id(fragment_id)
+        .await?
+        .ok_or_else(|| CatalogError::NotFound("fragment", fragment_id.to_string()))?;
+    let res: PgResponse<super::PgResponseStream> = generate_enhanced_fragment_string(distribution)?;
+    Ok(res)
+}
+
+fn generate_enhanced_fragment_string(fragment_dist: &FragmentDistribution) -> Result<RwPgResponse> {
+    let mut config = PrettyConfig {
+        need_boundaries: false,
+        width: 80,
+        ..Default::default()
+    };
+
+    let mut res = String::new();
+
+    res.push_str(&format!(
+        "Fragment {} (Table {})\n",
+        fragment_dist.fragment_id, fragment_dist.table_id
+    ));
+    let dist_type = fragment::FragmentDistributionType::try_from(fragment_dist.distribution_type)
+        .unwrap_or(fragment::FragmentDistributionType::Unspecified);
+    res.push_str(&format!("Distribution Type: {}\n", dist_type.as_str_name()));
+    res.push_str(&format!("Parallelism: {}\n", fragment_dist.parallelism));
+    res.push_str(&format!("VNode Count: {}\n", fragment_dist.vnode_count));
+
+    if !fragment_dist.state_table_ids.is_empty() {
+        res.push_str(&format!(
+            "State Tables: [{}]\n",
+            fragment_dist
+                .state_table_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if !fragment_dist.upstream_fragment_ids.is_empty() {
+        res.push_str(&format!(
+            "Upstream Fragments: [{}]\n",
+            fragment_dist
+                .upstream_fragment_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if let Some(node) = &fragment_dist.node {
+        res.push_str("\nStream Plan:\n");
+        let node_pretty = explain_node(node, true);
+        config.unicode(&mut res, &node_pretty);
+    }
+
+    let rows = vec![ExplainRow { query_plan: res }];
+
+    Ok(PgResponse::builder(StatementType::DESCRIBE)
+        .rows(rows)
+        .into())
 }
 
 #[cfg(test)]

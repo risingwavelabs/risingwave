@@ -1,0 +1,52 @@
+control substitution on
+
+
+# Setup test table and materialized view
+statement ok
+CREATE TABLE test_table (id INT PRIMARY KEY, value INT);
+
+
+statement ok
+CREATE MATERIALIZED VIEW test_table_mv AS
+SELECT id, SUM(value) as total FROM test_table GROUP BY id;
+
+
+system ok
+fragment_id=$(psql -h localhost -p 4566 -d dev -U root -tAc "SELECT fragment_id
+FROM rw_catalog.rw_fragments
+WHERE table_id = (SELECT id FROM rw_catalog.rw_tables WHERE name = 'test_table')
+AND flags @> ARRAY['MVIEW'];")
+psql_validate.py --debug --db dev --sql "DESCRIBE FRAGMENT $fragment_id" \
+--expected 'Fragment % (Table %)
+Distribution Type: %
+Parallelism: %
+VNode Count: %
+State Tables: [%]
+Upstream Fragments: [%]
+(empty)
+Stream Plan:
+StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
+├── output: [ id, value ]
+├── stream key: [ id ]
+└── StreamUnion { all: true } { output: [ id, value ], stream key: [] }
+    └── MergeExecutor { output: [ id, value ], stream key: [] }'
+
+
+
+# Test with non-existent fragment ID
+query error
+DESCRIBE FRAGMENT 99999999;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: fragment not found: 99999999
+
+
+
+# Clean up
+statement ok
+DROP TABLE test_table CASCADE;
+
+control substitution off

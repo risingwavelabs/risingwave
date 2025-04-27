@@ -1472,6 +1472,10 @@ pub enum Statement {
         name: ObjectName,
         kind: DescribeKind,
     },
+    /// DESCRIBE FRAGMENT <fragment_id>
+    DescribeFragment {
+        fragment_id: u32,
+    },
     /// SHOW OBJECT COMMAND
     ShowObjects {
         object: ShowObject,
@@ -1759,6 +1763,10 @@ impl Statement {
                         write!(f, " FRAGMENTS")?;
                     }
                 }
+                Ok(())
+            }
+            Statement::DescribeFragment { fragment_id } => {
+                write!(f, "DESCRIBE FRAGMENT {}", fragment_id)?;
                 Ok(())
             }
             Statement::ShowObjects {
