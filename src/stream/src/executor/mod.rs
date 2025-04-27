@@ -300,7 +300,7 @@ pub struct AddMutation {
     /// (`upstream_mv_table_id`,  `subscriber_id`)
     pub subscriptions_to_add: Vec<(TableId, u32)>,
     /// nodes which should start backfill
-    pub backfill_nodes_to_start: HashSet<FragmentId>,
+    pub backfill_nodes_to_pause: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -540,16 +540,16 @@ impl Barrier {
     pub fn is_backfill_pause_on_startup(&self, backfill_fragment_id: FragmentId) -> bool {
         match self.mutation.as_deref() {
             Some(Mutation::Add(AddMutation {
-                backfill_nodes_to_start,
+                backfill_nodes_to_pause,
                 ..
             }))
             | Some(Mutation::AddAndUpdate(
                 AddMutation {
-                    backfill_nodes_to_start,
+                    backfill_nodes_to_pause,
                     ..
                 },
                 _,
-            )) => !backfill_nodes_to_start.contains(&backfill_fragment_id),
+            )) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
             _ => true,
         }
     }
@@ -698,7 +698,7 @@ impl Mutation {
                 splits,
                 pause,
                 subscriptions_to_add,
-                backfill_nodes_to_start,
+                backfill_nodes_to_pause,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -721,7 +721,7 @@ impl Mutation {
                         upstream_mv_table_id: table_id.table_id,
                     })
                     .collect(),
-                backfill_nodes_to_start: backfill_nodes_to_start.iter().copied().collect(),
+                backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -874,7 +874,7 @@ impl Mutation {
                         },
                     )
                     .collect(),
-                backfill_nodes_to_start: add.backfill_nodes_to_start.iter().copied().collect(),
+                backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
             }),
 
             PbMutation::Splits(s) => {

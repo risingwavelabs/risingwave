@@ -124,8 +124,7 @@ impl CreatingStreamingJobControl {
             // we assume that when handling snapshot backfill, the cluster must not be paused
             pause: false,
             subscriptions_to_add: Default::default(),
-            // TODO: support backfill-order-control for snapshot backfill
-            backfill_nodes_to_start: Default::default(),
+            backfill_nodes_to_pause: Default::default(),
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));

@@ -47,27 +47,19 @@ pub struct BackfillOrderState {
     actor_to_fragment_id: HashMap<ActorId, FragmentId>,
 }
 
-pub fn get_root_nodes(
+/// Get nodes with some dependencies.
+/// These should initially be paused until their dependencies are done.
+pub fn get_nodes_with_backfill_dependencies(
     backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
-    stream_job_fragments: &StreamJobFragments,
-) -> Vec<FragmentId> {
-    let mut root_nodes = HashSet::new();
-    for fragment in stream_job_fragments.fragments() {
-        if fragment.fragment_type_mask
-            & (FragmentTypeFlag::StreamScan as u32 | FragmentTypeFlag::SourceScan as u32)
-            > 0
-        {
-            root_nodes.insert(fragment.fragment_id);
-        }
-    }
+) -> HashSet<FragmentId> {
+    let mut nodes_with_dependencies = HashSet::new();
 
     for children in backfill_orders.values() {
         for child in children {
-            root_nodes.remove(child);
+            nodes_with_dependencies.insert(*child);
         }
     }
-
-    root_nodes.into_iter().collect()
+    nodes_with_dependencies
 }
 
 // constructor

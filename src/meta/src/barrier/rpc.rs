@@ -487,10 +487,7 @@ impl ControlStreamManager {
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
-            backfill_nodes_to_start: background_jobs
-                .values()
-                .flat_map(|(_, fragments)| fragments.fragment_ids())
-                .collect_vec(),
+            backfill_nodes_to_pause: Default::default(),
         });
 
         fn resolve_jobs_committed_epoch(

@@ -44,7 +44,7 @@ use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::InflightSubscriptionInfo;
-use crate::barrier::backfill_order_control::get_root_nodes;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::ControlStreamManager;
@@ -736,9 +736,11 @@ impl Command {
                     } else {
                         Default::default()
                     };
-                let backfill_nodes_to_start: Vec<_> = match fragment_backfill_ordering {
-                    Some(backfill_order) => get_root_nodes(backfill_order, table_fragments),
-                    None => table_fragments.fragment_ids().collect(),
+                let backfill_nodes_to_pause: Vec<_> = match fragment_backfill_ordering {
+                    Some(backfill_order) => get_nodes_with_backfill_dependencies(backfill_order)
+                        .into_iter()
+                        .collect(),
+                    None => Default::default(),
                 };
                 let add = Some(Mutation::Add(AddMutation {
                     actor_dispatchers: edges
@@ -754,7 +756,7 @@ impl Command {
                     // If the cluster is already paused, the new actors should be paused too.
                     pause: is_currently_paused,
                     subscriptions_to_add,
-                    backfill_nodes_to_start,
+                    backfill_nodes_to_pause,
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1007,7 +1009,7 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                     subscriber_id: *subscription_id,
                 }],
-                backfill_nodes_to_start: vec![],
+                backfill_nodes_to_pause: vec![],
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
