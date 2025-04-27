@@ -48,21 +48,35 @@ function buildDependencyAsEdges(
 ): RelationPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
+  
+  const reverseDepMap = new Map<number, number[]>()
+  
+  list.forEach((r) => {
+    reverseDepMap.set(r.id, [])
+  })
+  
+  relation_deps.forEach((deps, relationId) => {
+    if (relationSet.has(relationId)) {
+      deps.forEach((depId) => {
+        if (relationSet.has(depId)) {
+          const parents = reverseDepMap.get(relationId) || []
+          parents.push(depId)
+          reverseDepMap.set(relationId, parents)
+        }
+      })
+    }
+  })
+  
   for (const r of reverse(sortBy(list, "id"))) {
     edges.push({
       id: r.id.toString(),
       name: r.name,
       parentIds: relationIsStreamingJob(r)
-        ? relation_deps.has(r.id)
-          ? relation_deps
-              .get(r.id)
-              ?.filter((r) => relationSet.has(r))
-              .map((r) => r.toString())
-          : []
+        ? (reverseDepMap.get(r.id) || []).map((id) => id.toString())
         : [],
       order: r.id,
-      width: 150, // Previously boxWidth
-      height: 45, // Previously boxHeight
+      width: 150,
+      height: 45,
       relation: r,
     })
   }
