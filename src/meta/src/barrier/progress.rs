@@ -325,7 +325,6 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let mut pending_backfill_nodes = Vec::new();
         for (creating_table_id, (definition, table_fragments)) in mviews {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
@@ -335,8 +334,6 @@ impl CreateMviewProgressTracker {
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
                 backfill_upstream_types.insert(actor, backfill_upstream_type);
             }
-
-            pending_backfill_nodes.extend(table_fragments.fragment_ids());
 
             let progress = Self::recover_progress(
                 states,
@@ -354,7 +351,7 @@ impl CreateMviewProgressTracker {
             progress_map,
             actor_map,
             pending_finished_jobs: Vec::new(),
-            pending_backfill_nodes,
+            pending_backfill_nodes: Vec::new(),
         }
     }
 
