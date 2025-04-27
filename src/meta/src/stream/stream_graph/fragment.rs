@@ -703,12 +703,7 @@ impl StreamFragmentGraph {
         for (fragment_id, fragment) in &self.fragments {
             let fragment_id = fragment_id.as_global_id();
             let fragment_mask = fragment.fragment_type_mask;
-            let candidates = [
-                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
-                FragmentTypeFlag::SnapshotBackfillStreamScan,
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-            ];
+            let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
             let has_some_scan = candidates
                 .into_iter()
                 .any(|flag| (fragment_mask & flag as u32) > 0);
