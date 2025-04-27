@@ -31,7 +31,7 @@ message AddMutation {
   bool pause = 4;
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should start backfill
-  common.Uint32Vector backfill_nodes_to_start = 6;
+  repeated uint32 backfill_nodes_to_start = 6;
 }
 
 message StopMutation {

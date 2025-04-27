@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::common::{HostAddress, Uint32Vector, WorkerNode};
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{
@@ -487,12 +487,10 @@ impl ControlStreamManager {
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
-            backfill_nodes_to_start: Some(Uint32Vector {
-                data: background_jobs
-                    .values()
-                    .flat_map(|(_, fragments)| fragments.fragment_ids())
-                    .collect_vec(),
-            }),
+            backfill_nodes_to_start: background_jobs
+                .values()
+                .flat_map(|(_, fragments)| fragments.fragment_ids())
+                .collect_vec(),
         });
 
         fn resolve_jobs_committed_epoch(

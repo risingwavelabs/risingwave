@@ -165,7 +165,6 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
-use risingwave_pb::common::Uint32Vector;
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
@@ -722,9 +721,7 @@ impl Mutation {
                         upstream_mv_table_id: table_id.table_id,
                     })
                     .collect(),
-                backfill_nodes_to_start: Some(Uint32Vector {
-                    data: backfill_nodes_to_start.iter().cloned().collect(),
-                }),
+                backfill_nodes_to_start: backfill_nodes_to_start.iter().copied().collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -877,14 +874,7 @@ impl Mutation {
                         },
                     )
                     .collect(),
-                backfill_nodes_to_start: add
-                    .backfill_nodes_to_start
-                    .as_ref()
-                    .expect("not None")
-                    .data
-                    .iter()
-                    .copied()
-                    .collect(),
+                backfill_nodes_to_start: add.backfill_nodes_to_start.iter().copied().collect(),
             }),
 
             PbMutation::Splits(s) => {

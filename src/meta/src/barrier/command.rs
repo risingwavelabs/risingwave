@@ -26,7 +26,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
-use risingwave_pb::common::{ActorInfo, Uint32Vector};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -754,9 +754,7 @@ impl Command {
                     // If the cluster is already paused, the new actors should be paused too.
                     pause: is_currently_paused,
                     subscriptions_to_add,
-                    backfill_nodes_to_start: Some(Uint32Vector {
-                        data: backfill_nodes_to_start,
-                    }),
+                    backfill_nodes_to_start,
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1009,7 +1007,7 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                     subscriber_id: *subscription_id,
                 }],
-                backfill_nodes_to_start: Some(Uint32Vector { data: vec![] }),
+                backfill_nodes_to_start: vec![],
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
