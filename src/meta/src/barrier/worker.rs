@@ -42,8 +42,8 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::rpc::{ControlStreamManager, merge_node_rpc_errors};
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
-    schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
+    RecoveryReason, schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -447,6 +447,20 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
+                    if let Some((_, Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
+                        let worker_ids: HashSet<_> =
+                            info.stream_job_fragments.inner
+                            .actors_to_create()
+                            .flat_map(|(_, _, actors)|
+                                actors.map(|(_, worker_id)| worker_id)
+                            )
+                            .collect();
+                        for worker_id in worker_ids {
+                            if !self.control_stream_manager.is_connected(worker_id) {
+                                self.control_stream_manager.try_reconnect_worker(worker_id, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                            }
+                        }
+                    }
                     if let Some(failed_databases) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager)
                         && !failed_databases.is_empty() {
                         if !self.enable_recovery {
