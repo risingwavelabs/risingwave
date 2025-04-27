@@ -20,7 +20,7 @@ import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
+import ReactFlowRelationGraph from "../components/ReactFlowRelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import api from "../lib/api/api"
@@ -61,8 +61,8 @@ function buildDependencyAsEdges(
           : []
         : [],
       order: r.id,
-      width: boxWidth,
-      height: boxHeight,
+      width: 150, // Previously boxWidth
+      height: 45, // Previously boxHeight
       relation: r,
     })
   }
@@ -214,10 +214,10 @@ export default function StreamingGraph() {
         >
           <Text fontWeight="semibold">Relation Graph</Text>
           {relationDependency && (
-            <RelationGraph
+            <ReactFlowRelationGraph
               nodes={relationDependency}
               selectedId={selectedId?.toString()}
-              setSelectedId={(id) => setSelectedId(parseInt(id))}
+              setSelectedId={(id: string) => setSelectedId(parseInt(id))}
               channelStats={relationChannelStats}
               relationStats={relationStats}
             />

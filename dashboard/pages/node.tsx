@@ -25,7 +25,7 @@ import {
 } from "@chakra-ui/react"
 import loadable from "@loadable/component"
 import { Fragment } from "react"
-import { Handle, Position } from "react-flow-renderer"
+import { Handle, Position } from "reactflow"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
