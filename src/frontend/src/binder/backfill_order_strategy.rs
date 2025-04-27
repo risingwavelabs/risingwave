@@ -111,7 +111,7 @@ fn bind_backfill_relation_id_by_name(session: &SessionImpl, name: ObjectName) ->
     match schema_name {
         Some(name) => {
             let schema_catalog = reader.get_schema_by_name(&db_name, &name)?;
-            bind_source_or_table(schema_catalog, &rel_name)
+            bind_table(schema_catalog, &rel_name)
         }
         None => {
             let search_path = session.config().search_path();
@@ -119,7 +119,7 @@ fn bind_backfill_relation_id_by_name(session: &SessionImpl, name: ObjectName) ->
             let schema_path = SchemaPath::Path(&search_path, &user_name);
             let result: Result<Option<(ObjectId, &str)>> = schema_path.try_find(|schema_name| {
                 if let Ok(schema_catalog) = reader.get_schema_by_name(&db_name, schema_name)
-                    && let Ok(relation_id) = bind_source_or_table(schema_catalog, &rel_name)
+                    && let Ok(relation_id) = bind_table(schema_catalog, &rel_name)
                 {
                     Ok(Some(relation_id))
                 } else {
@@ -129,12 +129,12 @@ fn bind_backfill_relation_id_by_name(session: &SessionImpl, name: ObjectName) ->
             if let Some((relation_id, _schema_name)) = result? {
                 return Ok(relation_id);
             }
-            Err(CatalogError::NotFound("table or source", rel_name.to_owned()).into())
+            Err(CatalogError::NotFound("table", rel_name.to_owned()).into())
         }
     }
 }
 
-fn bind_source_or_table(schema_catalog: &SchemaCatalog, name: &String) -> Result<ObjectId> {
+fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> Result<ObjectId> {
     if let Some(table) = schema_catalog.get_created_table_or_any_internal_table_by_name(name) {
         Ok(table.id().table_id)
     } else {
