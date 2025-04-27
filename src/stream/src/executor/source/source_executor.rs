@@ -1002,7 +1002,7 @@ mod tests {
                 },
                 pause: false,
                 subscriptions_to_add: vec![],
-                backfill_nodes_to_start: Default::default(),
+                backfill_nodes_to_pause: Default::default(),
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1094,7 +1094,7 @@ mod tests {
                 },
                 pause: false,
                 subscriptions_to_add: vec![],
-                backfill_nodes_to_start: Default::default(),
+                backfill_nodes_to_pause: Default::default(),
             }));
         barrier_tx.send(init_barrier).unwrap();
 
