@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_rpc_client::{ComputeClient, RpcClientPool};
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 pub struct ComputeObserverNode {
     system_params_manager: LocalSystemParamsManagerRef,
-    stream_client_pool: Arc<RpcClientPool<ComputeClient>>,
-    batch_client_pool: Arc<RpcClientPool<ComputeClient>>,
+    batch_client_pool: ComputeClientPoolRef,
 }
 
 impl ObserverState for ComputeObserverNode {
@@ -51,7 +48,6 @@ impl ObserverState for ComputeObserverNode {
                     }
                 },
                 Info::Recovery(_) => {
-                    self.stream_client_pool.invalidate_all();
                     // Reset batch client pool on recovery is always unnecessary
                     // when serving and streaming have been separated.
                     // It can still be used as a method to manually trigger a reset of the batch client pool.
@@ -76,12 +72,10 @@ impl ObserverState for ComputeObserverNode {
 impl ComputeObserverNode {
     pub fn new(
         system_params_manager: LocalSystemParamsManagerRef,
-        stream_client_pool: Arc<RpcClientPool<ComputeClient>>,
-        batch_client_pool: Arc<RpcClientPool<ComputeClient>>,
+        batch_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
             system_params_manager,
-            stream_client_pool,
             batch_client_pool,
         }
     }
