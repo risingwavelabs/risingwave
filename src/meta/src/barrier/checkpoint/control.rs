@@ -1153,10 +1153,18 @@ impl DatabaseCheckpointControl {
         }
 
         // Collect the jobs to finish
-        if let (BarrierKind::Checkpoint(_), None) = (&barrier_info.kind, &command)
-            && let Some(jobs_to_merge) = self.jobs_to_merge()
-        {
-            command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
+        if let (BarrierKind::Checkpoint(_), None) = (&barrier_info.kind, &command) {
+            if let Some(jobs_to_merge) = self.jobs_to_merge() {
+                command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
+            } else {
+                let pending_backfill_nodes =
+                    self.create_mview_tracker.take_pending_backfill_nodes();
+                if !pending_backfill_nodes.is_empty() {
+                    command = Some(Command::StartFragmentBackfill {
+                        fragment_ids: pending_backfill_nodes,
+                    });
+                }
+            }
         }
 
         let command = command;
