@@ -133,7 +133,7 @@ impl IcebergCommon {
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<(HashMap<String, String>, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
-
+        let enable_config_load = self.enable_config_load.unwrap_or(false);
         let file_io_props = {
             let catalog_type = self.catalog_type().to_owned();
 
@@ -201,7 +201,6 @@ impl IcebergCommon {
                     }
                 }
             }
-            let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
                 S3_DISABLE_CONFIG_LOAD.to_owned(),
                 (!enable_config_load).to_string(),
@@ -300,24 +299,27 @@ impl IcebergCommon {
                     }
                 }
                 Some("glue") => {
-                    java_catalog_configs.insert(
-                        "client.credentials-provider".to_owned(),
-                        "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
-                    );
-                    // Use S3 ak/sk and region as glue ak/sk and region by default.
-                    // TODO: use different ak/sk and region for s3 and glue.
-                    if let Some(access_key) = &self.access_key {
+                    if !enable_config_load {
                         java_catalog_configs.insert(
-                            "client.credentials-provider.glue.access-key-id".to_owned(),
-                            access_key.clone(),
+                            "client.credentials-provider".to_owned(),
+                            "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
                         );
+                        // Use S3 ak/sk and region as glue ak/sk and region by default.
+                        // TODO: use different ak/sk and region for s3 and glue.
+                        if let Some(access_key) = &self.access_key {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.access-key-id".to_owned(),
+                                access_key.clone(),
+                            );
+                        }
+                        if let Some(secret_key) = &self.secret_key {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.secret-access-key".to_owned(),
+                                secret_key.clone(),
+                            );
+                        }
                     }
-                    if let Some(secret_key) = &self.secret_key {
-                        java_catalog_configs.insert(
-                            "client.credentials-provider.glue.secret-access-key".to_owned(),
-                            secret_key.clone(),
-                        );
-                    }
+
                     if let Some(region) = &self.region {
                         java_catalog_configs.insert("client.region".to_owned(), region.clone());
                         java_catalog_configs.insert(
