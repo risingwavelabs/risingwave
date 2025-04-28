@@ -1,0 +1,98 @@
+name: Build Docker Image
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag for the Docker image: vX.Y.Z-<tag>-<commit_sha>'
+        required: true
+        type: string
+        default: 'untagged'
+      # By default, images should be built for the latest commit of a release-branch.
+      # This is disabled by default.
+      # Only in special circumstances when we need an urgent patch,
+      # before some commit is merged into a release branch,
+      # we can set the `enable_patch_build` input to `true`.
+      enable_patch_build:
+        description: 'Allow patch builds on release branches, default: false'
+        required: true
+        type: boolean
+        default: false
+      # By default, images should be built for the latest commit of a release-branch.
+      # This should only be used to build test images,
+      # and never for production.
+      # Images will be tagged with <commit_sha>-<tag>, to enforce that the image is not used in production.
+      # Since the `commit_sha` will never match semver (vX.Y.Z).
+      enable_alpha_build:
+        description: 'Allow custom build for any branch, default: false'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  # Generate image tag using:
+  # - version inside Cargo.toml,
+  # - the commit SHA,
+  # - and the tag provided by the user.
+  generate_image_tag:
+    runs-on: ubuntu-latest
+    # Checks that the branch is a release branch, by checking that the semver
+    # should match: vX.Y.Z
+    steps:
+      - name: 'Verify release branch'
+        id: verify_release_branch
+        if: github.event.inputs.enable_patch_build == 'false' && github.event.inputs.enable_alpha_build == 'false'
+        run: |
+          # Get current branch name
+          BRANCH_NAME=$(echo $GITHUB_REF | cut -d '/' -f 3)
+          echo "BRANCH_NAME=$BRANCH_NAME"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          
+          # Check for semver
+          if [[ "$BRANCH_NAME" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
+            echo "Branch $BRANCH_NAME is a valid release branch"
+          else
+            echo "Error: Branch $BRANCH_NAME is not a release branch"
+            exit 1
+          fi
+      - name: 'Verify patch branch'
+        id: verify_patch_branch
+        if: github.event.inputs.enable_patch_build == 'true'
+        run: |
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
+          # Check its not an alpha build
+          if [[ $VERSION == *"alpha"* ]]; then
+            echo "Error: Branch $BRANCH_NAME is not a release branch"
+            exit 1
+          fi
+      - name: 'Generate image tag'
+        id: generate_image_tag
+        run: |
+          # Get the version from Cargo.toml
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+          # Get the commit SHA
+          COMMIT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+
+          # Get the tag from the input
+          TAG=${{ github.event.inputs.tag }}
+          # Check if the tag is empty
+          if [ -z "$TAG" ]; then
+            TAG="untagged"
+          fi
+
+          # Generate the image tag
+          IMAGE_TAG="v$VERSION-$TAG-$COMMIT_SHA"
+          
+          # Write the image tag to environment file
+          echo "IMAGE_TAG=$IMAGE_TAG"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+#      - name: 'Trigger Docker build Workflow via Buildkite'
+#        uses: buildkite/trigger-pipeline-action@v2.0.0
+#        with:
+#          buildkite_api_access_token: ${{ secrets.TRIGGER_BK_BUILD_TOKEN }}
+#          pipeline: 'docker'
+#          branch: ${{ env.BRANCH_NAME }}
+#          message: 'Triggering Docker build'
+#          env:
+#            IMAGE_TAG: ${{ env.IMAGE_TAG }}
