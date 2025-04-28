@@ -627,7 +627,7 @@ pub struct KinesisCommon {
     pub assume_role_external_id: Option<String>,
 
     #[serde(flatten)]
-    pub consumer_options: KinesisSdkOptions,
+    pub sdk_options: KinesisSdkOptions,
 }
 
 #[derive(Debug)]
@@ -720,6 +720,20 @@ pub struct KinesisSdkOptions {
     pub sdk_max_backoff_ms: u64,
 }
 
+impl Default for KinesisSdkOptions {
+    fn default() -> Self {
+        Self {
+            sdk_connect_timeout_ms: kinesis_default_connect_timeout_ms(),
+            sdk_read_timeout_ms: kinesis_default_read_timeout_ms(),
+            sdk_operation_timeout_ms: kinesis_default_operation_timeout_ms(),
+            sdk_operation_attempt_timeout_ms: kinesis_default_operation_attempt_timeout_ms(),
+            sdk_max_retry_limit: kinesis_default_max_retry_limit(),
+            sdk_init_backoff_ms: kinesis_default_init_backoff_ms(),
+            sdk_max_backoff_ms: kinesis_default_max_backoff_ms(),
+        }
+    }
+}
+
 impl EnforceSecret for KinesisCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "kinesis.credentials.access",
@@ -749,28 +763,28 @@ impl KinesisCommon {
             builder.set_sleep_impl(Some(sleep_impl));
             let timeout_config = aws_smithy_types::timeout::TimeoutConfig::builder()
                 .connect_timeout(Duration::from_millis(
-                    self.consumer_options.sdk_connect_timeout_ms,
+                    self.sdk_options.sdk_connect_timeout_ms,
                 ))
                 .read_timeout(Duration::from_millis(
-                    self.consumer_options.sdk_read_timeout_ms,
+                    self.sdk_options.sdk_read_timeout_ms,
                 ))
                 .operation_timeout(Duration::from_millis(
-                    self.consumer_options.sdk_operation_timeout_ms,
+                    self.sdk_options.sdk_operation_timeout_ms,
                 ))
                 .operation_attempt_timeout(Duration::from_millis(
-                    self.consumer_options.sdk_operation_attempt_timeout_ms,
+                    self.sdk_options.sdk_operation_attempt_timeout_ms,
                 ))
                 .build();
             builder.set_timeout_config(Some(timeout_config));
 
             let retry_config = aws_smithy_types::retry::RetryConfig::standard()
                 .with_initial_backoff(Duration::from_millis(
-                    self.consumer_options.sdk_init_backoff_ms,
+                    self.sdk_options.sdk_init_backoff_ms,
                 ))
                 .with_max_backoff(Duration::from_millis(
-                    self.consumer_options.sdk_max_backoff_ms,
+                    self.sdk_options.sdk_max_backoff_ms,
                 ))
-                .with_max_attempts(self.consumer_options.sdk_max_retry_limit);
+                .with_max_attempts(self.sdk_options.sdk_max_retry_limit);
             builder.set_retry_config(Some(retry_config));
         }
         if let Some(endpoint) = &config.endpoint {
