@@ -279,6 +279,7 @@ impl LocalBarrierWorker {
             init_request.databases,
             init_request.term_id,
         );
+        self.actor_manager.env.client_pool().invalidate_all();
     }
 }
 
