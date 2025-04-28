@@ -110,7 +110,6 @@ impl StreamReaderBuilder {
     pub(crate) async fn fetch_latest_splits(
         &mut self,
         state: ConnectorState,
-        seek_to_latest: bool,
     ) -> StreamExecutorResult<CreateSplitReaderResult> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
@@ -121,7 +120,7 @@ impl StreamReaderBuilder {
                 state.clone(),
                 column_ids.clone(),
                 source_ctx_ref.clone(),
-                seek_to_latest,
+                true, // we only call the func for shared source
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;

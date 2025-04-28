@@ -68,7 +68,7 @@ pub struct SourceExecutor<S: StateStore> {
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
-    is_shared_non_cdc: bool,
+    is_shared_source: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -79,7 +79,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
-        is_shared_non_cdc: bool,
+        is_shared_source: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -88,7 +88,7 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
-            is_shared_non_cdc,
+            is_shared_source,
         }
     }
 
@@ -508,9 +508,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut reader_stream_builder = self.stream_reader_builder(source_desc.clone());
         let mut latest_splits = None;
         // Build the source stream reader.
-        if is_uninitialized {
+        if is_uninitialized && self.is_shared_source {
+            // only fetch the latest splits for shared source, not for cdc source and non-shared source
             let create_split_reader_result = reader_stream_builder
-                .fetch_latest_splits(recover_state.clone(), self.is_shared_non_cdc)
+                .fetch_latest_splits(recover_state.clone())
                 .await?;
             latest_splits = create_split_reader_result.latest_splits;
         }
@@ -528,8 +529,7 @@ impl<S: StateStore> SourceExecutor<S> {
         // barriers over source data chunks here.
         let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
             barrier_stream,
-            reader_stream_builder
-                .into_retry_stream(recover_state, is_uninitialized && self.is_shared_non_cdc),
+            reader_stream_builder.into_retry_stream(recover_state, is_uninitialized),
         );
         let mut command_paused = false;
 
