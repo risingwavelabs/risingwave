@@ -546,7 +546,7 @@ impl PostgresSinkWriter {
             let statement = transaction
                 .prepare(&statement_str)
                 .await
-                .with_context(|| format!("failed to run statement: {}", statement_str))?;
+                .with_context(|| format!("failed to prepare statement: {}", statement_str))?;
             Ok((statement_str, statement))
         }
 
@@ -582,7 +582,7 @@ impl PostgresSinkWriter {
                 transaction
                     .execute_raw(&statement, parameter)
                     .await
-                    .with_context(|| format!("failed to run statement: {}", statement_str,))?;
+                    .with_context(|| format!("failed to execute statement: {}", statement_str,))?;
             }
         }
         if !remaining_parameter.is_empty() {
@@ -609,7 +609,7 @@ impl PostgresSinkWriter {
             transaction
                 .execute_raw(&statement, remaining_parameter)
                 .await
-                .with_context(|| format!("failed to run statement: {}", statement_str))?;
+                .with_context(|| format!("failed to execute statement: {}", statement_str))?;
         }
         Ok(())
     }
