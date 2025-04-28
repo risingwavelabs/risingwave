@@ -57,7 +57,7 @@ impl ObserverState for ComputeObserverNode {
                 Info::Recovery(_) => {
                     self.stream_client_pool.invalidate_all();
                     // Reset batch client pool on recovery is always unnecessary
-                    // when serving and streaming have been seperated.
+                    // when serving and streaming have been separated.
                     // It can still be used as a method to manually trigger a reset of the batch client pool.
                     // TODO: invalidate a single batch client on any connection issue.
                     self.batch_client_pool.invalidate_all();
