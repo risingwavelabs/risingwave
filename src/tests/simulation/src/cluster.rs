@@ -915,7 +915,8 @@ impl Cluster {
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        }).await?;
+        })
+        .await?;
         Ok(())
     }
 }

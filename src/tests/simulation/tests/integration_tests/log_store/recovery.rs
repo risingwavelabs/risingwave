@@ -19,13 +19,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
+use madsim::runtime::init_logger;
 use rand::{Rng, rng as thread_rng};
 use risingwave_common::bail;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
-use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
-use madsim::runtime::init_logger;
 
 async fn start_sync_log_store_cluster() -> Result<Cluster> {
     // Create a cluster with 3 nodes
@@ -46,7 +46,7 @@ async fn start_sync_log_store_cluster() -> Result<Cluster> {
         compute_node_cores: 2,
         ..Default::default()
     })
-        .await
+    .await
 }
 
 // NOTE(kwannoel): To troubleshoot, recommend running with the following logging configuration:
@@ -73,13 +73,15 @@ async fn test_recover_synced_log_store() -> Result<()> {
                 "CREATE TABLE fact (id INT, dim_id INT, part_id INT, f1 INT)",
             ]
         };
-        let fact_workload = format!("\
+        let fact_workload = format!(
+            "\
         INSERT INTO fact select \
           gen.id as id, \
           gen.id % {dimension_count} as dim_id, \
           gen.id as part_id, \
           gen.id as f1 \
-          from generate_series(1, {fact_count}) as gen(id)");
+          from generate_series(1, {fact_count}) as gen(id)"
+        );
 
         session.run_all(create_relations).await?;
         session.run(fact_workload).await?;
@@ -88,15 +90,13 @@ async fn test_recover_synced_log_store() -> Result<()> {
         Ok(())
     }
 
-    async fn setup_mv(
-        cluster: &mut Cluster,
-        name: &str,
-        use_unaligned_join: bool,
-    ) -> Result<()> {
+    async fn setup_mv(cluster: &mut Cluster, name: &str, use_unaligned_join: bool) -> Result<()> {
         let mut session = cluster.start_session();
         let create_relations = vec![
             format!("SET streaming_enable_unaligned_join = {use_unaligned_join}"),
-            format!("CREATE MATERIALIZED VIEW {name} AS SELECT part_id, count(*) as cnt FROM fact join dimension on fact.dim_id = dimension.id GROUP BY part_id")
+            format!(
+                "CREATE MATERIALIZED VIEW {name} AS SELECT part_id, count(*) as cnt FROM fact join dimension on fact.dim_id = dimension.id GROUP BY part_id"
+            ),
         ];
         session.run_all(create_relations).await?;
         Ok(())
@@ -107,17 +107,16 @@ async fn test_recover_synced_log_store() -> Result<()> {
         dimension_count: usize,
     ) -> Result<()> {
         let mut session = cluster.start_session();
-        let dim_workload = format!("INSERT INTO dimension select gen.id - 1 as id, 1 as d1 from generate_series(1, {dimension_count}) as gen(id)");
+        let dim_workload = format!(
+            "INSERT INTO dimension select gen.id - 1 as id, 1 as d1 from generate_series(1, {dimension_count}) as gen(id)"
+        );
         session.run(dim_workload).await?;
         session.flush().await?;
 
         Ok(())
     }
 
-    async fn get_mv_count(
-        cluster: &mut Cluster,
-        name: &str,
-    ) -> Result<usize> {
+    async fn get_mv_count(cluster: &mut Cluster, name: &str) -> Result<usize> {
         let mut session = cluster.start_session();
         let query = format!("SELECT COUNT(*) FROM {name}");
         let result = session.run(query).await?;
@@ -151,13 +150,17 @@ async fn test_recover_synced_log_store() -> Result<()> {
             sleep(Duration::from_secs(1)).await;
         }
         // In a subsequent step we will compare the results, and print the missing records.
-        tracing::error!("failed after {MAX_RETRIES} retries, expected {result_count} but got {current_count}");
+        tracing::error!(
+            "failed after {MAX_RETRIES} retries, expected {result_count} but got {current_count}"
+        );
         Ok(())
     }
 
     init_logger();
     let mut cluster = start_sync_log_store_cluster().await?;
-    cluster.run("alter system set per_database_isolation = false").await?;
+    cluster
+        .run("alter system set per_database_isolation = false")
+        .await?;
 
     let amplification_factor = 20000;
     let dimension_count = 5;
@@ -166,14 +169,15 @@ async fn test_recover_synced_log_store() -> Result<()> {
     const UNALIGNED_MV_NAME: &str = "unaligned_mv";
     const ALIGNED_MV_NAME: &str = "aligned_mv";
 
-
     // unaligned join workload
     {
         setup_base_tables(&mut cluster, amplification_factor, dimension_count).await?;
         setup_mv(&mut cluster, UNALIGNED_MV_NAME, true).await?;
         run_amplification_workload(&mut cluster, dimension_count).await?;
 
-        cluster.kill_nodes(vec!["compute-1", "compute-2", "compute-3"], 5).await;
+        cluster
+            .kill_nodes(vec!["compute-1", "compute-2", "compute-3"], 5)
+            .await;
         tracing::info!("killed compute nodes");
         cluster.wait_for_recovery().await?;
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
