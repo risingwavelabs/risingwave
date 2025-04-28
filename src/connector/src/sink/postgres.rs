@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -149,7 +149,11 @@ impl Sink for PostgresSink {
                 &self.config.ssl_root_cert,
                 self.is_append_only,
             )
-            .await?;
+            .await
+            .context(format!(
+                "failed to connect to database: {}, schema: {}, table: {}",
+                &self.config.database, &self.config.schema, &self.config.table
+            ))?;
 
             // Check that names and types match, order of columns doesn't matter.
             {
@@ -244,6 +248,8 @@ struct ParameterBuffer<'a> {
     estimated_parameter_size: usize,
     /// current parameter buffer to be filled.
     current_parameter_buffer: Vec<Option<ScalarAdapter>>,
+    /// Parameter upper bound
+    parameter_upper_bound: usize,
 }
 
 impl<'a> ParameterBuffer<'a> {
@@ -253,19 +259,21 @@ impl<'a> ParameterBuffer<'a> {
     const MAX_PARAMETERS: usize = 32768;
 
     /// `flattened_chunk_size` is the number of datums in a single chunk.
-    fn new(schema_types: &'a [PgType], flattened_chunk_size: usize) -> Self {
-        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, flattened_chunk_size);
+    fn new(schema_types: &'a [PgType], parameter_upper_bound: usize) -> Self {
+        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, parameter_upper_bound);
         Self {
             parameters: vec![],
             column_length: schema_types.len(),
             schema_types,
             estimated_parameter_size,
             current_parameter_buffer: Vec::with_capacity(estimated_parameter_size),
+            parameter_upper_bound,
         }
     }
 
     fn add_row(&mut self, row: impl Row) {
-        if self.current_parameter_buffer.len() + self.column_length >= Self::MAX_PARAMETERS {
+        assert_eq!(row.len(), self.column_length);
+        if self.current_parameter_buffer.len() + self.column_length > self.parameter_upper_bound {
             self.new_buffer();
         }
         for (i, datum_ref) in row.iter().enumerate() {
@@ -299,8 +307,10 @@ impl<'a> ParameterBuffer<'a> {
 pub struct PostgresSinkWriter {
     config: PostgresConfig,
     pk_indices: Vec<usize>,
+    pk_indices_lookup: HashSet<usize>,
     is_append_only: bool,
     client: tokio_postgres::Client,
+    pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
     schema: Schema,
 }
@@ -308,7 +318,7 @@ pub struct PostgresSinkWriter {
 impl PostgresSinkWriter {
     async fn new(
         config: PostgresConfig,
-        mut schema: Schema,
+        schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
@@ -322,6 +332,8 @@ impl PostgresSinkWriter {
             &config.ssl_root_cert,
         )
         .await?;
+
+        let pk_indices_lookup = pk_indices.iter().copied().collect::<HashSet<_>>();
 
         // Rewrite schema types for serialization
         let schema_types = {
@@ -340,7 +352,8 @@ impl PostgresSinkWriter {
             .await?;
             let name_to_type = pg_table.column_name_to_pg_type();
             let mut schema_types = Vec::with_capacity(schema.fields.len());
-            for field in &mut schema.fields[..] {
+            let mut pk_types = Vec::with_capacity(pk_indices.len());
+            for (i, field) in schema.fields.iter().enumerate() {
                 let field_name = &field.name;
                 let actual_data_type = name_to_type.get(field_name).map(|t| (*t).clone());
                 let actual_data_type = actual_data_type
@@ -351,16 +364,21 @@ impl PostgresSinkWriter {
                         ))
                     })?
                     .clone();
+                if pk_indices_lookup.contains(&i) {
+                    pk_types.push(actual_data_type.clone())
+                }
                 schema_types.push(actual_data_type);
             }
-            schema_types
+            (pk_types, schema_types)
         };
 
         let writer = Self {
             config,
             pk_indices,
+            pk_indices_lookup,
             is_append_only,
             client,
+            pk_types,
             schema_types,
             schema,
         };
@@ -378,7 +396,6 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut transaction = self.client.transaction().await?;
         // 1d flattened array of parameters to be inserted.
         let mut parameter_buffer = ParameterBuffer::new(
             &self.schema_types,
@@ -395,14 +412,19 @@ impl PostgresSinkWriter {
             }
         }
         let (parameters, remaining) = parameter_buffer.into_parts();
+
+        let mut transaction = self.client.transaction().await?;
         Self::execute_parameter(
             Op::Insert,
             &mut transaction,
             &self.schema,
+            &self.config.schema,
             &self.config.table,
             &self.pk_indices,
+            &self.pk_indices_lookup,
             parameters,
             remaining,
+            true,
         )
         .await?;
         transaction.commit().await?;
@@ -411,16 +433,23 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut transaction = self.client.transaction().await?;
         // 1d flattened array of parameters to be inserted.
         let mut insert_parameter_buffer = ParameterBuffer::new(
             &self.schema_types,
-            chunk.cardinality() * chunk.data_types().len(),
+            // NOTE(kwannoel):
+            // insert on conflict do update may have multiple
+            // rows on the same PK.
+            // In that case they could encounter the following PG error:
+            // ERROR: ON CONFLICT DO UPDATE command cannot affect row a second time
+            // HINT: Ensure that no rows proposed for insertion within the same command have duplicate constrained values
+            // Given that JDBC sink does not batch their insert on conflict do update,
+            // we can keep the behaviour consistent.
+            //
+            // We may opt for an optimization flag to toggle this behaviour in the future.
+            chunk.data_types().len(),
         );
-        let mut delete_parameter_buffer = ParameterBuffer::new(
-            &self.schema_types,
-            chunk.cardinality() * self.pk_indices.len(),
-        );
+        let mut delete_parameter_buffer =
+            ParameterBuffer::new(&self.pk_types, chunk.cardinality() * self.pk_indices.len());
         // 1d flattened array of parameters to be deleted.
         for (op, row) in chunk.rows() {
             match op {
@@ -434,14 +463,18 @@ impl PostgresSinkWriter {
         }
 
         let (delete_parameters, delete_remaining_parameter) = delete_parameter_buffer.into_parts();
+        let mut transaction = self.client.transaction().await?;
         Self::execute_parameter(
             Op::Delete,
             &mut transaction,
             &self.schema,
+            &self.config.schema,
             &self.config.table,
             &self.pk_indices,
+            &self.pk_indices_lookup,
             delete_parameters,
             delete_remaining_parameter,
+            false,
         )
         .await?;
         let (insert_parameters, insert_remaining_parameter) = insert_parameter_buffer.into_parts();
@@ -449,10 +482,13 @@ impl PostgresSinkWriter {
             Op::Insert,
             &mut transaction,
             &self.schema,
+            &self.config.schema,
             &self.config.table,
             &self.pk_indices,
+            &self.pk_indices_lookup,
             insert_parameters,
             insert_remaining_parameter,
+            false,
         )
         .await?;
         transaction.commit().await?;
@@ -464,54 +500,113 @@ impl PostgresSinkWriter {
         op: Op,
         transaction: &mut tokio_postgres::Transaction<'_>,
         schema: &Schema,
+        schema_name: &str,
         table_name: &str,
         pk_indices: &[usize],
+        pk_indices_lookup: &HashSet<usize>,
         parameters: Vec<Vec<Option<ScalarAdapter>>>,
         remaining_parameter: Vec<Option<ScalarAdapter>>,
+        append_only: bool,
     ) -> Result<()> {
+        async fn prepare_statement(
+            transaction: &mut tokio_postgres::Transaction<'_>,
+            op: Op,
+            schema: &Schema,
+            schema_name: &str,
+            table_name: &str,
+            pk_indices: &[usize],
+            pk_indices_lookup: &HashSet<usize>,
+            rows_length: usize,
+            append_only: bool,
+        ) -> Result<(String, tokio_postgres::Statement)> {
+            assert!(rows_length > 0, "parameters are empty");
+            let statement_str = match op {
+                Op::Insert => {
+                    if append_only {
+                        create_insert_sql(schema, schema_name, table_name, rows_length)
+                    } else {
+                        create_upsert_sql(
+                            schema,
+                            schema_name,
+                            table_name,
+                            pk_indices,
+                            pk_indices_lookup,
+                            rows_length,
+                        )
+                    }
+                }
+                Op::Delete => {
+                    create_delete_sql(schema, schema_name, table_name, pk_indices, rows_length)
+                }
+                _ => unreachable!(),
+            };
+            let statement = transaction
+                .prepare(&statement_str)
+                .await
+                .with_context(|| format!("failed to prepare statement: {}", statement_str))?;
+            Ok((statement_str, statement))
+        }
+
         let column_length = match op {
             Op::Insert => schema.len(),
             Op::Delete => pk_indices.len(),
             _ => unreachable!(),
         };
+
         if !parameters.is_empty() {
             let parameter_length = parameters[0].len();
-            let rows_length = parameter_length / column_length;
             assert_eq!(
                 parameter_length % column_length,
                 0,
-                "flattened parameters are unaligned, parameters={:#?} columns={:#?}",
-                parameters,
-                schema.fields(),
+                "flattened parameters are unaligned, parameter_length={} column_length={}",
+                parameter_length,
+                column_length,
             );
-            let statement = match op {
-                Op::Insert => create_insert_sql(schema, table_name, rows_length),
-                Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
-                _ => unreachable!(),
-            };
-            let statement = transaction.prepare(&statement).await?;
+            let rows_length = parameter_length / column_length;
+            let (statement_str, statement) = prepare_statement(
+                transaction,
+                op,
+                schema,
+                schema_name,
+                table_name,
+                pk_indices,
+                pk_indices_lookup,
+                rows_length,
+                append_only,
+            )
+            .await?;
             for parameter in parameters {
-                transaction.execute_raw(&statement, parameter).await?;
+                transaction
+                    .execute_raw(&statement, parameter)
+                    .await
+                    .with_context(|| format!("failed to execute statement: {}", statement_str,))?;
             }
         }
         if !remaining_parameter.is_empty() {
-            let rows_length = remaining_parameter.len() / column_length;
+            let parameter_length = remaining_parameter.len();
             assert_eq!(
-                remaining_parameter.len() % column_length,
+                parameter_length % column_length,
                 0,
                 "flattened parameters are unaligned"
             );
-            let statement = match op {
-                Op::Insert => create_insert_sql(schema, table_name, rows_length),
-                Op::Delete => create_delete_sql(schema, table_name, pk_indices, rows_length),
-                _ => unreachable!(),
-            };
-            tracing::trace!("binding statement: {:?}", statement);
-            let statement = transaction.prepare(&statement).await?;
+            let rows_length = remaining_parameter.len() / column_length;
+            let (statement_str, statement) = prepare_statement(
+                transaction,
+                op,
+                schema,
+                schema_name,
+                table_name,
+                pk_indices,
+                pk_indices_lookup,
+                rows_length,
+                append_only,
+            )
+            .await?;
             tracing::trace!("binding parameters: {:?}", remaining_parameter);
             transaction
                 .execute_raw(&statement, remaining_parameter)
-                .await?;
+                .await
+                .with_context(|| format!("failed to execute statement: {}", statement_str))?;
         }
         Ok(())
     }
@@ -536,13 +631,26 @@ impl LogSinker for PostgresSinkWriter {
     }
 }
 
-fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -> String {
+fn create_insert_sql(
+    schema: &Schema,
+    schema_name: &str,
+    table_name: &str,
+    number_of_rows: usize,
+) -> String {
+    assert!(
+        number_of_rows > 0,
+        "number of parameters must be greater than 0"
+    );
+    let normalized_table_name = format!(
+        "{}.{}",
+        quote_identifier(schema_name),
+        quote_identifier(table_name)
+    );
     let number_of_columns = schema.len();
     let columns: String = schema
         .fields()
         .iter()
-        .map(|field| field.name.clone())
-        .collect_vec()
+        .map(|field| quote_identifier(&field.name))
         .join(", ");
     let parameters: String = (0..number_of_rows)
         .map(|i| {
@@ -554,16 +662,33 @@ fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -
         })
         .collect_vec()
         .join(", ");
-    format!("INSERT INTO {table_name} ({columns}) VALUES {parameters}")
+    format!("INSERT INTO {normalized_table_name} ({columns}) VALUES {parameters}")
 }
 
 fn create_delete_sql(
     schema: &Schema,
+    schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
     number_of_rows: usize,
 ) -> String {
+    assert!(
+        number_of_rows > 0,
+        "number of parameters must be greater than 0"
+    );
+    let normalized_table_name = format!(
+        "{}.{}",
+        quote_identifier(schema_name),
+        quote_identifier(table_name)
+    );
     let number_of_pk = pk_indices.len();
+    let pk = {
+        let pk_symbols = pk_indices
+            .iter()
+            .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
+            .join(", ");
+        format!("({})", pk_symbols)
+    };
     let parameters: String = (0..number_of_rows)
         .map(|i| {
             let row_parameters: String = pk_indices
@@ -616,11 +741,14 @@ mod tests {
                 type_name: "".to_owned(),
             },
         ]);
+        let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_insert_sql(&schema, table_name, 3);
+        let sql = create_insert_sql(&schema, schema_name, table_name, 3);
         check(
             sql,
-            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2), ($3, $4), ($5, $6)"],
+            expect![[
+                r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2), ($3, $4), ($5, $6)"#
+            ]],
         );
     }
 
@@ -640,8 +768,9 @@ mod tests {
                 type_name: "".to_owned(),
             },
         ]);
+        let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_delete_sql(&schema, table_name, &[1], 3);
+        let sql = create_delete_sql(&schema, schema_name, table_name, &[1], 3);
         check(
             sql,
             expect!["DELETE FROM test_table WHERE (b = $1) OR (b = $2) OR (b = $3)"],
