@@ -1735,7 +1735,7 @@ pub async fn create_iceberg_engine_table(
                         .name("n")
                         .ok_or_else(|| {
                             ErrorCode::InvalidInputSyntax(
-                                "The `n` must be set with `bucket` and `truncate`".to_string(),
+                                "The `n` must be set with `bucket` and `truncate`".to_owned(),
                             )
                         })?
                         .as_str();
@@ -1768,7 +1768,7 @@ pub async fn create_iceberg_engine_table(
         ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
             |_| {
                 ErrorCode::InvalidInputSyntax(
-                    "The partition columns should be the prefix of the primary key".to_string(),
+                    "The partition columns should be the prefix of the primary key".to_owned(),
                 )
             },
         )?;
@@ -1862,7 +1862,7 @@ fn ensure_partition_columns_are_prefix_of_primary_key(
     primary_key_columns: &[String],
 ) -> std::result::Result<(), String> {
     if partition_columns.len() > primary_key_columns.len() {
-        return Err("Partition columns cannot be longer than primary key columns.".to_string());
+        return Err("Partition columns cannot be longer than primary key columns.".to_owned());
     }
 
     for (i, partition_col) in partition_columns.iter().enumerate() {
