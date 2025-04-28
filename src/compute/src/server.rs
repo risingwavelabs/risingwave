@@ -224,20 +224,13 @@ pub async fn compute_node_serve(
     );
 
     // Initialize observer manager.
-    let stream_client_pool = Arc::new(ComputeClientPool::new(
-        config.streaming_exchange_connection_pool_size(),
-        config.streaming.developer.compute_client_config.clone(),
-    ));
     let batch_client_pool = Arc::new(ComputeClientPool::new(
         config.batch_exchange_connection_pool_size(),
         config.batch.developer.compute_client_config.clone(),
     ));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
-    let compute_observer_node = ComputeObserverNode::new(
-        system_params_manager.clone(),
-        stream_client_pool.clone(),
-        batch_client_pool.clone(),
-    );
+    let compute_observer_node =
+        ComputeObserverNode::new(system_params_manager.clone(), batch_client_pool.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
     observer_manager.start().await;
@@ -374,6 +367,10 @@ pub async fn compute_node_serve(
     );
 
     // Initialize the streaming environment.
+    let stream_client_pool = Arc::new(ComputeClientPool::new(
+        config.streaming_exchange_connection_pool_size(),
+        config.streaming.developer.compute_client_config.clone(),
+    ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
         stream_config,
