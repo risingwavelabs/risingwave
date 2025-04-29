@@ -148,6 +148,7 @@ steps:
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 18
       retry: *auto-retry
+      parallelism: 10
 
   - group: "end-to-end connector test (release)"
     steps:

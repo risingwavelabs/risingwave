@@ -175,5 +175,8 @@ else
 fi
 
 # Install sqllogictest
-cargo install --locked sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev ebaee51884cd57e1ce79f426ba56374b9359fde8
+cargo install --locked sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev e117b191a12ef9dde09183d6b672df8bef816b0d
 # cargo binstall -y --locked sqllogictest-bin@0.28.2
+
+unset BUILDKITE_PARALLEL_JOB
+unset BUILDKITE_PARALLEL_JOB_COUNT
