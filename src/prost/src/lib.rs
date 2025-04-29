@@ -472,7 +472,23 @@ impl stream_plan::Dispatcher {
         stream_plan::DispatchStrategy {
             r#type: self.r#type,
             dist_key_indices: self.dist_key_indices.clone(),
-            output_indices: self.output_indices.clone(),
+            output_mapping: self.output_mapping.clone(),
+        }
+    }
+}
+
+impl stream_plan::DispatchOutputMapping {
+    pub fn identical(len: usize) -> Self {
+        Self {
+            indices: (0..len as u32).collect(),
+            types: Vec::new(),
+        }
+    }
+
+    pub fn simple(indices: Vec<u32>) -> Self {
+        Self {
+            indices,
+            types: Vec::new(),
         }
     }
 }
