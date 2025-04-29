@@ -584,14 +584,14 @@ impl TableFunction {
 
     /// This is a highly specific _internal_ table function meant to scan and aggregate
     /// `backfill_table_id`, `row_count` for all MVs which are still being created.
-    pub fn new_internal_backfill_progress() -> Self {
+    pub fn new_backfill_progress(args: Vec<ExprImpl>) -> Self {
         TableFunction {
-            args: vec![],
+            args,
             return_type: DataType::Struct(StructType::new(vec![
                 ("job_id".to_owned(), DataType::Int32),
                 ("row_count".to_owned(), DataType::Decimal),
             ])),
-            function_type: TableFunctionType::InternalBackfillProgress,
+            function_type: TableFunctionType::BackfillProgress,
             user_defined: None,
         }
     }

@@ -38,12 +38,13 @@ use crate::optimizer::plan_node::{
 use crate::utils::{Condition, GroupBy};
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
-pub struct TableFunctionToInternalBackfillProgressRule {}
-impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
+pub struct TableFunctionToBackfillProgressRule {}
+
+impl FallibleRule for TableFunctionToBackfillProgressRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type
-            != TableFunctionType::InternalBackfillProgress
+            != TableFunctionType::BackfillProgress
         {
             return ApplyResult::NotApplicable;
         }
@@ -252,8 +253,8 @@ fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<Arc<TableCatalog>> {
         .collect_vec()
 }
 
-impl TableFunctionToInternalBackfillProgressRule {
+impl TableFunctionToBackfillProgressRule {
     pub fn create() -> BoxedRule {
-        Box::new(TableFunctionToInternalBackfillProgressRule {})
+        Box::new(TableFunctionToBackfillProgressRule {})
     }
 }

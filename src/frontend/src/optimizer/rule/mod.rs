@@ -328,7 +328,7 @@ macro_rules! for_all_rules {
             , { TableFunctionToFileScanRule }
             , { TableFunctionToPostgresQueryRule }
             , { TableFunctionToMySqlQueryRule }
-            , { TableFunctionToInternalBackfillProgressRule }
+            , { TableFunctionToBackfillProgressRule }
             , { ApplyLimitTransposeRule }
             , { CommonSubExprExtractRule }
             , { BatchProjectMergeRule }

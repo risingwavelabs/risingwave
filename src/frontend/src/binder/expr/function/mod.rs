@@ -364,7 +364,7 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_internal_backfill_progress().into());
+                return Ok(TableFunction::new_backfill_progress(args).into());
             }
             // UDTF
             if let Some(ref udf) = udf
