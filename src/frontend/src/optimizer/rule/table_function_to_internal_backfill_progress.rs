@@ -48,6 +48,12 @@ impl FallibleRule for TableFunctionToBackfillProgressRule {
         {
             return ApplyResult::NotApplicable;
         }
+        // let args = logical_table_function.table_function.args.clone();
+        // let (schema_name, table_name) = match args.as_slice() {
+        //     [table_name] => {
+        //
+        //     }
+        // }
 
         let fields = vec![
             Field::new("job_id", DataType::Int32),
