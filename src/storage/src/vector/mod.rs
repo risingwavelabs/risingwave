@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod distance;
+pub mod hnsw;
 pub use distance::DistanceMeasurement;
 
 pub mod utils;
