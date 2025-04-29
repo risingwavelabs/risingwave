@@ -85,7 +85,13 @@ jobs:
           echo "TAG=$TAG"
 
           # Generate the image tag
-          IMAGE_TAG="v$VERSION-$TAG-$COMMIT_SHA"
+          if [[ ${{ github.event.inputs.enable_alpha_build }} == 'true' ]]; then
+            # If alpha build is enabled, use the commit SHA and tag
+            IMAGE_TAG="$COMMIT_SHA-$TAG"
+          else
+            # Use the version from Cargo.toml, commit SHA, and tag
+            IMAGE_TAG="v$VERSION-$TAG-$COMMIT_SHA"
+          fi
           echo "IMAGE_TAG=$IMAGE_TAG"
 
           # Write the image tag to environment file
