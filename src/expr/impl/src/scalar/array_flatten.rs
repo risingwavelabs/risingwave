@@ -68,7 +68,7 @@ fn array_flatten(array: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     // The elements of the array must be arrays themselves
     let outer_type = &ctx.arg_types[0];
     let inner_type = if outer_type.is_array() {
-        outer_type.as_list()
+        outer_type.as_list_element_type()
     } else {
         return Err(ExprError::InvalidParam {
             name: "array_flatten",
