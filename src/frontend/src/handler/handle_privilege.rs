@@ -15,7 +15,9 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
-use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
+use risingwave_sqlparser::ast::{
+    DefaultPrivilegeOperation, GrantObjects, Ident, ObjectName, Privileges, Statement,
+};
 
 use super::RwPgResponse;
 use crate::bind_data_type;
@@ -450,6 +452,29 @@ pub async fn handle_revoke_privilege(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
+}
+
+pub async fn handle_alter_default_privileges(
+    handler_args: HandlerArgs,
+    stmt: Statement,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let Statement::AlterDefaultPrivileges {
+        target_users,
+        schema_names,
+        operation,
+    } = stmt
+    else {
+        return Err(
+            ErrorCode::BindError("Invalid alter default privileges statement".to_owned()).into(),
+        );
+    };
+
+    todo!("");
+
+    Ok(PgResponse::empty_result(
+        StatementType::ALTER_DEFAULT_PRIVILEGES,
+    ))
 }
 
 #[cfg(test)]
