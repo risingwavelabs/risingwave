@@ -46,7 +46,7 @@ jobs:
         run: |
           # Get current branch name
           echo "GITHUB_REF=$GITHUB_REF"
-          BRANCH_NAME=$(echo $GITHUB_REF | cut -d '/' -f 2)
+          BRANCH_NAME=$(basename $GITHUB_REF)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           
