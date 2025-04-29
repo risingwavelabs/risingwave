@@ -932,5 +932,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         self.env
             .notification_manager()
             .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }
