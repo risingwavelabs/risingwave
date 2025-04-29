@@ -47,16 +47,11 @@ jobs:
           echo "enable_alpha_build=${{ github.event.inputs.enable_alpha_build }}"
       - name: 'Verify release branch'
         id: verify_release_branch
-        # FIXME
-        # if: github.event.inputs.enable_patch_build == 'false' && github.event.inputs.enable_alpha_build == 'false'
+        if: github.event.inputs.enable_patch_build && github.event.inputs.enable_alpha_build
         run: |
           # Get current branch name
           echo "GITHUB_REF=$GITHUB_REF"
-          
-          # BRANCH_NAME=$(basename $GITHUB_REF)
-          # FIXME
-          BRANCH_NAME=release-8888.8888
-          
+          BRANCH_NAME=$(basename $GITHUB_REF)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           
@@ -69,18 +64,14 @@ jobs:
           fi
       - name: 'Get base version'
         id: get_base_version
-        # FIXME
-        # if: github.event.inputs.enable_alpha_build == 'false'
+        if: !github.event.inputs.enable_alpha_build
         run: |
-          # FIXME
-          VERSION=8888.8888.0
-          # VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
-          # Check its not an alpha build
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
+          echo "VERSION=$VERSION"
           if [[ $VERSION == *"alpha"* ]]; then
-            echo "Error: Branch $BRANCH_NAME is has an alpha version: $VERSION"
+            echo "Error: Branch $BRANCH_NAME has an alpha version"
             exit 1
           fi
-          echo "VERSION=$VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: 'Generate image tag'
         id: generate_image_tag
