@@ -38,7 +38,7 @@ fn compare_distance_on_heap<const MAX_HEAP: bool>(
 
 pub(super) struct HeapNode<I, const MAX_HEAP: bool> {
     distance: VectorDistance,
-    pub(super) item: I,
+    item: I,
 }
 
 impl<I, const MAX_HEAP: bool> PartialEq for HeapNode<I, MAX_HEAP> {
