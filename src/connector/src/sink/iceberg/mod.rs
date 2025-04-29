@@ -1705,9 +1705,6 @@ impl IcebergSinkCommitter {
         // occurring during the recovery phase. In this case, we need to use the `snapshot_id`
         // that was previously persisted in the system table to commit.
         let is_first_commit = snapshot_id.is_none();
-        if !is_first_commit {
-            tracing::info!("Doing iceberg re commit.");
-        }
         self.last_commit_epoch = epoch;
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
@@ -1825,7 +1822,7 @@ impl IcebergSinkCommitter {
         if self.is_exactly_once {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
-            tracing::info!(
+            tracing::debug!(
                 "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
                 self.sink_id,
                 epoch
@@ -1878,7 +1875,7 @@ impl IcebergSinkCommitter {
         .await
         {
             Ok(_) => {
-                tracing::info!(
+                tracing::debug!(
                     "Sink id = {}: mark written data status to committed, end_epoch = {}.",
                     sink_id,
                     end_epoch
@@ -1912,13 +1909,13 @@ impl IcebergSinkCommitter {
                 let deleted_count = result.rows_affected;
 
                 if deleted_count == 0 {
-                    tracing::info!(
+                    tracing::debug!(
                         "Sink id = {}: no item deleted in iceberg exactly once system table, end_epoch < {}.",
                         sink_id,
                         end_epoch
                     );
                 } else {
-                    tracing::info!(
+                    tracing::debug!(
                         "Sink id = {}: deleted item in iceberg exactly once system table, end_epoch < {}.",
                         sink_id,
                         end_epoch
