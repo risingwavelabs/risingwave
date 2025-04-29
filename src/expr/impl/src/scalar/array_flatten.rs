@@ -77,7 +77,7 @@ fn array_flatten(array: ListRef<'_>) -> Result<ListValue> {
         array
             .iter()
             // Filter out NULL inner arrays
-            .filter_map(|inner_array| inner_array)
+            .flatten()
             // Flatten all inner arrays
             .flat_map(|inner_array| {
                 if let ScalarRefImpl::List(inner_list) = inner_array {
