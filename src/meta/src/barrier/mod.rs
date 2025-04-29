@@ -106,7 +106,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
     database_job_infos: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
-    /// `table_id` -> (Vec<non-checkpoint epoch>, checkpoint epoch)
+    /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
     stream_actors: HashMap<ActorId, StreamActor>,
@@ -205,7 +205,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 struct DatabaseRuntimeInfoSnapshot {
     job_infos: HashMap<TableId, InflightStreamingJobInfo>,
     state_table_committed_epochs: HashMap<TableId, u64>,
-    /// `table_id` -> (Vec<non-checkpoint epoch>, checkpoint epoch)
+    /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     subscription_info: InflightSubscriptionInfo,
     stream_actors: HashMap<ActorId, StreamActor>,
