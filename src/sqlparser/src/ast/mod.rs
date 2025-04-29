@@ -179,12 +179,27 @@ impl Ident {
         }
     }
 
+    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident`.
+    pub fn from_real_value(value: &str) -> Self {
+        let needs_quotes = value
+            .chars()
+            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
+
+        if needs_quotes {
+            Self::with_quote_unchecked('"', value.replace('"', "\"\""))
+        } else {
+            Self::new_unchecked(value)
+        }
+    }
+
     pub fn quote_style(&self) -> Option<char> {
         self.quote_style
     }
 }
 
 impl From<&str> for Ident {
+    // FIXME: the result is wrong if value contains quote or is case sensitive,
+    //        should use `Ident::from_real_value` instead.
     fn from(value: &str) -> Self {
         Ident {
             value: value.to_owned(),
