@@ -105,6 +105,5 @@ jobs:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
           pipeline: 'docker'
           branch: ${{ env.BRANCH_NAME }}
-          message: 'Triggering Docker build'
-          env:
-            IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          message: ':github: Triggering Docker build'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}" }'
