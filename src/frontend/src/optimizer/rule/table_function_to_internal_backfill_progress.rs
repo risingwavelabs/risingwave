@@ -16,22 +16,22 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::catalog::{internal_table_name_to_parts, Field, Schema, StreamJobStatus};
+use risingwave_common::catalog::{Field, Schema, StreamJobStatus, internal_table_name_to_parts};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 
 use super::{ApplyResult, BoxedRule, FallibleRule};
+use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::table_catalog::TableType;
 use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
 };
-use crate::optimizer::PlanRef;
 use crate::utils::{Condition, GroupBy};
-use crate::TableCatalog;
 
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToInternalBackfillProgressRule {}
