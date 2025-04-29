@@ -491,6 +491,14 @@ impl stream_plan::DispatchOutputMapping {
             types: Vec::new(),
         }
     }
+
+    pub fn into_simple_indices(self) -> Vec<u32> {
+        assert!(
+            self.types.is_empty(),
+            "types must be empty for simple mapping"
+        );
+        self.indices
+    }
 }
 
 impl catalog::StreamSourceInfo {

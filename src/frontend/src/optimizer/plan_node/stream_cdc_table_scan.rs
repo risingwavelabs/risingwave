@@ -206,7 +206,8 @@ impl StreamCdcTableScan {
                 strategy: Some(DispatchStrategy {
                     r#type: DispatcherType::Simple as _,
                     dist_key_indices: vec![], // simple exchange doesn't need dist key
-                    output_indices: (0..cdc_source_schema.len() as u32).collect(),
+                    output_mapping: PbDispatchOutputMapping::identical(cdc_source_schema.len())
+                        .into(),
                 }),
             }))),
         };
