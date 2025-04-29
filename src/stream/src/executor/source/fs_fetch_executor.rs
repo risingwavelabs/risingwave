@@ -337,15 +337,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     let file_assignment = chunk
                                         .data_chunk()
                                         .rows()
-                                        .map(|row| {
+                                        .filter_map(|row| {
                                             let filename = row.datum_at(0).unwrap().into_utf8();
-                                            reading_file = Some(filename.into());
                                             let size = row.datum_at(2).unwrap().into_int64();
-                                            OpendalFsSplit::<Src>::new(
-                                                filename.to_owned(),
-                                                0,
-                                                size as usize,
-                                            )
+
+                                            if size > 0 {
+                                                Some(OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    size as usize,
+                                                ))
+                                            } else {
+                                                None
+                                            }
                                         })
                                         .collect();
                                     state_store_handler.set_states(file_assignment).await?;
