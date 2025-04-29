@@ -183,6 +183,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayPosition
             | Type::ArrayContains
             | Type::ArrayContained
+            | Type::ArrayFlatten
             | Type::HexToInt256
             | Type::JsonbConcat
             | Type::JsonbAccess

@@ -344,6 +344,15 @@ impl Binder {
                 ("arraycontains", raw_call(ExprType::ArrayContains)),
                 ("array_contained", raw_call(ExprType::ArrayContained)),
                 ("arraycontained", raw_call(ExprType::ArrayContained)),
+                ("array_flatten", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].ensure_array_type().map_err(|_| ErrorCode::BindError("array_flatten expects `any[][]` input".into()))?;
+                    let return_type = inputs[0].return_type().into_list_element_type();
+                    if !return_type.is_array() {
+                        return Err(ErrorCode::BindError("array_flatten expects `any[][]` input".into()).into());
+
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::ArrayFlatten, inputs, return_type).into())
+                }))),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 (
                     "array_ndims",
