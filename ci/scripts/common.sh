@@ -1,6 +1,5 @@
 export CARGO_TERM_COLOR=always
 export PROTOC_NO_VENDOR=true
-export CARGO_HOME=/risingwave/.cargo
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
@@ -174,3 +173,7 @@ if [ -n "${BUILDKITE_PARALLEL_JOB:-}" ] && [ -n "${BUILDKITE_PARALLEL_JOB_COUNT:
 else
   NEXTEST_PARTITION_ARG=""
 fi
+
+# Install sqllogictest
+cargo install --locked sqllogictest-bin --git https://github.com/risinglightdb/sqllogictest-rs --rev ebaee51884cd57e1ce79f426ba56374b9359fde8
+# cargo binstall -y --locked sqllogictest-bin@0.28.2
