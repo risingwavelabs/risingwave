@@ -975,6 +975,7 @@ where
                     continue;
                 };
                 let vec = vec.into_inner().iter().map(|f| f.unwrap().into_float32().0).collect_vec();
+                tracing::warn!("inserting vector: {:?}", vec);
                 let vec = risingwave_storage::vector::Vector::new(&vec);
                 let info = Bytes::new(); // TODO: value
                 vector_writer.insert(vec, info).unwrap(); // TODO: unwrap_or_else handle_memtable_error
@@ -1129,13 +1130,23 @@ where
             .flush()
             .instrument(tracing::info_span!("state_table_flush"))
             .await?;
+        if let Some(vector_writer) = &mut self.vector_writer {
+            vector_writer.flush().await?;
+        }
         let table_watermarks = self.commit_pending_watermark();
+        let seal_opts = SealCurrentEpochOptions {
+            table_watermarks,
+            switch_op_consistency_level,
+        };
+        if let Some(vector_writer) = &mut self.vector_writer {
+            vector_writer.seal_current_epoch(
+                new_epoch.curr,
+                seal_opts.clone(),
+            );
+        }
         self.local_store.seal_current_epoch(
             new_epoch.curr,
-            SealCurrentEpochOptions {
-                table_watermarks,
-                switch_op_consistency_level,
-            },
+            seal_opts,
         );
         self.epoch = Some(new_epoch);
 
@@ -1294,6 +1305,9 @@ where
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
         self.local_store.try_flush().await?;
+        if let Some(vector_writer) = &mut self.vector_writer {
+            vector_writer.try_flush().await?;
+        }
         Ok(())
     }
 }

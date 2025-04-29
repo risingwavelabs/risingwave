@@ -105,6 +105,8 @@ pub struct BatchTableInner<S: StateStore, SD: ValueRowSerde> {
     table_option: TableOption,
 
     read_prefix_len_hint: usize,
+
+    is_vector_index: bool,
 }
 
 /// `BatchTable` will use [`EitherSerde`] as default so that we can support both versioned and
@@ -270,7 +272,8 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
-            .collect();
+            .collect_vec();
+        let is_vector_index = matches!(pk_data_types[0], risingwave_common::types::DataType::Vector(_));
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
         let (row_serde, mapping) = {
             if versioned {
@@ -323,6 +326,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             distribution,
             table_option,
             read_prefix_len_hint,
+            is_vector_index,
         }
     }
 }
@@ -1050,7 +1054,52 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         chunk_size: usize,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<impl Stream<Item = StorageResult<DataChunk>> + Send> {
-        // self.store.new_read_snapshot(epoch, options);
+        tracing::warn!(
+            r#"batch_table_inner params!
+            schema: {:?},
+            output_indices: {:?},
+            key_output_indices: {:?},
+            value_output_indices: {:?},
+            output_row_in_key_indices: {:?},
+            mapping: {:?},
+            pk_indices: {:?},
+            is_vector_index: {:?},
+            "#,
+            self.schema,
+            self.output_indices,
+            self.key_output_indices,
+            self.value_output_indices,
+            self.output_row_in_key_indices,
+            self.mapping,
+            self.pk_indices,
+            self.is_vector_index,
+        );
+        if self.is_vector_index {
+            let read_snapshot = self
+                .store
+                .new_read_snapshot(
+                    epoch,
+                    NewReadSnapshotOptions {
+                        table_id: self.table_id,
+                    },
+                )
+                .await?;
+            use crate::store::{StateStoreReadVector as _, VectorNearestOptions, DistanceMeasurement};
+            use crate::vector::Vector;
+            let v = Vector::new(&[3., 1., 2.]);
+            let options = VectorNearestOptions {
+                top_n: 2,
+                measure: DistanceMeasurement::L2,
+            };
+            let ret = read_snapshot.nearest(v, options, |a, b, c| {
+                tracing::warn!("nearest on_fn: a: {:?}, b: {:?}, c: {:?}", a, b, c);
+                b
+            }).await?;
+            tracing::warn!("nearest ret: {:?}", ret);
+            return Err(crate::error::ErrorKind::DeserializeRow(
+                risingwave_common::util::value_encoding::error::ValueEncodingError::InvalidJsonbEncoding
+            ).into());
+        }
 
         let iter = self
             .chunk_iter_with_pk_bounds(

@@ -45,7 +45,7 @@ pub fn find_columns_by_ids(
         .unzip()
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ColumnMapping {
     output_indices: Vec<usize>,
 }
