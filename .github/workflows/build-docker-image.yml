@@ -54,7 +54,7 @@ jobs:
           BRANCH_NAME=$(basename $GITHUB_REF)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
-          
+
           # Check for semver
           if [[ "$BRANCH_NAME" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
             echo "Branch $BRANCH_NAME is a valid release branch"
@@ -66,7 +66,7 @@ jobs:
         id: get_base_version
         if: github.event.inputs.enable_alpha_build != 'true'
         run: |
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
           echo "VERSION=$VERSION"
           if [[ $VERSION == *"alpha"* ]]; then
             echo "Error: Branch $GITHUB_REF has an alpha version"
