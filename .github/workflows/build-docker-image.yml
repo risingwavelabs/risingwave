@@ -62,41 +62,37 @@ jobs:
             echo "Error: Branch $BRANCH_NAME is not a release branch"
             exit 1
           fi
-      - name: 'Verify patch base version'
-        id: verify_patch_base_version
+      - name: 'Get base version'
+        id: get_base_version
         # FIXME
-        # if: github.event.inputs.enable_patch_build == 'true'
+        # if: github.event.inputs.enable_alpha_build == 'false'
         run: |
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
+          # FIXME
+          VERSION=2.1.0
+          # VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
           # Check its not an alpha build
           if [[ $VERSION == *"alpha"* ]]; then
             echo "Error: Branch $BRANCH_NAME is has an alpha version: $VERSION"
             exit 1
           fi
+          echo "VERSION=$VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: 'Generate image tag'
         id: generate_image_tag
         run: |
-          # Get the version from Cargo.toml
-          # FIXME
-          # VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
-          VERSION=2.1.0
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          
           # Get the commit SHA
           COMMIT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "COMMIT_SHA=$COMMIT_SHA"
 
           # Get the tag from the input
           TAG=${{ github.event.inputs.tag }}
-          # Check if the tag is empty
-          if [ -z "$TAG" ]; then
-            TAG="untagged"
-          fi
+          echo "TAG=$TAG"
 
           # Generate the image tag
           IMAGE_TAG="v$VERSION-$TAG-$COMMIT_SHA"
+          echo "IMAGE_TAG=$IMAGE_TAG"
           
           # Write the image tag to environment file
-          echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 #      - name: 'Trigger Docker build Workflow via Buildkite'
 #        uses: buildkite/trigger-pipeline-action@v2.0.0
