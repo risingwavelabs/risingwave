@@ -97,7 +97,7 @@ pub fn try_purify_table_source_create_sql_ast(
 
             // Generate a new `ColumnDef` from the catalog.
             ColumnDef {
-                name: column.name().into(),
+                name: Ident::from_real_value(column.name()),
                 data_type: Some(column.data_type().to_ast()),
                 collation: None,
                 options: Vec::new(), // pk will be specified with table constraints
@@ -159,7 +159,14 @@ pub fn try_purify_table_source_create_sql_ast(
                     column.name()
                 );
             }
-            pk_columns.push(column.name().into());
+            // Find the name in `Ident` form from `column_defs` to preserve quote style best.
+            let name_ident = column_defs
+                .iter()
+                .find(|c| c.name.real_value() == column.name())
+                .unwrap()
+                .name
+                .clone();
+            pk_columns.push(name_ident);
         }
 
         let pk_constraint = TableConstraint::Unique {
