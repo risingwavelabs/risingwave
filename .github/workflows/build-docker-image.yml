@@ -45,6 +45,7 @@ jobs:
         # if: github.event.inputs.enable_patch_build == 'false' && github.event.inputs.enable_alpha_build == 'false'
         run: |
           # Get current branch name
+          echo "GITHUB_REF=$GITHUB_REF"
           BRANCH_NAME=$(echo $GITHUB_REF | cut -d '/' -f 3)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
