@@ -69,7 +69,7 @@ jobs:
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
           echo "VERSION=$VERSION"
           if [[ $VERSION == *"alpha"* ]]; then
-            echo "Error: Branch $BRANCH_NAME has an alpha version"
+            echo "Error: Branch $GITHUB_REF has an alpha version"
             exit 1
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
