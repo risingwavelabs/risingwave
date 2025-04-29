@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod compaction;
 mod prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -75,8 +74,6 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{self};
-use tokio::sync::oneshot;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
@@ -551,7 +548,6 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
@@ -561,8 +557,6 @@ impl Sink for IcebergSink {
             config: self.config.clone(),
             param: self.param.clone(),
             db,
-            commit_notifier: None,
-            _compact_task_guard: None,
             commit_retry_num: self.config.commit_retry_num,
             committed_epoch_subscriber: None,
         })
@@ -1485,10 +1479,8 @@ pub struct IcebergSinkCommitter {
     pub(crate) config: IcebergConfig,
     pub(crate) param: SinkParam,
     pub(crate) db: DatabaseConnection,
-    commit_notifier: Option<mpsc::UnboundedSender<()>>,
-    commit_retry_num: u32,
-    _compact_task_guard: Option<oneshot::Sender<()>>,
     pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
+    commit_retry_num: u32,
 }
 
 impl IcebergSinkCommitter {
@@ -1812,11 +1804,6 @@ impl IcebergSinkCommitter {
         .await?;
         self.table = table;
 
-        if let Some(commit_notifier) = &mut self.commit_notifier {
-            if commit_notifier.send(()).is_err() {
-                warn!("failed to notify commit");
-            }
-        }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if self.is_exactly_once {
