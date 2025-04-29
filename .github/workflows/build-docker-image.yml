@@ -47,7 +47,7 @@ jobs:
           echo "enable_alpha_build=${{ github.event.inputs.enable_alpha_build }}"
       - name: 'Verify release branch'
         id: verify_release_branch
-        if: github.event.inputs.enable_patch_build && github.event.inputs.enable_alpha_build
+        if: github.event.inputs.enable_patch_build == 'false' && github.event.inputs.enable_alpha_build == 'false'
         run: |
           # Get current branch name
           echo "GITHUB_REF=$GITHUB_REF"
@@ -64,7 +64,7 @@ jobs:
           fi
       - name: 'Get base version'
         id: get_base_version
-        if: ! github.event.inputs.enable_alpha_build
+        if: github.event.inputs.enable_alpha_build != 'true'
         run: |
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
           echo "VERSION=$VERSION"
