@@ -407,6 +407,12 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        self.update_vnode_bitmap_impl(vnodes).await
+    }
+}
+
+impl StateStoreWriteEpochControl for LocalHummockStorage {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
@@ -570,8 +576,13 @@ impl LocalStateStore for LocalHummockStorage {
             warn!("failed to send LocalSealEpoch. maybe shutting down");
         }
     }
+}
 
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+impl LocalHummockStorage {
+    async fn update_vnode_bitmap_impl(
+        &mut self,
+        vnodes: Arc<Bitmap>,
+    ) -> StorageResult<Arc<Bitmap>> {
         wait_for_epoch(
             &self.version_update_notifier_tx,
             self.epoch.expect("should have init").prev,
@@ -588,9 +599,7 @@ impl LocalStateStore for LocalHummockStorage {
         );
         Ok(read_version.update_vnode_bitmap(vnodes))
     }
-}
 
-impl LocalHummockStorage {
     fn new_flushed_snapshot_reader_inner(&self) -> LocalHummockFlushedSnapshotReader {
         LocalHummockFlushedSnapshotReader {
             table_id: self.table_id,

@@ -321,6 +321,8 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
+            Command::ConnectorPropsChange(_) => {}
+            Command::StartFragmentBackfill { .. } => {}
         }
 
         Ok(())

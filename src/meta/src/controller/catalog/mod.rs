@@ -244,6 +244,7 @@ impl CatalogController {
         let job_id = subscription_id as i32;
         let (subscription, obj) = Subscription::find_by_id(job_id)
             .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
@@ -384,12 +385,12 @@ impl CatalogController {
         } else {
             filter_condition
         };
-
         Object::delete_many()
             .filter(filter_condition)
             .exec(&txn)
             .await?;
         txn.commit().await?;
+        // We don't need to notify the frontend, because the Init subscription is not send to frontend.
         Ok(())
     }
 
@@ -849,6 +850,7 @@ impl CatalogControllerInner {
     async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
         let subscription_objs = Subscription::find()
             .find_also_related(Object)
+            .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .all(&self.db)
             .await?;
 

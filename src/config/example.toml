@@ -138,6 +138,7 @@ batch_output_channel_size = 64
 batch_receiver_channel_size = 1000
 batch_root_stage_channel_size = 100
 batch_chunk_size = 1024
+batch_local_execute_buffer_size = 64
 
 [batch.developer.batch_compute_client_config]
 connect_timeout_secs = 5
@@ -242,6 +243,15 @@ indexer_shards = 64
 compression = "None"
 recover_mode = "Quiet"
 
+[storage.data_file_cache.throttle]
+write_iops = 100000
+read_iops = 100000
+write_throughput = 1073741824
+read_throughput = 1073741824
+
+[storage.data_file_cache.throttle.iops_counter]
+PerIoSize = 131072
+
 [storage.data_file_cache.runtime_config.Unified]
 worker_threads = 0
 max_blocking_threads = 0
@@ -257,6 +267,15 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 recover_mode = "Quiet"
+
+[storage.meta_file_cache.throttle]
+write_iops = 100000
+read_iops = 100000
+write_throughput = 1073741824
+read_throughput = 1073741824
+
+[storage.meta_file_cache.throttle.iops_counter]
+PerIoSize = 131072
 
 [storage.meta_file_cache.runtime_config.Unified]
 worker_threads = 0
@@ -324,7 +343,7 @@ license_key = ""
 time_travel_retention_ms = 600000
 adaptive_parallelism_strategy = "Auto"
 per_database_isolation = true
-enforce_secret_on_cloud = false
+enforce_secret = false
 
 [udf]
 enable_embedded_python_udf = false

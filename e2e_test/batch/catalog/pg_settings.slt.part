@@ -14,7 +14,7 @@ postmaster backup_storage_url
 postmaster barrier_interval_ms
 postmaster checkpoint_frequency
 postmaster enable_tracing
-postmaster enforce_secret_on_cloud
+postmaster enforce_secret
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
@@ -63,6 +63,7 @@ user statement_timeout
 user streaming_allow_jsonb_in_stream_key
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
+user streaming_enable_materialized_expressions
 user streaming_enable_unaligned_join
 user streaming_force_filter_inside_join
 user streaming_max_parallelism

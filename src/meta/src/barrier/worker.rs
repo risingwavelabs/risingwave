@@ -43,8 +43,8 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::rpc::{ControlStreamManager, merge_node_rpc_errors};
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
-    schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
+    RecoveryReason, schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -357,7 +357,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
-                                    let workers = runtime_info.database_fragment_info.workers();
+                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|job| job.fragment_infos()));
                                     for worker_id in workers {
                                         if !self.control_stream_manager.is_connected(worker_id) {
                                             self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
@@ -447,6 +447,20 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
+                    if let Some((_, Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
+                        let worker_ids: HashSet<_> =
+                            info.stream_job_fragments.inner
+                            .actors_to_create()
+                            .flat_map(|(_, _, actors)|
+                                actors.map(|(_, worker_id)| worker_id)
+                            )
+                            .collect();
+                        for worker_id in worker_ids {
+                            if !self.control_stream_manager.is_connected(worker_id) {
+                                self.control_stream_manager.try_reconnect_worker(worker_id, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                            }
+                        }
+                    }
                     if let Some(failed_databases) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager)
                         && !failed_databases.is_empty() {
                         if !self.enable_recovery {
@@ -665,6 +679,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::controller::fragment::InflightFragmentInfo;
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
@@ -714,6 +729,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let enable_per_database_isolation = self.enable_per_database_isolation();
 
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
+            self.env.stream_client_pool().invalidate_all();
             // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
             // it holds the reschedule_read_lock and wait for creating job to finish, and caused the following scale_actor fail
             // to acquire the reschedule_write_lock, and then keep recovering, and then deadlock.
@@ -730,8 +746,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             })?;
             let BarrierWorkerRuntimeInfoSnapshot {
                 active_streaming_nodes,
-                database_fragment_infos,
+                database_job_infos,
                 mut state_table_committed_epochs,
+                mut state_table_log_epochs,
                 mut subscription_infos,
                 stream_actors,
                 fragment_relations,
@@ -755,18 +772,19 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
             {
-                let mut builder = FragmentEdgeBuilder::new(database_fragment_infos.values().flat_map(|info| info.fragment_infos()), &control_stream_manager);
+                let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|info| info.values().flatten()), &control_stream_manager);
                 builder.add_relations(&fragment_relations);
                 let mut edges = builder.build();
 
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
                 let mut failed_databases = HashSet::new();
-                for (database_id, info) in database_fragment_infos {
+                for (database_id, jobs) in database_job_infos {
                     let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
-                        info,
+                        jobs,
                         &mut state_table_committed_epochs,
+                        &mut state_table_log_epochs,
                         &mut edges,
                         &stream_actors,
                         &mut source_splits,
@@ -928,5 +946,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         self.env
             .notification_manager()
             .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }

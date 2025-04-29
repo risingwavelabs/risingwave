@@ -86,9 +86,10 @@ cluster_start
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
-if [ "$profile" != "ci-dev" ]; then
-    echo "--- Run release mode only tests"
-    risedev slt -p 4566 -d dev './e2e_test/release_mode_only/*.slt'
+if [[ "$profile" == "ci-release" ]]; then
+  echo "--- e2e, $mode, backfill"
+  # only run in release-mode. It's too slow for dev-mode.
+  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
 fi
 
 echo "--- Kill cluster"

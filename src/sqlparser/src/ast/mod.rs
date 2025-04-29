@@ -62,10 +62,11 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
-tokio::task_local! {
+task_local::task_local! {
     pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
 }
 
@@ -1666,25 +1667,55 @@ pub enum DescribeKind {
 }
 
 impl fmt::Display for Statement {
+    /// Converts(unparses) the statement to a SQL string.
+    ///
+    /// If the resulting SQL is not valid, this function will panic. Use
+    /// [`Statement::try_to_string`] to get a `Result` instead.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut buf = String::new();
-        self.fmt_inner(&mut buf)?;
+        // Note: we ignore formatting options here.
+        let sql = self
+            .try_to_string()
+            .expect("normalized SQL should be parsable");
+        f.write_str(&sql)
+    }
+}
+
+impl Statement {
+    /// Converts(unparses) the statement to a SQL string.
+    ///
+    /// If the resulting SQL is not valid, returns an error.
+    pub fn try_to_string(&self) -> Result<String, ParserError> {
+        let sql = self.to_string_unchecked();
+
         // TODO(#20713): expand this check to all statements
         if matches!(
             self,
             Statement::CreateTable { .. } | Statement::CreateSource { .. }
         ) {
-            let _ = Parser::parse_sql(&buf).expect("normalized SQL should be parsable");
+            let _ = Parser::parse_sql(&sql)?;
         }
-        f.write_str(&buf)
+        Ok(sql)
     }
-}
 
-impl Statement {
+    /// Converts(unparses) the statement to a SQL string.
+    ///
+    /// The result may not be valid SQL if there's an implementation bug in the `Display`
+    /// trait of any AST node. To avoid this, always prefer [`Statement::try_to_string`]
+    /// to get a `Result`, or `to_string` which panics if the SQL is invalid.
+    pub fn to_string_unchecked(&self) -> String {
+        let mut buf = String::new();
+        self.fmt_unchecked(&mut buf).unwrap();
+        buf
+    }
+
+    // NOTE: This function should not check the validity of the unparsed SQL (and panic).
+    //       Thus, do not directly format a statement with `write!` or `format!`. Recursively
+    //       call `fmt_unchecked` on the inner statements instead.
+    //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
     #[allow(clippy::cognitive_complexity)]
-    fn fmt_inner(&self, mut f: impl std::fmt::Write) -> fmt::Result {
+    fn fmt_unchecked(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
                 analyze,
@@ -1698,7 +1729,7 @@ impl Statement {
                 }
                 write!(f, "{}", options)?;
 
-                statement.fmt_inner(f)
+                statement.fmt_unchecked(f)
             }
             Statement::ExplainAnalyzeStreamJob {
                 target,
@@ -2286,7 +2317,7 @@ impl Statement {
                     write!(f, "({}) ", display_comma_separated(data_types))?;
                 }
                 write!(f, "AS ")?;
-                statement.fmt_inner(f)
+                statement.fmt_unchecked(f)
             }
             Statement::Comment {
                 object_type,
@@ -2998,12 +3029,27 @@ impl fmt::Display for SqlOption {
     }
 }
 
+impl TryFrom<(&String, &String)> for SqlOption {
+    type Error = ParserError;
+
+    fn try_from((name, value): (&String, &String)) -> Result<Self, Self::Error> {
+        let query = format!("{} = {}", name, value);
+        let mut tokenizer = Tokenizer::new(query.as_str());
+        let tokens = tokenizer.tokenize_with_location()?;
+        let mut parser = Parser(&tokens);
+        parser
+            .parse_sql_option()
+            .map_err(|e| ParserError::ParserError(e.to_string()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
+    BackfillOrder(BackfillOrderStrategy),
 }
 
 impl fmt::Display for SqlOptionValue {
@@ -3013,6 +3059,9 @@ impl fmt::Display for SqlOptionValue {
             SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
             SqlOptionValue::ConnectionRef(connection_ref) => {
                 write!(f, "{}", connection_ref)
+            }
+            SqlOptionValue::BackfillOrder(order) => {
+                write!(f, "{}", order)
             }
         }
     }
@@ -3589,6 +3638,36 @@ impl fmt::Display for DiscardType {
         use DiscardType::*;
         match self {
             All => write!(f, "ALL"),
+        }
+    }
+}
+
+// We decouple "default" from none,
+// so we can choose strategies that make the most sense.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BackfillOrderStrategy {
+    #[default]
+    Default,
+    None,
+    Auto,
+    Fixed(Vec<(ObjectName, ObjectName)>),
+}
+
+impl fmt::Display for BackfillOrderStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use BackfillOrderStrategy::*;
+        match self {
+            Default => write!(f, "DEFAULT"),
+            None => write!(f, "NONE"),
+            Auto => write!(f, "AUTO"),
+            Fixed(map) => {
+                let mut parts = vec![];
+                for (start, end) in map {
+                    parts.push(format!("{} -> {}", start, end));
+                }
+                write!(f, "{}", display_comma_separated(&parts))
+            }
         }
     }
 }

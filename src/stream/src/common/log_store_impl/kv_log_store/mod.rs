@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::mem::replace;
 use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
@@ -43,13 +45,121 @@ pub mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
-/// If truncating on barrier, the `seq_id` is `None`.
-pub(crate) type LogStoreVnodeProgress = HashMap<VirtualNode, SeqId>;
+pub(crate) enum LogStoreVnodeProgress {
+    None,
+    PerVnode(HashMap<VirtualNode, (Epoch, Option<SeqId>)>),
+    Aligned(Arc<Bitmap>, Epoch, Option<SeqId>),
+}
+
+impl LogStoreVnodeProgress {
+    pub(crate) fn take(&mut self) -> Self {
+        replace(self, Self::None)
+    }
+
+    fn assert_progress_increase(
+        prev_epoch: Epoch,
+        prev_progress: Option<SeqId>,
+        epoch: Epoch,
+        progress: Option<SeqId>,
+    ) {
+        match prev_progress {
+            None => {
+                assert!(
+                    prev_epoch < epoch,
+                    "barrier epoch {} decrease to {}",
+                    prev_epoch,
+                    epoch
+                );
+            }
+            Some(prev_progress) => {
+                assert_eq!(prev_epoch, epoch);
+                if let Some(progress) = progress {
+                    assert!(progress > prev_progress);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn apply_per_vnode(&mut self, epoch: Epoch, progress: HashMap<VirtualNode, SeqId>) {
+        fn apply_to_progress_map(
+            prev_progress: &mut HashMap<VirtualNode, (Epoch, Option<SeqId>)>,
+            epoch: Epoch,
+            progress: HashMap<VirtualNode, SeqId>,
+        ) {
+            for (vnode, seq_id) in progress {
+                match prev_progress.entry(vnode) {
+                    Entry::Occupied(entry) => {
+                        let (prev_epoch, prev_seq_id) = entry.into_mut();
+                        LogStoreVnodeProgress::assert_progress_increase(
+                            *prev_epoch,
+                            *prev_seq_id,
+                            epoch,
+                            Some(seq_id),
+                        );
+                        *prev_epoch = epoch;
+                        *prev_seq_id = Some(seq_id);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert((epoch, Some(seq_id)));
+                    }
+                }
+            }
+        }
+        match self {
+            LogStoreVnodeProgress::None => {
+                *self = LogStoreVnodeProgress::PerVnode(
+                    progress
+                        .into_iter()
+                        .map(|(vnode, seq_id)| (vnode, (epoch, Some(seq_id))))
+                        .collect(),
+                )
+            }
+            LogStoreVnodeProgress::PerVnode(prev_progress) => {
+                apply_to_progress_map(prev_progress, epoch, progress);
+            }
+            LogStoreVnodeProgress::Aligned(vnodes, prev_epoch, prev_progress) => {
+                let mut progress_map = vnodes
+                    .iter_vnodes()
+                    .map(|vnode| (vnode, (*prev_epoch, *prev_progress)))
+                    .collect();
+                apply_to_progress_map(&mut progress_map, epoch, progress);
+                *self = LogStoreVnodeProgress::PerVnode(progress_map);
+            }
+        }
+    }
+
+    pub(crate) fn apply_aligned(
+        &mut self,
+        vnodes: Arc<Bitmap>,
+        epoch: Epoch,
+        progress: Option<SeqId>,
+    ) {
+        match self {
+            LogStoreVnodeProgress::None => {}
+            LogStoreVnodeProgress::PerVnode(prev_progress) => {
+                for (vnode, (prev_epoch, prev_progress)) in prev_progress.drain() {
+                    assert!(
+                        vnodes.is_set(vnode.to_index()),
+                        "aligned progress not covered existing vnode {}",
+                        vnode
+                    );
+                    Self::assert_progress_increase(prev_epoch, prev_progress, epoch, progress);
+                }
+            }
+            LogStoreVnodeProgress::Aligned(prev_vnodes, prev_epoch, prev_progress) => {
+                assert_eq!(vnodes.len(), prev_vnodes.len());
+                assert!(prev_vnodes.iter_ones().all(|vnode| vnodes.is_set(vnode)));
+                Self::assert_progress_increase(*prev_epoch, *prev_progress, epoch, progress);
+            }
+        }
+        *self = LogStoreVnodeProgress::Aligned(vnodes, epoch, progress);
+    }
+}
 
 // TODO: unify with `risingwave_common::Epoch`
 pub(crate) type Epoch = u64;

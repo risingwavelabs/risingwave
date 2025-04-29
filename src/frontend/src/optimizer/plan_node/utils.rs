@@ -476,6 +476,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
                 || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
+                || scan.stream_scan_type() == StreamScanType::SnapshotBackfill
         } else {
             false
         }
