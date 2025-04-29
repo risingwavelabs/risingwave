@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
+use itertools::Either;
 use risingwave_common::array::{ListRef, ListValue};
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::{Result, function};
@@ -40,9 +40,19 @@ use risingwave_expr::{Result, function};
 /// {1,2,3,4}
 ///
 /// query T
+/// select array_flatten(array[array[array[1], array[2, null]], array[array[3, 4], null::int[]]]);
+/// ----
+/// {{1},{2,NULL},{3,4},NULL}
+///
+/// query T
 /// select array_flatten(array[[]]::int[][]);
 /// ----
 /// {}
+///
+/// query T
+/// select array_flatten(array[[null, 1]]::int[][]);
+/// ----
+/// {NULL,1}
 ///
 /// query T
 /// select array_flatten(array[]::int[][]);
@@ -71,10 +81,10 @@ fn array_flatten(array: ListRef<'_>) -> Result<ListValue> {
             // Flatten all inner arrays
             .flat_map(|inner_array| {
                 if let ScalarRefImpl::List(inner_list) = inner_array {
-                    inner_list.iter().collect_vec()
+                    Either::Left(inner_list.iter())
                 } else {
                     // This shouldn't happen but handle it gracefully
-                    vec![]
+                    Either::Right(std::iter::empty())
                 }
             }),
     ))
