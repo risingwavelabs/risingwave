@@ -40,6 +40,11 @@ jobs:
     # should match: vX.Y.Z
     steps:
       - uses: actions/checkout@v4
+      - name: 'Print inputs'
+        run: |
+          echo "TAG=${{ github.event.inputs.tag }}"
+          echo "enable_patch_build=${{ github.event.inputs.enable_patch_build }}"
+          echo "enable_alpha_build=${{ github.event.inputs.enable_alpha_build }}"
       - name: 'Verify release branch'
         id: verify_release_branch
         # FIXME
@@ -91,7 +96,7 @@ jobs:
           # Generate the image tag
           IMAGE_TAG="v$VERSION-$TAG-$COMMIT_SHA"
           echo "IMAGE_TAG=$IMAGE_TAG"
-          
+
           # Write the image tag to environment file
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 #      - name: 'Trigger Docker build Workflow via Buildkite'
