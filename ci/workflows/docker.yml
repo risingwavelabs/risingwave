@@ -10,7 +10,7 @@ auto-retry: &auto-retry
 steps:
   - label: "print image tag"
     command: |
-      echo "IMAGE_TAG: $IMAGE_TAG"
+      echo "IMAGE_TAG: ${IMAGE_TAG:-unset}"
   - label: "docker-build-push: amd64"
     if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/docker.sh"
