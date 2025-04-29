@@ -1224,7 +1224,7 @@ fn gen_output_mapping(
                 .position(|&id| id == *c)
                 .map(|i| i as u32)
         })
-        .collect()?;
+        .collect::<Option<_>>()?;
 
     Some(DispatchOutputMapping::simple(indices))
 }

@@ -631,8 +631,8 @@ pub enum DispatcherImpl {
 
 impl DispatcherImpl {
     pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
-        let output_indices = dispatcher
-            .output_indices
+        let output_indices = (dispatcher.output_mapping.clone().unwrap())
+            .into_simple_indices()
             .iter()
             .map(|&i| i as usize)
             .collect_vec();
