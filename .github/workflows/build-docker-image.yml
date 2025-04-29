@@ -77,7 +77,9 @@ jobs:
         id: generate_image_tag
         run: |
           # Get the version from Cargo.toml
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          # FIXME
+          # VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          VERSION=2.1.0
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           
           # Get the commit SHA
