@@ -64,7 +64,7 @@ jobs:
           fi
       - name: 'Get base version'
         id: get_base_version
-        if: !github.event.inputs.enable_alpha_build
+        if: ! github.event.inputs.enable_alpha_build
         run: |
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
           echo "VERSION=$VERSION"
