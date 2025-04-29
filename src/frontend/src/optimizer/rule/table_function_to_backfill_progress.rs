@@ -14,8 +14,9 @@
 
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema, StreamJobStatus, internal_table_name_to_parts};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
@@ -40,6 +41,25 @@ use crate::utils::{Condition, GroupBy};
 /// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
 pub struct TableFunctionToBackfillProgressRule {}
 
+impl TableFunctionToBackfillProgressRule {
+    fn bind_schema_and_table_name(args: &[ExprImpl]) -> Result<(String, String)> {
+        match args {
+            [table_name] => {
+                let table_name = table_name.to_string_value()?;
+                Ok(("public".to_owned(), table_name))
+            }
+            [schema_name, table_name] => {
+                let schema_name = schema_name.to_string_value()?;
+                let table_name = table_name.to_string_value()?;
+                Ok((schema_name, table_name))
+            }
+            _ => bail!(
+                "expected backfill_progress([schema_name varchar, ] table_name varchar), with literal arguments"
+            ),
+        }
+    }
+}
+
 impl FallibleRule for TableFunctionToBackfillProgressRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
@@ -48,12 +68,8 @@ impl FallibleRule for TableFunctionToBackfillProgressRule {
         {
             return ApplyResult::NotApplicable;
         }
-        // let args = logical_table_function.table_function.args.clone();
-        // let (schema_name, table_name) = match args.as_slice() {
-        //     [table_name] => {
-        //
-        //     }
-        // }
+        let args = logical_table_function.table_function.args.clone();
+        let (schema_name, table_name) = Self::bind_schema_and_table_name(&args)?;
 
         let fields = vec![
             Field::new("job_id", DataType::Int32),
