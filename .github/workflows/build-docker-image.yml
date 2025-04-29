@@ -55,7 +55,7 @@ jobs:
           
           # BRANCH_NAME=$(basename $GITHUB_REF)
           # FIXME
-          BRANCH_NAME=release-2.1
+          BRANCH_NAME=release-8888.8888
           
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
@@ -73,7 +73,7 @@ jobs:
         # if: github.event.inputs.enable_alpha_build == 'false'
         run: |
           # FIXME
-          VERSION=2.1.0
+          VERSION=8888.8888.0
           # VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
           # Check its not an alpha build
           if [[ $VERSION == *"alpha"* ]]; then
