@@ -18,7 +18,6 @@ use std::vec;
 
 use itertools::Itertools;
 use risingwave_pb::catalog::PbColIndexMapping;
-use risingwave_pb::stream_plan::DispatchStrategy;
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -319,28 +318,6 @@ impl ColIndexMapping {
             target_size: prost.target_size as usize,
             map: prost.map.iter().map(|&x| x.try_into().ok()).collect(),
         }
-    }
-}
-
-impl ColIndexMapping {
-    /// Rewrite the dist-key indices and output indices in the given dispatch strategy. Returns
-    /// `None` if any of the indices is not mapped to the target.
-    pub fn rewrite_dispatch_strategy(
-        &self,
-        strategy: &DispatchStrategy,
-    ) -> Option<DispatchStrategy> {
-        let map = |index: &[u32]| -> Option<Vec<u32>> {
-            index
-                .iter()
-                .map(|i| self.try_map(*i as usize).map(|i| i as u32))
-                .collect()
-        };
-
-        Some(DispatchStrategy {
-            r#type: strategy.r#type,
-            dist_key_indices: map(&strategy.dist_key_indices)?,
-            output_indices: map(&strategy.output_indices)?,
-        })
     }
 }
 
