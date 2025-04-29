@@ -33,13 +33,17 @@ fn row_(row: impl Row) -> StructValue {
 }
 
 fn map_from_key_values_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
-    let map = MapType::try_from_kv(args[0].as_list_element_type().clone(), args[1].as_list_element_type().clone())
-        .map_err(ExprError::Custom)?;
+    let map = MapType::try_from_kv(
+        args[0].as_list_element_type().clone(),
+        args[1].as_list_element_type().clone(),
+    )
+    .map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
 fn map_from_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
-    let map = MapType::try_from_entries(args[0].as_list_element_type().clone()).map_err(ExprError::Custom)?;
+    let map = MapType::try_from_entries(args[0].as_list_element_type().clone())
+        .map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 

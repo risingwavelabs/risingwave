@@ -751,7 +751,8 @@ impl ListValue {
                 if self.try_consume('}') {
                     return Ok(ListValue::empty(self.data_type.as_list_element_type()));
                 }
-                let mut builder = ArrayBuilderImpl::with_type(0, self.data_type.as_list_element_type().clone());
+                let mut builder =
+                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_element_type().clone());
                 loop {
                     let mut parser = Self {
                         input: self.input,
