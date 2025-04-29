@@ -46,7 +46,9 @@ use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
-use risingwave_pb::stream_plan::{PbDispatcher, PbDispatcherType, PbFragmentTypeFlag};
+use risingwave_pb::stream_plan::{
+    PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbFragmentTypeFlag,
+};
 use risingwave_pb::user::grant_privilege::{
     PbAction, PbActionWithGrantOption, PbObject as PbGrantObject,
 };
@@ -1092,7 +1094,7 @@ pub fn compose_dispatchers(
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
                 dist_key_indices: dist_key_indices.clone(),
-                output_indices: output_indices.clone(),
+                output_mapping: PbDispatchOutputMapping::simple(output_indices).into(),
                 hash_mapping: Some(
                     ActorMapping::from_bitmaps(
                         &target_fragment_actors
@@ -1124,7 +1126,7 @@ pub fn compose_dispatchers(
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
                 dist_key_indices: dist_key_indices.clone(),
-                output_indices: output_indices.clone(),
+                output_mapping: PbDispatchOutputMapping::simple(output_indices).into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id as _,
                 downstream_actor_id: target_fragment_actors
@@ -1150,7 +1152,7 @@ pub fn compose_dispatchers(
                 PbDispatcher {
                     r#type: PbDispatcherType::NoShuffle as _,
                     dist_key_indices: dist_key_indices.clone(),
-                    output_indices: output_indices.clone(),
+                    output_mapping: PbDispatchOutputMapping::simple(output_indices.clone()).into(),
                     hash_mapping: None,
                     dispatcher_id: target_fragment_id as _,
                     downstream_actor_id: vec![downstream_actor_id as _],
