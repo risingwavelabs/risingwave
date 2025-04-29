@@ -42,12 +42,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: 'Verify release branch'
         id: verify_release_branch
+        # FIXME
         # if: github.event.inputs.enable_patch_build == 'false' && github.event.inputs.enable_alpha_build == 'false'
         run: |
           # Get current branch name
           echo "GITHUB_REF=$GITHUB_REF"
+          
           # BRANCH_NAME=$(basename $GITHUB_REF)
+          # FIXME
           BRANCH_NAME=release-2.1
+          
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           
@@ -58,14 +62,15 @@ jobs:
             echo "Error: Branch $BRANCH_NAME is not a release branch"
             exit 1
           fi
-      - name: 'Verify patch branch'
-        id: verify_patch_branch
+      - name: 'Verify patch base version'
+        id: verify_patch_base_version
+        # FIXME
         # if: github.event.inputs.enable_patch_build == 'true'
         run: |
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2) 
           # Check its not an alpha build
           if [[ $VERSION == *"alpha"* ]]; then
-            echo "Error: Branch $BRANCH_NAME is not a release branch"
+            echo "Error: Branch $BRANCH_NAME is has an alpha version: $VERSION"
             exit 1
           fi
       - name: 'Generate image tag'
