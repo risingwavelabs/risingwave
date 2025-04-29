@@ -978,12 +978,22 @@ enum DispatcherType {
   DISPATCHER_TYPE_NO_SHUFFLE = 4;
 }
 
+message DispatchOutputMapping {
+  message TypePair {
+    data.DataType upstream = 1;
+    data.DataType downstream = 2;
+  }
+
+  repeated uint32 indices = 1;
+  repeated TypePair types = 2;
+}
+
 // The property of an edge in the fragment graph.
 // This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
 message DispatchStrategy {
   DispatcherType type = 1;
   repeated uint32 dist_key_indices = 2;
-  repeated uint32 output_indices = 3;
+  DispatchOutputMapping output_mapping = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -996,7 +1006,7 @@ message Dispatcher {
   // Indices of the columns to output.
   // In most cases, this contains all columns in the input. But for some cases like MV on MV or
   // schema change, we may only output a subset of the columns.
-  repeated uint32 output_indices = 6;
+  DispatchOutputMapping output_mapping = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
