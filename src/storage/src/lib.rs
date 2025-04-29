@@ -53,7 +53,7 @@ pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
-mod vector;
+pub mod vector;
 
 pub use store::{StateStore, StateStoreIter, StateStoreReadIter};
 pub use store_impl::StateStoreImpl;

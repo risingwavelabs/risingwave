@@ -61,17 +61,44 @@ impl<I, const MAX_HEAP: bool> Ord for HeapNode<I, MAX_HEAP> {
     }
 }
 
+pub struct DistanceHeap<I, const MAX_HEAP: bool>(BinaryHeap<HeapNode<I, MAX_HEAP>>);
+
+pub type MaxDistanceHeap<I> = DistanceHeap<I, true>;
+pub type MinDistanceHeap<I> = DistanceHeap<I, false>;
+
+impl<I, const MAX_HEAP: bool> DistanceHeap<I, MAX_HEAP> {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(BinaryHeap::with_capacity(capacity))
+    }
+
+    pub fn push(&mut self, distance: VectorDistance, item: I) {
+        self.0.push(HeapNode { distance, item });
+    }
+
+    pub fn top(&self) -> Option<(VectorDistance, &I)> {
+        self.0.peek().map(|node| (node.distance, &node.item))
+    }
+
+    pub fn pop(&mut self) -> Option<(VectorDistance, I)> {
+        self.0.pop().map(|node| (node.distance, node.item))
+    }
+}
+
 pub struct BoundedNearest<I> {
-    heap: BinaryHeap<HeapNode<I, true>>,
+    heap: MaxDistanceHeap<I>,
     capacity: usize,
 }
 
 impl<I> BoundedNearest<I> {
     pub fn new(capacity: usize) -> Self {
         Self {
-            heap: BinaryHeap::with_capacity(capacity),
+            heap: DistanceHeap(BinaryHeap::with_capacity(capacity)),
             capacity,
         }
+    }
+
+    pub fn furthest(&self) -> Option<(VectorDistance, &I)> {
+        self.heap.top()
     }
 
     pub fn insert(
@@ -79,8 +106,8 @@ impl<I> BoundedNearest<I> {
         distance: VectorDistance,
         get_item: impl FnOnce() -> I,
     ) -> Option<(VectorDistance, I)> {
-        if self.heap.len() >= self.capacity {
-            let mut top = self.heap.peek_mut().expect("non-empty");
+        if self.heap.0.len() >= self.capacity {
+            let mut top = self.heap.0.peek_mut().expect("non-empty");
             if top.distance > distance {
                 let prev_node = replace(
                     &mut *top,
@@ -94,7 +121,7 @@ impl<I> BoundedNearest<I> {
                 None
             }
         } else {
-            self.heap.push(HeapNode {
+            self.heap.0.push(HeapNode {
                 distance,
                 item: get_item(),
             });
@@ -103,12 +130,12 @@ impl<I> BoundedNearest<I> {
     }
 
     pub fn collect(mut self) -> Vec<I> {
-        let size = self.heap.len();
+        let size = self.heap.0.len();
         let mut vec = Vec::with_capacity(size);
         let uninit_slice = vec.spare_capacity_mut();
         let mut i = size;
         // elements are popped from max to min, so we write elements from back to front to ensure that the output is sorted ascendingly.
-        while let Some(node) = self.heap.pop() {
+        while let Some(node) = self.heap.0.pop() {
             i -= 1;
             // safety: `i` is initialized as the size of `self.heap`. It must have decremented for once, and can
             // decrement for at most `size` time, so it must be that 0 <= i < size
@@ -120,5 +147,22 @@ impl<I> BoundedNearest<I> {
         // safety: should have write `size` elements to the vector.
         unsafe { vec.set_len(size) }
         vec
+    }
+
+    pub fn resize(&mut self, new_capacity: usize) {
+        self.capacity = new_capacity;
+        while self.heap.0.len() > new_capacity {
+            self.heap.pop();
+        }
+    }
+}
+
+impl<'a, I> IntoIterator for &'a BoundedNearest<I> {
+    type Item = (VectorDistance, &'a I);
+
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.heap.0.iter().map(|node| (node.distance, &node.item))
     }
 }

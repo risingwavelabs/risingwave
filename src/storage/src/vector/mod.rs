@@ -43,7 +43,8 @@ impl Vector {
         Arc::get_mut(&mut self.0).map(VectorInner)
     }
 
-    /// safety: safe under the same condition to [`Arc::get_mut_unchecked`]
+    /// # Safety
+    ///     safe under the same condition to [`Arc::get_mut_unchecked`]
     pub unsafe fn get_mut_unchecked(&mut self) -> VectorMutRef<'_> {
         // safety: under unsafe function
         unsafe { VectorInner(Arc::get_mut_unchecked(&mut self.0)) }
@@ -140,7 +141,6 @@ pub trait MeasureDistanceBuilder {
     type Measure<'a>: MeasureDistance<'a>;
     fn new(target: VectorRef<'_>) -> Self::Measure<'_>;
 
-    #[cfg(test)]
     fn distance(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance
     where
         Self: Sized,
@@ -250,9 +250,9 @@ impl<'a> MeasureDistance<'a> for CosineDistanceMeasure<'a> {
         let len = self.target.0.len();
         assert_eq!(len, other.0.len());
         let magnitude_mul = other.magnitude() * self.magnitude;
-        (0..len)
+        1.0 - (0..len)
             .map(|i| self.target.0[i] * other.0[i] / magnitude_mul)
-            .sum()
+            .sum::<VectorDistance>()
     }
 }
 
@@ -272,7 +272,9 @@ impl<'a> MeasureDistance<'a> for InnerProductDistanceMeasure<'a> {
         // TODO: use some library with simd support
         let len = self.0.0.len();
         assert_eq!(len, other.0.len());
-        (0..len).map(|i| self.0.0[i] * other.0[i]).sum()
+        -(0..len)
+            .map(|i| self.0.0[i] * other.0[i])
+            .sum::<VectorDistance>()
     }
 }
 
@@ -310,11 +312,14 @@ impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
 #[cfg(test)]
 mod tests {
     use std::cmp::min;
+    use std::sync::LazyLock;
 
     use bytes::Bytes;
     use expect_test::expect;
     use itertools::Itertools;
-    use rand::{Rng, rng};
+    use parking_lot::Mutex;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     use crate::vector::{
         CosineDistance, InnerProductDistance, KlDivergenceDistance, L1Distance, L2Distance,
@@ -333,24 +338,25 @@ mod tests {
         0.22877127, 0.97690505, 0.44438475,
     ];
 
-    fn gen_vector() -> Vector {
-        let mut rng = rng();
-        Vector::new(&[(); VECTOR_LEN].map(|_| rng.random::<VectorItem>()))
+    pub(super) fn gen_vector(d: usize) -> Vector {
+        static RNG: LazyLock<Mutex<StdRng>> =
+            LazyLock::new(|| Mutex::new(StdRng::seed_from_u64(233)));
+        Vector::new(
+            &(0..d)
+                .map(|_| RNG.lock().random::<VectorItem>())
+                .collect_vec(),
+        )
+    }
+
+    pub(super) fn gen_info(i: usize) -> Bytes {
+        Bytes::copy_from_slice(i.to_le_bytes().as_slice())
     }
 
     fn gen_random_input(count: usize) -> Vec<(Vector, Bytes)> {
         (0..count)
-            .map(|i| {
-                (
-                    gen_vector(),
-                    Bytes::copy_from_slice(i.to_le_bytes().as_slice()),
-                )
-            })
+            .map(|i| (gen_vector(VECTOR_LEN), gen_info(i)))
             .collect()
     }
-
-    #[test]
-    fn test_vector() {}
 
     #[test]
     fn test_distance() {
@@ -386,12 +392,12 @@ mod tests {
         );
         assert_eq!(
             CosineDistance::distance(first_vec, second_vec),
-            (v1_1 * v2_1 + v1_2 * v2_2)
+            1.0 - (v1_1 * v2_1 + v1_2 * v2_2)
                 / ((v1_1.powi(2) + v1_2.powi(2)).sqrt() * (v2_1.powi(2) + v2_2.powi(2)).sqrt())
         );
         assert_eq!(
             InnerProductDistance::distance(first_vec, second_vec),
-            v1_1 * v2_1 + v1_2 * v2_2
+            -(v1_1 * v2_1 + v1_2 * v2_2)
         );
     }
 
@@ -419,14 +425,14 @@ mod tests {
             VectorInner(&VEC2),
         ));
         expect![[r#"
-            0.7715104
+            0.22848958
         "#]]
         .assert_debug_eq(&CosineDistance::distance(
             VectorInner(&VEC1),
             VectorInner(&VEC2),
         ));
         expect![[r#"
-            3.2870955
+            -3.2870955
         "#]]
         .assert_debug_eq(&InnerProductDistance::distance(
             VectorInner(&VEC1),
