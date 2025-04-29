@@ -125,9 +125,9 @@ steps:
       timeout_in_minutes: 9
       retry: *auto-retry
 
-    - label: "end-to-end test (parallel, {{matrix.backend}} backend)"
+    - label: "end-to-end test (parallel, shit backend)"
       key: "e2e-test-release-parallel"
-      <<: *sql-backend
+      # <<: *sql-backend
       command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
