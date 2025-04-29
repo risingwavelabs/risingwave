@@ -36,14 +36,15 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
     Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
-    UpdateMutation,
+    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::InflightSubscriptionInfo;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::ControlStreamManager;
@@ -57,8 +58,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    ConnectorPropsChange, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
-    build_actor_connector_splits,
+    ConnectorPropsChange, FragmentBackfillOrder, JobReschedulePostUpdates, SplitAssignment,
+    ThrottleConfig, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -180,6 +181,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
+    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
 }
 
 impl StreamJobFragments {
@@ -333,6 +335,11 @@ pub enum Command {
     },
 
     ConnectorPropsChange(ConnectorPropsChange),
+
+    /// `StartFragmentBackfill` command will trigger backfilling for specified scans by `fragment_id`.
+    StartFragmentBackfill {
+        fragment_ids: Vec<FragmentId>,
+    },
 }
 
 impl Command {
@@ -447,6 +454,7 @@ impl Command {
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
+            Command::StartFragmentBackfill { .. } => None,
         }
     }
 
@@ -701,6 +709,7 @@ impl Command {
                         stream_job_fragments: table_fragments,
                         init_split_assignment: split_assignment,
                         upstream_fragment_downstreams,
+                        fragment_backfill_ordering,
                         ..
                     },
                 job_type,
@@ -727,6 +736,12 @@ impl Command {
                     } else {
                         Default::default()
                     };
+                let backfill_nodes_to_pause: Vec<_> = match fragment_backfill_ordering {
+                    Some(backfill_order) => get_nodes_with_backfill_dependencies(backfill_order)
+                        .into_iter()
+                        .collect(),
+                    None => Default::default(),
+                };
                 let add = Some(Mutation::Add(AddMutation {
                     actor_dispatchers: edges
                         .dispatchers
@@ -741,6 +756,7 @@ impl Command {
                     // If the cluster is already paused, the new actors should be paused too.
                     pause: is_currently_paused,
                     subscriptions_to_add,
+                    backfill_nodes_to_pause,
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -993,6 +1009,7 @@ impl Command {
                     upstream_mv_table_id: upstream_mv_table_id.table_id,
                     subscriber_id: *subscription_id,
                 }],
+                backfill_nodes_to_pause: vec![],
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
@@ -1019,6 +1036,11 @@ impl Command {
                     },
                 ))
             }
+            Command::StartFragmentBackfill { fragment_ids } => Some(
+                Mutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                    fragment_ids: fragment_ids.clone(),
+                }),
+            ),
         }
     }
 

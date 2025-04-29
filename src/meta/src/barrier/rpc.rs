@@ -486,6 +486,8 @@ impl ControlStreamManager {
             actor_splits: build_actor_connector_splits(&source_split_assignments),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
+            // TODO(kwannoel): recover using backfill order plan
+            backfill_nodes_to_pause: Default::default(),
         });
 
         fn resolve_jobs_committed_epoch(

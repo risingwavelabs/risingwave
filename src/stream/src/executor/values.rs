@@ -209,6 +209,7 @@ mod tests {
                 splits: Default::default(),
                 pause: false,
                 subscriptions_to_add: vec![],
+                backfill_nodes_to_pause: Default::default(),
             }));
         tx.send(first_message).unwrap();
 
