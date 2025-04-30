@@ -18,6 +18,8 @@ use risingwave_pb::stream_plan::PbDispatchOutputMapping;
 use crate::executor::prelude::*;
 
 /// Map the output before dispatching.
+///
+/// See documentation of [`PbDispatchOutputMapping`] for more details.
 #[derive(Debug)]
 pub enum DispatchOutputMapping {
     /// Mapping by indices only.
@@ -41,6 +43,7 @@ impl DispatchOutputMapping {
                 .map(|t| {
                     t.upstream.and_then(|u| {
                         let d = t.downstream.unwrap();
+                        // Do an extra filter to avoid unnecessary mapping overhead.
                         if u == d {
                             None
                         } else {
@@ -98,13 +101,21 @@ impl DispatchOutputMapping {
 
     /// Apply the mapping to the watermark.
     pub(super) fn apply_watermark(&self, watermark: Watermark) -> Option<Watermark> {
-        match self {
-            Self::Simple(indices) => watermark.transform_with_indices(indices),
+        let indices = match self {
+            Self::Simple(indices) => indices,
             // Type change is only supported on composite types, while watermark must be a simple type.
             // So we simply ignore type mapping here.
-            // TODO: add assertion about this.
-            Self::TypeMapping { indices, types: _ } => watermark.transform_with_indices(indices),
-        }
+            Self::TypeMapping { indices, types } => {
+                if let Some(pos) = indices.iter().position(|p| *p == watermark.col_idx) {
+                    assert!(
+                        types[pos].is_none(),
+                        "watermark column should not have type changed"
+                    );
+                }
+                indices
+            }
+        };
+        watermark.transform_with_indices(indices)
     }
 }
 
@@ -115,6 +126,11 @@ mod type_mapping {
     };
     use risingwave_common::util::iter_util::ZipEqFast;
 
+    /// Map the datum from `from_type` to `into_type`. Struct types must have `ids` set.
+    ///
+    /// The only allowed difference between given types is adding or removing fields in struct.
+    /// We will compare the ID of fields to find the corresponding field. If the field is not found,
+    /// it will be set to NULL.
     pub fn do_map<'a>(
         datum: DatumRef<'a>,
         from_type: &DataType,
@@ -134,6 +150,7 @@ mod type_mapping {
             (DataType::List(from_inner_type), DataType::List(into_inner_type)) => {
                 let list = scalar.into_list();
 
+                // Recursively map each element.
                 let mut builder = into_inner_type.create_array_builder(list.len());
                 for datum in list.iter() {
                     let datum = do_map(datum, from_inner_type, into_inner_type);
@@ -154,6 +171,7 @@ mod type_mapping {
                 let map = scalar.into_map();
                 let (keys, values) = map.into_kv();
 
+                // Recursively map each value.
                 let mut value_builder = into_map_type.value().create_array_builder(map.len());
                 for value in values.iter() {
                     let value = do_map(value, from_map_type.value(), into_map_type.value());
@@ -175,14 +193,19 @@ mod type_mapping {
                     .unwrap()
                     .zip_eq_fast(into_struct_type.types())
                 {
-                    let index = from_struct_type.ids().unwrap().position(|x| x == id);
+                    // Find the field in the original struct.
+                    let index = from_struct_type
+                        .ids()
+                        .expect("ids of struct type should be set in dispatcher mapping context")
+                        .position(|x| x == id);
 
                     let field = if let Some(index) = index {
+                        // Found, recursively map the field.
                         let from_field_type = from_struct_type.type_at(index);
                         let field = struct_value.field_at(index);
                         do_map(field, from_field_type, into_field_type).to_owned_datum()
                     } else {
-                        // NULL
+                        // Not found, set to NULL.
                         None
                     };
 
