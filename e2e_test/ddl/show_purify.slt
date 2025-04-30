@@ -11,6 +11,21 @@ create table ctas as select
     map{'key1': 1, 'key2': 2, 'key3': 3} as v7
 ;
 
+# Without purfication, we get empty definition.
+
+statement ok
+set disable_purify_definition to true;
+
+query TT
+show create table ctas;
+----
+public.ctas	CREATE TABLE ctas ()
+
+statement ok
+set disable_purify_definition to default;
+
+# With purification, we get column definitions derived from the catalog.
+
 query TT
 show create table ctas;
 ----
