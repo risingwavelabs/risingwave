@@ -142,11 +142,12 @@ jobs:
                 body: '✅ Cherry-pick PRs (or issues if encountered conflicts) have been created successfully to all target branches.'
               });
             } else if (jobStatus === 'failure') {
+              const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
-                body: '❌ Cherry-pick failed for one or more branches. Please check the workflow logs and consider cherry-picking manually.'
+                body: `❌ Cherry-pick failed for one or more branches. Please check the [workflow run logs](${runUrl}) and consider retrying or manually cherry-picking.`
               });
             }
 
