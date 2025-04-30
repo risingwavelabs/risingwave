@@ -2401,6 +2401,10 @@ pub mod default {
         pub fn level0_stop_write_threshold_max_size() -> u64 {
             DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE
         }
+
+        pub fn enable_optimize_l0_interval_selection() -> bool {
+            false
+        }
     }
 
     pub mod object_store_config {
@@ -2798,6 +2802,8 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_sst_count: u32,
     #[serde(default = "default::compaction_config::level0_stop_write_threshold_max_size")]
     pub level0_stop_write_threshold_max_size: u64,
+    #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
+    pub enable_optimize_l0_interval_selection: bool,
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.
