@@ -957,11 +957,13 @@ pub async fn insert_fragment_relations(
                     .collect_vec()
                     .into(),
                 output_indices: downstream
-                    .output_indices
+                    .output_mapping
+                    .indices
                     .iter()
                     .map(|idx| *idx as i32)
                     .collect_vec()
                     .into(),
+                output_type_mapping: downstream.output_mapping.types.clone().into(),
             };
             FragmentRelation::insert(relation.into_active_model())
                 .exec(db)
@@ -1031,6 +1033,7 @@ where
         dispatcher_type,
         dist_key_indices,
         output_indices,
+        output_type_mapping,
     } in fragment_relations
     {
         let (source_fragment_distribution, source_fragment_actors) = {
@@ -1055,6 +1058,10 @@ where
             };
             (*distribution, actors.clone())
         };
+        let output_mapping = PbDispatchOutputMapping {
+            indices: output_indices.into_u32_array(),
+            types: output_type_mapping.to_protobuf(),
+        };
         let dispatchers = compose_dispatchers(
             source_fragment_distribution,
             &source_fragment_actors,
@@ -1063,7 +1070,7 @@ where
             &target_fragment_actors,
             dispatcher_type,
             dist_key_indices.into_u32_array(),
-            output_indices.into_u32_array(),
+            output_mapping,
         );
         let actor_dispatchers_map = actor_dispatchers_map
             .entry(source_fragment_id as _)
@@ -1086,14 +1093,14 @@ pub fn compose_dispatchers(
     target_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
     dispatcher_type: DispatcherType,
     dist_key_indices: Vec<u32>,
-    output_indices: Vec<u32>,
+    output_mapping: PbDispatchOutputMapping,
 ) -> HashMap<crate::model::ActorId, PbDispatcher> {
     match dispatcher_type {
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
                 dist_key_indices: dist_key_indices.clone(),
-                output_mapping: PbDispatchOutputMapping::simple(output_indices).into(),
+                output_mapping: output_mapping.into(),
                 hash_mapping: Some(
                     ActorMapping::from_bitmaps(
                         &target_fragment_actors
@@ -1125,7 +1132,7 @@ pub fn compose_dispatchers(
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
                 dist_key_indices: dist_key_indices.clone(),
-                output_mapping: PbDispatchOutputMapping::simple(output_indices).into(),
+                output_mapping: output_mapping.into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id as _,
                 downstream_actor_id: target_fragment_actors
@@ -1151,7 +1158,7 @@ pub fn compose_dispatchers(
                 PbDispatcher {
                     r#type: PbDispatcherType::NoShuffle as _,
                     dist_key_indices: dist_key_indices.clone(),
-                    output_mapping: PbDispatchOutputMapping::simple(output_indices.clone()).into(),
+                    output_mapping: output_mapping.clone().into(),
                     hash_mapping: None,
                     dispatcher_id: target_fragment_id as _,
                     downstream_actor_id: vec![downstream_actor_id as _],
