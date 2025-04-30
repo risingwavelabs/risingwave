@@ -51,7 +51,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, MergeNode, PbDispatcherType, PbStreamFragmentGraph,
+    FragmentTypeFlag, MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -854,7 +854,7 @@ impl DdlController {
                 downstream_fragment_id: union_fragment.fragment_id,
                 dispatcher_type: DispatcherType::Hash,
                 dist_key_indices: dist_key_indices.clone(),
-                output_indices: output_indices.clone(),
+                output_mapping: PbDispatchOutputMapping::simple(output_indices),
             });
         }
 
