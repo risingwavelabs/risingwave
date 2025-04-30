@@ -45,7 +45,7 @@ impl IcebergCompactionManager {
         }
     }
 
-    pub async fn start(mut self) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start(mut self) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             loop {
@@ -69,6 +69,7 @@ impl IcebergCompactionManager {
         *count += 1;
     }
 
+    #[allow(dead_code)]
     pub fn get_max_iceberg_commit_sink_id(&self) -> Option<SinkId> {
         self.iceberg_commits
             .iter()
@@ -76,6 +77,7 @@ impl IcebergCompactionManager {
             .map(|(sink_id, _)| *sink_id)
     }
 
+    #[allow(dead_code)]
     pub fn clear_iceberg_commits_by_sink_id(&mut self, sink_id: SinkId) {
         self.iceberg_commits.remove(&sink_id);
     }
@@ -92,6 +94,7 @@ impl IcebergCompactionManager {
         Ok(param)
     }
 
+    #[allow(dead_code)]
     pub async fn load_iceberg_table(&self, sink_id: &SinkId) -> MetaResult<Table> {
         let sink_param = self.get_sink_param(sink_id).await?;
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;

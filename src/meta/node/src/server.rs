@@ -476,7 +476,7 @@ pub async fn start_service_as_election_leader(
 
     let iceberg_compaction_mgr =
         IcebergCompactionManager::new(metadata_manager.clone(), iceberg_compaction_stat_rx);
-    sub_tasks.push(iceberg_compaction_mgr.start().await);
+    sub_tasks.push(iceberg_compaction_mgr.start());
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
