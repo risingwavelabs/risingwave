@@ -642,6 +642,9 @@ pub async fn handle(
             }
             variable::handle_set(handler_args, variable, value)
         }
+        Statement::Reset { variable } => {
+            variable::handle_reset(handler_args, variable)
+        }
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }

@@ -77,6 +77,15 @@ pub fn handle_set(
         .into())
 }
 
+/// Handle RESET command, which is equivalent to SET variable TO DEFAULT
+pub fn handle_reset(
+    handler_args: HandlerArgs,
+    variable: Ident,
+) -> Result<RwPgResponse> {
+    // RESET is equivalent to SET variable TO DEFAULT
+    handle_set(handler_args, variable, SetVariableValue::Default)
+}
+
 pub(super) fn handle_set_time_zone(
     handler_args: HandlerArgs,
     value: SetTimeZoneValue,

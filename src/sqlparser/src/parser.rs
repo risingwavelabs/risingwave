@@ -326,6 +326,7 @@ impl Parser<'_> {
                 Keyword::ALTER => Ok(self.parse_alter()?),
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
+                Keyword::RESET => Ok(self.parse_reset()?),
                 Keyword::SHOW => {
                     if self.parse_keyword(Keyword::CREATE) {
                         Ok(self.parse_show_create()?)
@@ -4811,6 +4812,11 @@ impl Parser<'_> {
                 self.expected("equals sign or TO")
             }
         }
+    }
+
+    pub fn parse_reset(&mut self) -> ModalResult<Statement> {
+        let variable = self.parse_identifier()?;
+        Ok(Statement::Reset { variable })
     }
 
     /// If have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show,

@@ -1533,6 +1533,13 @@ pub enum Statement {
         variable: Ident,
         value: SetVariableValue,
     },
+    /// `RESET <variable>`
+    ///
+    /// Note: this is a PostgreSQL-specific statement that is equivalent to
+    /// `SET <variable> TO DEFAULT`.
+    Reset {
+        variable: Ident,
+    },
     /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -2198,6 +2205,9 @@ impl Statement {
                     f.write_str("LOCAL ")?;
                 }
                 write!(f, "{name} = {value}", name = variable,)
+            }
+            Statement::Reset { variable } => {
+                write!(f, "RESET {}", variable)
             }
             Statement::ShowVariable { variable } => {
                 write!(f, "SHOW")?;
