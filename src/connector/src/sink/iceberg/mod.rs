@@ -74,6 +74,7 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
@@ -86,8 +87,9 @@ use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
-use crate::connector_common::IcebergCommon;
+use crate::connector_common::{IcebergCommon, IcebergCompactionStat};
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
@@ -545,7 +547,11 @@ impl Sink for IcebergSink {
         true
     }
 
-    async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        db: DatabaseConnection,
+        iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+    ) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         Ok(IcebergSinkCommitter {
@@ -559,6 +565,7 @@ impl Sink for IcebergSink {
             db,
             commit_retry_num: self.config.commit_retry_num,
             committed_epoch_subscriber: None,
+            iceberg_compact_stat_sender,
         })
     }
 }
@@ -1481,6 +1488,7 @@ pub struct IcebergSinkCommitter {
     pub(crate) db: DatabaseConnection,
     pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
     commit_retry_num: u32,
+    pub(crate) iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
 }
 
 impl IcebergSinkCommitter {
@@ -1817,6 +1825,15 @@ impl IcebergSinkCommitter {
 
             self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
+        }
+        if self
+            .iceberg_compact_stat_sender
+            .send(IcebergCompactionStat {
+                sink_id: SinkId::new(self.sink_id),
+            })
+            .is_err()
+        {
+            warn!("failed to send iceberg compaction stats");
         }
         Ok(())
     }

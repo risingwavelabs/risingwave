@@ -40,6 +40,7 @@ use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use sea_orm::DatabaseConnection;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
 
 use super::coordinate::CoordinatedLogSinker;
@@ -49,7 +50,7 @@ use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
     SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
 };
-use crate::connector_common::AwsAuthProps;
+use crate::connector_common::{AwsAuthProps, IcebergCompactionStat};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 
 pub const DELTALAKE_SINK: &str = "deltalake";
@@ -412,7 +413,11 @@ impl Sink for DeltaLakeSink {
         true
     }
 
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _db: DatabaseConnection,
+        _iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+    ) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
         })
