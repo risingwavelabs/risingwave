@@ -478,6 +478,7 @@ impl stream_plan::Dispatcher {
 }
 
 impl stream_plan::DispatchOutputMapping {
+    /// Create a mapping that forwards all columns.
     pub fn identical(len: usize) -> Self {
         Self {
             indices: (0..len as u32).collect(),
@@ -485,6 +486,7 @@ impl stream_plan::DispatchOutputMapping {
         }
     }
 
+    /// Create a mapping that forwards columns with given indices, without type conversion.
     pub fn simple(indices: Vec<u32>) -> Self {
         Self {
             indices,
@@ -492,6 +494,7 @@ impl stream_plan::DispatchOutputMapping {
         }
     }
 
+    /// Assert that this mapping does not involve type conversion and return the indices.
     pub fn into_simple_indices(self) -> Vec<u32> {
         assert!(
             self.types.is_empty(),
