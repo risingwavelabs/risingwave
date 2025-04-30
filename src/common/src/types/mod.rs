@@ -272,6 +272,12 @@ impl From<&PbDataType> for DataType {
     }
 }
 
+impl From<PbDataType> for DataType {
+    fn from(proto: PbDataType) -> DataType {
+        DataType::from(&proto)
+    }
+}
+
 impl From<DataTypeName> for PbTypeName {
     fn from(type_name: DataTypeName) -> Self {
         match type_name {
