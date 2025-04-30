@@ -28,7 +28,7 @@ use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
     + Send
     + 'static;
-pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection, UnboundedSender<IcebergCompactionStat>) -> BoxCoordinator
+pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection, Option<UnboundedSender<IcebergCompactionStat>>) -> BoxCoordinator
     + Send
     + 'static;
 
@@ -75,7 +75,7 @@ impl Sink for TestSink {
     async fn new_coordinator(
         &self,
         db: DatabaseConnection,
-        iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
     ) -> crate::sink::Result<Self::Coordinator> {
         Ok(build_box_coordinator(db, iceberg_compact_stat_sender))
     }
@@ -140,7 +140,7 @@ pub fn register_build_sink(
 
 fn build_box_coordinator(
     db: DatabaseConnection,
-    iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+    iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
 ) -> BoxCoordinator {
     (get_registry()
         .build_box_sink

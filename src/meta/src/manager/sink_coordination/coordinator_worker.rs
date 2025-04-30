@@ -385,7 +385,10 @@ impl CoordinatorWorker {
         };
 
         dispatch_sink!(sink, sink, {
-            let coordinator = match sink.new_coordinator(db, iceberg_compact_stat_sender).await {
+            let coordinator = match sink
+                .new_coordinator(db, Some(iceberg_compact_stat_sender))
+                .await
+            {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(

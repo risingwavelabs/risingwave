@@ -550,7 +550,7 @@ impl Sink for IcebergSink {
     async fn new_coordinator(
         &self,
         db: DatabaseConnection,
-        iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
     ) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
@@ -1488,7 +1488,7 @@ pub struct IcebergSinkCommitter {
     pub(crate) db: DatabaseConnection,
     pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
     commit_retry_num: u32,
-    pub(crate) iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+    pub(crate) iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
 }
 
 impl IcebergSinkCommitter {
@@ -1826,14 +1826,15 @@ impl IcebergSinkCommitter {
             self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
         }
-        if self
-            .iceberg_compact_stat_sender
-            .send(IcebergCompactionStat {
-                sink_id: SinkId::new(self.sink_id),
-            })
-            .is_err()
-        {
-            warn!("failed to send iceberg compaction stats");
+        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender {
+            if iceberg_compact_stat_sender
+                .send(IcebergCompactionStat {
+                    sink_id: SinkId::new(self.sink_id),
+                })
+                .is_err()
+            {
+                warn!("failed to send iceberg compaction stats");
+            }
         }
         Ok(())
     }

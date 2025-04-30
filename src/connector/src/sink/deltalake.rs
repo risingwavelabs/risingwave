@@ -416,7 +416,7 @@ impl Sink for DeltaLakeSink {
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
-        _iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
     ) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,

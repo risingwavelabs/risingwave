@@ -682,7 +682,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
-        _iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
     ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
