@@ -392,6 +392,12 @@ pub struct SessionConfig {
     /// The max buffer size for sync logstore, before we start flushing.
     #[parameter(default = 2048_usize)]
     streaming_sync_log_store_buffer_size: usize,
+
+    /// Whether to disable purifying the definition of the table or source upon retrieval.
+    /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
+    /// This config may be removed in the future.
+    #[parameter(default = false, flags = "NO_ALTER_SYS")]
+    disable_purify_definition: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
