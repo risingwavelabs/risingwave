@@ -28,11 +28,11 @@ use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
 use sea_orm::{DatabaseConnection, EntityTrait};
 
 use crate::controller::SqlMetaStore;
-use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
 use crate::hummock::metrics_utils::trigger_pin_unpin_version_state;
+use crate::hummock::{CompactorSubscribeResponseEvent, CompactorType, HummockManager};
 use crate::manager::{META_NODE_ID, MetadataManager};
 use crate::model::BTreeMapTransaction;
 use crate::rpc::metrics::MetaMetrics;
@@ -256,7 +256,10 @@ impl HummockManager {
             if sstables.is_empty() {
                 return;
             }
-            let compactor = match self.compactor_manager.next_compactor() {
+            let compactor = match self
+                .compactor_manager
+                .next_compactor(CompactorType::Hummock)
+            {
                 None => {
                     tracing::warn!("Skip committed SST sanity check due to no available worker");
                     return;
@@ -268,10 +271,12 @@ impl HummockManager {
                 .map(|LocalSstableInfo { sst_info, .. }| sst_info.clone())
                 .collect_vec();
             if compactor
-                .send_event(ResponseEvent::ValidationTask(ValidationTask {
-                    sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
-                    sst_id_to_worker_id: sst_to_context.clone(),
-                }))
+                .send_event(CompactorSubscribeResponseEvent::Hummock(
+                    ResponseEvent::ValidationTask(ValidationTask {
+                        sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
+                        sst_id_to_worker_id: sst_to_context.clone(),
+                    }),
+                ))
                 .is_err()
             {
                 tracing::warn!("Skip committed SST sanity check due to send failure");

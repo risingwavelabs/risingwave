@@ -50,6 +50,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use super::CompactorType;
 use crate::hummock::compaction::selector::{
     CompactionSelector, SpaceReclaimCompactionSelector, default_compaction_selector,
 };
@@ -265,8 +266,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .unwrap();
         let _compactor_rx = self
             .hummock_manager
-            .compactor_manager_ref_for_test()
-            .add_compactor(context_id as _);
+            .compactor_manager
+            .clone()
+            .add_compactor(context_id as _, CompactorType::Hummock);
 
         let (request_sender, mut request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();

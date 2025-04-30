@@ -126,8 +126,8 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
-      - use: kafka
-        persist-data: true
+      # - use: kafka
+      #   persist-data: true
 
   standalone-full-peripherals:
     steps:

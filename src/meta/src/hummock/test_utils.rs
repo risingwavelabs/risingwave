@@ -330,6 +330,9 @@ pub async fn setup_compute_env_with_metric(
     let (compactor_streams_change_tx, _compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
 
+    let (iceberg_compactor_streams_change_tx, _compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+
     let hummock_manager = HummockManager::with_config(
         env.clone(),
         cluster_ctl.clone(),
@@ -338,6 +341,7 @@ pub async fn setup_compute_env_with_metric(
         compactor_manager,
         config,
         compactor_streams_change_tx,
+        iceberg_compactor_streams_change_tx,
     )
     .await;
 

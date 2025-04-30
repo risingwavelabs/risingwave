@@ -366,6 +366,9 @@ pub async fn start_service_as_election_leader(
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
 
+    let (iceberg_compactor_streams_change_tx, iceberg_compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+
     let meta_metrics = Arc::new(GLOBAL_META_METRICS.clone());
 
     let hummock_manager = hummock::HummockManager::new(
@@ -374,6 +377,7 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         compactor_manager.clone(),
         compactor_streams_change_tx,
+        iceberg_compactor_streams_change_tx,
     )
     .await
     .unwrap();
@@ -591,10 +595,19 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         Some(backup_manager),
     ));
-    sub_tasks.extend(HummockManager::compaction_event_loop(
-        hummock_manager,
-        compactor_streams_change_rx,
-    ));
+    sub_tasks.extend(
+        HummockManager::compaction_event_loop(hummock_manager.clone(), compactor_streams_change_rx)
+            .await,
+    );
+
+    sub_tasks.extend(
+        HummockManager::iceberg_compaction_event_loop(
+            hummock_manager,
+            iceberg_compactor_streams_change_rx,
+        )
+        .await,
+    );
+
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),

@@ -860,7 +860,7 @@ async fn test_trigger_manual_compaction() {
     }
 
     // No compaction task available.
-    let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
+    let compactor_manager_ref = hummock_manager.compactor_manager.clone();
     let receiver = compactor_manager_ref.add_compactor(context_id);
     {
         let option = ManualCompactionOption::default();

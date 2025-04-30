@@ -23,10 +23,12 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
+use risingwave_meta::hummock::CompactorType;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
+use risingwave_pb::hummock::subscribe_iceberg_compaction_event_request::Event as IcebergRequestEvent;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -69,6 +71,8 @@ macro_rules! fields_to_kvs {
 #[async_trait::async_trait]
 impl HummockManagerService for HummockServiceImpl {
     type SubscribeCompactionEventStream = RwReceiverStream<SubscribeCompactionEventResponse>;
+    type SubscribeIcebergCompactionEventStream =
+        RwReceiverStream<SubscribeIcebergCompactionEventResponse>;
 
     async fn unpin_version_before(
         &self,
@@ -438,7 +442,9 @@ impl HummockManagerService for HummockServiceImpl {
 
         let rx: tokio::sync::mpsc::UnboundedReceiver<
             Result<SubscribeCompactionEventResponse, crate::MetaError>,
-        > = compactor_manager.add_compactor(context_id);
+        > = compactor_manager
+            .add_compactor(context_id, CompactorType::Hummock)
+            .into_hummock_receiver();
 
         // register request stream to hummock
         self.hummock_manager
@@ -613,6 +619,54 @@ impl HummockManagerService for HummockServiceImpl {
             .merge_compaction_group(req.left_group_id, req.right_group_id)
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
+    }
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+        request: Request<Streaming<SubscribeIcebergCompactionEventRequest>>,
+    ) -> Result<Response<Self::SubscribeIcebergCompactionEventStream>, tonic::Status> {
+        let mut request_stream: Streaming<SubscribeIcebergCompactionEventRequest> =
+            request.into_inner();
+        let register_req = {
+            let req = request_stream.next().await.ok_or_else(|| {
+                Status::invalid_argument("subscribe_compaction_event request is empty")
+            })??;
+
+            match req.event {
+                Some(IcebergRequestEvent::Register(register)) => register,
+                _ => {
+                    return Err(Status::invalid_argument(
+                        "the first message must be `Register`",
+                    ));
+                }
+            }
+        };
+
+        let context_id = register_req.context_id;
+
+        // check_context and add_compactor as a whole is not atomic, but compactor_manager will
+        // remove invalid compactor eventually.
+        if !self.hummock_manager.check_context(context_id).await? {
+            return Err(Status::new(
+                tonic::Code::Internal,
+                format!("invalid hummock context {}", context_id),
+            ));
+        }
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        let rx: tokio::sync::mpsc::UnboundedReceiver<
+            Result<SubscribeIcebergCompactionEventResponse, crate::MetaError>,
+        > = compactor_manager
+            .add_compactor(context_id, CompactorType::Iceberg)
+            .into_iceberg_receiver();
+
+        // register request stream to hummock
+        self.hummock_manager
+            .add_iceberg_compactor_stream(context_id, request_stream);
+
+        // TODO: Trigger compaction
+
+        Ok(Response::new(RwReceiverStream::new(rx)))
     }
 }
 

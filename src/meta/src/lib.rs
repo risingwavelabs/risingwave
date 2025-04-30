@@ -28,6 +28,7 @@
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]
+#![feature(adt_const_params)]
 
 pub mod backup_restore;
 pub mod barrier;
