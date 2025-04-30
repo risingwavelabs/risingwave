@@ -21,6 +21,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::*;
 
 use crate::error::Result;
+use crate::session::current;
 use crate::utils::data_type::DataTypeToAst as _;
 
 mod pk_column {
@@ -55,6 +56,15 @@ pub fn try_purify_table_source_create_sql_ast(
     row_id_index: Option<usize>,
     pk_column_ids: &[impl PkColumn],
 ) -> Result<Statement> {
+    if let Some(config) = current::config()
+        && config.read().disable_purify_definition()
+    {
+        current::notice_to_user(
+            "purifying definition is disabled via session config, results may be inaccurate",
+        );
+        return Ok(base);
+    }
+
     let (Statement::CreateTable {
         columns: column_defs,
         constraints,
