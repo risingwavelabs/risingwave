@@ -1223,6 +1223,8 @@ fn gen_output_mapping(
             .find_position(|&u| u.column_id == r.column_id)?;
         indices[i] = ui as u32;
 
+        // Only if we encounter type change (`ALTER TABLE ALTER COLUMN TYPE`) will we generate a
+        // non-empty `types`.
         if u.column_type != r.column_type {
             types.get_or_insert_with(|| vec![TypePair::default(); len])[i] = TypePair {
                 upstream: u.column_type.clone(),
