@@ -172,6 +172,9 @@ impl IntraCompactionPicker {
                     .max_l0_compact_level_count
                     .unwrap_or(compaction_config::max_l0_compact_level_count())
                     as usize,
+                self.config
+                    .enable_optimize_l0_interval_selection
+                    .unwrap_or(compaction_config::enable_optimize_l0_interval_selection()),
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker

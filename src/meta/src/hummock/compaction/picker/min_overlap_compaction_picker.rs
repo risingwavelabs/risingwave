@@ -187,6 +187,7 @@ pub struct NonOverlapSubLevelPicker {
     overlap_strategy: Arc<dyn OverlapStrategy>,
     enable_check_task_level_overlap: bool,
     max_expected_level_count: usize,
+    enable_optimize_l0_interval_selection: bool,
 }
 
 impl NonOverlapSubLevelPicker {
@@ -198,6 +199,7 @@ impl NonOverlapSubLevelPicker {
         overlap_strategy: Arc<dyn OverlapStrategy>,
         enable_check_task_level_overlap: bool,
         max_expected_level_count: usize,
+        enable_optimize_l0_interval_selection: bool,
     ) -> Self {
         Self {
             min_compaction_bytes,
@@ -207,6 +209,7 @@ impl NonOverlapSubLevelPicker {
             overlap_strategy,
             enable_check_task_level_overlap,
             max_expected_level_count,
+            enable_optimize_l0_interval_selection,
         }
     }
 
@@ -219,6 +222,7 @@ impl NonOverlapSubLevelPicker {
         overlap_strategy: Arc<dyn OverlapStrategy>,
         enable_check_task_level_overlap: bool,
         max_expected_level_count: usize,
+        enable_optimize_l0_interval_selection: bool,
     ) -> Self {
         Self {
             min_compaction_bytes,
@@ -228,6 +232,7 @@ impl NonOverlapSubLevelPicker {
             overlap_strategy,
             enable_check_task_level_overlap,
             max_expected_level_count,
+            enable_optimize_l0_interval_selection,
         }
     }
 
@@ -408,20 +413,23 @@ impl NonOverlapSubLevelPicker {
 
         let mut scores = vec![];
         // To find the sub_level with the most files;
-        let max_files_level_idx = l0
-            .iter()
-            .enumerate()
-            .max_by(|(idx1, levels1), (idx2, levels2)| {
-                levels1
-                    .table_infos
-                    .len()
-                    .cmp(&levels2.table_infos.len())
-                    .then(idx2.cmp(idx1))
-            })
-            .map(|(idx, _)| idx)
-            .unwrap();
+        let intervals_level_idx = if self.enable_optimize_l0_interval_selection {
+            l0.iter()
+                .enumerate()
+                .max_by(|(idx1, levels1), (idx2, levels2)| {
+                    levels1
+                        .table_infos
+                        .len()
+                        .cmp(&levels2.table_infos.len())
+                        .then(idx2.cmp(idx1))
+                })
+                .map(|(idx, _)| idx)
+                .unwrap()
+        } else {
+            0
+        };
 
-        let intervals = &l0[max_files_level_idx].table_infos;
+        let intervals = &l0[intervals_level_idx].table_infos;
         for sst in intervals {
             if level_handler.is_pending_compact(&sst.sst_id) {
                 continue;
@@ -777,6 +785,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -792,6 +801,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -807,6 +817,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -883,6 +894,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -899,6 +911,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -923,6 +936,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -947,6 +961,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             assert_eq!(6, ret.len());
@@ -1075,6 +1090,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {
@@ -1093,6 +1109,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {
@@ -1111,6 +1128,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 compaction_config::max_l0_compact_level_count() as usize,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {
@@ -1130,6 +1148,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 max_expected_level_count,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {
@@ -1153,6 +1172,7 @@ pub mod tests {
                 Arc::new(RangeOverlapStrategy::default()),
                 true,
                 max_expected_level_count,
+                true,
             );
             let ret = picker.pick_l0_multi_non_overlap_level(&levels, &levels_handlers[0]);
             {

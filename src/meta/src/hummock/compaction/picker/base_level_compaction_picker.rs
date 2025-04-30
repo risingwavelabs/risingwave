@@ -182,6 +182,9 @@ impl LevelCompactionPicker {
             self.config
                 .max_l0_compact_level_count
                 .unwrap_or(compaction_config::max_l0_compact_level_count()) as usize,
+            self.config
+                .enable_optimize_l0_interval_selection
+                .unwrap_or(compaction_config::enable_optimize_l0_interval_selection()),
         );
 
         let mut max_vnode_partition_idx = 0;
@@ -415,8 +418,24 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
+
+        let config_enable_optimize_l0_interval_selection = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(2)
+                .compaction_mode(CompactionMode::Range as i32)
+                .level0_sub_level_compact_level_count(1)
+                .enable_optimize_l0_interval_selection(Some(true))
+                .build(),
+        );
+
         let mut picker =
             LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
+
+        let mut picker_enable_optimize_l0_interval_selection = LevelCompactionPicker::new(
+            1,
+            config_enable_optimize_l0_interval_selection,
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
 
         let levels = vec![Level {
             level_idx: 1,
@@ -446,51 +465,82 @@ pub mod tests {
             ],
         );
 
-        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        {
+            let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+            let mut local_stats = LocalPickerStatistic::default();
+            let ret = picker_enable_optimize_l0_interval_selection
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
 
-        // pick
-        // l0 [sst_8]
-        assert_eq!(ret.input_levels.len(), 2);
-        assert_eq!(
-            ret.input_levels[0]
-                .table_infos
-                .iter()
-                .map(|t| t.sst_id)
-                .collect_vec(),
-            vec![8]
-        );
-        // trivial_move
-        assert!(ret.input_levels[1].table_infos.is_empty());
+            // pick
+            // l0 [sst_8]
+            assert_eq!(ret.input_levels.len(), 2);
+            assert_eq!(
+                ret.input_levels[0]
+                    .table_infos
+                    .iter()
+                    .map(|t| t.sst_id)
+                    .collect_vec(),
+                vec![8]
+            );
+            // trivial_move
+            assert!(ret.input_levels[1].table_infos.is_empty());
 
-        ret.add_pending_task(0, &mut levels_handler);
+            ret.add_pending_task(0, &mut levels_handler);
 
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
+            let ret = picker_enable_optimize_l0_interval_selection
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
 
-        assert_eq!(ret.input_levels.len(), 2);
-        assert_eq!(
-            ret.input_levels[0]
-                .table_infos
-                .iter()
-                .map(|t| t.sst_id)
-                .collect_vec(),
-            vec![7]
-        );
+            assert_eq!(ret.input_levels.len(), 2);
+            assert_eq!(
+                ret.input_levels[0]
+                    .table_infos
+                    .iter()
+                    .map(|t| t.sst_id)
+                    .collect_vec(),
+                vec![7]
+            );
 
-        assert_eq!(
-            ret.input_levels[1]
-                .table_infos
-                .iter()
-                .map(|t| t.sst_id)
-                .collect_vec(),
-            vec![5]
-        );
+            assert_eq!(
+                ret.input_levels[1]
+                    .table_infos
+                    .iter()
+                    .map(|t| t.sst_id)
+                    .collect_vec(),
+                vec![5]
+            );
+        }
+
+        {
+            let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+            let mut local_stats = LocalPickerStatistic::default();
+            let ret = picker
+                .pick_compaction(&levels, &levels_handler, &mut local_stats)
+                .unwrap();
+
+            // pick
+            assert_eq!(ret.input_levels.len(), 2);
+            assert_eq!(
+                ret.input_levels[0]
+                    .table_infos
+                    .iter()
+                    .map(|t| t.sst_id)
+                    .collect_vec(),
+                vec![1]
+            );
+
+            assert_eq!(
+                ret.input_levels[1]
+                    .table_infos
+                    .iter()
+                    .map(|t| t.sst_id)
+                    .collect_vec(),
+                vec![3]
+            );
+        }
     }
 
     #[test]
