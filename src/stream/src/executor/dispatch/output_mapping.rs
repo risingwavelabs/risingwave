@@ -17,11 +17,15 @@ use risingwave_pb::stream_plan::PbDispatchOutputMapping;
 
 use crate::executor::prelude::*;
 
+/// Map the output before dispatching.
 #[derive(Debug)]
 pub enum DispatchOutputMapping {
+    /// Mapping by indices only.
     Simple(Vec<usize>),
+    /// Mapping by indices, then transform the data type to fit the downstream.
     TypeMapping {
         indices: Vec<usize>,
+        /// `None` means no type change for this column.
         types: Vec<Option<(DataType, DataType)>>,
     },
 }
@@ -35,20 +39,25 @@ impl DispatchOutputMapping {
         } else {
             let types = (proto.types.into_iter())
                 .map(|t| {
-                    if t.upstream.is_some() {
-                        Some((t.upstream.unwrap().into(), t.downstream.unwrap().into()))
-                    } else {
-                        None
-                    }
+                    t.upstream.and_then(|u| {
+                        let d = t.downstream.unwrap();
+                        if u == d {
+                            None
+                        } else {
+                            Some((u.into(), d.into()))
+                        }
+                    })
                 })
                 .collect();
             Self::TypeMapping { indices, types }
         }
     }
 
+    /// Apply the mapping to the chunk.
     pub(super) fn apply(&self, chunk: StreamChunk) -> StreamChunk {
         match self {
             Self::Simple(indices) => {
+                // Only eliminate noop update when the number of columns is reduced.
                 if indices.len() < chunk.columns().len() {
                     chunk.project(indices).eliminate_adjacent_noop_update()
                 } else {
@@ -79,16 +88,21 @@ impl DispatchOutputMapping {
                     new_columns.push(column);
                 }
 
+                // Always eliminate noop update since there's always type change, and updates to some struct
+                // fields may not be visible to the downstream.
                 StreamChunk::with_visibility(ops, new_columns, visibility)
+                    .eliminate_adjacent_noop_update()
             }
         }
     }
 
+    /// Apply the mapping to the watermark.
     pub(super) fn apply_watermark(&self, watermark: Watermark) -> Option<Watermark> {
         match self {
             Self::Simple(indices) => watermark.transform_with_indices(indices),
             // Type change is only supported on composite types, while watermark must be a simple type.
             // So we simply ignore type mapping here.
+            // TODO: add assertion about this.
             Self::TypeMapping { indices, types: _ } => watermark.transform_with_indices(indices),
         }
     }
