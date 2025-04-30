@@ -50,8 +50,8 @@ use risingwave_pb::meta::{FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatcherType, PbFragmentTypeFlag, PbStreamContext, PbStreamNode, PbStreamScanType,
-    StreamScanType,
+    PbDispatchOutputMapping, PbDispatcherType, PbFragmentTypeFlag, PbStreamContext, PbStreamNode,
+    PbStreamScanType, StreamScanType,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
@@ -642,7 +642,10 @@ impl CatalogController {
                     downstream_fragment_id: relation.target_fragment_id as _,
                     dispatcher_type: relation.dispatcher_type,
                     dist_key_indices: relation.dist_key_indices.into_u32_array(),
-                    output_indices: relation.output_indices.into_u32_array(),
+                    output_mapping: PbDispatchOutputMapping {
+                        indices: relation.output_indices.into_u32_array(),
+                        types: relation.output_type_mapping.to_protobuf(),
+                    },
                 });
         }
         Ok(relations)
