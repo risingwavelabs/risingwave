@@ -150,7 +150,6 @@ impl CommandContext {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => {
-                let mut is_sink_into_table = false;
                 match job_type {
                     CreateStreamingJobType::SinkIntoTable(
                         replace_plan @ ReplaceStreamJobPlan {
@@ -161,7 +160,6 @@ impl CommandContext {
                             ..
                         },
                     ) => {
-                        is_sink_into_table = true;
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
