@@ -34,6 +34,7 @@ user client_encoding
 user client_min_messages
 user create_compaction_group_for_mv
 user datestyle
+user disable_purify_definition
 user dml_rate_limit
 user enable_join_ordering
 user enable_share_plan
