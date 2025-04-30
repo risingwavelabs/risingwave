@@ -13,8 +13,10 @@
 // limitations under the License.
 pub mod enumerator;
 
+use phf::{Set, phf_set};
 use serde::Deserialize;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
 use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::util::dummy::{
@@ -41,6 +43,13 @@ pub struct S3PropertiesCommon {
     pub endpoint_url: Option<String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecret for S3PropertiesCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "s3.credentials.access",
+        "s3.credentials.secret",
+    };
 }
 
 #[derive(Debug, Clone, PartialEq)]

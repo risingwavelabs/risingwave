@@ -12,7 +12,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.39"
+async-nats = "0.40"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -21,7 +21,6 @@ aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
 aws-sdk-dynamodb = "1"
-aws-sdk-emrserverless = "1.50.0"
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -42,7 +41,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d
 ] }
 csv = "1.3"
 deltalake = { workspace = true }
-duration-str = "0.16.1"
+duration-str = "0.17.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
@@ -51,19 +50,19 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-bigquery = { version = "0.14.0", features = ["auth"] }
+google-cloud-bigquery = { version = "0.15.0", features = ["auth"] }
 google-cloud-gax = "0.19.2"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.30"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-indexmap = { version = "2.8.0", features = ["serde"] }
+indexmap = { version = "2.9.0", features = ["serde"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
-mongodb = { version = "2.8.2", features = ["tokio-runtime"] }
+mongodb = "3.2.3"
 mysql_async = { workspace = true }
 mysql_common = { version = "0.32", default-features = false, features = [
     "chrono",
@@ -85,10 +84,11 @@ parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
+phf = { version = "0.11", features = ["macros"] }
 postgres-openssl = "0.5.0"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.14", features = ["serde"] }
+prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
@@ -103,7 +103,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.28", features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
+redis = { workspace = true, features = ["aio", "tokio-comp", "async-std-comp","cluster-async","geospatial"] }
 regex = "1.4"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
@@ -111,6 +111,7 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.24.0", features = ["url"] }
@@ -120,6 +121,7 @@ rustls-pemfile = "2"
 rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
 scopeguard = "1"
+sea-orm = { workspace = true }
 sea-schema = { version = "0.16", default-features = false, features = [
     "discovery",
     "sqlx-postgres",
@@ -164,7 +166,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
-typed-builder = "^0.20"
+typed-builder = "^0.21"
 url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }

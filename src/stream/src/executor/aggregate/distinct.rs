@@ -171,7 +171,17 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 );
                 let old_counts =
                     OwnedRow::new(prev_counts.iter().map(|&v| Some(v.into())).collect());
-                dedup_table.update(row_prefix.chain(old_counts), row_prefix.chain(new_counts));
+                let old_row = row_prefix.chain(old_counts);
+                if new_counts
+                    .iter()
+                    .all(|v| v.map_or(0, ScalarRefImpl::into_int64) == 0)
+                {
+                    // if new counts all dropped to 0, we need to delete the row from the dedup table
+                    dedup_table.delete(old_row);
+                    self.cache.remove(&cache_key);
+                } else {
+                    dedup_table.update(old_row, row_prefix.chain(new_counts));
+                }
             });
 
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
@@ -206,7 +216,9 @@ unsafe fn get_many_mut_from_slice<'a, T>(slice: &'a mut [T], indices: &[usize]) 
     let mut res = Vec::with_capacity(indices.len());
     let ptr = slice.as_mut_ptr();
     for &idx in indices {
-        res.push(&mut *ptr.add(idx));
+        unsafe {
+            res.push(&mut *ptr.add(idx));
+        }
     }
     res
 }
@@ -261,7 +273,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Vec<Bitmap>> {
-        for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
+        for (distinct_col, (call_indices, deduplicater)) in &mut self.deduplicaters {
             let column = &columns[*distinct_col];
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
             // Select visibilities (as mutable references) of distinct agg calls that distinct on
@@ -527,6 +539,109 @@ mod tests {
         for table in dedup_tables.values_mut() {
             table.commit_for_test(epoch).await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn test_distinct_deduplicater_delete() {
+        // Schema:
+        // a: int, b int, c int
+        // Agg calls:
+        // count(distinct a)
+        // Group keys:
+        // empty
+
+        let agg_calls = [
+            AggCall::from_pretty("(count:int8 $0:int8 distinct)"), // count(distinct a)
+        ];
+
+        let store = MemoryStateStore::new();
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+        let mut dedup_tables = infer_dedup_tables(&agg_calls, &[], store).await;
+        for table in dedup_tables.values_mut() {
+            table.init_epoch(epoch).await.unwrap()
+        }
+
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            &ActorContext::for_test(0),
+        );
+
+        // --- chunk 1 ---
+
+        let chunk = StreamChunk::from_pretty(
+            " I   I     I
+            + 1  10   100
+            - 1  10   100
+            + 2  21   201
+            + 2  22   202",
+        );
+        let (ops, columns, visibility) = chunk.into_inner();
+
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
+        let visibilities = deduplicater
+            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            visibilities[0].iter().collect_vec(),
+            vec![true, true, true, false]
+        );
+
+        deduplicater.flush(&mut dedup_tables).unwrap();
+
+        epoch.inc_for_test();
+        for table in dedup_tables.values_mut() {
+            table.commit_for_test(epoch).await.unwrap();
+        }
+
+        // the `a = 1` row should be deleted because all counts dropped to 0
+        let counts = dedup_tables[&0]
+            .get_row(OwnedRow::new(vec![Some(1i64.into())]))
+            .await
+            .unwrap();
+        assert!(counts.is_none());
+
+        let counts = dedup_tables[&0]
+            .get_row(OwnedRow::new(vec![Some(2i64.into())]))
+            .await
+            .unwrap();
+        assert_eq!(
+            counts.unwrap().iter().collect_vec(),
+            vec![Some(2i64.into())] // there're 2 rows with `a = 2`
+        );
+
+        // --- chunk 2 ---
+
+        let chunk = StreamChunk::from_pretty(
+            " I   I     I
+            - 2  21   201
+            - 2  22   202",
+        );
+        let (ops, columns, visibility) = chunk.into_inner();
+
+        let visibilities = std::iter::repeat_n(visibility, agg_calls.len()).collect_vec();
+        let visibilities = deduplicater
+            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
+            .await
+            .unwrap();
+        assert_eq!(visibilities[0].iter().collect_vec(), vec![false, true]);
+        // Note that the `true` row here (2, 22, 202) is not the `true` row in the previous chunk (2, 21, 201),
+        // but this is not a problem because we only care about the distinct column.
+
+        deduplicater.flush(&mut dedup_tables).unwrap();
+
+        epoch.inc_for_test();
+        for table in dedup_tables.values_mut() {
+            table.commit_for_test(epoch).await.unwrap();
+        }
+
+        let counts = dedup_tables[&0]
+            .get_row(OwnedRow::new(vec![Some(2i64.into())]))
+            .await
+            .unwrap();
+        assert!(counts.is_none());
     }
 
     #[tokio::test]

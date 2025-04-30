@@ -94,6 +94,7 @@ function restore() {
   --sql-endpoint "sqlite://${RW_SQLITE_DB}?mode=rwc" \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --validate-integrity \
   1>/dev/null 2>&1
 }
 
@@ -141,7 +142,33 @@ function restore_with_overwrite() {
   --hummock-storage-url "${overwrite_hummock_storage_url}" \
   --hummock-storage-directory "${overwrite_hummock_storage_dir}" \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --validate-integrity \
   1>/dev/null 2>&1
+}
+
+function restore_fail_integrity_validation() {
+  local job_id
+  job_id=$1
+  echo "try to restore snapshot ${job_id}"
+  stop_cluster
+  clean_meta_store
+  start_meta_store_minio
+  set +e
+  local output
+  output=$(${BACKUP_TEST_RW_ALL_IN_ONE} \
+  risectl \
+  meta \
+  restore-meta \
+  --meta-store-type "sql" \
+  --meta-snapshot-id "${job_id}" \
+  --sql-endpoint "sqlite://${RW_SQLITE_DB}?mode=rwc" \
+  --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --hummock-storage-directory dummy_dir \
+  --validate-integrity \
+  --dry-run 2>&1 | grep "Fail integrity validation." )
+  set -e
+  [ -n "${output}" ]
 }
 
 function execute_sql() {

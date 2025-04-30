@@ -70,7 +70,7 @@ pub(crate) mod tests {
         PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-    use risingwave_storage::hummock::test_utils::*;
+    use risingwave_storage::hummock::test_utils::{ReadOptions, *};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
@@ -175,16 +175,10 @@ pub(crate) mod tests {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local
-                .ingest_batch(
-                    vec![(
-                        TableKey(key.clone()),
-                        StorageValue::new_put(Bytes::from(new_val)),
-                    )],
-                    WriteOptions {
-                        epoch,
-                        table_id: Default::default(),
-                    },
-                )
+                .ingest_batch(vec![(
+                    TableKey(key.clone()),
+                    StorageValue::new_put(Bytes::from(new_val)),
+                )])
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
@@ -383,7 +377,7 @@ pub(crate) mod tests {
 
             for _ in 0..keys_per_epoch {
                 let mut key = idx.to_be_bytes().to_vec();
-                let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
+                let ramdom_key = rand::rng().random::<[u8; 32]>();
                 key.extend_from_slice(&ramdom_key);
                 local
                     .insert(TableKey(Bytes::from(key)), val.clone(), None)
@@ -550,7 +544,7 @@ pub(crate) mod tests {
             };
 
             let mut prefix = BytesMut::default();
-            let random_key = rand::thread_rng().gen::<[u8; 32]>();
+            let random_key = rand::rng().random::<[u8; 32]>();
             prefix.extend_from_slice(&vnode.to_be_bytes());
             prefix.put_slice(random_key.as_slice());
 
@@ -746,7 +740,7 @@ pub(crate) mod tests {
             }
             epoch_set.insert(epoch);
             let mut prefix = BytesMut::default();
-            let random_key = rand::thread_rng().gen::<[u8; 32]>();
+            let random_key = rand::rng().random::<[u8; 32]>();
             prefix.extend_from_slice(&vnode.to_be_bytes());
             prefix.put_slice(random_key.as_slice());
 
@@ -962,7 +956,7 @@ pub(crate) mod tests {
             storage.start_epoch(next_epoch, table_id_set.clone());
             epoch_set.insert(epoch);
 
-            let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
+            let ramdom_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
             local
                 .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
@@ -1962,8 +1956,7 @@ pub(crate) mod tests {
                 let next_epoch = *epoch + millisec_interval_epoch;
                 storage.start_epoch(next_epoch, table_id_set.clone());
 
-                let ramdom_key =
-                    [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
+                let ramdom_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
 
                 if local_1.1 {
                     local_1

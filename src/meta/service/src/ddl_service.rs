@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::rng as thread_rng;
+use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;

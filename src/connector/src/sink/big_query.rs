@@ -27,7 +27,7 @@ use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
-use google_cloud_bigquery::grpc::apiv1::conn_pool::{DOMAIN, WriteConnectionManager};
+use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
 use google_cloud_gax::grpc::Request;
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
@@ -38,6 +38,7 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 };
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use phf::{Set, phf_set};
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
@@ -63,6 +64,7 @@ use super::{
 };
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
@@ -92,6 +94,12 @@ pub struct BigQueryCommon {
     pub auto_create: bool,
     #[serde(rename = "bigquery.credentials")]
     pub credentials: Option<String>,
+}
+
+impl EnforceSecret for BigQueryCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "bigquery.credentials",
+    };
 }
 
 struct BigQueryFutureManager {
@@ -159,7 +167,8 @@ impl BigQueryLogSinker {
 
 #[async_trait]
 impl LogSinker for BigQueryLogSinker {
-    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             tokio::select!(
                 offset = self.bigquery_future_manager.next_offset() => {
@@ -177,7 +186,6 @@ impl LogSinker for BigQueryLogSinker {
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Barrier { epoch },0);
                         }
-                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                     }
                 }
             )
@@ -200,7 +208,7 @@ impl BigQueryCommon {
     async fn build_writer_client(
         &self,
         aws_auth_props: &AwsAuthProps,
-    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>>)> {
+    ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
         let credentials_file = CredentialsFile::new_from_str(&auth_json)
@@ -239,6 +247,15 @@ pub struct BigQueryConfig {
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
 }
+
+impl EnforceSecret for BigQueryConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        BigQueryCommon::enforce_one(prop)?;
+        AwsAuthProps::enforce_one(prop)?;
+        Ok(())
+    }
+}
+
 impl BigQueryConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
@@ -262,6 +279,17 @@ pub struct BigQuerySink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecret for BigQuerySink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            BigQueryConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl BigQuerySink {
@@ -794,15 +822,10 @@ impl StorageWriterClient {
             timeout: CONNECTION_TIMEOUT,
         };
         let environment = Environment::GoogleCloud(Box::new(ts_grpc));
-        let conn = WriteConnectionManager::new(
-            DEFAULT_GRPC_CHANNEL_NUMS,
-            &environment,
-            DOMAIN,
-            &conn_options,
-        )
-        .await
-        .map_err(|e| SinkError::BigQuery(e.into()))?;
-        let mut client = conn.conn();
+        let conn = ConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, &conn_options)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        let mut client = conn.writer();
 
         let (tx, rx) = mpsc::unbounded_channel();
         let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);

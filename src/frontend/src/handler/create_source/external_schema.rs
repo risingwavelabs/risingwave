@@ -66,12 +66,12 @@ async fn bind_columns_from_source_for_non_cdc(
             let (sec_resolve_props, connection_type, _) = resolve_connection_ref_and_secret_ref(
                 options.clone(),
                 session,
-                TelemetryDatabaseObject::Source,
+                Some(TelemetryDatabaseObject::Source),
             )?;
-            if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+            if !SOURCE_ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
                 return Err(RwError::from(ProtocolError(format!(
                     "connection type {:?} is not allowed, allowed types: {:?}",
-                    connection_type, ALLOWED_CONNECTION_CONNECTOR
+                    connection_type, SOURCE_ALLOWED_CONNECTION_CONNECTOR
                 ))));
             }
 
@@ -87,9 +87,9 @@ async fn bind_columns_from_source_for_non_cdc(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(format_encode.row_options())?,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
-    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
 
     let (format_encode_options, format_encode_secret_refs) = sec_resolve_props.into_parts();
     // Need real secret to access the schema registry

@@ -14,9 +14,11 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use prometheus::core::GenericCounter;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use crate::parser::ConnectorResult;
@@ -50,10 +52,10 @@ impl ParquetParser {
             tokio_util::compat::Compat<opendal::FuturesAsyncReader>,
         >,
         file_source_input_row_count_metrics: Option<
-            risingwave_common::metrics::LabelGuardedMetric<
-                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-                4,
-            >,
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
+        >,
+        parquet_source_skip_row_count_metrics: Option<
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
         >,
     ) {
         #[for_await]
@@ -63,7 +65,9 @@ impl ParquetParser {
             let chunk: StreamChunk = self.convert_record_batch_to_stream_chunk(
                 record_batch,
                 file_source_input_row_count_metrics.clone(),
+                parquet_source_skip_row_count_metrics.clone(),
             )?;
+
             yield chunk;
         }
     }
@@ -96,15 +100,16 @@ impl ParquetParser {
         &mut self,
         record_batch: RecordBatch,
         file_source_input_row_count_metrics: Option<
-            risingwave_common::metrics::LabelGuardedMetric<
-                prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-                4,
-            >,
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
+        >,
+        parquet_source_skip_row_count_metrics: Option<
+            LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
         >,
     ) -> Result<StreamChunk, crate::error::ConnectorError> {
         const MAX_HIDDEN_COLUMN_NUMS: usize = 3;
         let column_size = self.rw_columns.len();
         let mut chunk_columns = Vec::with_capacity(self.rw_columns.len() + MAX_HIDDEN_COLUMN_NUMS);
+
         for source_column in self.rw_columns.clone() {
             match source_column.column_type {
                 crate::source::SourceColumnType::Normal => {
@@ -148,9 +153,13 @@ impl ParquetParser {
                                 _ => unreachable!(),
                             }
                         } else {
+                            // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
                             let mut array_builder =
                                 ArrayBuilderImpl::with_type(column_size, rw_data_type.clone());
                             array_builder.append_n_null(record_batch.num_rows());
+                            if let Some(metrics) = parquet_source_skip_row_count_metrics.clone() {
+                                metrics.inc_by(record_batch.num_rows() as u64);
+                            }
                             Arc::new(array_builder.finish())
                         };
                         chunk_columns.push(column);

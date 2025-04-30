@@ -937,30 +937,36 @@ where
         drop(msg);
         let session = self.session.clone().unwrap();
 
-        if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
-            assert!(self.portal_store.contains_key(&portal_name));
+        match self.result_cache.remove(&portal_name) {
+            Some(mut result_cache) => {
+                assert!(self.portal_store.contains_key(&portal_name));
 
-            let is_cosume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
+                let is_cosume_completed =
+                    result_cache.consume::<S>(row_max, &mut self.stream).await?;
 
-            if !is_cosume_completed {
-                self.result_cache.insert(portal_name, result_cache);
+                if !is_cosume_completed {
+                    self.result_cache.insert(portal_name, result_cache);
+                }
             }
-        } else {
-            let portal = self.get_portal(&portal_name)?;
-            let sql = format!("{}", portal);
-            let truncated_sql = record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
-            drop(sql);
+            _ => {
+                let portal = self.get_portal(&portal_name)?;
+                let sql = format!("{}", portal);
+                let truncated_sql =
+                    record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+                drop(sql);
 
-            session.check_idle_in_transaction_timeout()?;
-            // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
-            let _exec_context_guard = session.init_exec_context(truncated_sql.into());
-            let result = session.clone().execute(portal).await;
+                session.check_idle_in_transaction_timeout()?;
+                // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
+                let _exec_context_guard = session.init_exec_context(truncated_sql.into());
+                let result = session.clone().execute(portal).await;
 
-            let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
-            let mut result_cache = ResultCache::new(pg_response);
-            let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
-            if !is_consume_completed {
-                self.result_cache.insert(portal_name, result_cache);
+                let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
+                let mut result_cache = ResultCache::new(pg_response);
+                let is_consume_completed =
+                    result_cache.consume::<S>(row_max, &mut self.stream).await?;
+                if !is_consume_completed {
+                    self.result_cache.insert(portal_name, result_cache);
+                }
             }
         }
 

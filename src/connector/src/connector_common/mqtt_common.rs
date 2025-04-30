@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use phf::{Set, phf_set};
 use rumqttc::tokio_rustls::rustls;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::ConnectProperties;
@@ -23,6 +24,7 @@ use with_options::WithOptions;
 
 use super::common::{load_certs, load_private_key};
 use crate::deserialize_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
@@ -77,7 +79,7 @@ pub struct MqttCommon {
     pub max_packet_size: Option<u32>,
 
     /// Path to CA certificate file for verifying the broker's key.
-    #[serde(rename = "tls.client_key")]
+    #[serde(rename = "tls.ca")]
     pub ca: Option<String>,
     /// Path to client's certificate file (PEM). Required for client authentication.
     /// Can be a file path under fs:// or a string with the certificate content.
@@ -88,6 +90,14 @@ pub struct MqttCommon {
     /// Can be a file path under fs:// or a string with the private key content.
     #[serde(rename = "tls.client_key")]
     pub client_key: Option<String>,
+}
+
+impl EnforceSecret for MqttCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "tls.client_cert",
+        "tls.client_key",
+        "password",
+    };
 }
 
 impl MqttCommon {

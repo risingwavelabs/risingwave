@@ -24,11 +24,17 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-# preparing for embedded udf tests
-mkdir -p e2e_test/udf/wasm/target/wasm32-wasip1/release/
-buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasip1/release/
+# preparing for embedded wasm udf tests
+mkdir -p e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/
+buildkite-agent artifact download udf.wasm e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/
+# preparing for external java udf tests
+mkdir -p e2e_test/udf/remote_java/target/
+buildkite-agent artifact download udf.jar e2e_test/udf/remote_java/target/
 # preparing for generated tests
 download-and-decompress-artifact e2e_test_generated ./
+
+echo "--- Install Python Dependencies"
+python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 
 mode=ci-3streaming-2serving-3fe
 start_cluster() {
@@ -58,7 +64,8 @@ kill_cluster
 echo "--- e2e, $mode, udf"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
 start_cluster
-risedev slt "${host_args[@]}" -d dev './e2e_test/udf/general/**/*.slt' './e2e_test/udf/embedded/**/*.slt' -j 16 --junit "parallel-udf-${profile}" --label "parallel"
+python3 -m pip install --break-system-packages -r ./e2e_test/udf/remote_python/requirements.txt
+risedev slt "${host_args[@]}" -d dev './e2e_test/udf/tests/**/*.slt' -j 16 --junit "parallel-udf-${profile}" --label "parallel"
 kill_cluster
 
 echo "--- e2e, $mode, generated"

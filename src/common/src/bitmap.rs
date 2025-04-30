@@ -347,9 +347,11 @@ impl Bitmap {
     ///
     /// Index must be in range.
     pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
-        match &self.bits {
-            None => self.count_ones != 0,
-            Some(bits) => bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0,
+        unsafe {
+            match &self.bits {
+                None => self.count_ones != 0,
+                Some(bits) => bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0,
+            }
         }
     }
 

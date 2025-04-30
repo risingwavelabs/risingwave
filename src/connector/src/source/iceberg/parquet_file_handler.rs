@@ -33,9 +33,11 @@ use opendal::services::{Azblob, Gcs, S3};
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, parquet_to_arrow_schema};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
+use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -284,10 +286,10 @@ pub async fn read_parquet_file(
     batch_size: usize,
     offset: usize,
     file_source_input_row_count_metrics: Option<
-        risingwave_common::metrics::LabelGuardedMetric<
-            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-            4,
-        >,
+        LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
+    >,
+    parquet_source_skip_row_count_metrics: Option<
+        LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
     >,
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
@@ -339,7 +341,8 @@ pub async fn read_parquet_file(
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
     > = parquet_parser.into_stream(
         record_batch_stream,
-        file_source_input_row_count_metrics.clone(),
+        file_source_input_row_count_metrics,
+        parquet_source_skip_row_count_metrics,
     );
     Ok(msg_stream)
 }

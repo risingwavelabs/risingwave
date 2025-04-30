@@ -111,10 +111,11 @@ pub fn verified_expr(sql: &str) -> Expr {
 
 pub fn only<T>(v: impl IntoIterator<Item = T>) -> T {
     let mut iter = v.into_iter();
-    if let (Some(item), None) = (iter.next(), iter.next()) {
-        item
-    } else {
-        panic!("only called on collection without exactly one item")
+    match (iter.next(), iter.next()) {
+        (Some(item), None) => item,
+        _ => {
+            panic!("only called on collection without exactly one item")
+        }
     }
 }
 

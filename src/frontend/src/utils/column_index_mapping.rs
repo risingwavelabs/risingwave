@@ -139,7 +139,7 @@ impl ColIndexMapping {
     /// Rewrite the indices in a functional dependency.
     ///
     /// If some columns in the `from` side are removed, then this fd is no longer valid. For
-    /// example, for ABC --> D, it means that A, B, and C together can determine C. But if B is
+    /// example, for ABC --> D, it means that A, B, and C together can determine D. But if B is
     /// removed, this fd is not valid. For this case, we will return [`None`]
     ///
     /// Additionally, If the `to` side of a functional dependency becomes empty after rewriting, it

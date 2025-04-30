@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
-use regex::Regex;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
@@ -72,39 +71,6 @@ impl MonitorServiceImpl {
     }
 }
 
-static REPLACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    const REGEX_STR: &str = r"consume_log \(sink_id (?<sink_id>\d+)\) \[!!! ";
-    Regex::new(REGEX_STR).unwrap()
-});
-
-fn rewrite_false_positive_consume_log_entry(trace: String) -> String {
-    // transform:
-    //  consume_log (sink_id 346) [!!! 3490.450s]
-    // into:
-    //  consume_log (sink_id 346) [3490.450s]
-    REPLACE_REGEX
-        .replace_all(&trace, r"consume_log (sink_id $sink_id) [")
-        .into_owned()
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::rpc::service::monitor_service::{
-        REPLACE_REGEX, rewrite_false_positive_consume_log_entry,
-    };
-
-    #[test]
-    fn test_rewrite_false_positive_consume_log_entry() {
-        assert!(REPLACE_REGEX.is_match("consume_log (sink_id 346) [!!! 3490.450s]"));
-        assert_eq!(
-            "consume_log (sink_id 346) [3490.450s]",
-            &rewrite_false_positive_consume_log_entry(
-                "consume_log (sink_id 346) [!!! 3490.450s]".into()
-            )
-        );
-    }
-}
-
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
     #[cfg_attr(coverage, coverage(off))]
@@ -112,12 +78,21 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
         let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k.0, rewrite_false_positive_consume_log_entry(v.to_string())))
+                .map(|(k, v)| {
+                    (
+                        k.0,
+                        if req.actor_traces_format == ActorTracesFormat::Text as i32 {
+                            v.to_string()
+                        } else {
+                            serde_json::to_string(&v).unwrap()
+                        },
+                    )
+                })
                 .collect()
         } else {
             Default::default()
@@ -328,16 +303,45 @@ impl MonitorService for MonitorServiceImpl {
         request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         let metrics = global_streaming_metrics(MetricLevel::Info);
-        let operator_ids = &request.into_inner().operator_ids;
+        let inner = request.into_inner();
+        let executor_ids = &inner.executor_ids;
+        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids.into_iter());
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
-            .collect(operator_ids);
-        let stream_node_output_blocking_duration_ms = metrics
-            .mem_stream_node_output_blocking_duration_ms
-            .collect(operator_ids);
+            .collect(executor_ids);
+        let stream_node_output_blocking_duration_ns = metrics
+            .mem_stream_node_output_blocking_duration_ns
+            .collect(executor_ids);
+
+        // Collect count metrics by fragment_ids
+        fn collect_by_fragment_ids<T: Collector>(
+            m: &T,
+            fragment_ids: &HashSet<u32>,
+        ) -> HashMap<u32, u64> {
+            let mut metrics = HashMap::new();
+            for mut metric_family in m.collect() {
+                for metric in metric_family.take_metric() {
+                    let fragment_id = get_label_infallible(&metric, "fragment_id");
+                    if fragment_ids.contains(&fragment_id) {
+                        let entry = metrics.entry(fragment_id).or_insert(0);
+                        *entry += metric.get_counter().value() as u64;
+                    }
+                }
+            }
+            metrics
+        }
+
+        let dispatch_fragment_output_row_count =
+            collect_by_fragment_ids(&metrics.actor_out_record_cnt, &fragment_ids);
+        let dispatch_fragment_output_blocking_duration_ns = collect_by_fragment_ids(
+            &metrics.actor_output_buffer_blocking_duration_ns,
+            &fragment_ids,
+        );
         Ok(Response::new(GetProfileStatsResponse {
             stream_node_output_row_count,
-            stream_node_output_blocking_duration_ms,
+            stream_node_output_blocking_duration_ns,
+            dispatch_fragment_output_row_count,
+            dispatch_fragment_output_blocking_duration_ns,
         }))
     }
 
@@ -349,25 +353,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
 
         fn collect<T: Collector>(m: &T) -> Vec<Metric> {
-            m.collect()
-                .into_iter()
-                .next()
-                .unwrap()
-                .take_metric()
-                .into_vec()
-        }
-
-        // Must ensure the label exists and can be parsed into `T`
-        fn get_label<T: std::str::FromStr>(metric: &Metric, label: &str) -> T {
-            metric
-                .get_label()
-                .iter()
-                .find(|lp| lp.get_name() == label)
-                .unwrap()
-                .get_value()
-                .parse::<T>()
-                .ok()
-                .unwrap()
+            m.collect().into_iter().next().unwrap().take_metric()
         }
 
         let actor_output_buffer_blocking_duration_ns =
@@ -377,8 +363,8 @@ impl MonitorService for MonitorServiceImpl {
         let actor_count: HashMap<_, _> = actor_count
             .iter()
             .map(|m| {
-                let fragment_id: u32 = get_label(m, "fragment_id");
-                let count = m.get_gauge().get_value() as u32;
+                let fragment_id: u32 = get_label_infallible(m, "fragment_id");
+                let count = m.get_gauge().value() as u32;
                 (fragment_id, count)
             })
             .collect();
@@ -396,8 +382,8 @@ impl MonitorService for MonitorServiceImpl {
 
         let actor_current_epoch = collect(&metrics.actor_current_epoch);
         for m in &actor_current_epoch {
-            let fragment_id: u32 = get_label(m, "fragment_id");
-            let epoch = m.get_gauge().get_value() as u64;
+            let fragment_id: u32 = get_label_infallible(m, "fragment_id");
+            let epoch = m.get_gauge().value() as u64;
             if let Some(s) = fragment_stats.get_mut(&fragment_id) {
                 s.current_epoch = if s.current_epoch == 0 {
                     epoch
@@ -415,8 +401,8 @@ impl MonitorService for MonitorServiceImpl {
         let mut relation_stats: HashMap<u32, RelationStats> = HashMap::new();
         let mview_current_epoch = collect(&metrics.materialize_current_epoch);
         for m in &mview_current_epoch {
-            let table_id: u32 = get_label(m, "table_id");
-            let epoch = m.get_gauge().get_value() as u64;
+            let table_id: u32 = get_label_infallible(m, "table_id");
+            let epoch = m.get_gauge().value() as u64;
             if let Some(s) = relation_stats.get_mut(&table_id) {
                 s.current_epoch = if s.current_epoch == 0 {
                     epoch
@@ -438,8 +424,9 @@ impl MonitorService for MonitorServiceImpl {
         let mut channel_stats: BTreeMap<String, ChannelStats> = BTreeMap::new();
 
         for metric in actor_output_buffer_blocking_duration_ns {
-            let fragment_id: u32 = get_label(&metric, "fragment_id");
-            let downstream_fragment_id: u32 = get_label(&metric, "downstream_fragment_id");
+            let fragment_id: u32 = get_label_infallible(&metric, "fragment_id");
+            let downstream_fragment_id: u32 =
+                get_label_infallible(&metric, "downstream_fragment_id");
 
             let key = format!("{}_{}", fragment_id, downstream_fragment_id);
             let channel_stat = channel_stats.entry(key).or_insert_with(|| ChannelStats {
@@ -451,34 +438,35 @@ impl MonitorService for MonitorServiceImpl {
 
             // When metrics level is Debug, `actor_id` will be removed to reduce metrics.
             // See `src/common/metrics/src/relabeled_metric.rs`
-            channel_stat.actor_count += if get_label::<String>(&metric, "actor_id").is_empty() {
-                actor_count[&fragment_id]
-            } else {
-                1
-            };
-            channel_stat.output_blocking_duration += metric.get_counter().get_value();
+            channel_stat.actor_count +=
+                if get_label_infallible::<String>(&metric, "actor_id").is_empty() {
+                    actor_count[&fragment_id]
+                } else {
+                    1
+                };
+            channel_stat.output_blocking_duration += metric.get_counter().value();
         }
 
         let actor_output_row_count = collect(&metrics.actor_out_record_cnt);
         for metric in actor_output_row_count {
-            let fragment_id: u32 = get_label(&metric, "fragment_id");
+            let fragment_id: u32 = get_label_infallible(&metric, "fragment_id");
 
             // Find out and write to all downstream channels
             let key_prefix = format!("{}_", fragment_id);
             let key_range_end = format!("{}`", fragment_id); // '`' is next to `_`
             for (_, s) in channel_stats.range_mut(key_prefix..key_range_end) {
-                s.send_row_count += metric.get_counter().get_value() as u64;
+                s.send_row_count += metric.get_counter().value() as u64;
             }
         }
 
         let actor_input_row_count = collect(&metrics.actor_in_record_cnt);
         for metric in actor_input_row_count {
-            let upstream_fragment_id: u32 = get_label(&metric, "upstream_fragment_id");
-            let fragment_id: u32 = get_label(&metric, "fragment_id");
+            let upstream_fragment_id: u32 = get_label_infallible(&metric, "upstream_fragment_id");
+            let fragment_id: u32 = get_label_infallible(&metric, "fragment_id");
 
             let key = format!("{}_{}", upstream_fragment_id, fragment_id);
             if let Some(s) = channel_stats.get_mut(&key) {
-                s.recv_row_count += metric.get_counter().get_value() as u64;
+                s.recv_row_count += metric.get_counter().value() as u64;
             }
         }
 
@@ -564,6 +552,7 @@ impl MonitorService for MonitorServiceImpl {
 }
 
 pub use grpc_middleware::*;
+use risingwave_common::metrics::get_label_infallible;
 
 pub mod grpc_middleware {
     use std::sync::Arc;

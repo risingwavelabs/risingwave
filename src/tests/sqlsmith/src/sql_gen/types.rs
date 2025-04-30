@@ -52,7 +52,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 })
                 .collect(),
         ),
-        DataType::List(ref typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
+        DataType::List(typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
         DataType::Map(_) => todo!(),
     }
 }
@@ -179,6 +179,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     && ![
                         PbAggKind::InternalLastSeenValue, // Use internally
                         PbAggKind::Sum0, // Used internally
+                        PbAggKind::ApproxCountDistinct,
                         PbAggKind::BitAnd,
                         PbAggKind::BitOr,
                         PbAggKind::BoolAnd,

@@ -38,8 +38,9 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, FragmentTypeFlag,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
+    BackfillOrderFixed, BackfillOrderStrategy, DispatchStrategy, DispatcherType, FragmentTypeFlag,
+    PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
+    StreamScanType, backfill_order_strategy,
 };
 
 use crate::MetaResult;
@@ -339,6 +340,12 @@ impl StreamFragmentEdge {
     }
 }
 
+/// Adjacency list (G) of backfill orders.
+/// `G[10] -> [1, 2, 11]`
+/// means for the backfill node in `fragment 10`
+/// should be backfilled before the backfill nodes in `fragment 1, 2 and 11`.
+pub type FragmentBackfillOrder = HashMap<FragmentId, Vec<FragmentId>>;
+
 /// In-memory representation of a **Fragment** Graph, built from the [`StreamFragmentGraphProto`]
 /// from the frontend.
 ///
@@ -373,6 +380,9 @@ pub struct StreamFragmentGraph {
     /// upstream fragment graph requires two fragments to be in the same distribution,
     /// thus the same vnode count.
     max_parallelism: usize,
+
+    /// The backfill ordering strategy of the graph.
+    backfill_order_strategy: BackfillOrderStrategy,
 }
 
 impl StreamFragmentGraph {
@@ -445,6 +455,9 @@ impl StreamFragmentGraph {
         };
 
         let max_parallelism = proto.max_parallelism as usize;
+        let backfill_order_strategy = proto
+            .backfill_order_strategy
+            .unwrap_or(BackfillOrderStrategy { strategy: None });
 
         Ok(Self {
             fragments,
@@ -453,6 +466,7 @@ impl StreamFragmentGraph {
             dependent_table_ids,
             specified_parallelism,
             max_parallelism,
+            backfill_order_strategy,
         })
     }
 
@@ -581,20 +595,26 @@ impl StreamFragmentGraph {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
-    /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
     pub fn collect_snapshot_backfill_info(
         &self,
+    ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
+        Self::collect_snapshot_backfill_info_impl(
+            self.fragments
+                .values()
+                .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask)),
+        )
+    }
+
+    /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
+    pub fn collect_snapshot_backfill_info_impl(
+        fragments: impl IntoIterator<Item = (&PbStreamNode, u32)>,
     ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
         let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
         let mut cross_db_info = SnapshotBackfillInfo {
             upstream_mv_table_id_to_backfill_epoch: Default::default(),
         };
         let mut result = Ok(());
-        for (node, fragment_type_mask) in self
-            .fragments
-            .values()
-            .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask))
-        {
+        for (node, fragment_type_mask) in fragments {
             visit_stream_node_cont(node, |node| {
                 if let Some(NodeBody::StreamScan(stream_scan)) = node.node_body.as_ref() {
                     let stream_scan_type = StreamScanType::try_from(stream_scan.stream_scan_type)
@@ -614,9 +634,10 @@ impl StreamFragmentGraph {
                                     & (FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
                                     > 0
                             );
-                            cross_db_info
-                                .upstream_mv_table_id_to_backfill_epoch
-                                .insert(TableId::new(stream_scan.table_id), None);
+                            cross_db_info.upstream_mv_table_id_to_backfill_epoch.insert(
+                                TableId::new(stream_scan.table_id),
+                                stream_scan.snapshot_backfill_epoch,
+                            );
 
                             return true;
                         }
@@ -629,7 +650,10 @@ impl StreamFragmentGraph {
                                 (Some(prev_snapshot_backfill_info), true) => {
                                     prev_snapshot_backfill_info
                                         .upstream_mv_table_id_to_backfill_epoch
-                                        .insert(TableId::new(stream_scan.table_id), None);
+                                        .insert(
+                                            TableId::new(stream_scan.table_id),
+                                            stream_scan.snapshot_backfill_epoch,
+                                        );
                                     true
                                 }
                                 (None, false) => true,
@@ -644,7 +668,10 @@ impl StreamFragmentGraph {
                                 if is_snapshot_backfill {
                                     Some(SnapshotBackfillInfo {
                                         upstream_mv_table_id_to_backfill_epoch: HashMap::from_iter(
-                                            [(TableId::new(stream_scan.table_id), None)],
+                                            [(
+                                                TableId::new(stream_scan.table_id),
+                                                stream_scan.snapshot_backfill_epoch,
+                                            )],
                                         ),
                                     })
                                 } else {
@@ -668,6 +695,64 @@ impl StreamFragmentGraph {
                 cross_db_info,
             )
         })
+    }
+
+    /// Collect the mapping from table / `source_id` -> `fragment_id`
+    pub fn collect_backfill_mapping(&self) -> HashMap<u32, Vec<FragmentId>> {
+        let mut mapping = HashMap::new();
+        for (fragment_id, fragment) in &self.fragments {
+            let fragment_id = fragment_id.as_global_id();
+            let fragment_mask = fragment.fragment_type_mask;
+            // TODO(kwannoel): Support source scan
+            let candidates = [FragmentTypeFlag::StreamScan];
+            let has_some_scan = candidates
+                .into_iter()
+                .any(|flag| (fragment_mask & flag as u32) > 0);
+            if has_some_scan {
+                visit_stream_node_cont(fragment.node.as_ref().unwrap(), |node| {
+                    match node.node_body.as_ref() {
+                        Some(NodeBody::StreamScan(stream_scan)) => {
+                            let table_id = stream_scan.table_id;
+                            let fragments: &mut Vec<_> = mapping.entry(table_id).or_default();
+                            fragments.push(fragment_id);
+                            // each fragment should have only 1 scan node.
+                            false
+                        }
+                        // TODO(kwannoel): Support source scan
+                        _ => true,
+                    }
+                })
+            }
+        }
+        mapping
+    }
+
+    /// Initially the mapping that comes from frontend is between `table_ids`.
+    /// We should remap it to fragment level, since we track progress by actor, and we can get
+    /// a fragment <-> actor mapping
+    pub fn create_fragment_backfill_ordering(&self) -> Option<FragmentBackfillOrder> {
+        match self.backfill_order_strategy.strategy.as_ref() {
+            None | Some(backfill_order_strategy::Strategy::Auto(_)) => None,
+            Some(backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order })) => {
+                let mapping = self.collect_backfill_mapping();
+                let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
+                for (rel_id, downstream_rel_ids) in order {
+                    let fragment_ids = mapping.get(rel_id).unwrap();
+                    for fragment_id in fragment_ids {
+                        let downstream_fragment_ids = downstream_rel_ids
+                            .data
+                            .iter()
+                            .flat_map(|downstream_rel_id| {
+                                mapping.get(downstream_rel_id).unwrap().iter()
+                            })
+                            .copied()
+                            .collect();
+                        fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
+                    }
+                }
+                Some(fragment_ordering)
+            }
+        }
     }
 }
 

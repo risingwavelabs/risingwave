@@ -13,18 +13,12 @@ repository = { workspace = true }
 ignored = ["chrono-tz", "futures-async-stream"]
 
 [features]
-external-udf = ["arrow-udf-flight", "tonic", "ginepro"]
-js-udf = ["arrow-udf-js"]
-python-udf = ["arrow-udf-python"]
-wasm-udf = ["arrow-udf-wasm", "zstd"]
+udf = ["arrow-udf-runtime", "tonic", "ginepro", "zstd"]
 
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-udf-flight = { workspace = true, optional = true }
-arrow-udf-js = { workspace = true, optional = true }
-arrow-udf-python = { workspace = true, optional = true }
-arrow-udf-wasm = { workspace = true, optional = true }
+arrow-udf-runtime = { workspace = true, optional = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 bytes = "1"
@@ -34,7 +28,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-constant_time_eq = "0.3"
+constant_time_eq = "0.4"
 educe = "0.6"
 fancy-regex = "0.14"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -58,7 +52,7 @@ risingwave_expr = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
-self_cell = "1.1.0"
+self_cell = "1.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
@@ -68,7 +62,7 @@ sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
-# For arrow-udf-flight
+# For arrow-udf-runtime/remote
 tonic = { version = "0.12", optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }

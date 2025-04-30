@@ -25,7 +25,9 @@ use core::fmt;
 use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
-use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
+use winnow::combinator::{
+    alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated, separated_pair,
+};
 use winnow::{ModalResult, Parser as _};
 
 use crate::ast::*;
@@ -237,6 +239,22 @@ impl Parser<'_> {
         Ok(stmts)
     }
 
+    /// Parse exactly one statement from a string.
+    pub fn parse_exactly_one(sql: &str) -> Result<Statement, ParserError> {
+        Parser::parse_sql(sql)
+            .map_err(|e| {
+                ParserError::ParserError(format!("failed to parse definition sql: {}", e))
+            })?
+            .into_iter()
+            .exactly_one()
+            .map_err(|e| {
+                ParserError::ParserError(format!(
+                    "expecting exactly one statement in definition: {}",
+                    e
+                ))
+            })
+    }
+
     /// Parse object name from a string.
     pub fn parse_object_name_str(s: &str) -> Result<ObjectName, ParserError> {
         let mut tokenizer = Tokenizer::new(s);
@@ -317,9 +335,7 @@ impl Parser<'_> {
                 }
                 Keyword::CANCEL => Ok(self.parse_cancel_job()?),
                 Keyword::KILL => Ok(self.parse_kill_process()?),
-                Keyword::DESCRIBE => Ok(Statement::Describe {
-                    name: self.parse_object_name()?,
-                }),
+                Keyword::DESCRIBE => Ok(self.parse_describe()?),
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -1848,6 +1864,14 @@ impl Parser<'_> {
         }
     }
 
+    pub fn expect_word(&mut self, expected: &str) -> ModalResult<()> {
+        if self.parse_word(expected) {
+            Ok(())
+        } else {
+            self.expected(expected)
+        }
+    }
+
     /// Look for an expected keyword and consume it if it exists
     #[must_use]
     pub fn parse_keyword(&mut self, expected: Keyword) -> bool {
@@ -1970,11 +1994,12 @@ impl Parser<'_> {
         F: FnMut(&mut Self) -> ModalResult<T>,
     {
         let checkpoint = *self;
-        if let Ok(t) = f(self) {
-            Some(t)
-        } else {
-            *self = checkpoint;
-            None
+        match f(self) {
+            Ok(t) => Some(t),
+            _ => {
+                *self = checkpoint;
+                None
+            }
         }
     }
 
@@ -3035,10 +3060,12 @@ impl Parser<'_> {
     }
 
     pub fn parse_sql_option(&mut self) -> ModalResult<SqlOption> {
+        const CONNECTION_REF_KEY: &str = "connection";
+        const BACKFILL_ORDER: &str = "backfill_order";
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::Eq)?;
         let value = {
-            const CONNECTION_REF_KEY: &str = "connection";
             if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
                 let connection_name = self.parse_object_name()?;
                 // tolerate previous buggy Display that outputs `connection = connection foo`
@@ -3049,6 +3076,9 @@ impl Parser<'_> {
                     _ => connection_name,
                 };
                 SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
+            } else if name.real_value().eq_ignore_ascii_case(BACKFILL_ORDER) {
+                let order = self.parse_backfill_order_strategy()?;
+                SqlOptionValue::BackfillOrder(order)
             } else {
                 self.parse_value_and_obj_ref::<false>()?
             }
@@ -3577,8 +3607,11 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;
             AlterSinkOperation::SwapRenameSink { target_sink }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let changed_props = self.parse_with_properties()?;
+            AlterSinkOperation::SetSinkProps { changed_props }
         } else {
-            return self.expected("RENAME or OWNER TO or SET after ALTER SINK");
+            return self.expected("RENAME or OWNER TO or SET or CONNECTOR WITH after ALTER SINK");
         };
 
         Ok(Statement::AlterSink {
@@ -3849,7 +3882,9 @@ impl Parser<'_> {
     pub fn ensure_parse_value(&mut self) -> ModalResult<Value> {
         match self.parse_value_and_obj_ref::<true>()? {
             SqlOptionValue::Value(value) => Ok(value),
-            SqlOptionValue::SecretRef(_) | SqlOptionValue::ConnectionRef(_) => unreachable!(),
+            SqlOptionValue::SecretRef(_)
+            | SqlOptionValue::ConnectionRef(_)
+            | SqlOptionValue::BackfillOrder(_) => unreachable!(),
         }
     }
 
@@ -3935,6 +3970,34 @@ impl Parser<'_> {
             }),
         ))
         .parse_next(self)
+    }
+
+    fn parse_backfill_order_strategy(&mut self) -> ModalResult<BackfillOrderStrategy> {
+        alt((
+            Keyword::DEFAULT.value(BackfillOrderStrategy::Default),
+            Keyword::NONE.value(BackfillOrderStrategy::None),
+            Keyword::AUTO.value(BackfillOrderStrategy::Auto),
+            Self::parse_fixed_backfill_order.map(BackfillOrderStrategy::Fixed),
+            fail.expect("backfill order strategy"),
+        ))
+        .parse_next(self)
+    }
+
+    fn parse_fixed_backfill_order(&mut self) -> ModalResult<Vec<(ObjectName, ObjectName)>> {
+        self.expect_word("FIXED")?;
+        self.expect_token(&Token::LParen)?;
+        let edges = separated(
+            0..,
+            separated_pair(
+                Self::parse_object_name,
+                Token::Arrow,
+                Self::parse_object_name,
+            ),
+            Token::Comma,
+        )
+        .parse_next(self)?;
+        self.expect_token(&Token::RParen)?;
+        Ok(edges)
     }
 
     pub fn parse_number_value(&mut self) -> ModalResult<String> {
@@ -4284,8 +4347,9 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_explain(&mut self) -> ModalResult<Statement> {
+    fn parse_explain_options(&mut self) -> ModalResult<(ExplainOptions, Option<u64>)> {
         let mut options = ExplainOptions::default();
+        let mut analyze_duration = None;
 
         let explain_key_words = [
             Keyword::VERBOSE,
@@ -4295,6 +4359,7 @@ impl Parser<'_> {
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
             Keyword::FORMAT,
+            Keyword::DURATION_SECS,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
@@ -4336,12 +4401,14 @@ impl Parser<'_> {
                         }
                     }
                 }
+                Keyword::DURATION_SECS => {
+                    analyze_duration = Some(parser.parse_literal_uint()?);
+                }
                 _ => unreachable!("{}", keyword),
             };
             Ok(())
         };
 
-        let analyze = self.parse_keyword(Keyword::ANALYZE);
         // In order to support following statement, we need to peek before consume.
         // explain (select 1) union (select 1)
         if self.peek_token() == Token::LParen
@@ -4351,6 +4418,13 @@ impl Parser<'_> {
             self.parse_comma_separated(parse_explain_option)?;
             self.expect_token(&Token::RParen)?;
         }
+
+        Ok((options, analyze_duration))
+    }
+
+    pub fn parse_explain(&mut self) -> ModalResult<Statement> {
+        let analyze = self.parse_keyword(Keyword::ANALYZE);
+        let (options, analyze_duration) = self.parse_explain_options()?;
 
         if analyze {
             fn parse_analyze_target(parser: &mut Parser<'_>) -> ModalResult<Option<AnalyzeTarget>> {
@@ -4377,7 +4451,10 @@ impl Parser<'_> {
                 }
             }
             if let Some(target) = parse_analyze_target(self)? {
-                let statement = Statement::ExplainAnalyzeStreamJob { target };
+                let statement = Statement::ExplainAnalyzeStreamJob {
+                    target,
+                    duration_secs: analyze_duration,
+                };
                 return Ok(statement);
             }
         }
@@ -4400,6 +4477,16 @@ impl Parser<'_> {
             statement: Box::new(statement),
             options,
         })
+    }
+
+    pub fn parse_describe(&mut self) -> ModalResult<Statement> {
+        let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENTS]) {
+            Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
+            None => DescribeKind::Plain,
+            Some(_) => unreachable!(),
+        };
+        let name = self.parse_object_name()?;
+        Ok(Statement::Describe { name, kind })
     }
 
     /// Parse a query expression, i.e. a `SELECT` statement optionally
@@ -4480,17 +4567,20 @@ impl Parser<'_> {
     }
 
     fn parse_cte_inner(&mut self) -> ModalResult<CteInner> {
-        if let Ok(()) = self.expect_token(&Token::LParen) {
-            let query = self.parse_query()?;
-            self.expect_token(&Token::RParen)?;
-            Ok(CteInner::Query(Box::new(query)))
-        } else {
-            let changelog = self.parse_identifier_non_reserved()?;
-            if changelog.to_string().to_lowercase() != "changelog" {
-                parser_err!("Expected 'changelog' but found '{}'", changelog);
+        match self.expect_token(&Token::LParen) {
+            Ok(()) => {
+                let query = self.parse_query()?;
+                self.expect_token(&Token::RParen)?;
+                Ok(CteInner::Query(Box::new(query)))
             }
-            self.expect_keyword(Keyword::FROM)?;
-            Ok(CteInner::ChangeLog(self.parse_object_name()?))
+            _ => {
+                let changelog = self.parse_identifier_non_reserved()?;
+                if changelog.to_string().to_lowercase() != "changelog" {
+                    parser_err!("Expected 'changelog' but found '{}'", changelog);
+                }
+                self.expect_keyword(Keyword::FROM)?;
+                Ok(CteInner::ChangeLog(self.parse_object_name()?))
+            }
         }
     }
 

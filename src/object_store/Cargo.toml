@@ -45,11 +45,11 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
     "services-azfile",
 ] }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true, optional = true }
-spin = "0.9"
+spin = "0.10"
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }

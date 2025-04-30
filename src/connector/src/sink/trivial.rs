@@ -15,8 +15,10 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
@@ -51,6 +53,10 @@ pub type TableSink = TrivialSink<TableSinkName>;
 #[derive(Debug)]
 pub struct TrivialSink<T: TrivialSinkName>(PhantomData<T>);
 
+impl<T: TrivialSinkName> EnforceSecret for TrivialSink<T> {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {};
+}
+
 impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
     type Error = SinkError;
 
@@ -81,7 +87,8 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
 #[async_trait]
 impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
@@ -91,7 +98,6 @@ impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
                 LogStoreReadItem::Barrier { .. } => {
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }
         }
     }

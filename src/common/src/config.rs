@@ -24,7 +24,9 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig};
+use foyer::{
+    Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
+};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -422,14 +424,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
+    /// The interval of the periodic scheduling compaction group split job.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
+    /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
+    /// The threshold of each dimension of the compaction group after merging. When the dimension * `compaction_group_merge_dimension_threshold` >= limit, the merging job will be rejected.
+    #[serde(default = "default::meta::compaction_group_merge_dimension_threshold")]
+    pub compaction_group_merge_dimension_threshold: f64,
 
     #[serde(default)]
     #[config_doc(nested)]
@@ -1019,6 +1027,7 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
 
+    /// Deprecated soon. Please use `throttle` to do I/O throttling instead.
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
@@ -1030,6 +1039,9 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
+
+    #[serde(default = "default::file_cache::throttle")]
+    pub throttle: Throttle,
 
     /// Recover mode.
     ///
@@ -1232,6 +1244,18 @@ pub struct StreamingDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    /// `IcebergListExecutor`: The interval in seconds for Iceberg source to list new files.
+    #[serde(default = "default::developer::iceberg_list_interval_sec")]
+    pub iceberg_list_interval_sec: u64,
+
+    /// `IcebergFetchExecutor`: The number of files the executor will fetch concurrently in a batch.
+    #[serde(default = "default::developer::iceberg_fetch_batch_size")]
+    pub iceberg_fetch_batch_size: u64,
+
+    /// `IcebergSink`: The size of the cache for positional delete in the sink.
+    #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
+    pub iceberg_sink_positional_delete_cache_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1265,6 +1289,9 @@ pub struct BatchDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    #[serde(default = "default::developer::batch_local_execute_buffer_size")]
+    pub local_execute_buffer_size: usize,
 }
 
 macro_rules! define_system_config {
@@ -1709,6 +1736,10 @@ pub mod default {
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
         }
+
+        pub fn compaction_group_merge_dimension_threshold() -> f64 {
+            1.2
+        }
     }
 
     pub mod server {
@@ -1923,7 +1954,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            2
+            10
         }
     }
 
@@ -1950,7 +1981,9 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
+        use std::num::NonZeroUsize;
+
+        use foyer::{Compression, RecoverMode, RuntimeOptions, Throttle, TokioRuntimeOptions};
 
         pub fn dir() -> String {
             "".to_owned()
@@ -1993,11 +2026,22 @@ pub mod default {
         }
 
         pub fn recover_mode() -> RecoverMode {
-            RecoverMode::None
+            RecoverMode::Quiet
         }
 
         pub fn runtime_config() -> RuntimeOptions {
             RuntimeOptions::Unified(TokioRuntimeOptions::default())
+        }
+
+        pub fn throttle() -> Throttle {
+            Throttle::new()
+                .with_iops_counter(foyer::IopsCounter::PerIoSize(
+                    NonZeroUsize::new(128 * 1024).unwrap(),
+                ))
+                .with_read_iops(100000)
+                .with_write_iops(100000)
+                .with_write_throughput(1024 * 1024 * 1024)
+                .with_read_throughput(1024 * 1024 * 1024)
         }
     }
 
@@ -2068,6 +2112,10 @@ pub mod default {
 
         pub fn batch_chunk_size() -> usize {
             1024
+        }
+
+        pub fn batch_local_execute_buffer_size() -> usize {
+            64
         }
 
         /// Default to unset to be compatible with the behavior before this config is introduced,
@@ -2243,6 +2291,18 @@ pub mod default {
 
         pub fn rpc_client_connect_timeout_secs() -> u64 {
             5
+        }
+
+        pub fn iceberg_list_interval_sec() -> u64 {
+            1
+        }
+
+        pub fn iceberg_fetch_batch_size() -> u64 {
+            1024
+        }
+
+        pub fn iceberg_sink_positional_delete_cache_size() -> usize {
+            1024
         }
     }
 

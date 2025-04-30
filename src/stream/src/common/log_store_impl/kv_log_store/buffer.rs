@@ -24,23 +24,23 @@ use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOff
 use tokio::sync::Notify;
 
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, ReaderTruncationOffsetType, SeqIdType,
+    KvLogStoreMetrics, ReaderTruncationOffsetType, SeqId,
 };
 
 #[derive(Clone)]
 pub(crate) enum LogStoreBufferItem {
     StreamChunk {
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         flushed: bool,
         chunk_id: ChunkId,
     },
 
     Flushed {
         vnode_bitmap: Bitmap,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         chunk_id: ChunkId,
     },
 
@@ -118,8 +118,8 @@ impl LogStoreBufferInner {
         &mut self,
         epoch: u64,
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> Option<StreamChunk> {
         if !self.can_add_stream_chunk() {
             Some(chunk)
@@ -155,8 +155,8 @@ impl LogStoreBufferInner {
     fn add_flushed(
         &mut self,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         new_vnode_bitmap: Bitmap,
     ) {
         if let Some((
@@ -197,7 +197,7 @@ impl LogStoreBufferInner {
     }
 
     fn add_truncate_offset(&mut self, (epoch, seq_id): ReaderTruncationOffsetType) {
-        if let Some((prev_epoch, ref mut prev_seq_id)) = self.truncation_list.back_mut()
+        if let Some((prev_epoch, prev_seq_id)) = self.truncation_list.back_mut()
             && *prev_epoch == epoch
         {
             *prev_seq_id = seq_id;
@@ -206,9 +206,12 @@ impl LogStoreBufferInner {
         }
     }
 
-    fn rewind(&mut self) {
+    fn rewind(&mut self, log_store_rewind_start_epoch: Option<u64>) {
+        let rewind_start_epoch = log_store_rewind_start_epoch.unwrap_or(0);
         while let Some((epoch, item)) = self.consumed_queue.pop_front() {
-            self.unconsumed_queue.push_back((epoch, item));
+            if epoch > rewind_start_epoch {
+                self.unconsumed_queue.push_back((epoch, item));
+            }
         }
         self.update_unconsumed_buffer_metrics();
     }
@@ -254,8 +257,8 @@ impl LogStoreBufferSender {
     pub(crate) fn add_flushed(
         &self,
         epoch: u64,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
         vnode_bitmap: Bitmap,
     ) {
         self.buffer
@@ -268,8 +271,8 @@ impl LogStoreBufferSender {
         &self,
         epoch: u64,
         chunk: StreamChunk,
-        start_seq_id: SeqIdType,
-        end_seq_id: SeqIdType,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
     ) -> Option<StreamChunk> {
         let ret = self
             .buffer
@@ -306,7 +309,7 @@ impl LogStoreBufferSender {
 
     pub(crate) fn flush_all_unflushed(
         &mut self,
-        mut flush_fn: impl FnMut(&StreamChunk, u64, SeqIdType, SeqIdType) -> LogStoreResult<()>,
+        mut flush_fn: impl FnMut(&StreamChunk, u64, SeqId, SeqId) -> LogStoreResult<()>,
     ) -> LogStoreResult<()> {
         let mut inner_guard = self.buffer.inner();
         let inner = inner_guard.deref_mut();
@@ -348,10 +351,7 @@ pub(crate) struct LogStoreBufferReceiver {
 impl LogStoreBufferReceiver {
     pub(crate) async fn next_item(&self) -> (u64, LogStoreBufferItem) {
         let notified = self.update_notify.notified();
-        if let Some(item) = {
-            let opt = self.buffer.inner().pop_item();
-            opt
-        } {
+        if let Some(item) = { self.buffer.inner().pop_item() } {
             item
         } else {
             notified.instrument_await("Wait For New Buffer Item").await;
@@ -429,8 +429,8 @@ impl LogStoreBufferReceiver {
         inner.add_truncate_offset((epoch, None));
     }
 
-    pub(crate) fn rewind(&self) {
-        self.buffer.inner().rewind()
+    pub(crate) fn rewind(&self, log_store_rewind_start_epoch: Option<u64>) {
+        self.buffer.inner().rewind(log_store_rewind_start_epoch)
     }
 }
 

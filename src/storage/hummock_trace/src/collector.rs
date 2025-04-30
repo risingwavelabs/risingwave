@@ -200,14 +200,6 @@ impl TraceSpan {
         }
     }
 
-    pub fn new_epoch_span(storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::LocalStorageEpoch, storage_type)
-    }
-
-    pub fn new_is_dirty_span(storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::LocalStorageIsDirty, storage_type)
-    }
-
     pub fn new_seal_current_epoch_span(
         epoch: u64,
         opts: TracedSealCurrentEpochOptions,
@@ -494,23 +486,23 @@ mod tests {
     #[ignore]
     #[test]
     fn test_set_use_trace() {
-        std::env::remove_var(USE_TRACE);
+        unsafe { std::env::remove_var(USE_TRACE) };
         assert!(!set_should_use_trace());
 
-        std::env::set_var(USE_TRACE, "true");
+        unsafe { std::env::set_var(USE_TRACE, "true") };
         assert!(set_should_use_trace());
 
-        std::env::set_var(USE_TRACE, "false");
+        unsafe { std::env::set_var(USE_TRACE, "false") };
         assert!(!set_should_use_trace());
 
-        std::env::set_var(USE_TRACE, "invalid");
+        unsafe { std::env::set_var(USE_TRACE, "invalid") };
         assert!(!set_should_use_trace());
     }
 
     #[ignore]
     #[test]
     fn test_should_use_trace() {
-        std::env::set_var(USE_TRACE, "true");
+        unsafe { std::env::set_var(USE_TRACE, "true") };
         assert!(should_use_trace());
         assert!(set_should_use_trace());
     }

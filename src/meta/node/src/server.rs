@@ -43,6 +43,7 @@ use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::health_service::HealthServiceImpl;
 use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
+use risingwave_meta_service::hosted_iceberg_catalog_service_impl::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
@@ -65,6 +66,7 @@ use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::hosted_iceberg_catalog_service_server::HostedIcebergCatalogServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
@@ -459,7 +461,11 @@ pub async fn start_service_as_election_leader(
     );
     tracing::info!("SourceManager started");
 
-    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
+    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker(
+        env.meta_store_ref().conn.clone(),
+        hummock_manager.clone(),
+        metadata_manager.clone(),
+    );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
@@ -555,6 +561,7 @@ pub async fn start_service_as_election_leader(
     let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
+    let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -682,7 +689,11 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
-        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));
+        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
+        .add_service(HostedIcebergCatalogServiceServer::new(
+            hosted_iceberg_catalog_srv,
+        ));
+
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
 

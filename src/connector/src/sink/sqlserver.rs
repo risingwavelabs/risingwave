@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use phf::{Set, phf_set};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Decimal};
@@ -34,6 +33,7 @@ use with_options::WithOptions;
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -57,6 +57,8 @@ pub struct SqlServerConfig {
     pub password: String,
     #[serde(rename = "sqlserver.database")]
     pub database: String,
+    #[serde(rename = "sqlserver.schema", default = "sql_server_default_schema")]
+    pub schema: String,
     #[serde(rename = "sqlserver.table")]
     pub table: String,
     #[serde(
@@ -66,6 +68,10 @@ pub struct SqlServerConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+pub fn sql_server_default_schema() -> String {
+    "dbo".to_owned()
 }
 
 impl SqlServerConfig {
@@ -83,8 +89,17 @@ impl SqlServerConfig {
         }
         Ok(config)
     }
+
+    pub fn full_object_path(&self) -> String {
+        format!("[{}].[{}].[{}]", self.database, self.schema, self.table)
+    }
 }
 
+impl EnforceSecret for SqlServerConfig {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "sqlserver.password"
+    };
+}
 #[derive(Debug)]
 pub struct SqlServerSink {
     pub config: SqlServerConfig,
@@ -93,6 +108,16 @@ pub struct SqlServerSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for SqlServerSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::sink::ConnectorResult<()> {
+        for prop in prop_iter {
+            SqlServerConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
 impl SqlServerSink {
     pub fn new(
         mut config: SqlServerConfig,
@@ -166,7 +191,7 @@ impl Sink for SqlServerSink {
         let query_table_metadata_error = || {
             SinkError::SqlServer(anyhow!(format!(
                 "SQL Server table {} metadata error",
-                self.config.table
+                self.config.full_object_path()
             )))
         };
         static QUERY_TABLE_METADATA: &str = r#"
@@ -185,7 +210,7 @@ ORDER BY
     col.column_id;"#;
         let rows = sql_client
             .inner_client
-            .query(QUERY_TABLE_METADATA, &[&self.config.table])
+            .query(QUERY_TABLE_METADATA, &[&self.config.full_object_path()])
             .await?
             .into_results()
             .await?;
@@ -211,7 +236,8 @@ ORDER BY
                 None => {
                     return Err(SinkError::SqlServer(anyhow!(format!(
                         "column {} not found in the downstream SQL Server table {}",
-                        col.name, self.config.table
+                        col.name,
+                        self.config.full_object_path()
                     ))));
                 }
                 Some(sql_server_is_pk) => {
@@ -221,13 +247,15 @@ ORDER BY
                     if rw_is_pk && !*sql_server_is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
-                            col.name, self.config.table,
+                            col.name,
+                            self.config.full_object_path(),
                         ))));
                     }
                     if !rw_is_pk && *sql_server_is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
-                            col.name, self.config.table,
+                            col.name,
+                            self.config.full_object_path(),
                         ))));
                     }
                 }
@@ -243,7 +271,7 @@ ORDER BY
                 return Err(SinkError::SqlServer(anyhow!(format!(
                     "primary key does not match between RisingWave sink ({}) and SQL Server table {} ({})",
                     self.pk_indices.len(),
-                    self.config.table,
+                    self.config.full_object_path(),
                     sql_server_pk_count,
                 ))));
             }
@@ -382,8 +410,8 @@ impl SqlServerSinkWriter {
                 SqlOp::Insert(_) => {
                     write!(
                         &mut query_str,
-                        "INSERT INTO [{}] ({}) VALUES ({});",
-                        self.config.table,
+                        "INSERT INTO {} ({}) VALUES ({});",
+                        self.config.full_object_path(),
                         all_col_names,
                         param_placeholders(&mut next_param_id),
                     )
@@ -392,12 +420,12 @@ impl SqlServerSinkWriter {
                 SqlOp::Merge(_) => {
                     write!(
                         &mut query_str,
-                        r#"MERGE [{}] AS [TARGET]
+                        r#"MERGE {} AS [TARGET]
                         USING (VALUES ({})) AS [SOURCE] ({})
                         ON {}
                         WHEN MATCHED THEN UPDATE SET {}
                         WHEN NOT MATCHED THEN INSERT ({}) VALUES ({});"#,
-                        self.config.table,
+                        self.config.full_object_path(),
                         param_placeholders(&mut next_param_id),
                         all_col_names,
                         pk_match,
@@ -410,8 +438,8 @@ impl SqlServerSinkWriter {
                 SqlOp::Delete(_) => {
                     write!(
                         &mut query_str,
-                        r#"DELETE FROM [{}] WHERE {};"#,
-                        self.config.table,
+                        r#"DELETE FROM {} WHERE {};"#,
+                        self.config.full_object_path(),
                         self.pk_indices
                             .iter()
                             .map(|idx| {
@@ -486,14 +514,6 @@ impl SinkWriter for SqlServerSinkWriter {
         if is_checkpoint {
             self.flush().await?;
         }
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }

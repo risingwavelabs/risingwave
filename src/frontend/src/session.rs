@@ -1513,7 +1513,7 @@ impl SessionManagerImpl {
                         UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                     } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
                         let mut salt = [0; 4];
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         rng.fill_bytes(&mut salt);
                         UserAuthenticator::Md5WithSalt {
                             encrypted_password: md5_hash_with_salt(
@@ -1749,7 +1749,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))
         }
-        Statement::Describe { name: _ } => Ok(infer_describe()),
+        Statement::Describe { name: _, kind } => Ok(infer_describe(&kind)),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),

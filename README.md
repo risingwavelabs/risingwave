@@ -20,6 +20,12 @@
 
 <div align="center">
   <a
+    href="https://github.com/risingwavelabs/risingwave/releases/latest"
+    target="_blank"
+  >
+    <img alt="Release" src="https://img.shields.io/github/v/release/risingwavelabs/risingwave.svg?sort=semver" />
+  </a>
+  <a
     href="https://go.risingwave.com/slack"
     target="_blank"
   >
@@ -79,12 +85,16 @@ RisingWave is designed to be easier to use and more cost-efficient:
 * **Expressive SQL:** Supports structured, semi-structured, and unstructured data with a familiar SQL dialect.
 * **No manual state tuning:** Eliminates complex state management configurations.
 
-### Zero disk architecture
+### S3 as primary storage
 
-* **Cloud-native storage:** Stores data in S3 (or equivalent), using local disk as a cache.
-* **High performance:** Optimized for complex queries like joins and time windowing.
-* **Fast recovery:** Recovers from system crashes within seconds.
-* **Dynamic scaling:** Instantly adjusts resources for workload spikes.
+RisingWave stores tables, materialized views, and internal states of stream processing jobs in S3 (or equivalent object storage), providing:
+- **High performance:** Optimized for complex queries, including joins and time windowing.
+- **Fast recovery:** Restores from system failures within seconds.
+- **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.
+
+### Elastic disk cache
+
+Beyond caching hot data in memory, RisingWave supports [**elastic disk cache**](https://docs.risingwave.com/get-started/disk-cache), a powerful performance optimization that uses local disks or EBS for efficient data caching. This minimizes access to S3, lowering processing latency and cutting S3 access costs.
 
 ## In what use cases does RisingWave excel?
 RisingWave is particularly effective for the following use cases:

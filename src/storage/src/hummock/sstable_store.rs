@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
@@ -312,12 +312,12 @@ impl SstableStore {
         let data_path = self.get_sst_data_path(object_id);
         let memory_usage = end_offset - start_offset;
         let tracker = MemoryUsageTracker::new(self.prefetch_buffer_usage.clone(), memory_usage);
-        let span: await_tree::Span = format!("Prefetch SST-{}", object_id).into();
+        let span = await_tree::span!("Prefetch SST-{}", object_id).verbose();
         let store = self.store.clone();
         let join_handle = tokio::spawn(async move {
             store
                 .read(&data_path, start_offset..end_offset)
-                .verbose_instrument_await(span)
+                .instrument_await(span)
                 .await
         });
         let buf = match join_handle.await {
@@ -411,7 +411,7 @@ impl SstableStore {
             async move {
                 let block_data = match store
                     .read(&data_path, range.clone())
-                    .verbose_instrument_await("get_block_response")
+                    .instrument_await("get_block_response".verbose())
                     .await
                 {
                     Ok(data) => data,
@@ -453,7 +453,7 @@ impl SstableStore {
                 Ok(BlockResponse::Entry(entry))
             }
             CachePolicy::NotFill => {
-                if let Some(entry) = self
+                match self
                     .block_cache
                     .get(&SstableBlockIndex {
                         sst_id: object_id,
@@ -462,12 +462,13 @@ impl SstableStore {
                     .await
                     .map_err(HummockError::foyer_error)?
                 {
-                    Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
+                    Some(entry) => Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
                         entry,
-                    )))
-                } else {
-                    let block = fetch_block().await.map_err(HummockError::foyer_error)?;
-                    Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
+                    ))),
+                    _ => {
+                        let block = fetch_block().await.map_err(HummockError::foyer_error)?;
+                        Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
+                    }
                 }
             }
             CachePolicy::Disable => {
@@ -539,7 +540,7 @@ impl SstableStore {
         &self,
         sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
-    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
+    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
         let object_id = sstable_info_ref.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {

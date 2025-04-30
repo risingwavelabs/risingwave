@@ -259,7 +259,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.rate_limit_rps,
         )
         .await?;
-        let mut reading_file: Arc<str> = "".into();
+        let mut reading_file: Option<Arc<str>> = None;
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -337,15 +337,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     let file_assignment = chunk
                                         .data_chunk()
                                         .rows()
-                                        .map(|row| {
+                                        .filter_map(|row| {
                                             let filename = row.datum_at(0).unwrap().into_utf8();
-
                                             let size = row.datum_at(2).unwrap().into_int64();
-                                            OpendalFsSplit::<Src>::new(
-                                                filename.to_owned(),
-                                                0,
-                                                size as usize,
-                                            )
+
+                                            if size > 0 {
+                                                Some(OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    size as usize,
+                                                ))
+                                            } else {
+                                                None
+                                            }
                                         })
                                         .collect();
                                     state_store_handler.set_states(file_assignment).await?;
@@ -381,8 +385,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
                                 if let Some((split_id, _offset)) = mapping.into_iter().next() {
-                                    reading_file = split_id.clone();
-                                    let row = state_store_handler.get(split_id.clone()).await?
+                                    reading_file = Some(split_id.clone());
+                                    let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
                                         split_id)
@@ -397,7 +401,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     };
 
                                     state_store_handler
-                                        .set(split_id, fs_split.encode_to_json())
+                                        .set(&split_id, fs_split.encode_to_json())
                                         .await?;
                                 }
                                 let chunk = prune_additional_cols(
@@ -409,8 +413,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 yield Message::Chunk(chunk);
                             }
                             None => {
-                                splits_on_fetch -= 1;
-                                state_store_handler.delete(reading_file.clone()).await?;
+                                if let Some(ref delete_file_name) = reading_file {
+                                    splits_on_fetch -= 1;
+                                    state_store_handler.delete(delete_file_name).await?;
+                                }
                             }
                         },
                     }

@@ -20,7 +20,9 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
+use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::metrics::LabelGuardedMetric;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 
@@ -92,6 +94,22 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
             let chunk_stream;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
+                let actor_id = source_ctx.actor_id.to_string();
+                let source_id = source_ctx.source_id.to_string();
+                let split_id = split.id();
+                let source_name = source_ctx.source_name.clone();
+                let parquet_source_skip_row_count_metrics: LabelGuardedMetric<
+                    GenericCounter<prometheus::core::AtomicU64>,
+                > = self
+                    .source_ctx
+                    .metrics
+                    .parquet_source_skip_row_count
+                    .with_guarded_label_values(&[
+                        actor_id.as_str(),
+                        source_id.as_str(),
+                        &split_id,
+                        source_name.as_str(),
+                    ]);
                 chunk_stream = read_parquet_file(
                     self.connector.op.clone(),
                     object_name.clone(),
@@ -100,6 +118,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
                     Some(file_source_input_row_count.clone()),
+                    Some(parquet_source_skip_row_count_metrics),
                 )
                 .await?;
             } else {
@@ -135,15 +154,15 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
         compression_format: CompressionFormat,
-        file_source_input_row_count_metrics: risingwave_common::metrics::LabelGuardedMetric<
-            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-            4,
+        file_source_input_row_count_metrics: LabelGuardedMetric<
+            GenericCounter<prometheus::core::AtomicU64>,
         >,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
         let source_id = source_ctx.source_id.to_string();
         let source_name = source_ctx.source_name.clone();
+        let split_id = split.id();
         let object_name = split.name.clone();
         let start_offset = split.offset;
         // After a recovery occurs, for gzip-compressed files, it is necessary to read from the beginning each time,
@@ -185,11 +204,11 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             .metrics
             .partition_input_bytes
             .with_guarded_label_values(&[
-                &actor_id,
-                &source_id,
-                split.id().as_ref(),
-                &source_name,
-                &fragment_id,
+                actor_id.as_str(),
+                source_id.as_str(),
+                &split_id,
+                source_name.as_str(),
+                fragment_id.as_str(),
             ]);
 
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;

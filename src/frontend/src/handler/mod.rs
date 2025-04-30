@@ -46,6 +46,7 @@ mod alter_rename;
 mod alter_resource_group;
 mod alter_secret;
 mod alter_set_schema;
+mod alter_sink_props;
 mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
@@ -265,9 +266,16 @@ pub async fn handle(
             analyze,
             options,
         } => explain::handle_explain(handler_args, *statement, options, analyze).await,
-        Statement::ExplainAnalyzeStreamJob { target } => {
-            explain_analyze_stream_job::handle_explain_analyze_stream_job(handler_args, target)
-                .await
+        Statement::ExplainAnalyzeStreamJob {
+            target,
+            duration_secs,
+        } => {
+            explain_analyze_stream_job::handle_explain_analyze_stream_job(
+                handler_args,
+                target,
+                duration_secs,
+            )
+            .await
         }
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
@@ -449,7 +457,12 @@ pub async fn handle(
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
-        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::Describe { name, kind } => match kind {
+            DescribeKind::Fragments => {
+                describe::handle_describe_fragments(handler_args, name).await
+            }
+            DescribeKind::Plain => describe::handle_describe(handler_args, name),
+        },
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,
@@ -906,7 +919,11 @@ pub async fn handle(
                 }
             }
         }
+
         Statement::AlterSink { name, operation } => match operation {
+            AlterSinkOperation::SetSinkProps { changed_props } => {
+                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
+            }
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }

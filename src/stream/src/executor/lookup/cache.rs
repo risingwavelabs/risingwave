@@ -36,7 +36,7 @@ impl LookupCache {
 
     /// Update a key after lookup cache misses.
     pub fn batch_update(&mut self, key: OwnedRow, value: EstimatedVec<OwnedRow>) {
-        self.data.push(key, LookupEntryState::from_vec(value));
+        self.data.put(key, LookupEntryState::from_vec(value));
     }
 
     /// Apply a batch from the arrangement side

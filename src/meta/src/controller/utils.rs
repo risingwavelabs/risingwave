@@ -29,10 +29,11 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId, SchemaId,
-    SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database,
-    fragment, fragment_relation, function, index, object, object_dependency, schema, secret, sink,
-    source, streaming_job, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, JobStatus, ObjectId, PrivilegeId,
+    SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap, WorkerId,
+    actor, connection, database, fragment, fragment_relation, function, index, object,
+    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
+    user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -58,13 +59,13 @@ use sea_orm::sea_query::{
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DerivePartialModel, EntityTrait,
-    FromQueryResult, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Set,
-    Statement,
+    FromQueryResult, IntoActiveModel, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait, Set, Statement,
 };
 use thiserror_ext::AsReport;
 
 use crate::controller::ObjectModel;
-use crate::model::FragmentActorDispatchers;
+use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -328,6 +329,11 @@ where
         return Ok(false);
     }
 
+    // special check for self referencing
+    if dependent_objs.contains(&target_table) {
+        return Ok(true);
+    }
+
     let query = construct_sink_cycle_check_query(target_table, dependent_objs);
     let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
 
@@ -525,7 +531,9 @@ where
 {
     macro_rules! check_duplicated {
         ($obj_type:expr, $entity:ident, $table:ident) => {
-            let count = Object::find()
+            let object_id = Object::find()
+                .select_only()
+                .column(object::Column::Oid)
                 .inner_join($entity)
                 .filter(
                     object::Column::DatabaseId
@@ -533,10 +541,38 @@ where
                         .and(object::Column::SchemaId.eq(Some(schema_id)))
                         .and($table::Column::Name.eq(name)),
                 )
-                .count(db)
+                .into_tuple::<ObjectId>()
+                .one(db)
                 .await?;
-            if count != 0 {
-                return Err(MetaError::catalog_duplicated($obj_type.as_str(), name));
+            if let Some(oid) = object_id {
+                let check_creation = if $obj_type == ObjectType::View {
+                    false
+                } else if $obj_type == ObjectType::Source {
+                    let source_info = Source::find_by_id(oid)
+                        .select_only()
+                        .column(source::Column::SourceInfo)
+                        .into_tuple::<Option<StreamSourceInfo>>()
+                        .one(db)
+                        .await?
+                        .unwrap();
+                    source_info.map_or(false, |info| info.to_protobuf().is_shared())
+                } else {
+                    true
+                };
+                return if check_creation
+                    && !matches!(
+                        StreamingJob::find_by_id(oid)
+                            .select_only()
+                            .column(streaming_job::Column::JobStatus)
+                            .into_tuple::<JobStatus>()
+                            .one(db)
+                            .await?,
+                        Some(JobStatus::Created)
+                    ) {
+                    Err(MetaError::catalog_under_creation($obj_type.as_str(), name))
+                } else {
+                    Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
+                };
             }
         };
     }
@@ -903,6 +939,37 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
     }
 }
 
+pub async fn insert_fragment_relations(
+    db: &impl ConnectionTrait,
+    downstream_fragment_relations: &FragmentDownstreamRelation,
+) -> MetaResult<()> {
+    for (upstream_fragment_id, downstreams) in downstream_fragment_relations {
+        for downstream in downstreams {
+            let relation = fragment_relation::Model {
+                source_fragment_id: *upstream_fragment_id as _,
+                target_fragment_id: downstream.downstream_fragment_id as _,
+                dispatcher_type: downstream.dispatcher_type,
+                dist_key_indices: downstream
+                    .dist_key_indices
+                    .iter()
+                    .map(|idx| *idx as i32)
+                    .collect_vec()
+                    .into(),
+                output_indices: downstream
+                    .output_indices
+                    .iter()
+                    .map(|idx| *idx as i32)
+                    .collect_vec()
+                    .into(),
+            };
+            FragmentRelation::insert(relation.into_active_model())
+                .exec(db)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn get_fragment_actor_dispatchers<C>(
     db: &C,
     fragment_ids: Vec<FragmentId>,
@@ -910,7 +977,10 @@ pub async fn get_fragment_actor_dispatchers<C>(
 where
     C: ConnectionTrait,
 {
-    type FragmentActorInfo = (DistributionType, Arc<HashMap<ActorId, Option<Bitmap>>>);
+    type FragmentActorInfo = (
+        DistributionType,
+        Arc<HashMap<crate::model::ActorId, Option<Bitmap>>>,
+    );
     let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
     let get_fragment_actors = |fragment_id: FragmentId| async move {
         let result: MetaResult<FragmentActorInfo> = try {
@@ -936,7 +1006,7 @@ where
                         .into_iter()
                         .map(|actor| {
                             (
-                                actor.actor_id,
+                                actor.actor_id as _,
                                 actor
                                     .vnode_bitmap
                                     .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
@@ -987,7 +1057,7 @@ where
         let dispatchers = compose_dispatchers(
             source_fragment_distribution,
             &source_fragment_actors,
-            target_fragment_id,
+            target_fragment_id as _,
             target_fragment_distribution,
             &target_fragment_actors,
             dispatcher_type,
@@ -1007,16 +1077,16 @@ where
     Ok(actor_dispatchers_map)
 }
 
-fn compose_dispatchers(
+pub fn compose_dispatchers(
     source_fragment_distribution: DistributionType,
-    source_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
-    target_fragment_id: FragmentId,
+    source_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
+    target_fragment_id: crate::model::FragmentId,
     target_fragment_distribution: DistributionType,
-    target_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
+    target_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
     dispatcher_type: DispatcherType,
     dist_key_indices: Vec<u32>,
     output_indices: Vec<u32>,
-) -> HashMap<ActorId, PbDispatcher> {
+) -> HashMap<crate::model::ActorId, PbDispatcher> {
     match dispatcher_type {
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
@@ -1094,10 +1164,10 @@ fn compose_dispatchers(
 /// return (`upstream_actor_id` -> `downstream_actor_id`)
 pub fn resolve_no_shuffle_actor_dispatcher(
     source_fragment_distribution: DistributionType,
-    source_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
+    source_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
     target_fragment_distribution: DistributionType,
-    target_fragment_actors: &HashMap<ActorId, Option<Bitmap>>,
-) -> Vec<(ActorId, ActorId)> {
+    target_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
+) -> Vec<(crate::model::ActorId, crate::model::ActorId)> {
     assert_eq!(source_fragment_distribution, target_fragment_distribution);
     assert_eq!(
         source_fragment_actors.len(),
@@ -1134,7 +1204,7 @@ pub fn resolve_no_shuffle_actor_dispatcher(
             vec![(*source_actor_id, *target_actor_id)]
         }
         DistributionType::Hash => {
-            let target_fragment_actors: HashMap<_, _> = target_fragment_actors
+            let mut target_fragment_actor_index: HashMap<_, _> = target_fragment_actors
                 .iter()
                 .map(|(actor_id, bitmap)| {
                     let bitmap = bitmap
@@ -1152,7 +1222,7 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                         .expect("hash distribution should have bitmap");
                     let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
                     let (target_actor_id, target_bitmap) =
-                        target_fragment_actors.get(&first_vnode).unwrap_or_else(|| {
+                        target_fragment_actor_index.remove(&first_vnode).unwrap_or_else(|| {
                             panic!(
                                 "cannot find matched target actor: {} {:?} {:?} {:?}",
                                 source_actor_id,
@@ -1163,14 +1233,14 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                         });
                     assert_eq!(
                         bitmap,
-                        *target_bitmap,
+                        target_bitmap,
                         "cannot find matched target actor due to bitmap mismatch: {} {:?} {:?} {:?}",
                         source_actor_id,
                         first_vnode,
                         source_fragment_actors,
                         target_fragment_actors
                     );
-                    (*source_actor_id, *target_actor_id)
+                    (*source_actor_id, target_actor_id)
                 }).collect()
         }
     }

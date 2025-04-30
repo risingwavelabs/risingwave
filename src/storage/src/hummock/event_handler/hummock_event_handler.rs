@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -225,7 +225,7 @@ async fn flush_imms(
         payload,
         compaction_catalog_manager_ref,
     )
-    .verbose_instrument_await("shared_buffer_compact")
+    .instrument_await("shared_buffer_compact".verbose())
     .await
 }
 
@@ -411,10 +411,13 @@ impl HummockEventHandler {
                 continue;
             };
             total_count += 1;
-            if let Some(mut write_guard) = read_version.try_write() {
-                f(instance_id, &mut write_guard);
-            } else {
-                pending.push_back(instance_id);
+            match read_version.try_write() {
+                Some(mut write_guard) => {
+                    f(instance_id, &mut write_guard);
+                }
+                _ => {
+                    pending.push_back(instance_id);
+                }
             }
         }
         if !pending.is_empty() {
@@ -439,11 +442,14 @@ impl HummockEventHandler {
                 .local_read_version_mapping
                 .get(&instance_id)
                 .expect("have checked exist before");
-            if let Some(mut write_guard) = read_version.try_write_for(TRY_LOCK_TIMEOUT) {
-                f(instance_id, &mut write_guard);
-            } else {
-                warn!(instance_id, "failed to get lock again for instance");
-                pending.push_back(instance_id);
+            match read_version.try_write_for(TRY_LOCK_TIMEOUT) {
+                Some(mut write_guard) => {
+                    f(instance_id, &mut write_guard);
+                }
+                _ => {
+                    warn!(instance_id, "failed to get lock again for instance");
+                    pending.push_back(instance_id);
+                }
             }
         }
     }

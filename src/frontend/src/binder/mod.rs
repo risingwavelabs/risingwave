@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement}
 
 use crate::error::Result;
 
+mod backfill_order_strategy;
 mod bind_context;
 mod bind_param;
 mod create;
@@ -44,6 +45,7 @@ mod struct_field;
 mod update;
 mod values;
 
+pub use backfill_order_strategy::bind_backfill_order_strategy;
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
@@ -385,13 +387,6 @@ impl Binder {
 
     pub fn new_for_system(session: &SessionImpl) -> Binder {
         Self::new_inner(session, BindFor::System, vec![])
-    }
-
-    pub fn new_for_stream_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Stream, param_types)
     }
 
     fn is_for_stream(&self) -> bool {
