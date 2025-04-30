@@ -240,6 +240,7 @@ impl stream_plan::MaterializeNode {
 }
 
 impl stream_plan::StreamScanNode {
+    /// See [`Self::upstream_column_ids`].
     pub fn upstream_columns(&self) -> Vec<plan_common::PbColumnDesc> {
         self.upstream_column_ids
             .iter()
