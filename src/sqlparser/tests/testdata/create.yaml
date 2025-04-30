@@ -41,7 +41,7 @@
 - input: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
   formatted_sql: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
 - input: CREATE SOURCE mysql_src with ( connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601' )
-  formatted_sql: CREATE SOURCE mysql_src WITH (connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601') FORMAT PLAIN ENCODE JSON
+  formatted_sql: CREATE SOURCE mysql_src WITH (connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601')
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
   formatted_sql: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest
