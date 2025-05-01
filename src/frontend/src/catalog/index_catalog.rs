@@ -82,7 +82,7 @@ impl IndexCatalog {
             .index_item
             .iter()
             .map(|expr| ExprImpl::from_expr_proto(expr).unwrap())
-            .map(|expr| rewriter::CompositeCastEliminator.rewrite_expr(expr))
+            .map(|expr| item_rewriter::CompositeCastEliminator.rewrite_expr(expr))
             .collect();
 
         let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
@@ -276,11 +276,31 @@ impl OwnedByUserCatalog for IndexCatalog {
     }
 }
 
-mod rewriter {
+mod item_rewriter {
     use risingwave_pb::expr::expr_node;
 
     use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall};
 
+    /// Rewrite the expression of index item to eliminate `CompositeCast`, if any. This is needed
+    /// if the type of a column was changed and there's functional index on it.
+    ///
+    /// # Example
+    ///
+    /// Imagine there's a table created with `CREATE TABLE t (v struct<a int, b int>)`.
+    /// Then we create an index on it with `CREATE INDEX idx ON t ((v).a)`, which will create an
+    /// index item `Field(InputRef(0), 0)`.
+    ///
+    /// If we alter the column with `ALTER TABLE t ALTER COLUMN v TYPE struct<x varchar, a int>`,
+    /// the meta service will wrap the `InputRef(0)` with a `CompositeCast` to maintain the correct
+    /// return type. The index item will now become `Field(CompositeCast(InputRef(0)), 0)`.
+    ///
+    /// `CompositeCast` is for internal use only, and cannot be constructed or executed. To allow
+    /// this functional index to work and be matched with user queries, we need to eliminate it
+    /// here. By comparing the input and output types of `CompositeCast` and matching the field id,
+    /// we can find the real `Field` index and rewrite it to `Field(InputRef(0), 1)`.
+    ///
+    /// Note that if the field is dropped, we will leave the index item as is. This makes the index
+    /// item invalid, and it will never be matched and used.
     pub struct CompositeCastEliminator;
 
     impl ExprRewriter for CompositeCastEliminator {
@@ -290,21 +310,23 @@ mod rewriter {
             // TODO: support passthroughing `ArrayAccess` and `MapAccess`.
             if func_type == expr_node::Type::Field {
                 let child = inputs[0].clone();
-                let index = (inputs[1].clone().into_literal().unwrap())
-                    .get_data()
-                    .clone()
-                    .unwrap()
-                    .into_int32();
 
-                if let Some(cast) = child.as_function_call()
-                    && cast.func_type() == expr_node::Type::CompositeCast
+                if let Some(child) = child.as_function_call()
+                    && child.func_type() == expr_node::Type::CompositeCast
                 {
-                    let struct_type = cast.return_type().into_struct();
+                    let index = (inputs[1].clone().into_literal().unwrap())
+                        .get_data()
+                        .clone()
+                        .unwrap()
+                        .into_int32();
+
+                    let struct_type = child.return_type().into_struct();
                     let field_id = struct_type
                         .id_at(index as usize)
                         .expect("ids should be set");
 
-                    let new_child = cast.inputs()[0].clone();
+                    // Unwrap the composite cast.
+                    let new_child = child.inputs()[0].clone();
                     let new_struct_type = new_child.return_type().into_struct();
 
                     let Some(new_index) = new_struct_type
@@ -323,7 +345,7 @@ mod rewriter {
                     let new_inputs = vec![new_child, new_index];
                     let new_field_call = FunctionCall::new_unchecked(func_type, new_inputs, ret);
 
-                    // Recursively eliminate more composite cast.
+                    // Recursively eliminate more composite cast by calling rewrite again.
                     return self.rewrite_function_call(new_field_call);
                 }
             }
