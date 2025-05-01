@@ -26,7 +26,7 @@ format plain encode avro (
   aws.glue.schema_arn = 'arn:aws:glue:ap-southeast-1:123456123456:schema/default-registry/MyEvent',
   aws.glue.mock_config = '{
     "by_id": {},
-    "arn_to_latest_id: {}"
+    "arn_to_latest_id": {}
   }');
 ----
 db error: ERROR: Failed to run the query
