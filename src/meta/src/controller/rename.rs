@@ -14,8 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::expr_node::{self, RexNode};
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
+use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_sqlparser::ast::{
     Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
     Distinct, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName,
@@ -430,6 +431,65 @@ impl QueryRewriter<'_> {
                 }
             }
         }
+    }
+}
+
+pub struct NewReplaceTableExprRewriter {
+    pub original_columns: Vec<PbColumnDesc>,
+    pub new_columns: Vec<PbColumnDesc>,
+}
+
+impl NewReplaceTableExprRewriter {
+    pub fn rewrite_expr(&self, expr: &mut ExprNode) {
+        let rex_node = expr.rex_node.as_mut().unwrap();
+        match rex_node {
+            RexNode::InputRef(idx) => {
+                let old_idx = *idx as usize;
+                let original_column = &self.original_columns[old_idx];
+                let (new_idx, new_column) = self
+                    .new_columns
+                    .iter()
+                    .find_position(|c| c.column_id == original_column.column_id)
+                    .expect("should already checked index referencing column still exists");
+                *idx = new_idx as u32;
+
+                if new_column.column_type != original_column.column_type {
+                    let old_type = original_column.column_type.clone().unwrap();
+                    let new_type = new_column.column_type.clone().unwrap();
+
+                    assert_eq!(&old_type, expr.return_type.as_ref().unwrap());
+                    expr.return_type = Some(new_type);
+
+                    let new_expr_node = ExprNode {
+                        function_type: expr_node::Type::CompositeCast as _,
+                        return_type: Some(old_type),
+                        rex_node: RexNode::FuncCall(FunctionCall {
+                            children: vec![expr.clone()],
+                        })
+                        .into(),
+                    };
+
+                    *expr = new_expr_node;
+                }
+            }
+            RexNode::Constant(_) => {}
+            RexNode::Udf(udf) => self.rewrite_udf(udf),
+            RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
+            RexNode::Now(_) => {}
+        }
+    }
+
+    fn rewrite_udf(&self, udf: &mut UserDefinedFunction) {
+        udf.children
+            .iter_mut()
+            .for_each(|expr| self.rewrite_expr(expr));
+    }
+
+    fn rewrite_function_call(&self, function_call: &mut FunctionCall) {
+        function_call
+            .children
+            .iter_mut()
+            .for_each(|expr| self.rewrite_expr(expr));
     }
 }
 
