@@ -1060,7 +1060,7 @@ impl CatalogController {
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
         replace_upstream: FragmentReplaceUpstream,
-        col_index_mapping: Option<ColIndexMapping>,
+        _col_index_mapping: Option<ColIndexMapping>, // TODO: remove this as it's not used
         SinkIntoTableContext {
             creating_sink_id,
             dropping_sink_id,
