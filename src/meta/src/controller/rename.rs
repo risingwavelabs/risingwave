@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::{self, RexNode};
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_pb::plan_common::PbColumnDesc;
@@ -434,12 +433,14 @@ impl QueryRewriter<'_> {
     }
 }
 
-pub struct NewReplaceTableExprRewriter {
+/// Rewrite the expression in index item after there's a schema change on the primary table.
+// TODO: move this out of `rename.rs`, this has nothing to do with renaming.
+pub struct IndexItemRewriter {
     pub original_columns: Vec<PbColumnDesc>,
     pub new_columns: Vec<PbColumnDesc>,
 }
 
-impl NewReplaceTableExprRewriter {
+impl IndexItemRewriter {
     pub fn rewrite_expr(&self, expr: &mut ExprNode) {
         let rex_node = expr.rex_node.as_mut().unwrap();
         match rex_node {
@@ -453,12 +454,15 @@ impl NewReplaceTableExprRewriter {
                     .expect("should already checked index referencing column still exists");
                 *idx = new_idx as u32;
 
+                // If there's a type change, we need to wrap it with an internal `CompositeCast` to
+                // maintain the correct return type. It cannot execute and will be eliminated in
+                // the frontend when rebuilding the index items.
                 if new_column.column_type != original_column.column_type {
                     let old_type = original_column.column_type.clone().unwrap();
                     let new_type = new_column.column_type.clone().unwrap();
 
                     assert_eq!(&old_type, expr.return_type.as_ref().unwrap());
-                    expr.return_type = Some(new_type);
+                    expr.return_type = Some(new_type); // update return type of `InputRef`
 
                     let new_expr_node = ExprNode {
                         function_type: expr_node::Type::CompositeCast as _,
@@ -471,38 +475,6 @@ impl NewReplaceTableExprRewriter {
 
                     *expr = new_expr_node;
                 }
-            }
-            RexNode::Constant(_) => {}
-            RexNode::Udf(udf) => self.rewrite_udf(udf),
-            RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
-            RexNode::Now(_) => {}
-        }
-    }
-
-    fn rewrite_udf(&self, udf: &mut UserDefinedFunction) {
-        udf.children
-            .iter_mut()
-            .for_each(|expr| self.rewrite_expr(expr));
-    }
-
-    fn rewrite_function_call(&self, function_call: &mut FunctionCall) {
-        function_call
-            .children
-            .iter_mut()
-            .for_each(|expr| self.rewrite_expr(expr));
-    }
-}
-
-pub struct ReplaceTableExprRewriter {
-    pub table_col_index_mapping: ColIndexMapping,
-}
-
-impl ReplaceTableExprRewriter {
-    pub fn rewrite_expr(&self, expr: &mut ExprNode) {
-        let rex_node = expr.rex_node.as_mut().unwrap();
-        match rex_node {
-            RexNode::InputRef(input_col_idx) => {
-                *input_col_idx = self.table_col_index_mapping.map(*input_col_idx as usize) as u32
             }
             RexNode::Constant(_) => {}
             RexNode::Udf(udf) => self.rewrite_udf(udf),

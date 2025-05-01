@@ -56,7 +56,7 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
-use super::rename::NewReplaceTableExprRewriter;
+use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
@@ -1077,7 +1077,7 @@ impl CatalogController {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
-        let mut rewriter_for_index = None;
+        let mut index_item_rewriter = None;
 
         // Update catalog
         match streaming_job {
@@ -1092,7 +1092,7 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
 
-                rewriter_for_index = Some({
+                index_item_rewriter = Some({
                     let original_columns = original_column_catalogs
                         .to_protobuf()
                         .into_iter()
@@ -1104,7 +1104,7 @@ impl CatalogController {
                         .map(|c| c.column_desc.clone().unwrap())
                         .collect_vec();
 
-                    NewReplaceTableExprRewriter {
+                    IndexItemRewriter {
                         original_columns,
                         new_columns,
                     }
@@ -1253,7 +1253,7 @@ impl CatalogController {
             _ => unreachable!("invalid streaming job type for replace: {:?}", job_type),
         }
 
-        if let Some(expr_rewriter) = rewriter_for_index {
+        if let Some(expr_rewriter) = index_item_rewriter {
             let index_items: Vec<(IndexId, ExprNodeArray)> = Index::find()
                 .select_only()
                 .columns([index::Column::IndexId, index::Column::IndexItems])
