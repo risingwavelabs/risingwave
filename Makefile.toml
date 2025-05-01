@@ -817,7 +817,7 @@ echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"
 psql -V || echo "$(tput setaf 3)psql$(tput sgr0) not found."
 echo
 
-echo "check: $(tput setaf 4)cmake$(tput sgr0)"
+echo "check: $(tput setaf 4)cmake >= 3.5.0$(tput sgr0)"
 cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
 echo
 
