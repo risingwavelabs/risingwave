@@ -41,7 +41,6 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::session::SessionImpl;
-use crate::session::current::notice_to_user;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
