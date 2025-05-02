@@ -644,7 +644,10 @@ impl CatalogController {
                     dist_key_indices: relation.dist_key_indices.into_u32_array(),
                     output_mapping: PbDispatchOutputMapping {
                         indices: relation.output_indices.into_u32_array(),
-                        types: relation.output_type_mapping.to_protobuf(),
+                        types: relation
+                            .output_type_mapping
+                            .unwrap_or_default()
+                            .to_protobuf(),
                     },
                 });
         }

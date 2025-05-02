@@ -967,7 +967,7 @@ pub async fn insert_fragment_relations(
                     .map(|idx| *idx as i32)
                     .collect_vec()
                     .into(),
-                output_type_mapping: downstream.output_mapping.types.clone().into(),
+                output_type_mapping: Some(downstream.output_mapping.types.clone().into()),
             };
             FragmentRelation::insert(relation.into_active_model())
                 .exec(db)
@@ -1064,7 +1064,7 @@ where
         };
         let output_mapping = PbDispatchOutputMapping {
             indices: output_indices.into_u32_array(),
-            types: output_type_mapping.to_protobuf(),
+            types: output_type_mapping.unwrap_or_default().to_protobuf(),
         };
         let dispatchers = compose_dispatchers(
             source_fragment_distribution,
