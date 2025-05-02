@@ -33,7 +33,6 @@ use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
@@ -334,7 +333,6 @@ impl CatalogWriter for MockCatalogWriter {
         _source: Option<PbSource>,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
-        _mapping: ColIndexMapping,
         _job_type: TableJobType,
     ) -> Result<()> {
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -343,12 +341,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        _graph: StreamFragmentGraph,
-        _mapping: ColIndexMapping,
-    ) -> Result<()> {
+    async fn replace_source(&self, source: PbSource, _graph: StreamFragmentGraph) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
     }
