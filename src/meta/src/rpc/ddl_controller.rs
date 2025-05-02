@@ -24,7 +24,6 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
@@ -124,7 +123,6 @@ impl StreamingJobId {
 pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
-    pub col_index_mapping: Option<ColIndexMapping>,
 }
 
 pub enum DdlCommand {
@@ -341,9 +339,8 @@ impl DdlController {
                 DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
                     fragment_graph,
-                    col_index_mapping,
                 }) => {
-                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
+                    ctrl.replace_job(streaming_job, fragment_graph)
                         .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
@@ -1272,7 +1269,6 @@ impl DdlController {
                             tmp_id as _,
                             streaming_job,
                             replace_upstream,
-                            None,
                             SinkIntoTableContext {
                                 creating_sink_id: None,
                                 dropping_sink_id: Some(sink_id),
@@ -1358,7 +1354,6 @@ impl DdlController {
         &self,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1467,7 +1462,6 @@ impl DdlController {
                         tmp_id,
                         streaming_job,
                         replace_upstream,
-                        col_index_mapping,
                         SinkIntoTableContext {
                             creating_sink_id: None,
                             dropping_sink_id: None,

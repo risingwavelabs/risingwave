@@ -543,7 +543,6 @@ pub async fn handle_create_sink(
                 },
             )),
             fragment_graph: Some(graph),
-            table_col_index_mapping: None,
         });
     }
 
