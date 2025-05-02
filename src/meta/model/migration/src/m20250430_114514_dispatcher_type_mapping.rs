@@ -13,7 +13,10 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(FragmentRelation::Table)
                     .add_column(
-                        ColumnDef::new(FragmentRelation::OutputTypeMapping).rw_binary(manager),
+                        ColumnDef::new(FragmentRelation::OutputTypeMapping)
+                            .rw_binary(manager)
+                            .not_null()
+                            .default(Expr::value(b"".to_vec())),
                     )
                     .to_owned(),
             )
