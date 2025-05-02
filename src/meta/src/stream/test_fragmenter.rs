@@ -234,7 +234,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_mapping: Some(PbDispatchOutputMapping::simple(vec![0, 1, 2])),
+                output_mapping: PbDispatchOutputMapping::simple(vec![0, 1, 2]).into(),
             }),
         }))),
         fields: vec![
@@ -394,7 +394,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 dist_key_indices: vec![],
-                output_mapping: None, // how could this be None?
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
             upstream_id: 1,
@@ -404,7 +404,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_mapping: None, // how could this be None?
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
             upstream_id: 2,
