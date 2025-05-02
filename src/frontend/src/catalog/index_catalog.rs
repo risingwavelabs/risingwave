@@ -307,8 +307,29 @@ mod item_rewriter {
         fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
             let (func_type, inputs, ret) = func_call.decompose();
 
-            // TODO: support passthroughing `ArrayAccess` and `MapAccess`.
-            if func_type == expr_node::Type::Field {
+            // Flatten consecutive `CompositeCast`.
+            if func_type == expr_node::Type::CompositeCast {
+                let child = inputs[0].clone();
+
+                if let Some(child) = child.as_function_call()
+                    && child.func_type() == expr_node::Type::CompositeCast
+                {
+                    let new_child = child.inputs()[0].clone();
+
+                    // If the type already matches, no need to wrap again.
+                    // Recursively eliminate more composite cast by calling rewrite again.
+                    if new_child.return_type() == ret {
+                        return self.rewrite_expr(new_child);
+                    } else {
+                        let new_composite_cast =
+                            FunctionCall::new_unchecked(func_type, vec![new_child], ret);
+                        return self.rewrite_function_call(new_composite_cast);
+                    }
+                }
+            }
+            // Rewrite `Field(CompositeCast(x), y)` to `Field(x, y')`.
+            // TODO: also support rewriting `ArrayAccess` and `MapAccess`.
+            else if func_type == expr_node::Type::Field {
                 let child = inputs[0].clone();
 
                 if let Some(child) = child.as_function_call()
