@@ -13,10 +13,8 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(FragmentRelation::Table)
                     .add_column(
-                        ColumnDef::new(FragmentRelation::OutputTypeMapping)
-                            .rw_binary(manager)
-                            .not_null()
-                            .default(Expr::value(b"".to_vec())),
+                        // MySQL does not support default value for binary column
+                        ColumnDef::new(FragmentRelation::OutputTypeMapping).rw_binary(manager),
                     )
                     .to_owned(),
             )
