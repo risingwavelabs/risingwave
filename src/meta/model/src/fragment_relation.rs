@@ -27,7 +27,8 @@ pub struct Model {
     pub dispatcher_type: DispatcherType,
     pub dist_key_indices: I32Array,
     pub output_indices: I32Array,
-    pub output_type_mapping: TypePairArray,
+    // `None` or empty array means no output type mapping.
+    pub output_type_mapping: Option<TypePairArray>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
