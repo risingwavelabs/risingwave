@@ -3,98 +3,43 @@ name: Build Docker Image
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Tag for the Docker image: vX.Y.Z-<tag>-<commit_sha>'
+      label:
+        description: 'Generate image tag + build Docker image: v<X.Y.Z>-<label>-<commit_sha>-<branch>'
         required: true
         type: string
-        default: 'untagged'
-      # By default, images should be built for the latest commit of a release-branch.
-      # This is disabled by default.
-      # Only in special circumstances when we need an urgent patch,
-      # before some commit is merged into a release branch,
-      # we can set the `enable_patch_build` input to `true`.
-      enable_patch_build:
-        description: 'Allow patch builds on release branches, default: false'
-        required: true
-        type: boolean
-        default: false
-      # By default, images should be built for the latest commit of a release-branch.
-      # This should only be used to build test images,
-      # and never for production.
-      # Images will be tagged with <commit_sha>-<tag>, to enforce that the image is not used in production.
-      # Since the `commit_sha` will never match semver (vX.Y.Z).
-      enable_alpha_build:
-        description: 'Allow custom build for any branch, default: false'
-        required: true
-        type: boolean
-        default: false
+        default: 'unlabeled'
 
 jobs:
-  # Generate image tag using:
-  # - version inside Cargo.toml,
-  # - the commit SHA,
-  # - and the tag provided by the user.
   generate_image_tag:
     runs-on: ubuntu-latest
-    # Checks that the branch is a release branch, by checking that the semver
-    # should match: vX.Y.Z
     steps:
       - uses: actions/checkout@v4
-      - name: 'Print inputs'
-        run: |
-          echo "TAG=${{ github.event.inputs.tag }}"
-          echo "enable_patch_build=${{ github.event.inputs.enable_patch_build }}"
-          echo "enable_alpha_build=${{ github.event.inputs.enable_alpha_build }}"
-      - name: 'Verify release branch'
-        id: verify_release_branch
-        if: github.event.inputs.enable_patch_build == 'false' && github.event.inputs.enable_alpha_build == 'false'
+      - name: 'Build image tag'
+        id: get_release_branch
         run: |
           # Get current branch name
-          echo "GITHUB_REF=$GITHUB_REF"
-          BRANCH_NAME=$(basename $GITHUB_REF)
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
-          # Check for semver
-          if [[ "$BRANCH_NAME" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
-            echo "Branch $BRANCH_NAME is a valid release branch"
-          else
-            echo "Error: Branch $BRANCH_NAME is not a release branch"
-            exit 1
-          fi
-      - name: 'Get base version'
-        id: get_base_version
-        if: github.event.inputs.enable_alpha_build != 'true'
-        run: |
+          # Get version from Cargo.toml, e.g. v2.3.0-alpha
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
           echo "VERSION=$VERSION"
-          if [[ $VERSION == *"alpha"* ]]; then
-            echo "Error: Branch $GITHUB_REF has an alpha version"
-            exit 1
-          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-      - name: 'Generate image tag'
-        id: generate_image_tag
-        run: |
+
           # Get the commit SHA
           COMMIT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
           echo "COMMIT_SHA=$COMMIT_SHA"
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
 
-          # Get the tag from the input
-          TAG=${{ github.event.inputs.tag }}
-          echo "TAG=$TAG"
+          # Get the label from the input
+          LABEL=${{ github.event.inputs.label }}
+          echo "LABEL=$LABEL"
+          echo "LABEL=$LABEL" >> $GITHUB_ENV
 
-          # Generate the image tag
-          if [[ ${{ github.event.inputs.enable_alpha_build }} == 'true' ]]; then
-            # If alpha build is enabled, use the commit SHA and tag
-            IMAGE_TAG="$COMMIT_SHA-$TAG"
-          else
-            # Use the version from Cargo.toml, commit SHA, and tag
-            IMAGE_TAG="v$VERSION-$TAG-$COMMIT_SHA"
-          fi
+          # Build the image tag
+          IMAGE_TAG="v$VERSION-$LABEL-$COMMIT_SHA-$BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
-
-          # Write the image tag to environment file
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
       - name: 'Trigger Docker build Workflow via Buildkite'
         uses: buildkite/trigger-pipeline-action@v2.0.0
@@ -102,5 +47,6 @@ jobs:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
           pipeline: 'risingwavelabs/docker'
           branch: ${{ env.BRANCH_NAME }}
+          commit: HEAD
           message: ':github: Triggering Docker build'
           build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}" }'
