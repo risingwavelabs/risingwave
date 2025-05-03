@@ -22,6 +22,11 @@ jobs:
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
+          echo "Replace / with - in branch name, for docker manifest requirement"
+          NO_SLASH_BRANCH_NAME=${BRANCH_NAME//\//-}
+          echo "NO_SLASH_BRANCH_NAME=$NO_SLASH_BRANCH_NAME"
+          echo "NO_SLASH_BRANCH_NAME=$NO_SLASH_BRANCH_NAME" >> $GITHUB_ENV
+
           # Get version from Cargo.toml, e.g. v2.3.0-alpha
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
           echo "VERSION=$VERSION"
@@ -38,7 +43,7 @@ jobs:
           echo "LABEL=$LABEL" >> $GITHUB_ENV
 
           # Build the image tag
-          IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$BRANCH_NAME"
+          IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$NO_SLASH_BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
       - name: 'Trigger Docker build Workflow via Buildkite'
