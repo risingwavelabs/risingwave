@@ -32,7 +32,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     /// Generates `GENERATE_SERIES`.
-    /// GENERATE_SERIES(start: INT | TIMESTAMP, end: INT | TIMESTAMP, step?: INT | INTERVAL)
+    /// `GENERATE_SERIES(start: INT | TIMESTAMP, end: INT | TIMESTAMP, step?: INT | INTERVAL)`
     /// - When type is INT: step is optional.
     /// - When type is TIMESTAMP: step (INTERVAL) is required.
     fn gen_generate_series(&mut self) -> (TableFactor, Table) {
@@ -53,7 +53,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     /// Generates `RANGE`.
-    /// RANGE(start: INT | TIMESTAMP, end: INT | TIMESTAMP, step?: INT | INTERVAL)
+    /// `RANGE(start: INT | TIMESTAMP, end: INT | TIMESTAMP, step?: INT | INTERVAL)`
     /// - When type is INT: step is optional.
     /// - When type is TIMESTAMP: step (INTERVAL) is required.
     fn gen_range(&mut self) -> (TableFactor, Table) {
