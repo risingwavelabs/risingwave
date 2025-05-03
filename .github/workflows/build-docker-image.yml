@@ -48,5 +48,5 @@ jobs:
           pipeline: 'risingwavelabs/docker'
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
-          message: ':github: Triggering Docker build'
+          message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
           build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}" }'
