@@ -101,7 +101,7 @@ cluster_start
 risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
 risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 
-if [[ $mode != "single-node" ]]; then
+if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
   risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 fi
 
