@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       label:
-        description: 'Generate image tag + build Docker image: v<X.Y.Z>:<label>:<commit_sha>:<branch>'
+        description: 'Generate image tag + build Docker image: v<X.Y.Z>--<label>--<commit_sha>--<branch>'
         required: true
         type: string
         default: 'unlabeled'
@@ -38,7 +38,7 @@ jobs:
           echo "LABEL=$LABEL" >> $GITHUB_ENV
 
           # Build the image tag
-          IMAGE_TAG="v$VERSION:$LABEL:$COMMIT_SHA:$BRANCH_NAME"
+          IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
       - name: 'Trigger Docker build Workflow via Buildkite'
