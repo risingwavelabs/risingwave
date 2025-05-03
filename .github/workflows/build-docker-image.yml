@@ -10,11 +10,11 @@ on:
         default: 'unlabeled'
 
 jobs:
-  generate_image_tag:
+  build_image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 'Build image tag'
+      - name: 'Generate image tag'
         id: get_release_branch
         run: |
           # Get current branch name
