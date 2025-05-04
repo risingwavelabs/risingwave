@@ -131,7 +131,12 @@ pub async fn gen_sink_plan(
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = resolved_with_options.get_connector().unwrap();
+        let Some(connector) = resolved_with_options.get_connector() else {
+            return Err(RwError::from(ErrorCode::ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                CONNECTOR_TYPE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
