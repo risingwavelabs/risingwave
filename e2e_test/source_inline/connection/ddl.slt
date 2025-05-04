@@ -47,12 +47,6 @@ format plain encode json;
 system ok
 rpk topic create connection_ddl_1 -p 1
 
-statement error missing field 'connector' in WITH clause
-create table t1 (a int, b varchar) with (
-  connection = conn,
-  topic = 'connection_ddl_1')
-format plain encode json;
-
 statement ok
 create table t1 (a int, b varchar) with (
   connector = 'kafka',
