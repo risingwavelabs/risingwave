@@ -42,32 +42,6 @@ pub fn date_bin_tstz(
     Ok(Timestamptz::from_micros(binned_source_us))
 }
 
-#[function("date_bin(interval, timestamp, timestamptz) -> timestamptz")]
-pub fn date_bin_ts_tstz(
-    stride: Interval,
-    source: Timestamp,
-    origin: Timestamptz,
-) -> Result<Timestamptz> {
-    let source_us = source.0.and_utc().timestamp_micros(); // source to microseconds
-    let origin_us = origin.timestamp_micros(); // origin to microseconds
-
-    let binned_source_us = date_bin_inner(stride, source_us, origin_us)?;
-    Ok(Timestamptz::from_micros(binned_source_us))
-}
-
-#[function("date_bin(interval, timestamptz, timestamp) -> timestamptz")]
-pub fn date_bin_tstz_ts(
-    stride: Interval,
-    source: Timestamptz,
-    origin: Timestamp,
-) -> Result<Timestamptz> {
-    let source_us = source.timestamp_micros(); // source to microseconds
-    let origin_us = origin.0.and_utc().timestamp_micros(); // origin to microseconds
-
-    let binned_source_us = date_bin_inner(stride, source_us, origin_us)?;
-    Ok(Timestamptz::from_micros(binned_source_us))
-}
-
 fn date_bin_inner(stride: Interval, source_us: i64, origin_us: i64) -> Result<i64> {
     if stride.months() != 0 {
         // PostgreSQL doesn't allow months in the interval for date_bin.
@@ -76,7 +50,7 @@ fn date_bin_inner(stride: Interval, source_us: i64, origin_us: i64) -> Result<i6
             reason: "stride interval with months not supported in date_bin".into(),
         });
     }
-    let stride_us = stride.usecs() + (stride.days() as i64) * (24 * 3600 * 1000000); // stride width in microseconds
+    let stride_us = stride.usecs() + (stride.days() as i64) * Interval::USECS_PER_DAY; // stride width in microseconds
 
     if stride_us <= 0 {
         return Err(ExprError::InvalidParam {

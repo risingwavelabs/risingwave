@@ -42,3 +42,14 @@ SELECT date_bin(
 );
 ----
 2021-12-31 23:45:00+00:00
+
+statement ok
+set timezone = 'US/Pacific';
+
+query T
+select date_bin(interval '1' day, '2021-09-08T18:05:04-07:00'::timestamptz, '2021-01-01'::timestamp);
+----
+2021-09-08 01:00:00-07:00
+
+statement ok
+set timezone = 'UTC';
