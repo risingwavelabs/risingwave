@@ -9,6 +9,8 @@ statement ok
 CREATE MATERIALIZED VIEW test_table_mv AS
 SELECT id, SUM(value) as total FROM test_table GROUP BY id;
 
+skipif parallel
+skipif madsim
 system ok
 fragment_id=$(psql -h $SLT_HOST -p $SLT_PORT -d $SLT_DB -U root -tAc "SELECT fragment_id
 FROM rw_catalog.rw_fragments
