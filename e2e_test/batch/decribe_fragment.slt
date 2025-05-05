@@ -10,7 +10,7 @@ CREATE MATERIALIZED VIEW test_table_mv AS
 SELECT id, SUM(value) as total FROM test_table GROUP BY id;
 
 system ok
-fragment_id=$(psql -h localhost -p 4566 -d dev -U root -tAc "SELECT fragment_id
+fragment_id=$(psql -h $SLT_HOST -p $SLT_PORT -d $SLT_DB -U root -tAc "SELECT fragment_id
 FROM rw_catalog.rw_fragments
 WHERE table_id = (SELECT id FROM rw_catalog.rw_tables WHERE name = 'test_table')
 AND flags @> ARRAY['MVIEW'];")
@@ -21,7 +21,7 @@ Parallelism: %
 VNode Count: %
 State Tables: [%]
 Upstream Fragments: [%]
-(empty)
+
 Stream Plan:
 StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
 ├── output: [ id, value ]
