@@ -4,14 +4,31 @@ curl "http://pulsar-server:8080/admin/v2/brokers/ready"
 ok
 
 
+system ok
+PULSAR_BROKER_URL=pulsar://pulsar-server:6650 pulsar_produce.py 'persistent://public/default/topic-0' <<EOF
+{"f1":12,"f2":"foo"}
+{"f1":17,"f2":"bar"}
+EOF
+
+
 statement ok
-create table t
-include payload as raw
+create table t (
+  f1 int,
+  f2 varchar)
 with (
   connector = 'pulsar',
   service.url = 'pulsar://pulsar-server:6650',
-  topic = 'non-persistent://public/default/topic-0',
+  topic = 'persistent://public/default/topic-0',
 ) format plain encode json;
+
+query IT rowsort retry 3 backoff 2s
+select * from t;
+----
+12 foo
+17 bar
 
 statement ok
 drop table t;
+
+system ok
+curl --fail-with-body -X DELETE 'http://pulsar-server:8080/admin/v2/persistent/public/default/topic-0'
