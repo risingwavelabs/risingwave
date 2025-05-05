@@ -193,18 +193,6 @@ impl PlanRoot {
         Ok(())
     }
 
-    pub fn set_req_dist_as_same_as_req_order(&mut self) {
-        if self.required_order.len() != 0 {
-            let dist = self
-                .required_order
-                .column_orders
-                .iter()
-                .map(|o| o.column_index)
-                .collect_vec();
-            self.required_dist = RequiredDist::hash_shard(&dist)
-        }
-    }
-
     /// Get the plan root's schema, only including the fields to be output.
     pub fn schema(&self) -> Schema {
         // The schema can be derived from the `out_fields` and `out_names`, so we don't maintain it

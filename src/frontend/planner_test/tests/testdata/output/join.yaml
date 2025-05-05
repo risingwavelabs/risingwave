@@ -557,7 +557,7 @@
                     └─BatchScan { table: b, columns: [b.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [y, z, $expr2(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], stream_key: [a._row_id, b._row_id, a.x, b.x], pk_columns: [$expr2, a._row_id, b._row_id, a.x, b.x], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard($expr2) }
+    └─StreamExchange { dist: HashShard(a._row_id, b._row_id, a.x, b.x) }
       └─StreamProject { exprs: [(2:Int32 * $expr1) as $expr3, $expr2, $expr2, a._row_id, b._row_id, a.x, b.x] }
         └─StreamProject { exprs: [a.x, b.x, $expr1, ($expr1 + $expr1) as $expr2, a._row_id, b._row_id] }
           └─StreamProject { exprs: [a.x, b.x, Coalesce(a.x, b.x) as $expr1, a._row_id, b._row_id] }
