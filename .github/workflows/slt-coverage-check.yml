@@ -25,6 +25,10 @@ jobs:
         id: base-branch
         run: echo "base_ref=${GITHUB_BASE_REF}" >> $GITHUB_OUTPUT
 
+      - name: Make a copy of the coverage script
+        run: |
+          cp e2e_test/check_slt_coverage.py /tmp/check_slt_coverage.py
+
       - name: Check out base branch for comparison
         run: |
           git fetch origin ${{ steps.base-branch.outputs.base_ref }}
@@ -33,7 +37,7 @@ jobs:
       - name: Run SLT coverage check on base branch
         id: base-coverage
         run: |
-          python e2e_test/check_slt_coverage.py -d --output base_coverage.json
+          python /tmp/check_slt_coverage.py -d --output base_coverage.json
           echo "Base branch uncovered files: $(jq '.uncovered_files_count' base_coverage.json)"
 
       - name: Check out PR branch
@@ -42,7 +46,7 @@ jobs:
       - name: Run SLT coverage check on PR branch
         id: pr-coverage
         run: |
-          python e2e_test/check_slt_coverage.py -d --output pr_coverage.json
+          python /tmp/check_slt_coverage.py -d --output pr_coverage.json
           echo "PR branch uncovered files: $(jq '.uncovered_files_count' pr_coverage.json)"
 
       - name: Check for newly uncovered files
