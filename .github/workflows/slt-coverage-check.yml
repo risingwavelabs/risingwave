@@ -58,11 +58,10 @@ jobs:
 
           # Find newly uncovered files (in PR but not in base)
           echo "Checking for newly uncovered files..."
-          grep -Fxv -f base_uncovered.txt pr_uncovered.txt > newly_uncovered.txt
+          grep -Fxv -f base_uncovered.txt pr_uncovered.txt > newly_uncovered.txt || true
 
           # Count how many new uncovered files
           NEW_UNCOVERED_COUNT=$(wc -l < newly_uncovered.txt | tr -d ' ')
-          echo "new_uncovered_count=$NEW_UNCOVERED_COUNT" >> $GITHUB_OUTPUT
 
           if [[ $NEW_UNCOVERED_COUNT -gt 0 ]]; then
             echo "::error::SLT Coverage regression detected! PR added $NEW_UNCOVERED_COUNT new uncovered test file(s)."
