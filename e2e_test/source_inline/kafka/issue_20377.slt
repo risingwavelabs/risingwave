@@ -17,8 +17,8 @@ python3 -m http.server -d schema_registry_root/ 9000 > /dev/null 2>&1 < /dev/nul
 
 sleep 1s
 
-system ok retry 3 backoff 5s
-curl 'http://localhost:9000/apis/ccompat/v6/subjects/dummy_topic-value/versions/latest'
+system ok retry 3 backoff 2s
+curl --fail-with-body 'http://localhost:9000/apis/ccompat/v6/subjects/dummy_topic-value/versions/latest'
 
 statement ok
 CREATE SOURCE s WITH (
