@@ -1,0 +1,1945 @@
+{
+  "total_slt_files": 382,
+  "total_slt_part_files": 565,
+  "total_files": 947,
+  "ignore_patterns": [
+    "e2e_test/backwards-compat-tests/**/*.slt*",
+    "e2e_test/iceberg/**/*.slt*",
+    "e2e_test/over_window/templates/**/*.slt*",
+    "e2e_test/source_legacy/pulsar/**/*.slt*"
+  ],
+  "scripts": [
+    {
+      "name": "e2e-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/remote/jdbc.load.slt",
+        "e2e_test/sink/remote/jdbc.check.pg.slt",
+        "e2e_test/sink/postgres_sink.slt",
+        "e2e_test/sink/append_only_sink.slt",
+        "e2e_test/sink/create_sink_as.slt",
+        "e2e_test/sink/blackhole_sink.slt",
+        "e2e_test/sink/remote/types.slt",
+        "e2e_test/sink/sink_into_table/*.slt",
+        "e2e_test/sink/file_sink.slt",
+        "e2e_test/sink/remote/jdbc.load.slt",
+        "e2e_test/sink/remote/jdbc.check.pg.slt",
+        "e2e_test/sink/nexmark_endless_mvs/*.slt",
+        "e2e_test/sink/nexmark_endless_sinks/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/remote/jdbc.load.slt",
+        "e2e_test/sink/remote/jdbc.check.pg.slt",
+        "e2e_test/sink/postgres_sink.slt",
+        "e2e_test/sink/append_only_sink.slt",
+        "e2e_test/sink/create_sink_as.slt",
+        "e2e_test/sink/blackhole_sink.slt",
+        "e2e_test/sink/remote/types.slt",
+        "e2e_test/sink/sink_into_table/specify_column.slt",
+        "e2e_test/sink/sink_into_table/ctas.slt",
+        "e2e_test/sink/sink_into_table/alter_column.slt",
+        "e2e_test/sink/sink_into_table/basic.slt",
+        "e2e_test/sink/sink_into_table/issue_17278.slt",
+        "e2e_test/sink/sink_into_table/cycle.slt",
+        "e2e_test/sink/sink_into_table/dml_on_source.slt",
+        "e2e_test/sink/sink_into_table/rename.slt",
+        "e2e_test/sink/sink_into_table/parallelism.slt",
+        "e2e_test/sink/sink_into_table/cdc_target.slt",
+        "e2e_test/sink/sink_into_table/syntax.slt",
+        "e2e_test/sink/sink_into_table/dml_on_target.slt",
+        "e2e_test/sink/sink_into_table/snapshot.slt",
+        "e2e_test/sink/file_sink.slt",
+        "e2e_test/sink/remote/jdbc.load.slt",
+        "e2e_test/sink/remote/jdbc.check.pg.slt",
+        "e2e_test/sink/nexmark_endless_mvs/nexmark_endless_part4.slt",
+        "e2e_test/sink/nexmark_endless_mvs/nexmark_endless_part1.slt",
+        "e2e_test/sink/nexmark_endless_mvs/nexmark_endless_part3.slt",
+        "e2e_test/sink/nexmark_endless_mvs/nexmark_endless_part2.slt",
+        "e2e_test/sink/nexmark_endless_sinks/nexmark_endless_part6.slt",
+        "e2e_test/sink/nexmark_endless_sinks/nexmark_endless_part5.slt",
+        "e2e_test/sink/nexmark_endless_sinks/nexmark_endless_part4.slt",
+        "e2e_test/sink/nexmark_endless_sinks/nexmark_endless_part1.slt",
+        "e2e_test/sink/nexmark_endless_sinks/nexmark_endless_part3.slt",
+        "e2e_test/sink/nexmark_endless_sinks/nexmark_endless_part2.slt"
+      ]
+    },
+    {
+      "name": "e2e-doris-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/doris_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/doris_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-mqtt-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/mqtt_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/mqtt_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-deltalake-sink-rust-test.sh",
+      "patterns": [
+        "e2e_test/sink/deltalake_rust_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/deltalake_rust_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-kafka-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/kafka/create_sink.slt",
+        "e2e_test/sink/kafka/drop_sink.slt",
+        "e2e_test/sink/kafka/protobuf.slt",
+        "e2e_test/sink/kafka/avro.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/kafka/create_sink.slt",
+        "e2e_test/sink/kafka/drop_sink.slt",
+        "e2e_test/sink/kafka/protobuf.slt",
+        "e2e_test/sink/kafka/avro.slt"
+      ]
+    },
+    {
+      "name": "e2e-mongodb-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/mongodb_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/mongodb_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-test-parallel-for-opendal.sh",
+      "patterns": [
+        "e2e_test/streaming/**/*.slt",
+        "e2e_test/ddl/**/*.slt",
+        "e2e_test/visibility_mode/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/streaming/join-3way.slt",
+        "e2e_test/streaming/temporal_filter.slt",
+        "e2e_test/streaming/mv_on_mv.slt",
+        "e2e_test/streaming/with_version_column.slt",
+        "e2e_test/streaming/nexmark_snapshot.slt",
+        "e2e_test/streaming/cross_db_mv.slt",
+        "e2e_test/streaming/outer_join.slt",
+        "e2e_test/streaming/changelog.slt",
+        "e2e_test/streaming/now.slt",
+        "e2e_test/streaming/nexmark_upstream.slt",
+        "e2e_test/streaming/extreme_null.slt",
+        "e2e_test/streaming/basic.slt",
+        "e2e_test/streaming/distinct_on.slt",
+        "e2e_test/streaming/time_window_join.slt",
+        "e2e_test/streaming/union.slt",
+        "e2e_test/streaming/on_conflict.slt",
+        "e2e_test/streaming/dynamic_filter.slt",
+        "e2e_test/streaming/order_by.slt",
+        "e2e_test/streaming/natural_and_cross_join.slt",
+        "e2e_test/streaming/asof_join.slt",
+        "e2e_test/streaming/values.slt",
+        "e2e_test/streaming/append_only.slt",
+        "e2e_test/streaming/struct_table.slt",
+        "e2e_test/streaming/index.slt",
+        "e2e_test/streaming/project_set.slt",
+        "e2e_test/streaming/tpch_snapshot.slt",
+        "e2e_test/streaming/join.slt",
+        "e2e_test/streaming/null_safe_equal_join.slt",
+        "e2e_test/streaming/append_only_agg.slt",
+        "e2e_test/streaming/watermark.slt",
+        "e2e_test/streaming/time_window.slt",
+        "e2e_test/streaming/expr_context.slt",
+        "e2e_test/streaming/tpch_upstream.slt",
+        "e2e_test/streaming/non_strict_mode.slt",
+        "e2e_test/streaming/unaligned-join.slt",
+        "e2e_test/streaming/demo/twitter.slt",
+        "e2e_test/streaming/demo/ad_ctr.slt",
+        "e2e_test/streaming/demo/ecommerce.slt",
+        "e2e_test/streaming/demo/metric_analysis.slt",
+        "e2e_test/streaming/group_top_n/group_top_1.slt",
+        "e2e_test/streaming/group_top_n/main.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index2.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index3.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_non_lookup_cond.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_with_index.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_multiple_rows.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_watermark.slt",
+        "e2e_test/streaming/temporal_join/append_only/issue_15257.slt",
+        "e2e_test/streaming/temporal_join/append_only/nested_loop.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_non_loopup_cond.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge_stateful_agg.slt",
+        "e2e_test/streaming/aggregate/jsonb_agg.slt",
+        "e2e_test/streaming/aggregate/distinct_agg.slt",
+        "e2e_test/streaming/aggregate/bit_agg.slt",
+        "e2e_test/streaming/aggregate/hdr_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge.slt",
+        "e2e_test/streaming/aggregate/shuffle_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_agg.slt",
+        "e2e_test/streaming/aggregate/count_star.slt",
+        "e2e_test/streaming/aggregate/string_agg.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge_stateless_agg.slt",
+        "e2e_test/streaming/aggregate/wrap_scalar.slt",
+        "e2e_test/streaming/aggregate/selective_agg.slt",
+        "e2e_test/streaming/aggregate/boolean.slt",
+        "e2e_test/streaming/aggregate/basic_agg.slt",
+        "e2e_test/streaming/aggregate/array_agg.slt",
+        "e2e_test/streaming/grouping_sets/rollup.slt",
+        "e2e_test/streaming/grouping_sets/cube.slt",
+        "e2e_test/streaming/grouping_sets/grouping_sets.slt",
+        "e2e_test/streaming/over_window/main.slt",
+        "e2e_test/streaming/eowc/eowc_over_window.slt",
+        "e2e_test/streaming/eowc/eowc_select.slt",
+        "e2e_test/streaming/eowc/eowc_group_top_n.slt",
+        "e2e_test/streaming/eowc/eowc_group_agg.slt",
+        "e2e_test/streaming/bug_fixes/issue_11915.slt",
+        "e2e_test/streaming/bug_fixes/issue_19352.slt",
+        "e2e_test/streaming/bug_fixes/hop_window_update_10495.slt",
+        "e2e_test/streaming/bug_fixes/issue_13094.slt",
+        "e2e_test/streaming/bug_fixes/issue_12474.slt",
+        "e2e_test/streaming/bug_fixes/panic_on_interval_4575_comment.slt",
+        "e2e_test/streaming/bug_fixes/issue_12299.slt",
+        "e2e_test/streaming/bug_fixes/stack_overflow_17342.slt",
+        "e2e_test/streaming/bug_fixes/issue_8570.slt",
+        "e2e_test/streaming/bug_fixes/issue_5285.slt",
+        "e2e_test/streaming/bug_fixes/issue_10448.slt",
+        "e2e_test/streaming/bug_fixes/issue_7698.slt",
+        "e2e_test/streaming/bug_fixes/issue_15302.slt",
+        "e2e_test/streaming/bug_fixes/issue_15075.slt",
+        "e2e_test/streaming/bug_fixes/issue_12620.slt",
+        "e2e_test/streaming/bug_fixes/issue_15198.slt",
+        "e2e_test/streaming/bug_fixes/issue_12140.slt",
+        "e2e_test/streaming/bug_fixes/issue_8084.slt",
+        "e2e_test/streaming/bug_fixes/mv_on_singleton_mv_4153.slt",
+        "e2e_test/streaming/bug_fixes/issue_5825.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream.slt",
+        "e2e_test/streaming/delta_join/delta_join_snapshot.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream_with_index_different_types.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream_no_index.slt",
+        "e2e_test/streaming/delta_join/delta_join_snapshot_no_index.slt",
+        "e2e_test/streaming/queryable_internal_state/group_agg.slt",
+        "e2e_test/ddl/alter_resource_group.slt",
+        "e2e_test/ddl/privilege.slt",
+        "e2e_test/ddl/alter_parallelism.slt",
+        "e2e_test/ddl/max_parallelism.slt",
+        "e2e_test/ddl/show_purify.slt",
+        "e2e_test/ddl/alter_set_schema.slt",
+        "e2e_test/ddl/schema_qualified_name.slt",
+        "e2e_test/ddl/alter_swap_rename.slt",
+        "e2e_test/ddl/table.slt",
+        "e2e_test/ddl/schema.slt",
+        "e2e_test/ddl/secret.slt",
+        "e2e_test/ddl/explain_no_duplicate_check.slt",
+        "e2e_test/ddl/index.slt",
+        "e2e_test/ddl/invalid_operation.slt",
+        "e2e_test/ddl/search_path.slt",
+        "e2e_test/ddl/subscription.slt",
+        "e2e_test/ddl/alter_owner.slt",
+        "e2e_test/ddl/system_columns.slt",
+        "e2e_test/ddl/alter_session_params.slt",
+        "e2e_test/ddl/throttle.slt",
+        "e2e_test/ddl/user.slt",
+        "e2e_test/ddl/alter_table_column_issue_17121.slt",
+        "e2e_test/ddl/dependency_check.slt",
+        "e2e_test/ddl/not_null.slt",
+        "e2e_test/ddl/alter_table_column.slt",
+        "e2e_test/ddl/alter_rename.slt",
+        "e2e_test/ddl/database.slt",
+        "e2e_test/ddl/show.slt",
+        "e2e_test/ddl/alter_table_column_type/with_index.slt",
+        "e2e_test/ddl/alter_table_column_type/with_downstream.slt",
+        "e2e_test/ddl/alter_table_column_type/basic.slt",
+        "e2e_test/ddl/alter_table_column_type/with_downstream_complex.slt",
+        "e2e_test/ddl/drop/drop_creating_mv.slt",
+        "e2e_test/ddl/drop/drop_source_cascade.slt",
+        "e2e_test/ddl/drop/drop_table_cascade.slt",
+        "e2e_test/ddl/drop/drop_mv_cascade.slt",
+        "e2e_test/ddl/drop/drop_index_cascade.slt",
+        "e2e_test/ddl/drop/drop_view_cascade.slt",
+        "e2e_test/ddl/drop/drop_schema_cascade.slt",
+        "e2e_test/visibility_mode/checkpoint.slt",
+        "e2e_test/visibility_mode/barrier.slt"
+      ]
+    },
+    {
+      "name": "e2e-test-parallel.sh",
+      "patterns": [
+        "e2e_test/streaming/**/*.slt",
+        "e2e_test/visibility_mode/*.slt",
+        "e2e_test/udf/tests/**/*.slt",
+        "e2e_test/generated/**/*.slt",
+        "e2e_test/ddl/**/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/streaming/join-3way.slt",
+        "e2e_test/streaming/temporal_filter.slt",
+        "e2e_test/streaming/mv_on_mv.slt",
+        "e2e_test/streaming/with_version_column.slt",
+        "e2e_test/streaming/nexmark_snapshot.slt",
+        "e2e_test/streaming/cross_db_mv.slt",
+        "e2e_test/streaming/outer_join.slt",
+        "e2e_test/streaming/changelog.slt",
+        "e2e_test/streaming/now.slt",
+        "e2e_test/streaming/nexmark_upstream.slt",
+        "e2e_test/streaming/extreme_null.slt",
+        "e2e_test/streaming/basic.slt",
+        "e2e_test/streaming/distinct_on.slt",
+        "e2e_test/streaming/time_window_join.slt",
+        "e2e_test/streaming/union.slt",
+        "e2e_test/streaming/on_conflict.slt",
+        "e2e_test/streaming/dynamic_filter.slt",
+        "e2e_test/streaming/order_by.slt",
+        "e2e_test/streaming/natural_and_cross_join.slt",
+        "e2e_test/streaming/asof_join.slt",
+        "e2e_test/streaming/values.slt",
+        "e2e_test/streaming/append_only.slt",
+        "e2e_test/streaming/struct_table.slt",
+        "e2e_test/streaming/index.slt",
+        "e2e_test/streaming/project_set.slt",
+        "e2e_test/streaming/tpch_snapshot.slt",
+        "e2e_test/streaming/join.slt",
+        "e2e_test/streaming/null_safe_equal_join.slt",
+        "e2e_test/streaming/append_only_agg.slt",
+        "e2e_test/streaming/watermark.slt",
+        "e2e_test/streaming/time_window.slt",
+        "e2e_test/streaming/expr_context.slt",
+        "e2e_test/streaming/tpch_upstream.slt",
+        "e2e_test/streaming/non_strict_mode.slt",
+        "e2e_test/streaming/unaligned-join.slt",
+        "e2e_test/streaming/demo/twitter.slt",
+        "e2e_test/streaming/demo/ad_ctr.slt",
+        "e2e_test/streaming/demo/ecommerce.slt",
+        "e2e_test/streaming/demo/metric_analysis.slt",
+        "e2e_test/streaming/group_top_n/group_top_1.slt",
+        "e2e_test/streaming/group_top_n/main.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index2.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index3.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_non_lookup_cond.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_with_index.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_multiple_rows.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_watermark.slt",
+        "e2e_test/streaming/temporal_join/append_only/issue_15257.slt",
+        "e2e_test/streaming/temporal_join/append_only/nested_loop.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_non_loopup_cond.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge_stateful_agg.slt",
+        "e2e_test/streaming/aggregate/jsonb_agg.slt",
+        "e2e_test/streaming/aggregate/distinct_agg.slt",
+        "e2e_test/streaming/aggregate/bit_agg.slt",
+        "e2e_test/streaming/aggregate/hdr_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge.slt",
+        "e2e_test/streaming/aggregate/shuffle_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_agg.slt",
+        "e2e_test/streaming/aggregate/count_star.slt",
+        "e2e_test/streaming/aggregate/string_agg.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge_stateless_agg.slt",
+        "e2e_test/streaming/aggregate/wrap_scalar.slt",
+        "e2e_test/streaming/aggregate/selective_agg.slt",
+        "e2e_test/streaming/aggregate/boolean.slt",
+        "e2e_test/streaming/aggregate/basic_agg.slt",
+        "e2e_test/streaming/aggregate/array_agg.slt",
+        "e2e_test/streaming/grouping_sets/rollup.slt",
+        "e2e_test/streaming/grouping_sets/cube.slt",
+        "e2e_test/streaming/grouping_sets/grouping_sets.slt",
+        "e2e_test/streaming/over_window/main.slt",
+        "e2e_test/streaming/eowc/eowc_over_window.slt",
+        "e2e_test/streaming/eowc/eowc_select.slt",
+        "e2e_test/streaming/eowc/eowc_group_top_n.slt",
+        "e2e_test/streaming/eowc/eowc_group_agg.slt",
+        "e2e_test/streaming/bug_fixes/issue_11915.slt",
+        "e2e_test/streaming/bug_fixes/issue_19352.slt",
+        "e2e_test/streaming/bug_fixes/hop_window_update_10495.slt",
+        "e2e_test/streaming/bug_fixes/issue_13094.slt",
+        "e2e_test/streaming/bug_fixes/issue_12474.slt",
+        "e2e_test/streaming/bug_fixes/panic_on_interval_4575_comment.slt",
+        "e2e_test/streaming/bug_fixes/issue_12299.slt",
+        "e2e_test/streaming/bug_fixes/stack_overflow_17342.slt",
+        "e2e_test/streaming/bug_fixes/issue_8570.slt",
+        "e2e_test/streaming/bug_fixes/issue_5285.slt",
+        "e2e_test/streaming/bug_fixes/issue_10448.slt",
+        "e2e_test/streaming/bug_fixes/issue_7698.slt",
+        "e2e_test/streaming/bug_fixes/issue_15302.slt",
+        "e2e_test/streaming/bug_fixes/issue_15075.slt",
+        "e2e_test/streaming/bug_fixes/issue_12620.slt",
+        "e2e_test/streaming/bug_fixes/issue_15198.slt",
+        "e2e_test/streaming/bug_fixes/issue_12140.slt",
+        "e2e_test/streaming/bug_fixes/issue_8084.slt",
+        "e2e_test/streaming/bug_fixes/mv_on_singleton_mv_4153.slt",
+        "e2e_test/streaming/bug_fixes/issue_5825.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream.slt",
+        "e2e_test/streaming/delta_join/delta_join_snapshot.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream_with_index_different_types.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream_no_index.slt",
+        "e2e_test/streaming/delta_join/delta_join_snapshot_no_index.slt",
+        "e2e_test/streaming/queryable_internal_state/group_agg.slt",
+        "e2e_test/visibility_mode/checkpoint.slt",
+        "e2e_test/visibility_mode/barrier.slt",
+        "e2e_test/udf/tests/aggregate/python.slt",
+        "e2e_test/udf/tests/aggregate/wrapped_scalar.slt",
+        "e2e_test/udf/tests/aggregate/javascript.slt",
+        "e2e_test/udf/tests/management/create_and_drop.slt",
+        "e2e_test/udf/tests/management/alter_function.slt",
+        "e2e_test/udf/tests/bug_fixes/17560_udaf_as_win_func.slt",
+        "e2e_test/udf/tests/bug_fixes/18202_sql_udf_aggregate_prefix.slt",
+        "e2e_test/udf/tests/language_specific/javascript_async.slt",
+        "e2e_test/udf/tests/language_specific/wasm.slt",
+        "e2e_test/udf/tests/language_specific/python.slt",
+        "e2e_test/udf/tests/language_specific/javascript.slt",
+        "e2e_test/udf/tests/language_specific/javascript_legacy.slt",
+        "e2e_test/udf/tests/language_specific/sql.slt",
+        "e2e_test/udf/tests/language_specific/rust.slt",
+        "e2e_test/udf/tests/language_specific/remote/main.slt",
+        "e2e_test/udf/tests/scalar/wasm.slt",
+        "e2e_test/udf/tests/scalar/python.slt",
+        "e2e_test/udf/tests/scalar/javascript.slt",
+        "e2e_test/udf/tests/scalar/rust.slt",
+        "e2e_test/ddl/alter_resource_group.slt",
+        "e2e_test/ddl/privilege.slt",
+        "e2e_test/ddl/alter_parallelism.slt",
+        "e2e_test/ddl/max_parallelism.slt",
+        "e2e_test/ddl/show_purify.slt",
+        "e2e_test/ddl/alter_set_schema.slt",
+        "e2e_test/ddl/schema_qualified_name.slt",
+        "e2e_test/ddl/alter_swap_rename.slt",
+        "e2e_test/ddl/table.slt",
+        "e2e_test/ddl/schema.slt",
+        "e2e_test/ddl/secret.slt",
+        "e2e_test/ddl/explain_no_duplicate_check.slt",
+        "e2e_test/ddl/index.slt",
+        "e2e_test/ddl/invalid_operation.slt",
+        "e2e_test/ddl/search_path.slt",
+        "e2e_test/ddl/subscription.slt",
+        "e2e_test/ddl/alter_owner.slt",
+        "e2e_test/ddl/system_columns.slt",
+        "e2e_test/ddl/alter_session_params.slt",
+        "e2e_test/ddl/throttle.slt",
+        "e2e_test/ddl/user.slt",
+        "e2e_test/ddl/alter_table_column_issue_17121.slt",
+        "e2e_test/ddl/dependency_check.slt",
+        "e2e_test/ddl/not_null.slt",
+        "e2e_test/ddl/alter_table_column.slt",
+        "e2e_test/ddl/alter_rename.slt",
+        "e2e_test/ddl/database.slt",
+        "e2e_test/ddl/show.slt",
+        "e2e_test/ddl/alter_table_column_type/with_index.slt",
+        "e2e_test/ddl/alter_table_column_type/with_downstream.slt",
+        "e2e_test/ddl/alter_table_column_type/basic.slt",
+        "e2e_test/ddl/alter_table_column_type/with_downstream_complex.slt",
+        "e2e_test/ddl/drop/drop_creating_mv.slt",
+        "e2e_test/ddl/drop/drop_source_cascade.slt",
+        "e2e_test/ddl/drop/drop_table_cascade.slt",
+        "e2e_test/ddl/drop/drop_mv_cascade.slt",
+        "e2e_test/ddl/drop/drop_index_cascade.slt",
+        "e2e_test/ddl/drop/drop_view_cascade.slt",
+        "e2e_test/ddl/drop/drop_schema_cascade.slt"
+      ]
+    },
+    {
+      "name": "e2e-elasticsearch-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/elasticsearch/elasticsearch_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/elasticsearch/elasticsearch_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-iceberg-test.sh",
+      "patterns": [
+        "e2e_test/iceberg/test_case/pure_slt/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/iceberg/test_case/pure_slt/iceberg_sink.slt",
+        "e2e_test/iceberg/test_case/pure_slt/iceberg_engine.slt"
+      ]
+    },
+    {
+      "name": "e2e-cassandra-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/cassandra_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/cassandra_sink.slt"
+      ]
+    },
+    {
+      "name": "slow-e2e-test.sh",
+      "patterns": [
+        "e2e_test/slow_tests/**/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/slow_tests/ddl/creation_check.slt",
+        "e2e_test/slow_tests/streaming/bug_fixes/issue_20342.slt",
+        "e2e_test/slow_tests/streaming/rate_limit/fragment.slt",
+        "e2e_test/slow_tests/streaming/rate_limit/snapshot_amplification.slt",
+        "e2e_test/slow_tests/streaming/rate_limit/upstream_amplification.slt",
+        "e2e_test/slow_tests/streaming/rate_limit/basic.slt",
+        "e2e_test/slow_tests/streaming/rate_limit/alter_rate_limit.slt",
+        "e2e_test/slow_tests/backfill/rate_limit/slow-udf.slt",
+        "e2e_test/slow_tests/udf/graceful_shutdown_python.slt",
+        "e2e_test/slow_tests/udf/always_retry_python.slt"
+      ]
+    },
+    {
+      "name": "run-backfill-tests.sh",
+      "patterns": [
+        "e2e_test/backfill/sink/create_sink.slt",
+        "e2e_test/backfill/sink/validate_sink.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/insert_upstream.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/insert_upstream.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/runtime/create_wide_table.slt",
+        "e2e_test/backfill/runtime/insert_wide_snapshot.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt",
+        "e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q3.slt",
+        "e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q7.slt",
+        "e2e_test/backfill/snapshot_backfill/scale.slt",
+        "e2e_test/backfill/snapshot_backfill/scale.slt",
+        "e2e_test/backfill/snapshot_backfill/drop_mv.slt",
+        "e2e_test/backfill/snapshot_backfill/drop_mv.slt",
+        "e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt",
+        "e2e_test/backfill/cross_db/cross_db_mv.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/backfill/sink/create_sink.slt",
+        "e2e_test/backfill/sink/validate_sink.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/insert_upstream.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/insert_upstream.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/runtime/create_table.slt",
+        "e2e_test/backfill/runtime/insert_snapshot.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/runtime/create_wide_table.slt",
+        "e2e_test/backfill/runtime/insert_wide_snapshot.slt",
+        "e2e_test/backfill/runtime/create_arrangement_backfill_mv.slt",
+        "e2e_test/backfill/runtime/create_no_shuffle_mv.slt",
+        "e2e_test/backfill/runtime/validate_rows_no_shuffle.slt",
+        "e2e_test/backfill/runtime/validate_rows_arrangement.slt",
+        "e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt",
+        "e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q3.slt",
+        "e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q7.slt",
+        "e2e_test/backfill/snapshot_backfill/scale.slt",
+        "e2e_test/backfill/snapshot_backfill/scale.slt",
+        "e2e_test/backfill/snapshot_backfill/drop_mv.slt",
+        "e2e_test/backfill/snapshot_backfill/drop_mv.slt",
+        "e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt",
+        "e2e_test/backfill/cross_db/cross_db_mv.slt"
+      ]
+    },
+    {
+      "name": "e2e-sqlserver-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/sqlserver_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/sqlserver_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-redis-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/redis_sink.slt",
+        "e2e_test/sink/redis_cluster_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/redis_sink.slt",
+        "e2e_test/sink/redis_cluster_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-pulsar-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/pulsar_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/pulsar_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-time-travel-test.sh",
+      "patterns": [
+        "e2e_test/time_travel/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/time_travel/license.slt",
+        "e2e_test/time_travel/basic.slt",
+        "e2e_test/time_travel/index.slt",
+        "e2e_test/time_travel/join.slt",
+        "e2e_test/time_travel/syntax.slt",
+        "e2e_test/time_travel/lookup_join.slt"
+      ]
+    },
+    {
+      "name": "e2e-source-test.sh",
+      "patterns": [
+        "e2e_test/debug_mode_only/debug_splits.slt",
+        "e2e_test/source_inline/**/*.slt",
+        "e2e_test/source_legacy/cdc/mongodb/**/*.slt",
+        "e2e_test/source_legacy/cdc_inline/**/*.slt",
+        "e2e_test/source_legacy/cdc/cdc.validate.mysql.slt",
+        "e2e_test/source_legacy/cdc/cdc.validate.postgres.slt",
+        "e2e_test/source_legacy/cdc/cdc.share_stream.slt",
+        "e2e_test/source_legacy/cdc/cdc.load.slt",
+        "e2e_test/source_legacy/cdc/cdc.check.slt",
+        "e2e_test/source_legacy/cdc/cdc.check_new_rows.slt",
+        "e2e_test/source_legacy/cdc/cdc_share_stream_drop.slt",
+        "e2e_test/source_legacy/basic/*.slt",
+        "e2e_test/source_legacy/basic/old_row_format_syntax/*.slt",
+        "e2e_test/ch_benchmark/batch/ch_benchmark.slt",
+        "e2e_test/ch_benchmark/streaming/*.slt",
+        "e2e_test/webhook/webhook_source.slt",
+        "e2e_test/webhook/webhook_source_recovery.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/debug_mode_only/debug_splits.slt",
+        "e2e_test/source_inline/connection/ddl.slt",
+        "e2e_test/source_inline/connection/alter_owner_to.slt",
+        "e2e_test/source_inline/connection/schema_registry.slt",
+        "e2e_test/source_inline/tvf/mysql_query.slt",
+        "e2e_test/source_inline/tvf/postgres_query.slt",
+        "e2e_test/source_inline/kafka/secret_dep.slt",
+        "e2e_test/source_inline/kafka/add_partition.slt",
+        "e2e_test/source_inline/kafka/handling_mode.slt",
+        "e2e_test/source_inline/kafka/nexmark.slt",
+        "e2e_test/source_inline/kafka/kinesis.slt",
+        "e2e_test/source_inline/kafka/include_key_as.slt",
+        "e2e_test/source_inline/kafka/temporary_kafka_batch.slt",
+        "e2e_test/source_inline/kafka/ttl_table_with_con.slt",
+        "e2e_test/source_inline/kafka/tpch.slt",
+        "e2e_test/source_inline/kafka/datagen.slt",
+        "e2e_test/source_inline/kafka/issue_18308.slt",
+        "e2e_test/source_inline/kafka/alter/alter_parallelism.slt",
+        "e2e_test/source_inline/kafka/alter/alter_table_drop_connector.slt",
+        "e2e_test/source_inline/kafka/alter/add_column.slt",
+        "e2e_test/source_inline/kafka/alter/add_column_shared.slt",
+        "e2e_test/source_inline/kafka/avro/alter_source.slt",
+        "e2e_test/source_inline/kafka/avro/partial_schema.slt",
+        "e2e_test/source_inline/kafka/avro/name_strategy.slt",
+        "e2e_test/source_inline/kafka/avro/alter_table.slt",
+        "e2e_test/source_inline/kafka/avro/ref.slt",
+        "e2e_test/source_inline/kafka/avro/debezium_evolution.slt",
+        "e2e_test/source_inline/kafka/avro/union.slt",
+        "e2e_test/source_inline/kafka/protobuf/alter_source.slt",
+        "e2e_test/source_inline/kafka/protobuf/opentelemetry.slt",
+        "e2e_test/source_inline/kafka/protobuf/basic.slt",
+        "e2e_test/source_inline/kafka/protobuf/alter_source_shared.slt",
+        "e2e_test/source_inline/kafka/protobuf/recursive_overflow.slt",
+        "e2e_test/source_inline/fs/posix_fs.slt",
+        "e2e_test/source_legacy/cdc/mongodb/mongodb_basic.slt",
+        "e2e_test/source_legacy/cdc_inline/auto_schema_change_pg.slt",
+        "e2e_test/source_legacy/cdc_inline/auto_schema_map_mysql.slt",
+        "e2e_test/source_legacy/cdc_inline/auto_schema_map_pg.slt",
+        "e2e_test/source_legacy/cdc_inline/auto_schema_change_mysql.slt",
+        "e2e_test/source_legacy/cdc_inline/postgres_create_drop.slt",
+        "e2e_test/source_legacy/cdc_inline/sql_server_cdc/sql_server_cdc.slt",
+        "e2e_test/source_legacy/cdc_inline/alter/cdc_backfill_rate_limit.slt",
+        "e2e_test/source_legacy/cdc_inline/alter/postgres_alter.slt",
+        "e2e_test/source_legacy/cdc_inline/alter/cdc_table_alter.slt",
+        "e2e_test/source_legacy/cdc/cdc.validate.mysql.slt",
+        "e2e_test/source_legacy/cdc/cdc.validate.postgres.slt",
+        "e2e_test/source_legacy/cdc/cdc.share_stream.slt",
+        "e2e_test/source_legacy/cdc/cdc.load.slt",
+        "e2e_test/source_legacy/cdc/cdc.check.slt",
+        "e2e_test/source_legacy/cdc/cdc.check_new_rows.slt",
+        "e2e_test/source_legacy/cdc/cdc_share_stream_drop.slt",
+        "e2e_test/source_legacy/basic/nosim_kafka.slt",
+        "e2e_test/source_legacy/basic/ddl.slt",
+        "e2e_test/source_legacy/basic/kafka.slt",
+        "e2e_test/source_legacy/basic/kafka_batch.slt",
+        "e2e_test/source_legacy/basic/old_row_format_syntax/ddl.slt",
+        "e2e_test/source_legacy/basic/old_row_format_syntax/kafka.slt",
+        "e2e_test/source_legacy/basic/old_row_format_syntax/datagen.slt",
+        "e2e_test/source_legacy/basic/old_row_format_syntax/kafka_batch.slt",
+        "e2e_test/ch_benchmark/batch/ch_benchmark.slt",
+        "e2e_test/ch_benchmark/streaming/ch_benchmark.slt",
+        "e2e_test/webhook/webhook_source.slt",
+        "e2e_test/webhook/webhook_source_recovery.slt"
+      ]
+    },
+    {
+      "name": "e2e-starrocks-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/starrocks_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/starrocks_sink.slt"
+      ]
+    },
+    {
+      "name": "e2e-test-serial.sh",
+      "patterns": [
+        "e2e_test/streaming/**/*.slt",
+        "e2e_test/backfill/sink/different_pk_and_dist_key.slt",
+        "e2e_test/backfill/backfill_order_control.slt",
+        "e2e_test/ddl/**/*.slt",
+        "e2e_test/background_ddl/basic.slt",
+        "e2e_test/visibility_mode/*.slt",
+        "e2e_test/ttl/ttl.slt",
+        "e2e_test/dml/*.slt",
+        "e2e_test/database/prepare.slt",
+        "e2e_test/database/test.slt",
+        "e2e_test/subscription/check_sql_statement.slt",
+        "e2e_test/superset/*.slt",
+        "e2e_test/error_ui/simple/**/*.slt",
+        "e2e_test/error_ui/extended/**/*.slt",
+        "e2e_test/extended_mode/**/*.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/streaming/join-3way.slt",
+        "e2e_test/streaming/temporal_filter.slt",
+        "e2e_test/streaming/mv_on_mv.slt",
+        "e2e_test/streaming/with_version_column.slt",
+        "e2e_test/streaming/nexmark_snapshot.slt",
+        "e2e_test/streaming/cross_db_mv.slt",
+        "e2e_test/streaming/outer_join.slt",
+        "e2e_test/streaming/changelog.slt",
+        "e2e_test/streaming/now.slt",
+        "e2e_test/streaming/nexmark_upstream.slt",
+        "e2e_test/streaming/extreme_null.slt",
+        "e2e_test/streaming/basic.slt",
+        "e2e_test/streaming/distinct_on.slt",
+        "e2e_test/streaming/time_window_join.slt",
+        "e2e_test/streaming/union.slt",
+        "e2e_test/streaming/on_conflict.slt",
+        "e2e_test/streaming/dynamic_filter.slt",
+        "e2e_test/streaming/order_by.slt",
+        "e2e_test/streaming/natural_and_cross_join.slt",
+        "e2e_test/streaming/asof_join.slt",
+        "e2e_test/streaming/values.slt",
+        "e2e_test/streaming/append_only.slt",
+        "e2e_test/streaming/struct_table.slt",
+        "e2e_test/streaming/index.slt",
+        "e2e_test/streaming/project_set.slt",
+        "e2e_test/streaming/tpch_snapshot.slt",
+        "e2e_test/streaming/join.slt",
+        "e2e_test/streaming/null_safe_equal_join.slt",
+        "e2e_test/streaming/append_only_agg.slt",
+        "e2e_test/streaming/watermark.slt",
+        "e2e_test/streaming/time_window.slt",
+        "e2e_test/streaming/expr_context.slt",
+        "e2e_test/streaming/tpch_upstream.slt",
+        "e2e_test/streaming/non_strict_mode.slt",
+        "e2e_test/streaming/unaligned-join.slt",
+        "e2e_test/streaming/demo/twitter.slt",
+        "e2e_test/streaming/demo/ad_ctr.slt",
+        "e2e_test/streaming/demo/ecommerce.slt",
+        "e2e_test/streaming/demo/metric_analysis.slt",
+        "e2e_test/streaming/group_top_n/group_top_1.slt",
+        "e2e_test/streaming/group_top_n/main.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index2.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_with_index3.slt",
+        "e2e_test/streaming/temporal_join/non_append_only/temporal_join_non_lookup_cond.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_with_index.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_multiple_rows.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_watermark.slt",
+        "e2e_test/streaming/temporal_join/append_only/issue_15257.slt",
+        "e2e_test/streaming/temporal_join/append_only/nested_loop.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join.slt",
+        "e2e_test/streaming/temporal_join/append_only/temporal_join_non_loopup_cond.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge_stateful_agg.slt",
+        "e2e_test/streaming/aggregate/jsonb_agg.slt",
+        "e2e_test/streaming/aggregate/distinct_agg.slt",
+        "e2e_test/streaming/aggregate/bit_agg.slt",
+        "e2e_test/streaming/aggregate/hdr_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge.slt",
+        "e2e_test/streaming/aggregate/shuffle_approx_percentile.slt",
+        "e2e_test/streaming/aggregate/two_phase_agg.slt",
+        "e2e_test/streaming/aggregate/count_star.slt",
+        "e2e_test/streaming/aggregate/string_agg.slt",
+        "e2e_test/streaming/aggregate/two_phase_approx_percentile_merge_stateless_agg.slt",
+        "e2e_test/streaming/aggregate/wrap_scalar.slt",
+        "e2e_test/streaming/aggregate/selective_agg.slt",
+        "e2e_test/streaming/aggregate/boolean.slt",
+        "e2e_test/streaming/aggregate/basic_agg.slt",
+        "e2e_test/streaming/aggregate/array_agg.slt",
+        "e2e_test/streaming/grouping_sets/rollup.slt",
+        "e2e_test/streaming/grouping_sets/cube.slt",
+        "e2e_test/streaming/grouping_sets/grouping_sets.slt",
+        "e2e_test/streaming/over_window/main.slt",
+        "e2e_test/streaming/eowc/eowc_over_window.slt",
+        "e2e_test/streaming/eowc/eowc_select.slt",
+        "e2e_test/streaming/eowc/eowc_group_top_n.slt",
+        "e2e_test/streaming/eowc/eowc_group_agg.slt",
+        "e2e_test/streaming/bug_fixes/issue_11915.slt",
+        "e2e_test/streaming/bug_fixes/issue_19352.slt",
+        "e2e_test/streaming/bug_fixes/hop_window_update_10495.slt",
+        "e2e_test/streaming/bug_fixes/issue_13094.slt",
+        "e2e_test/streaming/bug_fixes/issue_12474.slt",
+        "e2e_test/streaming/bug_fixes/panic_on_interval_4575_comment.slt",
+        "e2e_test/streaming/bug_fixes/issue_12299.slt",
+        "e2e_test/streaming/bug_fixes/stack_overflow_17342.slt",
+        "e2e_test/streaming/bug_fixes/issue_8570.slt",
+        "e2e_test/streaming/bug_fixes/issue_5285.slt",
+        "e2e_test/streaming/bug_fixes/issue_10448.slt",
+        "e2e_test/streaming/bug_fixes/issue_7698.slt",
+        "e2e_test/streaming/bug_fixes/issue_15302.slt",
+        "e2e_test/streaming/bug_fixes/issue_15075.slt",
+        "e2e_test/streaming/bug_fixes/issue_12620.slt",
+        "e2e_test/streaming/bug_fixes/issue_15198.slt",
+        "e2e_test/streaming/bug_fixes/issue_12140.slt",
+        "e2e_test/streaming/bug_fixes/issue_8084.slt",
+        "e2e_test/streaming/bug_fixes/mv_on_singleton_mv_4153.slt",
+        "e2e_test/streaming/bug_fixes/issue_5825.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream.slt",
+        "e2e_test/streaming/delta_join/delta_join_snapshot.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream_with_index_different_types.slt",
+        "e2e_test/streaming/delta_join/delta_join_upstream_no_index.slt",
+        "e2e_test/streaming/delta_join/delta_join_snapshot_no_index.slt",
+        "e2e_test/streaming/queryable_internal_state/group_agg.slt",
+        "e2e_test/backfill/sink/different_pk_and_dist_key.slt",
+        "e2e_test/backfill/backfill_order_control.slt",
+        "e2e_test/ddl/alter_resource_group.slt",
+        "e2e_test/ddl/privilege.slt",
+        "e2e_test/ddl/alter_parallelism.slt",
+        "e2e_test/ddl/max_parallelism.slt",
+        "e2e_test/ddl/show_purify.slt",
+        "e2e_test/ddl/alter_set_schema.slt",
+        "e2e_test/ddl/schema_qualified_name.slt",
+        "e2e_test/ddl/alter_swap_rename.slt",
+        "e2e_test/ddl/table.slt",
+        "e2e_test/ddl/schema.slt",
+        "e2e_test/ddl/secret.slt",
+        "e2e_test/ddl/explain_no_duplicate_check.slt",
+        "e2e_test/ddl/index.slt",
+        "e2e_test/ddl/invalid_operation.slt",
+        "e2e_test/ddl/search_path.slt",
+        "e2e_test/ddl/subscription.slt",
+        "e2e_test/ddl/alter_owner.slt",
+        "e2e_test/ddl/system_columns.slt",
+        "e2e_test/ddl/alter_session_params.slt",
+        "e2e_test/ddl/throttle.slt",
+        "e2e_test/ddl/user.slt",
+        "e2e_test/ddl/alter_table_column_issue_17121.slt",
+        "e2e_test/ddl/dependency_check.slt",
+        "e2e_test/ddl/not_null.slt",
+        "e2e_test/ddl/alter_table_column.slt",
+        "e2e_test/ddl/alter_rename.slt",
+        "e2e_test/ddl/database.slt",
+        "e2e_test/ddl/show.slt",
+        "e2e_test/ddl/alter_table_column_type/with_index.slt",
+        "e2e_test/ddl/alter_table_column_type/with_downstream.slt",
+        "e2e_test/ddl/alter_table_column_type/basic.slt",
+        "e2e_test/ddl/alter_table_column_type/with_downstream_complex.slt",
+        "e2e_test/ddl/drop/drop_creating_mv.slt",
+        "e2e_test/ddl/drop/drop_source_cascade.slt",
+        "e2e_test/ddl/drop/drop_table_cascade.slt",
+        "e2e_test/ddl/drop/drop_mv_cascade.slt",
+        "e2e_test/ddl/drop/drop_index_cascade.slt",
+        "e2e_test/ddl/drop/drop_view_cascade.slt",
+        "e2e_test/ddl/drop/drop_schema_cascade.slt",
+        "e2e_test/background_ddl/basic.slt",
+        "e2e_test/visibility_mode/checkpoint.slt",
+        "e2e_test/visibility_mode/barrier.slt",
+        "e2e_test/ttl/ttl.slt",
+        "e2e_test/dml/rate_limit_pause_resume.slt",
+        "e2e_test/dml/rate_limit_set.slt",
+        "e2e_test/dml/rate_limit_no_limit.slt",
+        "e2e_test/database/prepare.slt",
+        "e2e_test/database/test.slt",
+        "e2e_test/subscription/check_sql_statement.slt",
+        "e2e_test/superset/connection.slt",
+        "e2e_test/error_ui/simple/license.slt",
+        "e2e_test/error_ui/simple/expr.slt",
+        "e2e_test/error_ui/simple/main.slt",
+        "e2e_test/error_ui/simple/recovery.slt",
+        "e2e_test/error_ui/extended/main.slt",
+        "e2e_test/extended_mode/basic.slt",
+        "e2e_test/extended_mode/type.slt"
+      ]
+    },
+    {
+      "name": "e2e-clickhouse-sink-test.sh",
+      "patterns": [
+        "e2e_test/sink/clickhouse_sink.slt"
+      ],
+      "excluded_patterns": [],
+      "files_covered": [
+        "e2e_test/sink/clickhouse_sink.slt"
+      ]
+    }
+  ],
+  "uncovered_files": [
+    "e2e_test/backfill/backfill_order_control_recovery.slt",
+    "e2e_test/background_ddl/common/create_bg_mv.slt",
+    "e2e_test/background_ddl/common/create_fg_mv.slt",
+    "e2e_test/background_ddl/common/create_index.slt",
+    "e2e_test/background_ddl/common/create_sink.slt",
+    "e2e_test/background_ddl/common/create_table.slt",
+    "e2e_test/background_ddl/common/drop_index.slt",
+    "e2e_test/background_ddl/common/drop_mv.slt",
+    "e2e_test/background_ddl/common/drop_sink.slt",
+    "e2e_test/background_ddl/common/drop_table.slt",
+    "e2e_test/background_ddl/common/validate_backfilled_mv.slt",
+    "e2e_test/background_ddl/common/validate_no_jobs.slt",
+    "e2e_test/background_ddl/common/validate_one_job.slt",
+    "e2e_test/background_ddl/sim.slt",
+    "e2e_test/background_ddl/sim/basic.slt",
+    "e2e_test/compaction/ingest_rows.slt",
+    "e2e_test/database/timezone.slt",
+    "e2e_test/nexmark/create_source_bug_fix.slt.part",
+    "e2e_test/over_window/generated/batch/ignore_nulls/mod.slt.part",
+    "e2e_test/over_window/generated/batch/odd_frames/mod.slt.part",
+    "e2e_test/over_window/generated/streaming/ignore_nulls/mod.slt.part",
+    "e2e_test/over_window/generated/streaming/odd_frames/mod.slt.part",
+    "e2e_test/sink/kafka/avro-decimal.slt",
+    "e2e_test/sink/license.slt",
+    "e2e_test/sink/pg_native_vs_jdbc.slt",
+    "e2e_test/sink/rate_limit.slt",
+    "e2e_test/streaming/except.slt.part",
+    "e2e_test/streaming/intersect.slt.part",
+    "e2e_test/streaming/nexmark/sinks/q19.slt.part",
+    "e2e_test/streaming/nexmark/sinks/q6_group_top1.slt.part",
+    "e2e_test/subscription/create_table_and_subscription.slt",
+    "e2e_test/subscription/drop_table_and_subscription.slt",
+    "e2e_test/user_doc/user_doc.slt"
+  ],
+  "covered_files_count": 916,
+  "uncovered_files_count": 33,
+  "covered_slt_files_count": 360,
+  "uncovered_slt_files_count": 24,
+  "covered_slt_part_files_count": 556,
+  "uncovered_slt_part_files_count": 9,
+  "directly_covered_count": 328,
+  "covered_through_includes_count": 588,
+  "uncovered_slt_files": [
+    "e2e_test/backfill/backfill_order_control_recovery.slt",
+    "e2e_test/background_ddl/common/create_bg_mv.slt",
+    "e2e_test/background_ddl/common/create_fg_mv.slt",
+    "e2e_test/background_ddl/common/create_index.slt",
+    "e2e_test/background_ddl/common/create_sink.slt",
+    "e2e_test/background_ddl/common/create_table.slt",
+    "e2e_test/background_ddl/common/drop_index.slt",
+    "e2e_test/background_ddl/common/drop_mv.slt",
+    "e2e_test/background_ddl/common/drop_sink.slt",
+    "e2e_test/background_ddl/common/drop_table.slt",
+    "e2e_test/background_ddl/common/validate_backfilled_mv.slt",
+    "e2e_test/background_ddl/common/validate_no_jobs.slt",
+    "e2e_test/background_ddl/common/validate_one_job.slt",
+    "e2e_test/background_ddl/sim.slt",
+    "e2e_test/background_ddl/sim/basic.slt",
+    "e2e_test/compaction/ingest_rows.slt",
+    "e2e_test/database/timezone.slt",
+    "e2e_test/sink/kafka/avro-decimal.slt",
+    "e2e_test/sink/license.slt",
+    "e2e_test/sink/pg_native_vs_jdbc.slt",
+    "e2e_test/sink/rate_limit.slt",
+    "e2e_test/subscription/create_table_and_subscription.slt",
+    "e2e_test/subscription/drop_table_and_subscription.slt",
+    "e2e_test/user_doc/user_doc.slt"
+  ],
+  "uncovered_slt_part_files": [
+    "e2e_test/nexmark/create_source_bug_fix.slt.part",
+    "e2e_test/over_window/generated/batch/ignore_nulls/mod.slt.part",
+    "e2e_test/over_window/generated/batch/odd_frames/mod.slt.part",
+    "e2e_test/over_window/generated/streaming/ignore_nulls/mod.slt.part",
+    "e2e_test/over_window/generated/streaming/odd_frames/mod.slt.part",
+    "e2e_test/streaming/except.slt.part",
+    "e2e_test/streaming/intersect.slt.part",
+    "e2e_test/streaming/nexmark/sinks/q19.slt.part",
+    "e2e_test/streaming/nexmark/sinks/q6_group_top1.slt.part"
+  ],
+  "directory_analysis": {
+    "directory_files": {
+      "e2e_test/backfill": [
+        "backfill_order_control_recovery.slt"
+      ],
+      "e2e_test/background_ddl": [
+        "sim.slt"
+      ],
+      "e2e_test/background_ddl/common": [
+        "create_bg_mv.slt",
+        "create_fg_mv.slt",
+        "create_index.slt",
+        "create_sink.slt",
+        "create_table.slt",
+        "drop_index.slt",
+        "drop_mv.slt",
+        "drop_sink.slt",
+        "drop_table.slt",
+        "validate_backfilled_mv.slt",
+        "validate_no_jobs.slt",
+        "validate_one_job.slt"
+      ],
+      "e2e_test/background_ddl/sim": [
+        "basic.slt"
+      ],
+      "e2e_test/compaction": [
+        "ingest_rows.slt"
+      ],
+      "e2e_test/database": [
+        "timezone.slt"
+      ],
+      "e2e_test/nexmark": [
+        "create_source_bug_fix.slt.part"
+      ],
+      "e2e_test/over_window/generated/batch/ignore_nulls": [
+        "mod.slt.part"
+      ],
+      "e2e_test/over_window/generated/batch/odd_frames": [
+        "mod.slt.part"
+      ],
+      "e2e_test/over_window/generated/streaming/ignore_nulls": [
+        "mod.slt.part"
+      ],
+      "e2e_test/over_window/generated/streaming/odd_frames": [
+        "mod.slt.part"
+      ],
+      "e2e_test/sink": [
+        "license.slt",
+        "pg_native_vs_jdbc.slt",
+        "rate_limit.slt"
+      ],
+      "e2e_test/sink/kafka": [
+        "avro-decimal.slt"
+      ],
+      "e2e_test/streaming": [
+        "except.slt.part",
+        "intersect.slt.part"
+      ],
+      "e2e_test/streaming/nexmark/sinks": [
+        "q19.slt.part",
+        "q6_group_top1.slt.part"
+      ],
+      "e2e_test/subscription": [
+        "create_table_and_subscription.slt",
+        "drop_table_and_subscription.slt"
+      ],
+      "e2e_test/user_doc": [
+        "user_doc.slt"
+      ]
+    },
+    "fully_uncovered_directories": {
+      "e2e_test/background_ddl/common": [
+        "create_bg_mv.slt",
+        "create_fg_mv.slt",
+        "create_index.slt",
+        "create_sink.slt",
+        "create_table.slt",
+        "drop_index.slt",
+        "drop_mv.slt",
+        "drop_sink.slt",
+        "drop_table.slt",
+        "validate_backfilled_mv.slt",
+        "validate_no_jobs.slt",
+        "validate_one_job.slt"
+      ],
+      "e2e_test/background_ddl/sim": [
+        "basic.slt"
+      ],
+      "e2e_test/compaction": [
+        "ingest_rows.slt"
+      ],
+      "e2e_test/over_window/generated/batch/ignore_nulls": [
+        "mod.slt.part"
+      ],
+      "e2e_test/over_window/generated/batch/odd_frames": [
+        "mod.slt.part"
+      ],
+      "e2e_test/over_window/generated/streaming/ignore_nulls": [
+        "mod.slt.part"
+      ],
+      "e2e_test/over_window/generated/streaming/odd_frames": [
+        "mod.slt.part"
+      ],
+      "e2e_test/user_doc": [
+        "user_doc.slt"
+      ]
+    },
+    "directory_coverage": {
+      "e2e_test/backfill": {
+        "total_files": 2,
+        "covered_files": 1,
+        "uncovered_files": 1,
+        "coverage_percentage": 50.0
+      },
+      "e2e_test/backfill/cross_db": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/backfill/runtime": {
+        "total_files": 9,
+        "covered_files": 9,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/backfill/sink": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/backfill/snapshot_backfill": {
+        "total_files": 6,
+        "covered_files": 6,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/backfill/snapshot_backfill/nexmark": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/background_ddl": {
+        "total_files": 2,
+        "covered_files": 1,
+        "uncovered_files": 1,
+        "coverage_percentage": 50.0
+      },
+      "e2e_test/background_ddl/common": {
+        "total_files": 12,
+        "covered_files": 0,
+        "uncovered_files": 12,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/background_ddl/sim": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/backup_restore": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/aggregate": {
+        "total_files": 20,
+        "covered_files": 20,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/basic": {
+        "total_files": 52,
+        "covered_files": 52,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/catalog": {
+        "total_files": 37,
+        "covered_files": 37,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/aggregate/aggregates": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/conjunction": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/cte": {
+        "total_files": 6,
+        "covered_files": 6,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join": {
+        "total_files": 6,
+        "covered_files": 6,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join/cross_product": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join/full_outer": {
+        "total_files": 8,
+        "covered_files": 8,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join/iejoin": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join/inner": {
+        "total_files": 11,
+        "covered_files": 11,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join/left_outer": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/join/right_outer": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/limit": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/projection": {
+        "total_files": 12,
+        "covered_files": 12,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/duckdb/select": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/functions": {
+        "total_files": 39,
+        "covered_files": 39,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/grouping_sets": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/join": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/join/inner": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/keyword": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/order": {
+        "total_files": 10,
+        "covered_files": 10,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/over_window": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/over_window/session": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/subquery": {
+        "total_files": 12,
+        "covered_files": 12,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/top_n": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/tpch": {
+        "total_files": 22,
+        "covered_files": 22,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/transaction": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/types": {
+        "total_files": 18,
+        "covered_files": 18,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/types/list": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/batch/types/struct": {
+        "total_files": 8,
+        "covered_files": 8,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ch_benchmark": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ch_benchmark/batch": {
+        "total_files": 24,
+        "covered_files": 24,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ch_benchmark/streaming": {
+        "total_files": 26,
+        "covered_files": 26,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ch_benchmark/streaming/views": {
+        "total_files": 22,
+        "covered_files": 22,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/compaction": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/database": {
+        "total_files": 3,
+        "covered_files": 2,
+        "uncovered_files": 1,
+        "coverage_percentage": 66.66666666666666
+      },
+      "e2e_test/ddl": {
+        "total_files": 28,
+        "covered_files": 28,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ddl/alter_table_column_type": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ddl/drop": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ddl/table": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/debug_mode_only": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/dml": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/error_ui/extended": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/error_ui/simple": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/extended_mode": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/nexmark": {
+        "total_files": 11,
+        "covered_files": 10,
+        "uncovered_files": 1,
+        "coverage_percentage": 90.9090909090909
+      },
+      "e2e_test/over_window/generated/batch": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/agg_in_win_func": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/basic": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/expr_in_win_func": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/ignore_nulls": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/over_window/generated/batch/no_effect_updates": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/odd_frames": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/over_window/generated/batch/opt_agg_then_join": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/rank_func": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/batch/with_filter": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/agg_in_win_func": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/basic": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/expr_in_win_func": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/ignore_nulls": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/over_window/generated/streaming/no_effect_updates": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/odd_frames": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/over_window/generated/streaming/opt_agg_then_join": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/rank_func": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/over_window/generated/streaming/with_filter": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/sink": {
+        "total_files": 19,
+        "covered_files": 16,
+        "uncovered_files": 3,
+        "coverage_percentage": 84.21052631578947
+      },
+      "e2e_test/sink/elasticsearch": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/sink/kafka": {
+        "total_files": 5,
+        "covered_files": 4,
+        "uncovered_files": 1,
+        "coverage_percentage": 80.0
+      },
+      "e2e_test/sink/nexmark_endless_mvs": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/sink/nexmark_endless_sinks": {
+        "total_files": 6,
+        "covered_files": 6,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/sink/remote": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/sink/sink_into_table": {
+        "total_files": 13,
+        "covered_files": 13,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/slow_tests/backfill/rate_limit": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/slow_tests/ddl": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/slow_tests/streaming/bug_fixes": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/slow_tests/streaming/rate_limit": {
+        "total_files": 5,
+        "covered_files": 5,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/slow_tests/udf": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/connection": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/fs": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/kafka": {
+        "total_files": 11,
+        "covered_files": 11,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/kafka/alter": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/kafka/avro": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/kafka/protobuf": {
+        "total_files": 5,
+        "covered_files": 5,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_inline/tvf": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/basic": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/basic/old_row_format_syntax": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/cdc": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/cdc/mongodb": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/cdc_inline": {
+        "total_files": 5,
+        "covered_files": 5,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/cdc_inline/alter": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/source_legacy/cdc_inline/sql_server_cdc": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming": {
+        "total_files": 37,
+        "covered_files": 35,
+        "uncovered_files": 2,
+        "coverage_percentage": 94.5945945945946
+      },
+      "e2e_test/streaming/aggregate": {
+        "total_files": 17,
+        "covered_files": 17,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/bug_fixes": {
+        "total_files": 20,
+        "covered_files": 20,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/delta_join": {
+        "total_files": 5,
+        "covered_files": 5,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/demo": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/eowc": {
+        "total_files": 4,
+        "covered_files": 4,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/group_top_n": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/grouping_sets": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/nexmark": {
+        "total_files": 29,
+        "covered_files": 29,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/nexmark/sinks": {
+        "total_files": 26,
+        "covered_files": 24,
+        "uncovered_files": 2,
+        "coverage_percentage": 92.3076923076923
+      },
+      "e2e_test/streaming/nexmark/views": {
+        "total_files": 26,
+        "covered_files": 26,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/over_window": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/queryable_internal_state": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/temporal_join/append_only": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/temporal_join/non_append_only": {
+        "total_files": 5,
+        "covered_files": 5,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/tpch": {
+        "total_files": 24,
+        "covered_files": 24,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/streaming/tpch/views": {
+        "total_files": 22,
+        "covered_files": 22,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/subscription": {
+        "total_files": 3,
+        "covered_files": 1,
+        "uncovered_files": 2,
+        "coverage_percentage": 33.33333333333333
+      },
+      "e2e_test/superset": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/time_travel": {
+        "total_files": 6,
+        "covered_files": 6,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/tpch": {
+        "total_files": 13,
+        "covered_files": 13,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/ttl": {
+        "total_files": 1,
+        "covered_files": 1,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/aggregate": {
+        "total_files": 5,
+        "covered_files": 5,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/bug_fixes": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/language_specific": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/language_specific/remote": {
+        "total_files": 3,
+        "covered_files": 3,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/management": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/scalar": {
+        "total_files": 8,
+        "covered_files": 8,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/udf/tests/scalar/fallback": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/user_doc": {
+        "total_files": 1,
+        "covered_files": 0,
+        "uncovered_files": 1,
+        "coverage_percentage": 0.0
+      },
+      "e2e_test/visibility_mode": {
+        "total_files": 2,
+        "covered_files": 2,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      },
+      "e2e_test/webhook": {
+        "total_files": 7,
+        "covered_files": 7,
+        "uncovered_files": 0,
+        "coverage_percentage": 100.0
+      }
+    }
+  }
+}

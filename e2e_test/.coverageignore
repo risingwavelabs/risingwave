@@ -1,0 +1,14 @@
+# This file contains patterns for files that should be ignored in coverage analysis
+# Format is similar to .gitignore - each line is a glob pattern relative to the e2e_test directory
+
+# Manually executed in `backwards-compat-test.sh`
+e2e_test/backwards-compat-tests/**/*.slt*
+
+# Manually executed in `e2e_test/iceberg/main.py`
+e2e_test/iceberg/**/*.slt*
+
+# Template files. We run generated ones in `e2e_test/over_window/generated/` instead.
+e2e_test/over_window/templates/**/*.slt*
+
+# Manually executed in `e2e_test/source_legacy/pulsar/*.py`
+e2e_test/source_legacy/pulsar/**/*.slt*
