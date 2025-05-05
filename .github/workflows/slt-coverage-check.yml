@@ -1,0 +1,81 @@
+name: SLT Coverage Check
+
+on:
+  pull_request:
+    paths:
+      - "e2e_test/**/*.slt"
+      - "e2e_test/**/*.slt.part"
+      - "ci/scripts/**/*.sh"
+      - "e2e_test/check_slt_coverage.py"
+      - ".github/workflows/slt-coverage-check.yml"
+      - "e2e_test/.coverageignore"
+
+jobs:
+  check-slt-coverage:
+    name: Check SLT Coverage Regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Get base branch information
+        id: base-branch
+        run: echo "base_ref=${GITHUB_BASE_REF}" >> $GITHUB_OUTPUT
+
+      - name: Check out base branch for comparison
+        run: |
+          git fetch origin ${{ steps.base-branch.outputs.base_ref }}
+          git checkout FETCH_HEAD
+
+      - name: Run SLT coverage check on base branch
+        id: base-coverage
+        run: |
+          python e2e_test/check_slt_coverage.py -d --output base_coverage.json
+          echo "Base branch uncovered files: $(jq '.uncovered_files_count' base_coverage.json)"
+
+      - name: Check out PR branch
+        run: git checkout ${{ github.event.pull_request.head.sha }}
+
+      - name: Run SLT coverage check on PR branch
+        id: pr-coverage
+        run: |
+          python e2e_test/check_slt_coverage.py -d --output pr_coverage.json
+          echo "PR branch uncovered files: $(jq '.uncovered_files_count' pr_coverage.json)"
+
+      - name: Check for newly uncovered files
+        id: check-new-uncovered
+        run: |
+          # Get list of uncovered files from both branches
+          jq -r '.uncovered_files[]' pr_coverage.json > pr_uncovered.txt
+          jq -r '.uncovered_files[]' base_coverage.json > base_uncovered.txt
+
+          # Find newly uncovered files (in PR but not in base)
+          echo "Checking for newly uncovered files..."
+          grep -Fxv -f base_uncovered.txt pr_uncovered.txt > newly_uncovered.txt
+
+          # Count how many new uncovered files
+          NEW_UNCOVERED_COUNT=$(wc -l < newly_uncovered.txt | tr -d ' ')
+          echo "new_uncovered_count=$NEW_UNCOVERED_COUNT" >> $GITHUB_OUTPUT
+
+          if [[ $NEW_UNCOVERED_COUNT -gt 0 ]]; then
+            echo "::error::SLT Coverage regression detected! PR added $NEW_UNCOVERED_COUNT new uncovered test file(s)."
+            echo "Newly uncovered SLT files:"
+            cat newly_uncovered.txt
+            exit 1
+          else
+            echo "::notice::No new uncovered SLT files detected. Good job!"
+
+            # Just for informational purposes, calculate overall difference
+            BASE_UNCOVERED=$(jq '.uncovered_files_count' base_coverage.json)
+            PR_UNCOVERED=$(jq '.uncovered_files_count' pr_coverage.json)
+            DIFF=$((PR_UNCOVERED - BASE_UNCOVERED))
+
+            if [[ $DIFF -lt 0 ]]; then
+              echo "::notice::Overall coverage improved by $((-DIFF)) files."
+            elif [[ $DIFF -eq 0 ]]; then
+              echo "::notice::Total uncovered file count unchanged."
+            fi
+          fi
