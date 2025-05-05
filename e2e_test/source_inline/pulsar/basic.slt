@@ -1,0 +1,17 @@
+system ok
+curl "http://pulsar-server:8080/admin/v2/brokers/ready"
+----
+ok
+
+
+statement ok
+create table t
+include payload as raw
+with (
+  connector = 'pulsar',
+  service.url = 'pulsar://pulsar-server:6650',
+  topic = 'non-persistent://public/default/topic-0',
+) format plain encode json;
+
+statement ok
+drop table t;
