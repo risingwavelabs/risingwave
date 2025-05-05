@@ -65,6 +65,9 @@ jobs:
 
           if [[ $NEW_UNCOVERED_COUNT -gt 0 ]]; then
             echo "::error::SLT Coverage regression detected! PR added $NEW_UNCOVERED_COUNT new uncovered test file(s)."
+            echo 'Please either add lines to execute these files in a script located under `ci/scripts`, or include them in other SLT files if they are partial files (ending with `.slt.part`).'
+            echo 'If you believe this is a false positive, you can add lines to `e2e_test/.coverageignore` to ignore these files. See `e2e_test/README.md` for more information.'
+            echo ""
             echo "Newly uncovered SLT files:"
             cat newly_uncovered.txt
             exit 1
