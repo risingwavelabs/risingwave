@@ -37,9 +37,9 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
 use crate::model::{ActorId, Fragment};
+use crate::stream::assign_hierarchical_worker_oriented_n;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
-use crate::stream::{assign_hierarchical_worker_oriented_n, schedule_units_for_slots};
 
 type HashMappingId = usize;
 
@@ -217,11 +217,6 @@ impl Scheduler {
     ) -> MetaResult<Self> {
         // Group worker slots with worker node.
 
-        let slots = workers
-            .iter()
-            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.compute_node_parallelism()))
-            .collect();
-
         let parallelism = default_parallelism.get();
         assert!(
             parallelism <= expected_vnode_count,
@@ -245,12 +240,10 @@ impl Scheduler {
             streaming_job_id,
         )?;
 
-        let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
-
-        let scheduled_worker_slots = scheduled
+        let scheduled_worker_slots = assignment
             .into_iter()
-            .flat_map(|(worker_id, size)| {
-                (0..size).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
+            .flat_map(|(worker_id, units)| {
+                (0..units.len()).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
             })
             .collect_vec();
 
@@ -260,8 +253,9 @@ impl Scheduler {
         let default_hash_mapping =
             WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
-        let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
-        let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
+        let single_assignment =
+            assign_hierarchical_worker_oriented_n(&worker_weights, 1, 1, streaming_job_id)?;
+        let default_single_worker_id = single_assignment.keys().exactly_one().cloned().unwrap();
         let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id as _, 0);
 
         Ok(Self {
