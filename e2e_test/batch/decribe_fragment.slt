@@ -5,11 +5,9 @@ control substitution on
 statement ok
 CREATE TABLE test_table (id INT PRIMARY KEY, value INT);
 
-
 statement ok
 CREATE MATERIALIZED VIEW test_table_mv AS
 SELECT id, SUM(value) as total FROM test_table GROUP BY id;
-
 
 system ok
 fragment_id=$(psql -h localhost -p 4566 -d dev -U root -tAc "SELECT fragment_id
@@ -32,7 +30,6 @@ StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk
     └── MergeExecutor { output: [ id, value ], stream key: [] }'
 
 
-
 # Test with non-existent fragment ID
 query error
 DESCRIBE FRAGMENT 99999999;
@@ -42,7 +39,6 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Catalog error
   2: fragment not found: 99999999
-
 
 
 # Clean up
