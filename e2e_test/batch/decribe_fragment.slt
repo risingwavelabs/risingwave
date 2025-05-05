@@ -21,7 +21,6 @@ Parallelism: %
 VNode Count: %
 State Tables: [%]
 Upstream Fragments: [%]
-
 Stream Plan:
 StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
 ├── output: [ id, value ]

@@ -430,7 +430,7 @@ fn generate_enhanced_fragment_string(fragment_dist: &FragmentDistribution) -> Re
     }
 
     if let Some(node) = &fragment_dist.node {
-        res.push_str("\nStream Plan:\n");
+        res.push_str("Stream Plan:\n");
         let node_pretty = explain_node(node, true);
         config.unicode(&mut res, &node_pretty);
     }
