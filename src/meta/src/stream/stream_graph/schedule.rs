@@ -37,9 +37,9 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
 use crate::model::{ActorId, Fragment};
-use crate::stream::schedule_units_for_slots;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
+use crate::stream::{assign_hierarchical_worker_oriented_n, schedule_units_for_slots};
 
 type HashMappingId = usize;
 
@@ -227,6 +227,23 @@ impl Scheduler {
             parallelism <= expected_vnode_count,
             "parallelism should be limited by vnode count in previous steps"
         );
+
+        let worker_weights = workers
+            .iter()
+            .map(|(worker_id, worker)| {
+                (
+                    *worker_id as WorkerId,
+                    NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                )
+            })
+            .collect();
+
+        let assignment = assign_hierarchical_worker_oriented_n(
+            &worker_weights,
+            parallelism,
+            expected_vnode_count,
+            streaming_job_id,
+        )?;
 
         let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
 

@@ -18,6 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 
 use anyhow::{Result, anyhow};
+use itertools::Itertools;
 
 /// Assign items to containers without any capacity limit.
 ///
@@ -205,171 +206,6 @@ fn stable_hash<T: Hash>(t: &T) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     t.hash(&mut hasher);
     hasher.finish()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::num::NonZeroUsize;
-
-    use super::*;
-
-    const SALT_FOR_TEST: u64 = 42;
-
-    macro_rules! nz {
-        ($e:expr) => {
-            NonZeroUsize::new($e).unwrap()
-        };
-    }
-
-    #[test]
-    fn evenly_distributes_equal_weights() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(1, nz!(1));
-        containers.insert(2, nz!(1));
-        containers.insert(3, nz!(1));
-        let items: Vec<u32> = (0..9).collect();
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        for (&c, v) in &result {
-            assert_eq!(v.len(), 3, "Container {:?} expected 3 items", c);
-        }
-    }
-
-    #[test]
-    fn respects_weight_ratios() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(10, nz!(1));
-        containers.insert(20, nz!(3));
-        let items: Vec<u32> = (0..40).collect();
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let c1 = result.get(&10).unwrap().len();
-        let c2 = result.get(&20).unwrap().len();
-        assert!(
-            c2 > c1 * 2 && c2 < c1 * 4,
-            "Weight ratio violated: c1={} c2={}",
-            c1,
-            c2
-        );
-    }
-
-    #[test]
-    fn handles_empty_inputs() {
-        let empty: BTreeMap<u32, NonZeroUsize> = BTreeMap::new();
-        let items = vec![1, 2, 3];
-        assert!(assign_items_weighted(&empty, &items, SALT_FOR_TEST).is_empty());
-
-        let mut one: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        one.insert(42, nz!(10));
-        let none: Vec<u32> = Vec::new();
-        let result = assign_items_weighted(&one, &none, SALT_FOR_TEST);
-        assert_eq!(result.get(&42).unwrap().len(), 0);
-    }
-
-    #[test]
-    fn scale_factor_increases_capacity() {
-        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
-        containers.insert('A', nz!(1));
-        containers.insert('B', nz!(1));
-        let items: Vec<u32> = (0..4).collect();
-        let result =
-            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
-                Some(2.0)
-            });
-        assert_eq!(
-            result.get(&'A').unwrap().len() + result.get(&'B').unwrap().len(),
-            4
-        );
-    }
-
-    #[test]
-    fn exact_quota_match_for_small_weights() {
-        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
-        containers.insert('A', nz!(1));
-        containers.insert('B', nz!(2));
-        let items: Vec<u8> = (0..3).collect();
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let a_count = result.get(&'A').unwrap().len();
-        let b_count = result.get(&'B').unwrap().len();
-        assert_eq!(a_count, 1, "Expected A to get exactly 1 item");
-        assert_eq!(b_count, 2, "Expected B to get exactly 2 items");
-    }
-
-    #[test]
-    fn handles_more_containers_than_items() {
-        let mut containers: BTreeMap<&str, NonZeroUsize> = BTreeMap::new();
-        containers.insert("X", nz!(1));
-        containers.insert("Y", nz!(1));
-        containers.insert("Z", nz!(1));
-        let items = vec![100, 200];
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let non_empty = result.values().filter(|v| !v.is_empty()).count();
-        assert_eq!(
-            non_empty, 2,
-            "Exactly two containers should receive an item"
-        );
-        let zero = result.values().filter(|v| v.is_empty()).count();
-        assert_eq!(zero, 1, "Exactly one container should receive zero items");
-    }
-
-    #[test]
-    fn deterministic_across_invocations() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(10, nz!(3));
-        containers.insert(20, nz!(5));
-        let items: Vec<i32> = (0..20).collect();
-        let first = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let second = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        assert_eq!(first, second, "Assignment must be deterministic");
-    }
-
-    #[test]
-    fn scale_less_than_one_behaves_as_one() {
-        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
-        containers.insert('A', nz!(1));
-        containers.insert('B', nz!(1));
-        let items: Vec<u8> = (0..6).collect();
-        let default = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let scaled_down =
-            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
-                Some(0.5)
-            });
-        assert_eq!(default, scaled_down, "scale < 1 should not alter quotas");
-    }
-
-    #[test]
-    fn scale_factor_limits_are_respected() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(1, nz!(1));
-        containers.insert(2, nz!(1));
-        let items: Vec<u32> = (0..4).collect();
-        let result =
-            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
-                Some(1.5)
-            });
-        for (&c, v) in &result {
-            assert!(
-                v.len() <= 3,
-                "Container {:?} exceeded scaled quota of 3, got {}",
-                c,
-                v.len()
-            );
-        }
-        let total_assigned: usize = result.values().map(|v| v.len()).sum();
-        assert_eq!(total_assigned, 4, "All items should be assigned");
-    }
-
-    #[test]
-    fn empty_inputs_return_empty_vectors() {
-        let empty: BTreeMap<u32, NonZeroUsize> = BTreeMap::new();
-        let items = vec![1, 2, 3];
-        assert!(assign_items_weighted(&empty, &items, SALT_FOR_TEST).is_empty());
-
-        let mut one: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        one.insert(99, nz!(5));
-        let none: Vec<i32> = Vec::new();
-        let result = assign_items_weighted(&one, &none, SALT_FOR_TEST);
-        assert_eq!(result.get(&99).unwrap().len(), 0);
-    }
 }
 
 /// Distributes virtual nodes to actors via a two-layered weighted assignment:
@@ -647,6 +483,192 @@ where
     }
 
     Ok(result)
+}
+
+pub fn assign_hierarchical_worker_oriented_n<W, S>(
+    workers: &BTreeMap<W, NonZeroUsize>,
+    actor_count: usize,
+    vnode_count: usize,
+    salt: S,
+) -> Result<HashMap<W, HashMap<i32, Vec<usize>>>>
+where
+    W: Ord + Hash + Eq + Copy + Clone + Debug,
+    S: Hash + Copy,
+{
+    let actors = (0..actor_count).map(|x| x as i32).collect_vec();
+    let vnodes = (0..vnode_count).collect_vec();
+    assign_hierarchical(
+        workers,
+        &actors,
+        &vnodes,
+        salt,
+        BalancedBy::RawWorkerWeights,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::num::NonZeroUsize;
+
+    use super::*;
+
+    const SALT_FOR_TEST: u64 = 42;
+
+    macro_rules! nz {
+        ($e:expr) => {
+            NonZeroUsize::new($e).unwrap()
+        };
+    }
+
+    #[test]
+    fn evenly_distributes_equal_weights() {
+        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
+        containers.insert(1, nz!(1));
+        containers.insert(2, nz!(1));
+        containers.insert(3, nz!(1));
+        let items: Vec<u32> = (0..9).collect();
+        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        for (&c, v) in &result {
+            assert_eq!(v.len(), 3, "Container {:?} expected 3 items", c);
+        }
+    }
+
+    #[test]
+    fn respects_weight_ratios() {
+        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
+        containers.insert(10, nz!(1));
+        containers.insert(20, nz!(3));
+        let items: Vec<u32> = (0..40).collect();
+        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        let c1 = result.get(&10).unwrap().len();
+        let c2 = result.get(&20).unwrap().len();
+        assert!(
+            c2 > c1 * 2 && c2 < c1 * 4,
+            "Weight ratio violated: c1={} c2={}",
+            c1,
+            c2
+        );
+    }
+
+    #[test]
+    fn handles_empty_inputs() {
+        let empty: BTreeMap<u32, NonZeroUsize> = BTreeMap::new();
+        let items = vec![1, 2, 3];
+        assert!(assign_items_weighted(&empty, &items, SALT_FOR_TEST).is_empty());
+
+        let mut one: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
+        one.insert(42, nz!(10));
+        let none: Vec<u32> = Vec::new();
+        let result = assign_items_weighted(&one, &none, SALT_FOR_TEST);
+        assert_eq!(result.get(&42).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn scale_factor_increases_capacity() {
+        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
+        containers.insert('A', nz!(1));
+        containers.insert('B', nz!(1));
+        let items: Vec<u32> = (0..4).collect();
+        let result =
+            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
+                Some(2.0)
+            });
+        assert_eq!(
+            result.get(&'A').unwrap().len() + result.get(&'B').unwrap().len(),
+            4
+        );
+    }
+
+    #[test]
+    fn exact_quota_match_for_small_weights() {
+        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
+        containers.insert('A', nz!(1));
+        containers.insert('B', nz!(2));
+        let items: Vec<u8> = (0..3).collect();
+        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        let a_count = result.get(&'A').unwrap().len();
+        let b_count = result.get(&'B').unwrap().len();
+        assert_eq!(a_count, 1, "Expected A to get exactly 1 item");
+        assert_eq!(b_count, 2, "Expected B to get exactly 2 items");
+    }
+
+    #[test]
+    fn handles_more_containers_than_items() {
+        let mut containers: BTreeMap<&str, NonZeroUsize> = BTreeMap::new();
+        containers.insert("X", nz!(1));
+        containers.insert("Y", nz!(1));
+        containers.insert("Z", nz!(1));
+        let items = vec![100, 200];
+        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        let non_empty = result.values().filter(|v| !v.is_empty()).count();
+        assert_eq!(
+            non_empty, 2,
+            "Exactly two containers should receive an item"
+        );
+        let zero = result.values().filter(|v| v.is_empty()).count();
+        assert_eq!(zero, 1, "Exactly one container should receive zero items");
+    }
+
+    #[test]
+    fn deterministic_across_invocations() {
+        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
+        containers.insert(10, nz!(3));
+        containers.insert(20, nz!(5));
+        let items: Vec<i32> = (0..20).collect();
+        let first = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        let second = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        assert_eq!(first, second, "Assignment must be deterministic");
+    }
+
+    #[test]
+    fn scale_less_than_one_behaves_as_one() {
+        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
+        containers.insert('A', nz!(1));
+        containers.insert('B', nz!(1));
+        let items: Vec<u8> = (0..6).collect();
+        let default = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
+        let scaled_down =
+            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
+                Some(0.5)
+            });
+        assert_eq!(default, scaled_down, "scale < 1 should not alter quotas");
+    }
+
+    #[test]
+    fn scale_factor_limits_are_respected() {
+        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
+        containers.insert(1, nz!(1));
+        containers.insert(2, nz!(1));
+        let items: Vec<u32> = (0..4).collect();
+        let result =
+            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
+                Some(1.5)
+            });
+        for (&c, v) in &result {
+            assert!(
+                v.len() <= 3,
+                "Container {:?} exceeded scaled quota of 3, got {}",
+                c,
+                v.len()
+            );
+        }
+        let total_assigned: usize = result.values().map(|v| v.len()).sum();
+        assert_eq!(total_assigned, 4, "All items should be assigned");
+    }
+
+    #[test]
+    fn empty_inputs_return_empty_vectors() {
+        let empty: BTreeMap<u32, NonZeroUsize> = BTreeMap::new();
+        let items = vec![1, 2, 3];
+        assert!(assign_items_weighted(&empty, &items, SALT_FOR_TEST).is_empty());
+
+        let mut one: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
+        one.insert(99, nz!(5));
+        let none: Vec<i32> = Vec::new();
+        let result = assign_items_weighted(&one, &none, SALT_FOR_TEST);
+        assert_eq!(result.get(&99).unwrap().len(), 0);
+    }
 }
 
 #[cfg(test)]
