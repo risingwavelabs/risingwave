@@ -62,7 +62,7 @@ def should_ignore_file(file_path, ignore_patterns):
     return False
 
 
-def find_all_slt_files():
+def find_all_slt_files(include_ignored=False):
     """Find all .slt and .slt.part files in the e2e_test directory"""
     slt_files = set(
         path_for_storage(f)
@@ -73,8 +73,8 @@ def find_all_slt_files():
         for f in glob.glob(f"{E2E_TEST_DIR}/**/*.slt.part", recursive=True)
     )
 
-    # Filter out ignored files
-    ignore_patterns = read_coverageignore()
+    # Filter out ignored files unless explicitly included
+    ignore_patterns = read_coverageignore() if not include_ignored else []
     if ignore_patterns:
         slt_files = {f for f in slt_files if not should_ignore_file(f, ignore_patterns)}
         slt_part_files = {
@@ -382,7 +382,9 @@ def main():
     )
     args = parser.parse_args()
 
-    all_slt_files, all_slt_part_files, ignore_patterns = find_all_slt_files()
+    all_slt_files, all_slt_part_files, ignore_patterns = find_all_slt_files(
+        include_ignored=args.include_ignored
+    )
     all_files = all_slt_files.union(all_slt_part_files)
 
     print(f"Total SLT files: {len(all_slt_files)}")
@@ -416,6 +418,10 @@ def main():
 
     for script in scripts:
         script_path = os.path.join(CI_SCRIPTS_DIR, script)
+        if not os.path.exists(script_path):
+            print(f"Warning: Script {script_path} not found, skipping")
+            continue
+
         patterns, excluded_patterns = extract_slt_patterns_from_script(script_path)
 
         if not patterns and not excluded_patterns:
