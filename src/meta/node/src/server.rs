@@ -595,18 +595,15 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         Some(backup_manager),
     ));
-    sub_tasks.extend(
-        HummockManager::compaction_event_loop(hummock_manager.clone(), compactor_streams_change_rx)
-            .await,
-    );
+    sub_tasks.extend(HummockManager::compaction_event_loop(
+        hummock_manager.clone(),
+        compactor_streams_change_rx,
+    ));
 
-    sub_tasks.extend(
-        HummockManager::iceberg_compaction_event_loop(
-            hummock_manager,
-            iceberg_compactor_streams_change_rx,
-        )
-        .await,
-    );
+    sub_tasks.extend(HummockManager::iceberg_compaction_event_loop(
+        hummock_manager,
+        iceberg_compactor_streams_change_rx,
+    ));
 
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(

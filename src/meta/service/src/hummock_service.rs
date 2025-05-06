@@ -23,7 +23,6 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
-use risingwave_meta::hummock::CompactorType;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
@@ -442,9 +441,7 @@ impl HummockManagerService for HummockServiceImpl {
 
         let rx: tokio::sync::mpsc::UnboundedReceiver<
             Result<SubscribeCompactionEventResponse, crate::MetaError>,
-        > = compactor_manager
-            .add_compactor(context_id, CompactorType::Hummock)
-            .into_hummock_receiver();
+        > = compactor_manager.add_compactor(context_id);
 
         // register request stream to hummock
         self.hummock_manager
@@ -652,13 +649,13 @@ impl HummockManagerService for HummockServiceImpl {
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        let compactor_manager = self.hummock_manager.compactor_manager.clone();
 
         let rx: tokio::sync::mpsc::UnboundedReceiver<
             Result<SubscribeIcebergCompactionEventResponse, crate::MetaError>,
-        > = compactor_manager
-            .add_compactor(context_id, CompactorType::Iceberg)
-            .into_iceberg_receiver();
+        > = self
+            .hummock_manager
+            .iceberg_compactor_manager
+            .add_compactor(context_id);
 
         // register request stream to hummock
         self.hummock_manager

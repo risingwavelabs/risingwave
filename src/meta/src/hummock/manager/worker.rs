@@ -18,7 +18,7 @@ use sync_point::sync_point;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 
-use crate::hummock::{CompactorType, HummockManager, HummockManagerRef};
+use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::LocalNotification;
 
 pub type HummockManagerEventSender = tokio::sync::mpsc::UnboundedSender<HummockManagerEvent>;
@@ -94,8 +94,7 @@ impl HummockManager {
     async fn handle_local_notification(&self, notification: LocalNotification) {
         if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
             if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager
-                    .remove_compactor(worker_node.id, CompactorType::Hummock);
+                self.compactor_manager.remove_compactor(worker_node.id);
 
                 // TODO: remove iceberg compactor
             }
