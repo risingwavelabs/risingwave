@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_pb::source::{ConnectorExtraInfo, ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
@@ -182,6 +182,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
     pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
+    pub connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 impl StreamJobFragments {
@@ -710,6 +711,7 @@ impl Command {
                         init_split_assignment: split_assignment,
                         upstream_fragment_downstreams,
                         fragment_backfill_ordering,
+                        connector_extra_info,
                         ..
                     },
                 job_type,
@@ -757,6 +759,7 @@ impl Command {
                     pause: is_currently_paused,
                     subscriptions_to_add,
                     backfill_nodes_to_pause,
+                    connector_extra_info: *connector_extra_info,
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -991,6 +994,10 @@ impl Command {
                     dropped_actors,
                     actor_splits,
                     actor_new_dispatchers,
+
+                    // assume the migration make the source distribution even
+                    // no need to carry the extra info for fd limit check
+                    connector_extra_info: None,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1010,6 +1017,8 @@ impl Command {
                     subscriber_id: *subscription_id,
                 }],
                 backfill_nodes_to_pause: vec![],
+                // Subscription does not involve fd heavy workload, skip
+                connector_extra_info: None,
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,

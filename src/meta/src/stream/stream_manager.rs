@@ -441,6 +441,10 @@ impl GlobalStreamManager {
                 )
                 .await?,
         );
+        let connector_extra_info = self
+            .source_manager
+            .get_connector_extra_info(&stream_job_fragments)
+            .await;
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
@@ -456,6 +460,7 @@ impl GlobalStreamManager {
             job_type,
             create_type,
             fragment_backfill_ordering,
+            connector_extra_info,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {

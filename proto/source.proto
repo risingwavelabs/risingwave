@@ -18,3 +18,8 @@ message SourceActorInfo {
   uint32 actor_id = 1;
   ConnectorSplits splits = 2;
 }
+
+message ConnectorExtraInfo {
+  // for kafka source, need to verify the ulimit is enough on CN side
+  optional uint32 kafka_broker_size = 1;
+}

@@ -33,7 +33,7 @@ use risingwave_connector::source::{
 };
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
-use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_pb::source::{ConnectorExtraInfo, ConnectorSplit, ConnectorSplits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -398,6 +398,15 @@ impl SourceManager {
     pub async fn apply_source_change(&self, source_change: SourceChange) {
         let mut core = self.core.lock().await;
         core.apply_source_change(source_change);
+    }
+
+    pub async fn get_connector_extra_info(
+        &self,
+        table_fragments: &StreamJobFragments,
+    ) -> Option<ConnectorExtraInfo> {
+        let source_ids = table_fragments.stream_source_fragments().keys();
+
+        todo!()
     }
 
     /// create and register connector worker for source.

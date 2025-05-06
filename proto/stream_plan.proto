@@ -32,6 +32,8 @@ message AddMutation {
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
+  // extra info for connector
+  source.ConnectorExtraInfo connector_extra_info = 7;
 }
 
 message StopMutation {
@@ -79,6 +81,8 @@ message UpdateMutation {
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
+  // extra info for connector
+  source.ConnectorExtraInfo connector_extra_info = 7;
 }
 
 message SourceChangeSplitMutation {

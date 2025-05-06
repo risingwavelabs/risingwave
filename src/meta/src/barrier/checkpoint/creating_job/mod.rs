@@ -125,6 +125,7 @@ impl CreatingStreamingJobControl {
             pause: false,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause: Default::default(),
+            connector_extra_info: info.connector_extra_info,
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));

@@ -488,6 +488,7 @@ impl ControlStreamManager {
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
             backfill_nodes_to_pause: Default::default(),
+            connector_extra_info: None, /* in recovery, we don't need to carry the extra info for fd limit check */
         });
 
         fn resolve_jobs_committed_epoch(
