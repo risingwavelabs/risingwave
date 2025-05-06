@@ -55,11 +55,10 @@ fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
     };
 
     // Add a `Pb`-prefixed alias for all types.
+    // No need to add docs for this alias as rust-analyzer will forward the docs to the original type.
     let pb_alias = {
         let pb_name = format_ident!("Pb{name}");
-        let doc = format!("Alias for [`{name}`].");
         quote! {
-            #[doc = #doc]
             pub type #pb_name = #name;
         }
     };

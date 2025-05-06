@@ -17,7 +17,7 @@ use std::process::Command;
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
-use super::{ExecuteContext, Task, risingwave_cmd};
+use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{FrontendConfig, add_tempo_endpoint};
 
@@ -73,7 +73,7 @@ impl Task for FrontendService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = risingwave_cmd("frontend-node")?;
+        let mut cmd = ctx.risingwave_cmd("frontend-node")?;
 
         Self::apply_command_args(&mut cmd, &self.config)?;
 

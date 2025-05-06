@@ -16,6 +16,7 @@ RUN apt-get update -yy && \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
     golang perl \
+    dumb-init \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
@@ -72,7 +73,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.24 \
-    sqllogictest-bin@0.28.0 \
+    sqllogictest-bin@0.28.1 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
@@ -89,3 +90,9 @@ cd "/risingwave"
 ./risedev "\$@"
 EOF
 RUN chmod +x /root/.cargo/bin/risedev
+
+# Use `dumb-init` as the init system to properly handle signals:
+# - rewrite SIGTERM (sent by Buildkite agent or `docker stop`) to SIGINT
+# - forward signals to all child processes in the same process group
+# To debug, set env var `DUMB_INIT_DEBUG=1` for verbose logging.
+ENTRYPOINT [ "/usr/bin/dumb-init", "--rewrite", "15:2", "--" ]

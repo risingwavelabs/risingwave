@@ -25,7 +25,7 @@
     BatchTopN { order: [t1_mv.a DESC], limit: 50, offset: 50 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 100, offset: 0 }
-        └─BatchScan { table: t1_mv, columns: [t1_mv.pk, t1_mv.a, t1_mv.b, t1_mv.c, t1_mv.d], limit: 100, distribution: UpstreamHashShard(t1_mv.a) }
+        └─BatchScan { table: t1_mv, columns: [t1_mv.pk, t1_mv.a, t1_mv.b, t1_mv.c, t1_mv.d], limit: 100, distribution: SomeShard }
 - sql: |
     WITH c1(k, v) AS (
         VALUES

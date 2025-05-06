@@ -30,9 +30,9 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
-    ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, SqlOptionValue,
-    Statement, Value,
+    BackfillOrderStrategy, ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement,
+    CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
+    SqlOptionValue, Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -52,6 +52,7 @@ pub struct WithOptions {
     inner: BTreeMap<String, String>,
     secret_ref: BTreeMap<String, SecretRefValue>,
     connection_ref: BTreeMap<String, ConnectionRefValue>,
+    backfill_order_strategy: BackfillOrderStrategy,
 }
 
 impl GetKeyIter for WithOptions {
@@ -87,6 +88,7 @@ impl WithOptions {
             inner,
             secret_ref: Default::default(),
             connection_ref: Default::default(),
+            backfill_order_strategy: Default::default(),
         }
     }
 
@@ -100,6 +102,7 @@ impl WithOptions {
             inner,
             secret_ref,
             connection_ref,
+            backfill_order_strategy: Default::default(),
         }
     }
 
@@ -132,6 +135,7 @@ impl WithOptions {
             inner,
             secret_ref: self.secret_ref,
             connection_ref: self.connection_ref,
+            backfill_order_strategy: self.backfill_order_strategy,
         }
     }
 
@@ -157,6 +161,7 @@ impl WithOptions {
             inner,
             secret_ref: self.secret_ref.clone(),
             connection_ref: self.connection_ref.clone(),
+            backfill_order_strategy: self.backfill_order_strategy.clone(),
         }
     }
 
@@ -202,12 +207,16 @@ impl WithOptions {
         self.inner.contains_key(UPSTREAM_SOURCE_KEY)
             && self.inner.get(UPSTREAM_SOURCE_KEY).unwrap() != WEBHOOK_CONNECTOR
     }
+
+    pub fn backfill_order_strategy(&self) -> BackfillOrderStrategy {
+        self.backfill_order_strategy.clone()
+    }
 }
 
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
-    object: TelemetryDatabaseObject,
+    object: Option<TelemetryDatabaseObject>,
 ) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
@@ -235,21 +244,23 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         };
 
-        // report to telemetry
-        report_event(
-            PbTelemetryEventStage::CreateStreamJob,
-            "connection_ref",
-            0,
-            connector_name.clone(),
-            Some(object),
-            {
-                connection_params.as_ref().map(|cp| {
-                    jsonbb::json!({
-                        "connection_type": cp.connection_type().as_str_name().to_owned()
+        if let Some(object) = object {
+            // report to telemetry
+            report_event(
+                PbTelemetryEventStage::CreateStreamJob,
+                "connection_ref",
+                0,
+                connector_name.clone(),
+                Some(object),
+                {
+                    connection_params.as_ref().map(|cp| {
+                        jsonbb::json!({
+                            "connection_type": cp.connection_type().as_str_name().to_owned()
+                        })
                     })
-                })
-            },
-        );
+                },
+            );
+        }
     }
 
     let mut inner_secret_refs = {
@@ -394,6 +405,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
         let mut secret_ref: BTreeMap<String, SecretRefValue> = BTreeMap::new();
         let mut connection_ref: BTreeMap<String, ConnectionRefValue> = BTreeMap::new();
+        let mut backfill_order_strategy = BackfillOrderStrategy::Default;
         for option in options {
             let key = option.name.real_value();
             match &option.value {
@@ -417,6 +429,10 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                             key
                         ))));
                     }
+                    continue;
+                }
+                SqlOptionValue::BackfillOrder(b) => {
+                    backfill_order_strategy = b.clone();
                     continue;
                 }
                 _ => {}
@@ -445,6 +461,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             inner,
             secret_ref,
             connection_ref,
+            backfill_order_strategy,
         })
     }
 }

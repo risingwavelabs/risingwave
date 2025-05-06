@@ -36,7 +36,7 @@ use with_options::WithOptions;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
@@ -102,8 +102,8 @@ pub struct AwsAuthProps {
     pub msk_signer_timeout_sec: Option<u64>,
 }
 
-impl EnforceSecretOnCloud for AwsAuthProps {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for AwsAuthProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "access_key",
         "aws.credentials.access_key_id",
         "s3.access.key",
@@ -267,8 +267,8 @@ pub struct KafkaConnectionProps {
     sasl_oathbearer_config: Option<String>,
 }
 
-impl EnforceSecretOnCloud for KafkaConnectionProps {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for KafkaConnectionProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "properties.ssl.key.pem",
         "properties.ssl.key.password",
         "properties.sasl.password",
@@ -508,8 +508,8 @@ pub struct PulsarCommon {
     pub auth_token: Option<String>,
 }
 
-impl EnforceSecretOnCloud for PulsarCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for PulsarCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "pulsar.auth.token",
     };
 }
@@ -626,8 +626,8 @@ pub struct KinesisCommon {
     pub assume_role_external_id: Option<String>,
 }
 
-impl EnforceSecretOnCloud for KinesisCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for KinesisCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "kinesis.credentials.access",
         "kinesis.credentials.secret",
         "kinesis.credentials.session_token",
@@ -690,8 +690,8 @@ pub struct NatsCommon {
     pub max_message_size: Option<i32>,
 }
 
-impl EnforceSecretOnCloud for NatsCommon {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for NatsCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "password",
         "jwt",
         "nkey",
@@ -901,6 +901,12 @@ pub struct MongodbCommon {
     /// for more information.
     #[serde(rename = "collection.name")]
     pub collection_name: String,
+}
+
+impl EnforceSecret for MongodbCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "mongodb.url"
+    };
 }
 
 impl MongodbCommon {

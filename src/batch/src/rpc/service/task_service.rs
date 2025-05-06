@@ -34,8 +34,6 @@ use crate::task::{
     TASK_STATUS_BUFFER_SIZE,
 };
 
-const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
-
 #[derive(Clone)]
 pub struct BatchServiceImpl {
     mgr: Arc<BatchManager>,
@@ -175,7 +173,7 @@ impl BatchServiceImpl {
         );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
         let task = Arc::new(task);
-        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
+        let (tx, rx) = tokio::sync::mpsc::channel(mgr.config().developer.local_execute_buffer_size);
         if let Err(e) = task
             .clone()
             .async_execute(None, tracing_context, expr_context)

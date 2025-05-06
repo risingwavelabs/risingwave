@@ -312,7 +312,7 @@ impl HummockManager {
         // It's crucial to get pinned_by_metadata_backup only after object_ids.
         let pinned_by_metadata_backup = backup_manager
             .as_ref()
-            .map(|b| b.list_pinned_ssts())
+            .map(|b| b.list_pinned_object_ids())
             .unwrap_or_default();
         // It's crucial to collect_min_uncommitted_sst_id (i.e. `min_sst_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_sst_id`, new compute nodes may join and generate new uncommitted SSTs that are not covered by `min_sst_id`.
@@ -508,7 +508,7 @@ impl HummockManager {
             return Ok(());
         };
         // Objects pinned by either meta backup or time travel should be filtered out.
-        let backup_pinned: HashSet<_> = backup_manager.list_pinned_ssts();
+        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids();
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
             let versioning = self.versioning.read().await;

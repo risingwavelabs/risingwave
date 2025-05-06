@@ -28,6 +28,7 @@ use super::elasticsearch::ES_SINK;
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
 use super::opensearch::OPENSEARCH_SINK;
 use crate::connector_common::ElasticsearchConnection;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
 use crate::sink::Result;
 
@@ -83,6 +84,13 @@ pub struct ElasticSearchOpenSearchConfig {
 
     #[serde(default = "default_type")]
     pub r#type: String,
+}
+
+impl EnforceSecret for ElasticSearchOpenSearchConfig {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
+        "username",
+        "password",
+    };
 }
 
 fn default_type() -> String {

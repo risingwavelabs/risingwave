@@ -1,0 +1,142 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+statement ok
+drop table if exists car_sales cascade;
+
+statement ok
+drop table if exists car_info cascade;
+
+statement ok
+drop table if exists car_regions cascade;
+
+statement ok
+create table car_sales(id int, car_id int, region_id int, price int);
+
+statement ok
+create table car_info(id int, name varchar);
+
+statement ok
+create table car_regions(id int, region varchar);
+
+statement ok
+insert into car_info select t.id as id, 'unmatched' from generate_series(10, 100000) t(id);
+
+statement ok
+insert into car_info values (1, 'Toyota'), (2, 'Honda'), (3, 'Ford'), (4, 'Chevy'), (5, 'BMW'), (6, 'Audi'), (7, 'Mercedes');
+
+statement ok
+insert into car_regions select t.id as id, 'unmatched' from generate_series(10, 100000) t(id);
+
+statement ok
+insert into car_regions values (1, 'North America'), (2, 'Europe'), (3, 'Asia'), (4, 'South America'), (5, 'Africa'), (6, 'Australia'), (7, 'Antarctica');
+
+# Generate 100K sales per car per region
+statement ok
+INSERT INTO car_sales
+  SELECT
+    sales_id_gen.id as id,
+    car_id_gen.id as car_id,
+    region_id_gen.id as region_id,
+    sales_id_gen.id as price
+  FROM generate_series(1, 100000) as sales_id_gen(id)
+    CROSS JOIN generate_series(1, 5) as car_id_gen(id)
+    CROSS JOIN generate_series(1, 5) as region_id_gen(id);
+
+# should fail with cycle
+statement error Backfill order strategy has a cycle
+create materialized view m1
+  with (backfill_order = FIXED(car_sales -> car_sales))
+as select count(*) from car_sales join car_info
+  on car_sales.car_id = car_info.id
+  join car_regions
+    on car_sales.region_id = car_regions.id;
+
+# should fail with cycle
+statement error Backfill order strategy has a cycle
+create materialized view m1
+  with (backfill_order = FIXED(car_sales -> car_regions, car_info -> car_sales, car_regions -> car_sales))
+as select count(*) from car_sales join car_info
+  on car_sales.car_id = car_info.id
+  join car_regions
+    on car_sales.region_id = car_regions.id;
+
+# Create an MV that groups sales by a range of prices
+statement ok
+create materialized view m1
+    with (backfill_order = FIXED(car_regions -> car_sales, car_info -> car_sales))
+    as
+      with price_ranges as (
+        select
+          car_info.name as name,
+          car_sales.price as price,
+          round(log10(1 + car_sales.price)::numeric, 1) as price_range
+        from car_sales join car_info
+          on car_sales.car_id = car_info.id
+          join car_regions
+            on car_sales.region_id = car_regions.id
+      )
+      select
+        name,
+        price_range,
+        count(*) as sales_count,
+        sum(price) as sales_volume,
+        avg(price) as sales_avg,
+        min(price) as sales_min,
+        max(price) as sales_max,
+        approx_percentile(0.5) WITHIN GROUP (ORDER BY price) as sales_est_median,
+        approx_percentile(0.01) WITHIN GROUP (ORDER BY price) as sales_est_bottom_1_percent,
+        approx_percentile(0.99) WITHIN GROUP (ORDER BY price) as sales_est_top_1_percent
+      FROM
+        price_ranges
+      GROUP BY name, price_range;
+
+# Create an MV that groups sales by a range of prices, no backfill order
+statement ok
+create materialized view m1_no_order
+    as
+      with price_ranges as (
+        select
+          car_info.name as name,
+          car_sales.price as price,
+          round(log10(1 + car_sales.price)::numeric, 1) as price_range
+        from car_sales join car_info
+          on car_sales.car_id = car_info.id
+          join car_regions
+            on car_sales.region_id = car_regions.id
+      )
+      select
+        name,
+        price_range,
+        count(*) as sales_count,
+        sum(price) as sales_volume,
+        avg(price) as sales_avg,
+        min(price) as sales_min,
+        max(price) as sales_max,
+        approx_percentile(0.5) WITHIN GROUP (ORDER BY price) as sales_est_median,
+        approx_percentile(0.01) WITHIN GROUP (ORDER BY price) as sales_est_bottom_1_percent,
+        approx_percentile(0.99) WITHIN GROUP (ORDER BY price) as sales_est_top_1_percent
+      FROM
+        price_ranges
+      GROUP BY name, price_range;
+
+query I
+select * from m1
+except
+select * from m1_no_order
+----
+
+query I
+select * from m1_no_order
+except
+select * from m1
+----
+
+statement ok
+drop table if exists car_sales cascade;
+
+statement ok
+drop table if exists car_info cascade;
+
+statement ok
+drop table if exists car_regions cascade;

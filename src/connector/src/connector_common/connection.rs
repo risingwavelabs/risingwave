@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use opendal::Operator;
-use opendal::services::{Gcs, S3};
+use opendal::services::{Azblob, Gcs, S3};
 use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
@@ -34,7 +34,7 @@ use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
 use crate::deserialize_optional_bool_from_string;
-use crate::enforce_secret_on_cloud::EnforceSecretOnCloud;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
@@ -61,10 +61,8 @@ pub struct KafkaConnection {
     pub aws_auth_props: AwsAuthProps,
 }
 
-impl EnforceSecretOnCloud for KafkaConnection {
-    fn enforce_secret_on_cloud<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> ConnectorResult<()> {
+impl EnforceSecret for KafkaConnection {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
         for prop in prop_iter {
             KafkaConnectionProps::enforce_one(prop)?;
             AwsAuthProps::enforce_one(prop)?;
@@ -148,6 +146,13 @@ pub struct IcebergConnection {
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
 
+    #[serde(rename = "azblob.account_name")]
+    pub azblob_account_name: Option<String>,
+    #[serde(rename = "azblob.account_key")]
+    pub azblob_account_key: Option<String>,
+    #[serde(rename = "azblob.endpoint_url")]
+    pub azblob_endpoint_url: Option<String>,
+
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
@@ -216,8 +221,8 @@ pub struct IcebergConnection {
     pub hosted_catalog: Option<bool>,
 }
 
-impl EnforceSecretOnCloud for IcebergConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for IcebergConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "s3.access.key",
         "s3.secret.key",
         "gcs.credential",
@@ -291,6 +296,21 @@ impl Connection for IcebergConnection {
                     let op = Operator::new(builder)?.finish();
                     op.check().await?;
                 }
+                "azblob" => {
+                    let mut builder = Azblob::default();
+                    if let Some(account_name) = &self.azblob_account_name {
+                        builder = builder.account_name(account_name);
+                    }
+                    if let Some(azblob_account_key) = &self.azblob_account_key {
+                        builder = builder.account_key(azblob_account_key);
+                    }
+                    if let Some(azblob_endpoint_url) = &self.azblob_endpoint_url {
+                        builder = builder.endpoint(azblob_endpoint_url);
+                    }
+                    builder = builder.root(root.as_str()).container(bucket.as_str());
+                    let op = Operator::new(builder)?.finish();
+                    op.check().await?;
+                }
                 _ => {
                     bail!("Unsupported scheme: {}", scheme);
                 }
@@ -329,11 +349,15 @@ impl Connection for IcebergConnection {
             access_key: self.access_key.clone(),
             secret_key: self.secret_key.clone(),
             gcs_credential: self.gcs_credential.clone(),
+            azblob_account_name: self.azblob_account_name.clone(),
+            azblob_account_key: self.azblob_account_key.clone(),
+            azblob_endpoint_url: self.azblob_endpoint_url.clone(),
             warehouse_path: self.warehouse_path.clone(),
             glue_id: self.glue_id.clone(),
             catalog_name: self.catalog_name.clone(),
             catalog_uri: self.catalog_uri.clone(),
             credential: self.credential.clone(),
+
             token: self.token.clone(),
             oauth2_server_uri: self.oauth2_server_uri.clone(),
             scope: self.scope.clone(),
@@ -386,8 +410,8 @@ impl Connection for ConfluentSchemaRegistryConnection {
     }
 }
 
-impl EnforceSecretOnCloud for ConfluentSchemaRegistryConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ConfluentSchemaRegistryConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "schema.registry.password",
     };
 }
@@ -407,8 +431,8 @@ impl Connection for ElasticsearchConnection {
     }
 }
 
-impl EnforceSecretOnCloud for ElasticsearchConnection {
-    const ENFORCE_SECRET_PROPERTIES_ON_CLOUD: Set<&'static str> = phf_set! {
+impl EnforceSecret for ElasticsearchConnection {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "elasticsearch.password",
     };
 }

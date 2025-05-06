@@ -53,7 +53,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
 };
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
+    Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
 };
 
 pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -466,7 +466,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                             latest_offset.check_next_item_epoch(epoch)?;
                         }
                         let item = match item {
-                            KvLogStoreItem::StreamChunk(chunk) => {
+                            KvLogStoreItem::StreamChunk { chunk, .. } => {
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {
@@ -476,7 +476,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     Some(TruncateOffset::Chunk { epoch, chunk_id });
                                 LogStoreReadItem::StreamChunk { chunk, chunk_id }
                             }
-                            KvLogStoreItem::Barrier { is_checkpoint } => {
+                            KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
                                 LogStoreReadItem::Barrier {
                                     is_checkpoint,
@@ -659,7 +659,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
-    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, u64)>> + 'static {
+    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, Epoch)>> + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
         async move {
@@ -793,10 +793,7 @@ mod tests {
     use risingwave_storage::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use risingwave_storage::store::{
-        LocalStateStore, NewLocalOptions, NewReadSnapshotOptions, ReadOptions,
-        SealCurrentEpochOptions, StateStoreRead,
-    };
+    use risingwave_storage::store::*;
     use risingwave_storage::{StateStore, StateStoreIter};
 
     use crate::common::log_store_impl::kv_log_store::reader::AutoRebuildStateStoreReadIter;
