@@ -449,15 +449,16 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
                     if let Some((_, Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
                         let worker_ids: HashSet<_> =
-                            info.stream_job_fragments.inner
+                            info.stream_job_fragments
                             .actors_to_create()
                             .flat_map(|(_, _, actors)|
                                 actors.map(|(_, worker_id)| worker_id)
                             )
                             .collect();
                         for worker_id in worker_ids {
-                            if !self.control_stream_manager.is_connected(worker_id) {
-                                self.control_stream_manager.try_reconnect_worker(worker_id, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                            if !self.control_stream_manager.contains_worker(worker_id) {
+                                let node = self.active_streaming_nodes.current()[&worker_id].clone();
+                                self.control_stream_manager.try_add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
                             }
                         }
                     }
