@@ -38,6 +38,10 @@ impl DockerServiceConfig for PulsarConfig {
             (self.http_port.to_string(), "8080".to_owned()),
         ]
     }
+
+    fn data_path(&self) -> Option<String> {
+        self.persist_data.then(|| "/pulsar/data".to_owned())
+    }
 }
 
 /// Docker-backed Pulsar service.

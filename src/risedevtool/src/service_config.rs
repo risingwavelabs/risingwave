@@ -325,6 +325,7 @@ pub struct PulsarConfig {
 
     pub user_managed: bool,
     pub image: String,
+    pub persist_data: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
