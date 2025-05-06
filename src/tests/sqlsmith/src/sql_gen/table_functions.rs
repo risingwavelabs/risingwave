@@ -14,7 +14,6 @@
 
 use chrono::{Duration, NaiveDateTime};
 use rand::Rng;
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value,
 };
@@ -81,8 +80,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let table_name = self.gen_table_name_with_prefix("unnest");
         let alias = create_table_alias(&table_name);
 
-        let element_type = self.pick_random_scalar_type();
-        let list_type = DataType::List(Box::new(element_type.clone()));
+        let depth = self.rng.random_range(0..=5);
+        let list_type = self.gen_list_data_type(depth);
 
         let array_expr = self.gen_simple_scalar(&list_type);
 
@@ -145,20 +144,6 @@ impl<R: Rng> SqlGenerator<'_, R> {
             1..=1 => self.gen_simple_timestamp_range(),
             _ => unreachable!(),
         }
-    }
-
-    fn pick_random_scalar_type(&mut self) -> DataType {
-        let candidates = [
-            DataType::Int16,
-            DataType::Int32,
-            DataType::Int64,
-            DataType::Float32,
-            DataType::Float64,
-            DataType::Varchar,
-            DataType::Boolean,
-        ];
-        let idx = self.rng.random_range(0..candidates.len());
-        candidates[idx].clone()
     }
 }
 
