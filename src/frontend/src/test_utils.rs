@@ -56,14 +56,14 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
-use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, PbTableParallelism, PbThrottleTarget, RecoveryStatus, SystemParams,
+    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
+    SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -1135,6 +1135,13 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
+        unimplemented!()
+    }
+
+    async fn get_fragment_by_id(
+        &self,
+        _fragment_id: u32,
+    ) -> RpcResult<Option<FragmentDistribution>> {
         unimplemented!()
     }
 }

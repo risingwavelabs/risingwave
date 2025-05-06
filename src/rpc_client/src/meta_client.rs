@@ -78,7 +78,6 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
-use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -92,7 +91,7 @@ use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClie
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::meta::*;
+use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -1015,6 +1014,17 @@ impl MetaClient {
             .list_fragment_distribution(ListFragmentDistributionRequest {})
             .await?;
         Ok(resp.distributions)
+    }
+
+    pub async fn get_fragment_by_id(
+        &self,
+        fragment_id: u32,
+    ) -> Result<Option<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .get_fragment_by_id(GetFragmentByIdRequest { fragment_id })
+            .await?;
+        Ok(resp.distribution)
     }
 
     pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
@@ -2141,6 +2151,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
+            ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

@@ -17,3 +17,13 @@ Refer to the [RisingWave Developer Guide](https://risingwavelabs.github.io/risin
 ## How to test connectors
 
 See the [connector development guide](http://risingwavelabs.github.io/risingwave/connector/intro.html#end-to-end-tests).
+
+## Environment variables in SLT
+
+If you run `risedev slt` the following environment variables are set:
+
+```sh
+SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
+SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
+SLT_DB = "dev"
+```

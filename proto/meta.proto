@@ -225,6 +225,14 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
+message GetFragmentByIdRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentByIdResponse {
+  FragmentDistribution distribution = 1;
+}
+
 message ListStreamingJobStatesRequest {}
 
 message ListStreamingJobStatesResponse {
@@ -241,18 +249,19 @@ message ListStreamingJobStatesResponse {
 
 message ListFragmentDistributionRequest {}
 
+message FragmentDistribution {
+  uint32 fragment_id = 1;
+  uint32 table_id = 2;
+  TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
+  repeated uint32 state_table_ids = 4;
+  repeated uint32 upstream_fragment_ids = 5;
+  uint32 fragment_type_mask = 6;
+  uint32 parallelism = 7;
+  uint32 vnode_count = 8;
+  stream_plan.StreamNode node = 9;
+}
+
 message ListFragmentDistributionResponse {
-  message FragmentDistribution {
-    uint32 fragment_id = 1;
-    uint32 table_id = 2;
-    TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
-    repeated uint32 state_table_ids = 4;
-    repeated uint32 upstream_fragment_ids = 5;
-    uint32 fragment_type_mask = 6;
-    uint32 parallelism = 7;
-    uint32 vnode_count = 8;
-    stream_plan.StreamNode node = 9;
-  }
   repeated FragmentDistribution distributions = 1;
 }
 
@@ -356,6 +365,7 @@ service StreamManagerService {
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
+  rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
 }
 
 // Below for cluster service.
