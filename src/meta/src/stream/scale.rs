@@ -54,7 +54,7 @@ use crate::model::{
 use crate::serving::{
     ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
-use crate::stream::{GlobalStreamManager, SourceManagerRef, assign_hierarchical_worker_oriented_n};
+use crate::stream::{AssignerBuilder, GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1877,6 +1877,11 @@ impl ScaleController {
             },
         ) in job_parallelism_updates
         {
+            let assigner = AssignerBuilder::new(table_id)
+                .worker_oriented_balancing()
+                .actor_capacity_weighted()
+                .build();
+
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
 
             let available_worker_slots = workers
@@ -1929,12 +1934,7 @@ impl ScaleController {
 
                         assert_eq!(*should_be_one, 1);
 
-                        let assignment = assign_hierarchical_worker_oriented_n(
-                            &available_worker_slots,
-                            1,
-                            1,
-                            table_id,
-                        )?;
+                        let assignment = assigner.assign_actors_counts(&available_worker_slots, 1);
 
                         let (chosen_target_worker_id, should_be_one) =
                             assignment.iter().exactly_one().ok().with_context(|| {
@@ -1943,7 +1943,7 @@ impl ScaleController {
                                 )
                             })?;
 
-                        assert_eq!(should_be_one.len(), 1);
+                        assert_eq!(*should_be_one, 1);
 
                         if *chosen_target_worker_id == *single_worker_id {
                             tracing::debug!(
@@ -1972,17 +1972,8 @@ impl ScaleController {
                                     "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
                                 );
 
-                                let assignment = assign_hierarchical_worker_oriented_n(
-                                    &available_worker_slots,
-                                    max_parallelism,
-                                    max_parallelism,
-                                    table_id,
-                                )?;
-
-                                let target_worker_slots = assignment
-                                    .into_iter()
-                                    .map(|(worker_id, v)| (worker_id, v.len()))
-                                    .collect();
+                                let target_worker_slots = assigner
+                                    .assign_actors_counts(&available_worker_slots, max_parallelism);
 
                                 target_plan.insert(
                                     fragment_id,
@@ -1996,17 +1987,10 @@ impl ScaleController {
                                     "available parallelism for table {table_id} is limit by adaptive strategy {adaptive_parallelism_strategy}, resetting to {target_slot_count}"
                                 );
 
-                                let assignment = assign_hierarchical_worker_oriented_n(
+                                let target_worker_slots = assigner.assign_actors_counts(
                                     &available_worker_slots,
                                     target_slot_count,
-                                    target_slot_count,
-                                    table_id,
-                                )?;
-
-                                let target_worker_slots = assignment
-                                    .into_iter()
-                                    .map(|(worker_id, v)| (worker_id, v.len()))
-                                    .collect();
+                                );
 
                                 target_plan.insert(
                                     fragment_id,
@@ -2038,17 +2022,8 @@ impl ScaleController {
                                 n = max_parallelism
                             }
 
-                            let assignment = assign_hierarchical_worker_oriented_n(
-                                &available_worker_slots,
-                                n,
-                                n,
-                                table_id,
-                            )?;
-
-                            let target_worker_slots = assignment
-                                .into_iter()
-                                .map(|(worker_id, v)| (worker_id, v.len()))
-                                .collect();
+                            let target_worker_slots =
+                                assigner.assign_actors_counts(&available_worker_slots, n);
 
                             target_plan.insert(
                                 fragment_id,

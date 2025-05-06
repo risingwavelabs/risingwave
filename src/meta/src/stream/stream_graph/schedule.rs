@@ -37,7 +37,7 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
 use crate::model::{ActorId, Fragment};
-use crate::stream::assign_hierarchical_worker_oriented_n;
+use crate::stream::AssignerBuilder;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 
@@ -223,6 +223,11 @@ impl Scheduler {
             "parallelism should be limited by vnode count in previous steps"
         );
 
+        let assigner = AssignerBuilder::new(streaming_job_id)
+            .worker_oriented_balancing()
+            .actor_capacity_weighted()
+            .build();
+
         let worker_weights = workers
             .iter()
             .map(|(worker_id, worker)| {
@@ -233,17 +238,12 @@ impl Scheduler {
             })
             .collect();
 
-        let assignment = assign_hierarchical_worker_oriented_n(
-            &worker_weights,
-            parallelism,
-            expected_vnode_count,
-            streaming_job_id,
-        )?;
+        let assignment = assigner.assign_actors_counts(&worker_weights, parallelism);
 
         let scheduled_worker_slots = assignment
             .into_iter()
             .flat_map(|(worker_id, units)| {
-                (0..units.len()).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
+                (0..units).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
             })
             .collect_vec();
 
@@ -253,8 +253,8 @@ impl Scheduler {
         let default_hash_mapping =
             WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
-        let single_assignment =
-            assign_hierarchical_worker_oriented_n(&worker_weights, 1, 1, streaming_job_id)?;
+        let single_assignment = assigner.assign_actors_counts(&worker_weights, 1);
+
         let default_single_worker_id = single_assignment.keys().exactly_one().cloned().unwrap();
         let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id as _, 0);
 
