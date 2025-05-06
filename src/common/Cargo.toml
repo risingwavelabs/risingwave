@@ -22,7 +22,7 @@ arrow-54-schema = { package = "arrow-schema", version = "54" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
-bitfield-struct = "0.10"
+bitfield-struct = "0.11"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"
@@ -98,7 +98,7 @@ stacker = "0.1"
 static_assertions = "1"
 strum = "0.27"
 strum_macros = "0.27"
-sysinfo = { version = "0.34", default-features = false, features = ["system"] }
+sysinfo = { version = "0.35", default-features = false, features = ["system"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
