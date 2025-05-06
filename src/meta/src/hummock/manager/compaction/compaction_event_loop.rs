@@ -163,7 +163,7 @@ impl CompactionEventDispatcher for HummockCompactionEventDispatcher {
     async fn on_event_remotely(&self, context_id: u32, event: Self::EventType) -> Result<()> {
         if let Some(tx) = &self.tx {
             tx.send((context_id, event))
-                .map_err(|e| anyhow::anyhow!("Failed to send event: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to send event: {}", e.as_report()))?;
         } else {
             unreachable!();
         }
