@@ -510,9 +510,17 @@ impl DataType {
     /// # Panics
     ///
     /// Panics if the type is not a list type.
+    /// TODO(rc): rename to `as_list_element_type`
     pub fn as_list(&self) -> &DataType {
         match self {
             DataType::List(t) => t,
+            t => panic!("expect list type, got {t}"),
+        }
+    }
+
+    pub fn into_list_element_type(self) -> DataType {
+        match self {
+            DataType::List(t) => *t,
             t => panic!("expect list type, got {t}"),
         }
     }

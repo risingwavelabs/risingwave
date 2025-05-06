@@ -27,8 +27,6 @@ Run a local cluster in EC2 instance with an additional environment variable `RIS
 RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d full
 ```
 
-Here we use `full` instead of `compose-3node-deploy` because `compose-3node-deploy` uses Docker container to run RisingWave processes, which makes it more difficult to do profiling and analyzing.
-
 Under the hood, `risedev` set environment variable `MALLOC_CONF` for RisingWave process. [Here](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/compute_node_service.rs#L107) is the implementation.
 
 By default, the profiler will output a profile result on every 4GB memory allocation. Running a query and waiting for a while, lots of `.heap` files will be generated in the current folder:
