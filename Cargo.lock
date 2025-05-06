@@ -10958,7 +10958,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_stream",
- "rlimit",
  "serde",
  "serde_json",
  "tempfile",
