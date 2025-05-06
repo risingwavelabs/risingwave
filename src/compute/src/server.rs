@@ -14,7 +14,11 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
+
+// Global atomic variable to store the ulimit for file descriptors
+pub static GLOBAL_ULIMIT_NOFILE: AtomicI64 = AtomicI64::new(-1);
 
 use risingwave_batch::monitor::{
     GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_SPILL_METRICS,
@@ -93,6 +97,11 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
     shutdown: CancellationToken,
 ) {
+    // Initialize the global ulimit variable with the current ulimit for file descriptors
+    if let Ok(limit) = rlimit::Resource::NOFILE.get_soft() {
+        GLOBAL_ULIMIT_NOFILE.store(limit as i64, Ordering::SeqCst);
+    }
+
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
     info!("Starting compute node",);
