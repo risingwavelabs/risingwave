@@ -11,10 +11,10 @@ repository = { workspace = true }
 ahash = "0.8"
 anyhow = "1"
 arc-swap = { workspace = true }
-arrow-52-array = { package = "arrow-array", version = "52" }
-arrow-52-buffer = { package = "arrow-buffer", version = "52" }
-arrow-52-cast = { package = "arrow-cast", version = "52" }
-arrow-52-schema = { package = "arrow-schema", version = "52" }
+arrow-53-array = { package = "arrow-array", version = "53" }
+arrow-53-buffer = { package = "arrow-buffer", version = "53" }
+arrow-53-cast = { package = "arrow-cast", version = "53" }
+arrow-53-schema = { package = "arrow-schema", version = "53" }
 arrow-54-array = { package = "arrow-array", version = "54" }
 arrow-54-buffer = { package = "arrow-buffer", version = "54" }
 arrow-54-cast = { package = "arrow-cast", version = "54" }
