@@ -1121,9 +1121,6 @@ template:
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
 
-    # Redpanda used by this Prometheus instance
-    provide-redpanda: "redpanda*"
-
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
