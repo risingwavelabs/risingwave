@@ -482,28 +482,6 @@ impl CompactorManager {
     }
 }
 
-impl CompactorManagerTrait for CompactorManager {
-    fn add_compactor(&self, context_id: HummockContextId) -> CompactorSubscribeStreamReceiver {
-        self.add_compactor(context_id)
-    }
-
-    fn remove_compactor(&self, context_id: HummockContextId) {
-        self.remove_compactor(context_id)
-    }
-
-    fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
-        self.get_compactor(context_id)
-    }
-
-    fn next_compactor(&self) -> Option<Arc<Compactor>> {
-        self.next_compactor()
-    }
-
-    fn compactor_num(&self) -> usize {
-        self.compactor_num()
-    }
-}
-
 impl IcebergCompactor {
     pub fn new(
         context_id: HummockContextId,
