@@ -40,6 +40,7 @@ mod concat;
 mod concat_op;
 mod concat_ws;
 mod conjunction;
+mod date_bin;
 mod date_trunc;
 mod delay;
 mod encdec;
