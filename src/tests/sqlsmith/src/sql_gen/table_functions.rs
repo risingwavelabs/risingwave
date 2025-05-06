@@ -14,8 +14,9 @@
 
 use chrono::{Duration, NaiveDateTime};
 use rand::Rng;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value,
+    DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value
 };
 
 use crate::sql_gen::utils::{create_args, create_table_alias};
@@ -24,9 +25,10 @@ use crate::sql_gen::{SqlGenerator, Table};
 impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates table functions.
     pub(crate) fn gen_table_func(&mut self) -> (TableFactor, Table) {
-        match self.rng.random_range(0..=1) {
+        match self.rng.random_range(0..=2) {
             0..=0 => self.gen_generate_series(),
             1..=1 => self.gen_range(),
+            2..=2 => self.gen_unnest(),
             _ => unreachable!(),
         }
     }
@@ -70,6 +72,23 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
         let relation = create_tvf("range", alias, create_args(args), false);
 
+        (relation, table)
+    }
+
+    /// Generates `UNNEST`.
+    /// `UNNEST(arr1 [, arr2, ...])`
+    fn gen_unnest(&mut self) -> (TableFactor, Table) {
+        let table_name = self.gen_table_name_with_prefix("unnest");
+        let alias = create_table_alias(&table_name);
+    
+        let element_type = self.pick_random_scalar_type();
+        let list_type = DataType::List(Box::new(element_type.clone()));
+    
+        let array_expr = self.gen_simple_scalar(&list_type);
+    
+        let table = Table::new(table_name, vec![]);
+        let relation = create_tvf("unnest", alias, create_args(vec![array_expr]), false);
+    
         (relation, table)
     }
 
@@ -126,6 +145,20 @@ impl<R: Rng> SqlGenerator<'_, R> {
             1..=1 => self.gen_simple_timestamp_range(),
             _ => unreachable!(),
         }
+    }
+
+    fn pick_random_scalar_type(&mut self) -> DataType {
+        let candidates = vec![
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Varchar,
+            DataType::Boolean,
+        ];
+        let idx = self.rng.random_range(0..candidates.len());
+        candidates[idx].clone()
     }
 }
 
