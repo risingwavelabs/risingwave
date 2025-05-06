@@ -44,7 +44,8 @@ impl Vector {
     }
 
     /// # Safety
-    ///     safe under the same condition to [`Arc::get_mut_unchecked`]
+    ///
+    /// safe under the same condition to [`Arc::get_mut_unchecked`]
     pub unsafe fn get_mut_unchecked(&mut self) -> VectorMutRef<'_> {
         // safety: under unsafe function
         unsafe { VectorInner(Arc::get_mut_unchecked(&mut self.0)) }
