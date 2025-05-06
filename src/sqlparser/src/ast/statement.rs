@@ -475,8 +475,17 @@ impl fmt::Display for CreateSourceStatement {
         for item in &self.include_column_options {
             v.push(format!("{}", item));
         }
+
+        // skip format_encode for cdc source
+        let is_cdc_source = self.with_properties.0.iter().any(|option| {
+            option.name.real_value().eq_ignore_ascii_case("connector")
+                && option.value.to_string().contains("cdc")
+        });
+
         impl_fmt_display!(with_properties, v, self);
-        impl_fmt_display!(format_encode, v, self);
+        if !is_cdc_source {
+            impl_fmt_display!(format_encode, v, self);
+        }
         v.iter().join(" ").fmt(f)
     }
 }

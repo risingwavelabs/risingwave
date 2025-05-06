@@ -87,6 +87,9 @@ impl CompactionConfigBuilder {
                 level0_stop_write_threshold_max_size: Some(
                     compaction_config::level0_stop_write_threshold_max_size(),
                 ),
+                enable_optimize_l0_interval_selection: Some(
+                    compaction_config::enable_optimize_l0_interval_selection(),
+                ),
             },
         }
     }
@@ -125,6 +128,7 @@ impl CompactionConfigBuilder {
                 opt.level0_stop_write_threshold_max_sst_count,
             ))
             .level0_stop_write_threshold_max_size(Some(opt.level0_stop_write_threshold_max_size))
+            .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -193,4 +197,5 @@ builder_field! {
     emergency_level0_sub_level_partition: Option<u32>,
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
+    enable_optimize_l0_interval_selection: Option<bool>,
 }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod compaction;
 mod prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -75,8 +74,6 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{self};
-use tokio::sync::oneshot;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
@@ -415,7 +412,7 @@ impl IcebergSink {
                                 UnboundPartitionField::builder()
                                     .source_id(id)
                                     .transform(transform)
-                                    .name(column.to_owned())
+                                    .name(format!("_p_{}", column))
                                     .field_id(i as i32)
                                     .build(),
                             ),
@@ -551,7 +548,6 @@ impl Sink for IcebergSink {
     async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
@@ -561,12 +557,22 @@ impl Sink for IcebergSink {
             config: self.config.clone(),
             param: self.param.clone(),
             db,
-            commit_notifier: None,
-            _compact_task_guard: None,
             commit_retry_num: self.config.commit_retry_num,
             committed_epoch_subscriber: None,
         })
     }
+}
+
+/// None means no project.
+/// Prepare represent the extra partition column idx.
+/// Done represents the project idx vec.
+///
+/// The `ProjectIdxVec` will be late-evaluated. When we encounter the Prepare state first, we will use the data chunk schema
+/// to create the project idx vec.
+enum ProjectIdxVec {
+    None,
+    Prepare(usize),
+    Done(Vec<usize>),
 }
 
 pub struct IcebergSinkWriter {
@@ -576,6 +582,9 @@ pub struct IcebergSinkWriter {
     metrics: IcebergWriterMetrics,
     // State of iceberg table for this writer
     table: Table,
+    // For chunk with extra partition column, we should remove this column before write.
+    // This project index vec is used to avoid create project idx each time.
+    project_idx_vec: ProjectIdxVec,
 }
 
 #[allow(clippy::type_complexity)]
@@ -708,11 +717,7 @@ impl IcebergSinkWriter {
         );
         let data_file_builder =
             DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id());
-        if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
-            Err(SinkError::Iceberg(anyhow!(
-                "Extra partition column is not supported in append-only mode"
-            )))
-        } else if partition_spec.fields().is_empty() {
+        if partition_spec.fields().is_empty() {
             let writer_builder = MonitoredGeneralWriterBuilder::new(
                 data_file_builder,
                 write_qps.clone(),
@@ -740,6 +745,13 @@ impl IcebergSinkWriter {
                     writer_builder,
                 },
                 table,
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
+                },
             })
         } else {
             let partition_builder = MonitoredGeneralWriterBuilder::new(
@@ -774,6 +786,13 @@ impl IcebergSinkWriter {
                     writer_builder: partition_builder,
                 },
                 table,
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
+                },
             })
         }
     }
@@ -900,11 +919,7 @@ impl IcebergSinkWriter {
             equality_delete_builder,
             unique_column_ids,
         );
-        if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
-            Err(SinkError::Iceberg(anyhow!(
-                "Extra partition column is not supported in upsert mode"
-            )))
-        } else if partition_spec.fields().is_empty() {
+        if partition_spec.fields().is_empty() {
             let writer_builder = MonitoredGeneralWriterBuilder::new(
                 delta_builder,
                 write_qps.clone(),
@@ -942,6 +957,13 @@ impl IcebergSinkWriter {
                     writer: inner_writer,
                     writer_builder,
                     arrow_schema_with_op_column: schema_with_extra_op_column,
+                },
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
                 },
             })
         } else {
@@ -987,6 +1009,13 @@ impl IcebergSinkWriter {
                     writer: inner_writer,
                     writer_builder: partition_builder,
                     arrow_schema_with_op_column: schema_with_extra_op_column,
+                },
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
                 },
             })
         }
@@ -1069,6 +1098,25 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
+        match &self.project_idx_vec {
+            ProjectIdxVec::None => {}
+            ProjectIdxVec::Prepare(idx) => {
+                if *idx >= chunk.columns().len() {
+                    return Err(SinkError::Iceberg(anyhow!(
+                        "invalid extra partition column index {}",
+                        idx
+                    )));
+                }
+                let project_idx_vec = (0..*idx)
+                    .chain(*idx + 1..chunk.columns().len())
+                    .collect_vec();
+                chunk = chunk.project(&project_idx_vec);
+                self.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
+            }
+            ProjectIdxVec::Done(idx_vec) => {
+                chunk = chunk.project(idx_vec);
+            }
+        }
         if ops.is_empty() {
             return Ok(());
         }
@@ -1431,10 +1479,8 @@ pub struct IcebergSinkCommitter {
     pub(crate) config: IcebergConfig,
     pub(crate) param: SinkParam,
     pub(crate) db: DatabaseConnection,
-    commit_notifier: Option<mpsc::UnboundedSender<()>>,
-    commit_retry_num: u32,
-    _compact_task_guard: Option<oneshot::Sender<()>>,
     pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
+    commit_retry_num: u32,
 }
 
 impl IcebergSinkCommitter {
@@ -1651,9 +1697,6 @@ impl IcebergSinkCommitter {
         // occurring during the recovery phase. In this case, we need to use the `snapshot_id`
         // that was previously persisted in the system table to commit.
         let is_first_commit = snapshot_id.is_none();
-        if !is_first_commit {
-            tracing::info!("Doing iceberg re commit.");
-        }
         self.last_commit_epoch = epoch;
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
@@ -1761,17 +1804,12 @@ impl IcebergSinkCommitter {
         .await?;
         self.table = table;
 
-        if let Some(commit_notifier) = &mut self.commit_notifier {
-            if commit_notifier.send(()).is_err() {
-                warn!("failed to notify commit");
-            }
-        }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if self.is_exactly_once {
             self.mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
                 .await?;
-            tracing::info!(
+            tracing::debug!(
                 "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
                 self.sink_id,
                 epoch
@@ -1824,7 +1862,7 @@ impl IcebergSinkCommitter {
         .await
         {
             Ok(_) => {
-                tracing::info!(
+                tracing::debug!(
                     "Sink id = {}: mark written data status to committed, end_epoch = {}.",
                     sink_id,
                     end_epoch
@@ -1858,13 +1896,13 @@ impl IcebergSinkCommitter {
                 let deleted_count = result.rows_affected;
 
                 if deleted_count == 0 {
-                    tracing::info!(
+                    tracing::debug!(
                         "Sink id = {}: no item deleted in iceberg exactly once system table, end_epoch < {}.",
                         sink_id,
                         end_epoch
                     );
                 } else {
-                    tracing::info!(
+                    tracing::debug!(
                         "Sink id = {}: deleted item in iceberg exactly once system table, end_epoch < {}.",
                         sink_id,
                         end_epoch

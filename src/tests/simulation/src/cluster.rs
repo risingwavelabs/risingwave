@@ -902,6 +902,23 @@ impl Cluster {
             }
         }
     }
+
+    pub async fn wait_for_recovery(&mut self) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                if let Ok(result) = session.run("select rw_recovery_status()").await
+                    && result == "RUNNING"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
 }
 
 type SessionRequest = (
@@ -916,6 +933,16 @@ pub struct Session {
 }
 
 impl Session {
+    /// Run the given SQLs on the session.
+    pub async fn run_all(&mut self, sqls: Vec<impl Into<String>>) -> Result<Vec<String>> {
+        let mut results = Vec::with_capacity(sqls.len());
+        for sql in sqls {
+            let result = self.run(sql).await?;
+            results.push(result);
+        }
+        Ok(results)
+    }
+
     /// Run the given SQL query on the session.
     pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
         let (tx, rx) = oneshot::channel();

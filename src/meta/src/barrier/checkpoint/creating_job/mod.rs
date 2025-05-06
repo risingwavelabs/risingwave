@@ -79,6 +79,7 @@ impl CreatingStreamingJobControl {
             "new creating job"
         );
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
+        // FIXME(kwannoel): support backfill order control for snapshot backfill
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(
                 job_id,
@@ -123,6 +124,7 @@ impl CreatingStreamingJobControl {
             // we assume that when handling snapshot backfill, the cluster must not be paused
             pause: false,
             subscriptions_to_add: Default::default(),
+            backfill_nodes_to_pause: Default::default(),
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));

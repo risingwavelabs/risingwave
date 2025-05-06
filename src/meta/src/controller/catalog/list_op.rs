@@ -219,6 +219,11 @@ impl CatalogController {
         Ok(source_ids)
     }
 
+    pub async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
+        let inner = self.inner.read().await;
+        inner.list_indexes().await
+    }
+
     pub async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
         inner.list_sinks().await

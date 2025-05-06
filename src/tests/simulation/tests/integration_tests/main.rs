@@ -24,6 +24,7 @@ mod batch;
 mod compaction;
 mod default_parallelism;
 mod license_cpu_limit;
+mod log_store;
 mod recovery;
 mod scale;
 mod sink;

@@ -28,6 +28,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
+mod backfill_order_control;
 mod checkpoint;
 mod command;
 mod complete_task;
@@ -42,6 +43,8 @@ mod schedule;
 mod trace;
 mod utils;
 mod worker;
+
+pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,

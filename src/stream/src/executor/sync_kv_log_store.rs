@@ -564,13 +564,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             let log_store_stream = read_state
                 .read_persisted_log_store(
                     self.metrics.persistent_log_read_metrics.clone(),
-                    initial_write_epoch.prev,
+                    initial_write_epoch.curr,
                     LogStoreReadStateStreamRangeStart::Unbounded,
                 )
                 .await?;
 
             let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
             let mut clean_state = log_store_stream.peek().await.is_none();
+            tracing::trace!(?clean_state);
 
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
@@ -787,6 +788,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                 while let Some((epoch, item)) = stream.try_next().await? {
                     match item {
                         KvLogStoreItem::Barrier { vnodes, .. } => {
+                            tracing::trace!(epoch, "read logstore barrier");
                             // update the progress
                             progress.apply_aligned(vnodes, epoch, None);
                             continue;
@@ -854,6 +856,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         break;
                     }
                     LogStoreBufferItem::Barrier { .. } => {
+                        tracing::trace!(item_epoch, "read buffer barrier");
                         progress.apply_aligned(read_state.vnodes().clone(), item_epoch, None);
                         continue;
                     }
@@ -870,7 +873,11 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
         let (_, chunk, epoch) = future.await?;
         progress.apply_aligned(read_state.vnodes().clone(), epoch, Some(end_seq_id));
-        tracing::trace!("read flushed chunk of size: {}", chunk.cardinality());
+        tracing::trace!(
+            end_seq_id,
+            "read flushed chunk of size: {}",
+            chunk.cardinality()
+        );
         *self = ReadFuture::Idle;
         Ok(chunk)
     }
@@ -885,6 +892,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         progress: LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
+        tracing::trace!(?progress, "applying truncation");
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
         // to reduce memory consumption of logstore.
 

@@ -150,7 +150,6 @@ impl CommandContext {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => {
-                let mut is_sink_into_table = false;
                 match job_type {
                     CreateStreamingJobType::SinkIntoTable(
                         replace_plan @ ReplaceStreamJobPlan {
@@ -161,7 +160,6 @@ impl CommandContext {
                             ..
                         },
                     ) => {
-                        is_sink_into_table = true;
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -249,17 +247,16 @@ impl CommandContext {
                     )
                     .await?;
 
-                if !is_sink_into_table {
-                    barrier_manager_context
-                        .source_manager
-                        .apply_source_change(SourceChange::CreateJob {
-                            added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                            added_backfill_fragments: stream_job_fragments
-                                .source_backfill_fragments()?,
-                            split_assignment: init_split_assignment.clone(),
-                        })
-                        .await;
-                }
+                let source_change = SourceChange::CreateJob {
+                    added_source_fragments: stream_job_fragments.stream_source_fragments(),
+                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
+                    split_assignment: init_split_assignment.clone(),
+                };
+
+                barrier_manager_context
+                    .source_manager
+                    .apply_source_change(source_change)
+                    .await;
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -322,6 +319,7 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::ConnectorPropsChange(_) => {}
+            Command::StartFragmentBackfill { .. } => {}
         }
 
         Ok(())
