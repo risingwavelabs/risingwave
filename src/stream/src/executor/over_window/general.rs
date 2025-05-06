@@ -292,6 +292,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             _ => {
                                 consistency_panic!(
                                     ?pk,
+                                    ?row,
+                                    ?prev_change,
                                     "inconsistent changes in input chunk, double-inserting"
                                 );
                                 if let Record::Update { old_row, .. } = prev_change {
