@@ -13,12 +13,14 @@
 // limitations under the License.
 
 mod actor;
-mod assignment;
+mod assignment2;
 mod fragment;
 mod id;
 mod schedule;
+mod assignment;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
+pub use assignment2::*;
 pub use assignment::*;
 pub use fragment::{
     CompleteStreamFragmentGraph, FragmentBackfillOrder, StreamFragmentGraph,
