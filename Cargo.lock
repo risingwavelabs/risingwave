@@ -10391,7 +10391,6 @@ version = "2.5.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap",
  "console",
  "fs-err",
  "glob",
@@ -10406,7 +10405,6 @@ dependencies = [
  "regex",
  "reqwest 0.12.4",
  "serde",
- "serde_with",
  "serde_yaml",
  "sqlx",
  "tempfile",
