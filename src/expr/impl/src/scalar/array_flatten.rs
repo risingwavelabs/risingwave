@@ -81,7 +81,7 @@ fn array_flatten(array: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
             reason: Box::from("expected the argument to be an array of arrays"),
         });
     }
-    let inner_elem_type = inner_type.as_list();
+    let inner_elem_type = inner_type.as_list_element_type();
 
     // Collect all inner array elements and flatten them into a single array
     Ok(ListValue::from_datum_iter(
