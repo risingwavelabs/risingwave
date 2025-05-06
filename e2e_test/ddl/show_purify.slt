@@ -1,12 +1,12 @@
 # Test definition purification for `CREATE TABLE AS`, mainly focusing on the data types.
 statement ok
 create table ctas as select
-    0::int as v0,
+    0::int as "V0",
     1::decimal as v1,
     '2022-03-13 01:00:00'::timestamp as v2,
     '2022-03-13 01:00:00Z'::timestamptz as v3,
     array['foo', 'bar', 'null'] as v4,
-    (1, (2, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>> as v5,
+    (1, (2, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, "B" VARCHAR>> as v5,
     hex_to_int256('0x11') as v6,
     map{'key1': 1, 'key2': 2, 'key3': 3} as v7
 ;
@@ -14,7 +14,7 @@ create table ctas as select
 query TT
 show create table ctas;
 ----
-public.ctas	CREATE TABLE ctas (v0 INT, v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME ZONE, v4 CHARACTER VARYING[], v5 STRUCT<i BIGINT, j STRUCT<a BIGINT, b CHARACTER VARYING>>, v6 rw_int256, v7 MAP(CHARACTER VARYING,INT))
+public.ctas	CREATE TABLE ctas ("V0" INT, v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME ZONE, v4 CHARACTER VARYING[], v5 STRUCT<i BIGINT, j STRUCT<a BIGINT, "B" CHARACTER VARYING>>, v6 rw_int256, v7 MAP(CHARACTER VARYING,INT))
 
 statement ok
 alter table ctas add column v8 double;
@@ -24,15 +24,28 @@ alter table ctas add column v8 double;
 query TT
 show create table ctas;
 ----
-public.ctas	CREATE TABLE ctas (v0 INT, v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME ZONE, v4 CHARACTER VARYING[], v5 STRUCT<i BIGINT, j STRUCT<a BIGINT, b CHARACTER VARYING>>, v6 rw_int256, v7 MAP(CHARACTER VARYING,INT), v8 DOUBLE)
+public.ctas	CREATE TABLE ctas ("V0" INT, v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME ZONE, v4 CHARACTER VARYING[], v5 STRUCT<i BIGINT, j STRUCT<a BIGINT, "B" CHARACTER VARYING>>, v6 rw_int256, v7 MAP(CHARACTER VARYING,INT), v8 DOUBLE)
 
 statement ok
-alter table ctas drop column v0;
+alter table ctas drop column "V0";
 
 query TT
 show create table ctas;
 ----
-public.ctas	CREATE TABLE ctas (v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME ZONE, v4 CHARACTER VARYING[], v5 STRUCT<i BIGINT, j STRUCT<a BIGINT, b CHARACTER VARYING>>, v6 rw_int256, v7 MAP(CHARACTER VARYING,INT), v8 DOUBLE)
+public.ctas	CREATE TABLE ctas (v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME ZONE, v4 CHARACTER VARYING[], v5 STRUCT<i BIGINT, j STRUCT<a BIGINT, "B" CHARACTER VARYING>>, v6 rw_int256, v7 MAP(CHARACTER VARYING,INT), v8 DOUBLE)
 
 statement ok
 drop table ctas;
+
+# Test quote & case-sensitivity when purifying definition.
+
+statement ok
+create table accounts ("accountId" string, data jsonb, primary key ("accountId"));
+
+query TT
+show create table accounts;
+----
+public.accounts	CREATE TABLE accounts ("accountId" CHARACTER VARYING, data JSONB, PRIMARY KEY ("accountId"))
+
+statement ok
+drop table accounts;
