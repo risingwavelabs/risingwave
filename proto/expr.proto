@@ -236,6 +236,7 @@ message ExprNode {
     ARRAY_SORT = 549;
     ARRAY_CONTAINS = 550;
     ARRAY_CONTAINED = 551;
+    ARRAY_FLATTEN = 552;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
