@@ -16,7 +16,7 @@ use chrono::{Duration, NaiveDateTime};
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value
+    DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value,
 };
 
 use crate::sql_gen::utils::{create_args, create_table_alias};
@@ -80,15 +80,15 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_unnest(&mut self) -> (TableFactor, Table) {
         let table_name = self.gen_table_name_with_prefix("unnest");
         let alias = create_table_alias(&table_name);
-    
+
         let element_type = self.pick_random_scalar_type();
         let list_type = DataType::List(Box::new(element_type.clone()));
-    
+
         let array_expr = self.gen_simple_scalar(&list_type);
-    
+
         let table = Table::new(table_name, vec![]);
         let relation = create_tvf("unnest", alias, create_args(vec![array_expr]), false);
-    
+
         (relation, table)
     }
 
@@ -148,7 +148,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn pick_random_scalar_type(&mut self) -> DataType {
-        let candidates = vec![
+        let candidates = [
             DataType::Int16,
             DataType::Int32,
             DataType::Int64,
