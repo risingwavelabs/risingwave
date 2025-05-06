@@ -31,8 +31,9 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
     MetaNodeService, MinioService, MySqlService, PostgresService, PrometheusService, PubsubService,
-    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
-    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
+    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
+    preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -282,13 +283,7 @@ fn task_main(
                         .set_message(format!("pubsub {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Pulsar(c) => {
-                    // TODO: support starting pulsar in RiseDev. Currently it's user-managed only
-                    if !c.user_managed {
-                        anyhow::bail!(
-                            "Non user-managed Pulsar is not supported yet. Please use user-managed Pulsar."
-                        );
-                    }
-                    DummyService::new(&c.id).execute(&mut ctx)?;
+                    PulsarService::new(c.clone()).execute(&mut ctx)?;
                     let mut task = risedev::TcpReadyCheckTask::new(
                         c.address.clone(),
                         c.broker_port,

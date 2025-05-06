@@ -324,6 +324,7 @@ pub struct PulsarConfig {
     pub http_port: u16,
 
     pub user_managed: bool,
+    pub image: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

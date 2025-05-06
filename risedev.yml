@@ -1304,7 +1304,9 @@ template:
     address: localhost
     broker-port: 6650
     http-port: 8080
-    user-managed: true
+    user-managed: false
+    # Only effective when NOT user managed
+    image: "apachepulsar/pulsar:4.0.4"
 
   # redis service
   redis:
