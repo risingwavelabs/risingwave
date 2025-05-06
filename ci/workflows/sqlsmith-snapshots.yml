@@ -1,9 +1,5 @@
 # Generate Sqlsmith weekly snapshots.
 steps:
-  - label: "check ci image"
-    command: "ci/check-ci-image.sh -c"
-  - wait
-
   - label: "build"
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
@@ -12,7 +8,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          propagate-environment: true
     timeout_in_minutes: 15
 
   - label: "build (deterministic simulation)"
@@ -23,7 +18,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          propagate-environment: true
     timeout_in_minutes: 15
 
   - label: "Generate sqlsmith snapshots"
@@ -39,5 +33,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          propagate-environment: true
+          environment:
+            - GITHUB_TOKEN
     timeout_in_minutes: 60

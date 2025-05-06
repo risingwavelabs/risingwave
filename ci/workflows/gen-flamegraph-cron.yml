@@ -1,8 +1,4 @@
 steps:
-  - label: "check ci image"
-    command: "ci/check-ci-image.sh -c"
-  - wait
-
   # Builds cpu flamegraph env
   - label: "cpu-flamegraph-env-build"
     key: "cpu-flamegraph-env-build"
@@ -15,7 +11,8 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          propagate-environment: true
+          environment:
+            - GITHUB_TOKEN
     timeout_in_minutes: 20
 
   - label: "Generate CPU flamegraph"
@@ -29,7 +26,8 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          propagate-environment: true
+          environment:
+            - GITHUB_TOKEN
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)

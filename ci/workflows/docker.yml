@@ -7,9 +7,6 @@ auto-retry: &auto-retry
       signal_reason: none
       limit: 3
 
-env:
-  RW_BUILD_ENV_VERSION: unused
-
 steps:
   - label: "docker-build-push: amd64"
     if: build.env("SKIP_TARGET_AMD64") != "true"
@@ -65,6 +62,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           propagate-environment: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
     retry: *auto-retry
 
   - label: "pre build binary: aarch64 "
@@ -79,6 +79,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           propagate-environment: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
     agents:
       queue: "linux-arm64"
     retry: *auto-retry
