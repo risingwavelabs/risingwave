@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Either;
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::ScalarRefImpl;
-use risingwave_expr::{Result, function};
+use risingwave_expr::expr::Context;
+use risingwave_expr::{ExprError, Result, function};
 
 /// Flattens a nested array by concatenating the inner arrays into a single array.
 /// Only the outermost level of nesting is removed. For deeper nested arrays, call
@@ -65,11 +64,23 @@ use risingwave_expr::{Result, function};
 /// NULL
 /// ```
 #[function("array_flatten(anyarray) -> anyarray")]
-fn array_flatten(array: ListRef<'_>) -> Result<ListValue> {
+fn array_flatten(array: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     // The elements of the array must be arrays themselves
-    // Create a new list by flattening all inner arrays
-    let array_data_type = array.data_type();
-    let inner_type = array_data_type.as_list();
+    let outer_type = &ctx.arg_types[0];
+    let inner_type = if outer_type.is_array() {
+        outer_type.as_list()
+    } else {
+        return Err(ExprError::InvalidParam {
+            name: "array_flatten",
+            reason: Box::from("expected the argument to be an array of arrays"),
+        });
+    };
+    if !inner_type.is_array() {
+        return Err(ExprError::InvalidParam {
+            name: "array_flatten",
+            reason: Box::from("expected the argument to be an array of arrays"),
+        });
+    }
 
     // Collect all inner array elements and flatten them into a single array
     Ok(ListValue::from_datum_iter(
@@ -79,13 +90,6 @@ fn array_flatten(array: ListRef<'_>) -> Result<ListValue> {
             // Filter out NULL inner arrays
             .flatten()
             // Flatten all inner arrays
-            .flat_map(|inner_array| {
-                if let ScalarRefImpl::List(inner_list) = inner_array {
-                    Either::Left(inner_list.iter())
-                } else {
-                    // This shouldn't happen but handle it gracefully
-                    Either::Right(std::iter::empty())
-                }
-            }),
+            .flat_map(|inner_array| inner_array.into_list().iter()),
     ))
 }
