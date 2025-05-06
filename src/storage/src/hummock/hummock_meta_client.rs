@@ -18,10 +18,10 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
+use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, SubscribeIcebergCompactionEventRequest};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo, MetaClient,
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo, IcebergCompactionEventItem, MetaClient
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -110,5 +110,14 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         table_id: u32,
     ) -> Result<PbHummockVersion> {
         self.meta_client.get_version_by_epoch(epoch, table_id).await
+    }
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+        BoxStream<'static, IcebergCompactionEventItem>,
+    )> {
+        self.meta_client.subscribe_iceberg_compaction_event().await
     }
 }

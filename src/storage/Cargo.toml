@@ -44,6 +44,8 @@ risingwave_hummock_trace = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+risingwave_connector = { workspace = true }
+ic-core = { git = "https://github.com/nimtable/IC.git", rev = "4185895245a4a6db527c2f3ab6534685afbbf968" }
 scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"

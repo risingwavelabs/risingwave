@@ -112,7 +112,7 @@ use tonic::{Code, Request, Streaming};
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo, IcebergCompactionEventItem,
 };
 use crate::meta_rpc_client_method_impl;
 
@@ -1702,6 +1702,38 @@ impl HummockMetaClient for MetaClient {
     ) -> Result<PbHummockVersion> {
         self.get_version_by_epoch(epoch, table_id).await
     }
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+        BoxStream<'static, IcebergCompactionEventItem>,
+    )> {
+        let (request_sender, request_receiver) =
+            unbounded_channel::<SubscribeIcebergCompactionEventRequest>();
+        request_sender
+            .send(SubscribeIcebergCompactionEventRequest {
+                event: Some(subscribe_iceberg_compaction_event_request::Event::Register(
+                    subscribe_iceberg_compaction_event_request::Register {
+                        context_id: self.worker_id(),
+                    },
+                )),
+                create_at: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
+            })
+            .context("Failed to subscribe iceberg compaction event")?;
+
+        let stream = self
+            .inner
+            .subscribe_iceberg_compaction_event(Request::new(UnboundedReceiverStream::new(
+                request_receiver,
+            )))
+            .await?;
+
+        Ok((request_sender, Box::pin(stream)))
+    }
 }
 
 #[async_trait]
@@ -2211,6 +2243,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
+            ,{ hummock_client, subscribe_iceberg_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeIcebergCompactionEventRequest>, Streaming<SubscribeIcebergCompactionEventResponse> }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
