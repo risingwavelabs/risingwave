@@ -41,6 +41,7 @@ use risingwave_pb::hummock::PbVnodeWatermark;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
+pub(crate) use crate::vector::{DistanceMeasurement, OnNearestItemFn, Vector};
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -425,30 +426,21 @@ pub trait StateStoreWriteEpochControl: StaticSendSync {
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 }
 
-pub type VectorItem = f64;
-#[derive(Clone)]
-pub struct Vector(#[expect(dead_code)] Vec<VectorItem>);
-pub type VectorDistance = f64;
-
 pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
     fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
 }
-
-pub enum DistanceMeasurement {}
 
 pub struct VectorNearestOptions {
     pub top_n: usize,
     pub measure: DistanceMeasurement,
 }
 
-pub trait OnNearestItem<O> = for<'i> Fn(&'i Vector, VectorDistance, &'i [u8]) -> O + Send + 'static;
-
 pub trait StateStoreReadVector: StaticSendSync {
     fn nearest<O: Send + 'static>(
         &self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItem<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> impl StorageFuture<'_, Vec<O>>;
 }
 
