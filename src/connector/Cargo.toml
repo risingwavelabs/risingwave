@@ -51,7 +51,7 @@ futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-bigquery = { version = "0.15.0", features = ["auth"] }
-google-cloud-gax = "0.19.2"
+google-cloud-gax = "0.21.0"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.30"
 iceberg = { workspace = true }
