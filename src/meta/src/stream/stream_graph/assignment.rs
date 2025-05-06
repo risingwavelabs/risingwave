@@ -19,7 +19,6 @@ use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
 
-use crate::stream;
 
 /// Assign items to weighted containers with optional capacity scaling and deterministic tie-breaking.
 ///
@@ -72,32 +71,32 @@ use crate::stream;
 ///
 /// # Algorithm
 ///
-/// 1. **Quota Calculation**  
-///    - Compute `total_weight = sum(w_i)` as `u128`.  
-///    - For each container `i` with weight `w_i`:  
+/// 1. **Quota Calculation**
+///    - Compute `total_weight = sum(w_i)` as `u128`.
+///    - For each container `i` with weight `w_i`:
 ///      ```text
 ///      ideal_i     = M * w_i
 ///      base_quota_i = floor(ideal_i / total_weight)
 ///      rem_i        = ideal_i % total_weight
-///      ```  
+///      ```
 ///    - Let `rem_count = M - sum(base_quota_i)` and sort containers by `rem_i` (desc),
-///      breaking ties by `stable_hash((container, salt))`.  
+///      breaking ties by `stable_hash((container, salt))`.
 ///    - Give `+1` slot to the first `rem_count` containers.
 ///
-/// 2. **Capacity Scaling**  
-///    - If `Some(f)`: For each container,  
-///      `quota_i = max(base_quota_i, ceil(base_quota_i as f64 * f))`.  
+/// 2. **Capacity Scaling**
+///    - If `Some(f)`: For each container,
+///      `quota_i = max(base_quota_i, ceil(base_quota_i as f64 * f))`.
 ///    - If `None`: Set `quota_i = usize::MAX`.
 ///
-/// 3. **Weighted Rendezvous Assignment**  
-///    - For each item `x`, compute for each container `i`:  
+/// 3. **Weighted Rendezvous Assignment**
+///    - For each item `x`, compute for each container `i`:
 ///      ```text
 ///      h = stable_hash((x, i, salt))
 ///      r = (h + 1) / (MAX_HASH + 2)       // 0 < r ≤ 1
 ///      key_i = -ln(r) / weight_i
-///      ```  
+///      ```
 ///    - Assign `x` to the container with the smallest `key_i`.
-/// ```  
+/// ```
 pub fn assign_items_weighted_with_scale_fn<C, I, S>(
     containers: &BTreeMap<C, NonZeroUsize>,
     items: &[I],
@@ -335,14 +334,14 @@ pub enum BalancedBy {
 ///      based on `actor_capacity_mode` and `workers` weights.
 ///    - Build `actor_to_worker: BTreeMap<W, Vec<A>>`.
 ///
-/// 2. **VNodes → Workers**
+/// 2. **`VNodes` → Workers**
 ///    - If `RawWorkerWeights`: compute per-worker quotas with `compute_worker_quotas`, ensuring
 ///      each active worker’s quota ≥ its actor count and quotas sum = total vnodes.
 ///    - If `ActorCounts`: set each worker’s weight = its actor count.
 ///    - Run `assign_items_weighted_with_scale_fn` on vnodes vs. the computed weights,
 ///      yielding `vnode_to_worker: BTreeMap<W, Vec<V>>`.
 ///
-/// 3. **VNodes → Actors**
+/// 3. **`VNodes` → Actors**
 ///    - For each worker, take its vnode list and assign them to actors in simple round-robin:
 ///      iterate vnodes in order, dispatching index `% actor_list.len()`.
 ///    - Collect into final `BTreeMap<W, BTreeMap<A, Vec<V>>>`.
@@ -766,7 +765,7 @@ mod tests {
             CapacityMode::Weighted,
             BalancedBy::ActorCounts,
         )
-            .unwrap_err();
+        .unwrap_err();
 
         assert!(err.to_string().contains("no actors to assign"));
     }
@@ -787,7 +786,7 @@ mod tests {
             CapacityMode::Unbounded,
             BalancedBy::RawWorkerWeights,
         )
-            .unwrap_err();
+        .unwrap_err();
 
         assert!(err.to_string().contains("no vnodes to assign"));
     }
@@ -808,7 +807,7 @@ mod tests {
             CapacityMode::Weighted,
             BalancedBy::ActorCounts,
         )
-            .unwrap_err();
+        .unwrap_err();
 
         assert!(err.to_string().contains("exceeds vnode count"));
     }
@@ -829,7 +828,7 @@ mod tests {
             CapacityMode::Weighted,
             BalancedBy::RawWorkerWeights,
         )
-            .unwrap();
+        .unwrap();
 
         // Only one worker should appear
         assert_eq!(assignment.len(), 1);
@@ -850,8 +849,8 @@ mod tests {
             (1, NonZeroUsize::new(1).unwrap()),
             (2, NonZeroUsize::new(1).unwrap()),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let actors: Vec<u16> = vec![10, 20];
         let vnodes: Vec<u16> = vec![0, 1];
 
@@ -863,7 +862,7 @@ mod tests {
             CapacityMode::Weighted,
             BalancedBy::ActorCounts,
         )
-            .unwrap();
+        .unwrap();
 
         // Both workers should appear
         assert_eq!(assignment.len(), 2);
@@ -882,8 +881,8 @@ mod tests {
             (1, NonZeroUsize::new(1).unwrap()),
             (2, NonZeroUsize::new(3).unwrap()),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
         let actors: Vec<u16> = vec![10, 20, 30, 40];
         let vnodes: Vec<u16> = vec![0, 1, 2, 3, 4, 5, 6];
 
@@ -895,12 +894,19 @@ mod tests {
             CapacityMode::Weighted,
             BalancedBy::RawWorkerWeights,
         )
-            .unwrap();
+        .unwrap();
 
         let w1_total: usize = assignment.get(&1).unwrap().values().map(Vec::len).sum();
         let w2_total: usize = assignment.get(&2).unwrap().values().map(Vec::len).sum();
         // Worker 2 has triple weight, so should get roughly 3/4 of vnodes
-        assert!(w2_total > w1_total, "Worker 2 should receive more vnodes than Worker 1");
-        assert_eq!(w1_total + w2_total, vnodes.len(), "All vnodes must be assigned");
+        assert!(
+            w2_total > w1_total,
+            "Worker 2 should receive more vnodes than Worker 1"
+        );
+        assert_eq!(
+            w1_total + w2_total,
+            vnodes.len(),
+            "All vnodes must be assigned"
+        );
     }
 }
