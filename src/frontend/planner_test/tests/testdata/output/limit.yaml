@@ -99,9 +99,8 @@
     └─BatchValues { rows: [[1:Int32]] }
   stream_plan: |-
     StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [c], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(1:Int32) }
-      └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
-        └─StreamValues { rows: [[1:Int32, 0:Int64]] }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     select 1 c union all select 1 c limit 10
   batch_plan: |-
@@ -118,9 +117,8 @@
     └─BatchValues { rows: [[1:Int32], [1:Int32]] }
   stream_plan: |-
     StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [_row_id], pk_columns: [c, _row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(1:Int32) }
-      └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 10, offset: 0 }
-        └─StreamValues { rows: [[1:Int32, 0:Int64], [1:Int32, 1:Int64]] }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 10, offset: 0 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64], [1:Int32, 1:Int64]] }
 - sql: |
     create table t (a int);
     select count(*) from t limit 1;

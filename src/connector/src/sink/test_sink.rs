@@ -15,14 +15,17 @@
 use std::sync::{Arc, OnceLock};
 
 use anyhow::anyhow;
+use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use sea_orm::DatabaseConnection;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 
-pub trait BuildBoxLogSinkerTrait =
-    FnMut(SinkParam, SinkWriterParam) -> BoxLogSinker + Send + 'static;
+pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
+    + Send
+    + 'static;
 pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection) -> BoxCoordinator + Send + 'static;
 
 type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
@@ -33,6 +36,8 @@ pub const TEST_SINK_NAME: &str = "test";
 pub struct TestSink {
     param: SinkParam,
 }
+
+impl EnforceSecret for TestSink {}
 
 impl TryFrom<SinkParam> for TestSink {
     type Error = SinkError;
@@ -60,7 +65,7 @@ impl Sink for TestSink {
         &self,
         writer_param: SinkWriterParam,
     ) -> crate::sink::Result<Self::LogSinker> {
-        Ok(build_box_log_sinker(self.param.clone(), writer_param))
+        build_box_log_sinker(self.param.clone(), writer_param).await
     }
 
     async fn new_coordinator(
@@ -96,7 +101,7 @@ impl Drop for TestSinkRegistryGuard {
     }
 }
 
-fn registry_build_sink_inner(
+fn register_build_sink_inner(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
     build_box_coordinator: impl BuildBoxCoordinatorTrait,
 ) -> TestSinkRegistryGuard {
@@ -113,10 +118,17 @@ fn registry_build_sink_inner(
     TestSinkRegistryGuard
 }
 
-pub fn registry_build_sink(
+pub fn register_build_coordinated_sink(
+    build_box_log_sinker: impl BuildBoxLogSinkerTrait,
+    build_box_coordinator: impl BuildBoxCoordinatorTrait,
+) -> TestSinkRegistryGuard {
+    register_build_sink_inner(build_box_log_sinker, build_box_coordinator)
+}
+
+pub fn register_build_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
 ) -> TestSinkRegistryGuard {
-    registry_build_sink_inner(build_box_log_sinker, |_| {
+    register_build_sink_inner(build_box_log_sinker, |_| {
         unreachable!("no coordinator registered")
     })
 }
@@ -130,11 +142,15 @@ fn build_box_coordinator(db: DatabaseConnection) -> BoxCoordinator {
         .1)(db)
 }
 
-fn build_box_log_sinker(param: SinkParam, writer_param: SinkWriterParam) -> BoxLogSinker {
-    (get_registry()
+async fn build_box_log_sinker(
+    param: SinkParam,
+    writer_param: SinkWriterParam,
+) -> crate::sink::Result<BoxLogSinker> {
+    let future = (get_registry()
         .build_box_sink
         .lock()
         .as_mut()
         .expect("should not be empty")
-        .0)(param, writer_param)
+        .0)(param, writer_param);
+    future.await
 }

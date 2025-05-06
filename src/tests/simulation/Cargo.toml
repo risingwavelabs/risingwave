@@ -34,7 +34,7 @@ risingwave_compute = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
-risingwave_expr_impl = { workspace = true, features = ["js-udf"] }
+risingwave_expr_impl = { workspace = true } # Note: no UDF support (except for SQL functions)
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_meta_node = { workspace = true }

@@ -1691,7 +1691,11 @@ mod tests {
 
     use crate::MetaResult;
     use crate::controller::catalog::CatalogController;
-    use crate::model::{ActorUpstreams, Fragment, FragmentActorUpstreams, StreamActor};
+    use crate::model::{Fragment, StreamActor};
+
+    type ActorUpstreams = BTreeMap<crate::model::FragmentId, HashSet<crate::model::ActorId>>;
+
+    type FragmentActorUpstreams = HashMap<crate::model::ActorId, ActorUpstreams>;
 
     const TEST_FRAGMENT_ID: FragmentId = 1;
 

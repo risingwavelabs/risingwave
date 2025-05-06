@@ -26,6 +26,7 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 http = "1"
+indexmap = { version = "2.8.0", features = ["serde"] }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
@@ -36,7 +37,7 @@ num-integer = "0.1"
 num-traits = "0.2"
 otlp-embedded = { workspace = true }
 parking_lot = { workspace = true }
-prometheus = "0.13"
+prometheus = "0.14"
 prometheus-http-query = "0.8"
 prost = { workspace = true }
 rand = { workspace = true }

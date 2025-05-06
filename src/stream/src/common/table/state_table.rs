@@ -106,6 +106,9 @@ pub struct StateTableInner<
     /// State store for accessing snapshot data
     store: S,
 
+    /// Current epoch
+    epoch: Option<EpochPair>,
+
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -186,6 +189,7 @@ where
     /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
+        assert_eq!(None, self.epoch.replace(epoch), "should not init for twice");
         Ok(())
     }
 
@@ -512,6 +516,7 @@ where
             table_id,
             local_store: local_state_store,
             store,
+            epoch: None,
             pk_serde,
             row_serde,
             pk_indices,
@@ -537,11 +542,6 @@ where
 
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
-    }
-
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn epoch(&self) -> u64 {
-        self.local_store.epoch()
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -583,10 +583,6 @@ where
 
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
         &self.value_indices
-    }
-
-    fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty() || self.pending_watermark.is_some()
     }
 
     pub fn is_consistent_op(&self) -> bool {
@@ -681,7 +677,6 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
@@ -759,10 +754,6 @@ where
         &mut self,
         new_vnodes: Arc<Bitmap>,
     ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
-        assert!(
-            !self.inner.is_dirty(),
-            "vnode bitmap should only be updated when state table is clean"
-        );
         let prev_vnodes = self
             .inner
             .local_store
@@ -1068,7 +1059,10 @@ where
     ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
     {
         assert!(!self.on_post_commit);
-        assert_eq!(self.epoch(), new_epoch.prev);
+        assert_eq!(
+            self.epoch.expect("should only be called after init").curr,
+            new_epoch.prev
+        );
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
             self.op_consistency_level = new_consistency_level;
@@ -1084,18 +1078,15 @@ where
         });
         trace!(
             table_id = %self.table_id,
-            epoch = ?self.epoch(),
+            epoch = ?self.epoch,
             "commit state table"
         );
 
-        let mut table_watermarks = None;
-        if self.is_dirty() {
-            self.local_store
-                .flush()
-                .instrument(tracing::info_span!("state_table_flush"))
-                .await?;
-            table_watermarks = self.commit_pending_watermark();
-        }
+        self.local_store
+            .flush()
+            .instrument(tracing::info_span!("state_table_flush"))
+            .await?;
+        let table_watermarks = self.commit_pending_watermark();
         self.local_store.seal_current_epoch(
             new_epoch.curr,
             SealCurrentEpochOptions {
@@ -1103,6 +1094,7 @@ where
                 switch_op_consistency_level,
             },
         );
+        self.epoch = Some(new_epoch);
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
@@ -1161,18 +1153,18 @@ where
     fn commit_pending_watermark(
         &mut self,
     ) -> Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)> {
-        let watermark = self.pending_watermark.take();
-        watermark.as_ref().inspect(|watermark| {
-            trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
-        });
+        let watermark = self.pending_watermark.take()?;
+        trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
 
-        let watermark_serializer = if self.pk_indices().is_empty() {
-            None
-        } else {
+        assert!(
+            !self.pk_indices().is_empty(),
+            "see pending watermark on empty pk"
+        );
+        let watermark_serializer = {
             match self.clean_watermark_index_in_pk {
-                None => Some(self.pk_serde.index(0)),
+                None => self.pk_serde.index(0),
                 Some(clean_watermark_index_in_pk) => {
-                    Some(self.pk_serde.index(clean_watermark_index_in_pk as usize))
+                    self.pk_serde.index(clean_watermark_index_in_pk as usize)
                 }
             }
         };
@@ -1185,8 +1177,8 @@ where
             },
         };
 
-        let should_clean_watermark = match watermark {
-            Some(ref watermark) => {
+        let should_clean_watermark = {
+            {
                 if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
                     if let Some(key) = self.watermark_cache.lowest_key() {
                         watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
@@ -1204,53 +1196,42 @@ where
                     true
                 }
             }
-            None => false,
         };
 
-        let watermark_suffix = watermark.as_ref().map(|watermark| {
-            serialize_pk(
-                row::once(Some(watermark.clone())),
-                watermark_serializer.as_ref().unwrap(),
-            )
-        });
-
-        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark, WatermarkSerdeType)> =
-            None;
+        let watermark_suffix =
+            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
 
         // Compute Delete Ranges
-        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
+        let seal_watermark = if should_clean_watermark {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
 
-            let order_type = watermark_serializer
-                .as_ref()
-                .unwrap()
-                .get_order_types()
-                .get(0)
-                .unwrap();
+            let order_type = watermark_serializer.get_order_types().get(0).unwrap();
 
             if order_type.is_ascending() {
-                seal_watermark = Some((
+                Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                     watermark_type,
-                ));
+                ))
             } else {
-                seal_watermark = Some((
+                Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                     watermark_type,
-                ));
+                ))
             }
-        }
-        self.committed_watermark = watermark;
+        } else {
+            None
+        };
+        self.committed_watermark = Some(watermark);
 
         // Clear the watermark cache and force a resync.
         // TODO(kwannoel): This can be further optimized:
@@ -1341,10 +1322,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
         };
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
@@ -1359,10 +1338,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
         };
 
         Ok(self

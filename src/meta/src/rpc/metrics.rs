@@ -64,28 +64,28 @@ pub struct MetaMetrics {
     // ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
-    pub barrier_latency: LabelGuardedHistogramVec<1>,
+    pub barrier_latency: LabelGuardedHistogramVec,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
     /// Latency between each barrier send
-    pub barrier_send_latency: LabelGuardedHistogramVec<1>,
+    pub barrier_send_latency: LabelGuardedHistogramVec,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
-    pub all_barrier_nums: LabelGuardedIntGaugeVec<1>,
+    pub all_barrier_nums: LabelGuardedIntGaugeVec,
     /// The number of in-flight barriers
-    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec<1>,
+    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
     pub last_committed_barrier_time: IntGaugeVec,
 
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
-    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
+    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
-    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
+    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec, // (table_id, )
     /// The lags between the upstream epoch and the downstream epoch.
-    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
+    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec, // (table_id, )
     /// The number of inflight barriers of `table_id`
-    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec<1>, // (table_id, _)
+    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec, // (table_id, _)
 
     // ********************************** Recovery ************************************
     pub recovery_failure_cnt: IntCounterVec,
@@ -183,7 +183,7 @@ pub struct MetaMetrics {
 
     // ********************************** Source ************************************
     /// supervisor for which source is still up.
-    pub source_is_up: LabelGuardedIntGaugeVec<2>,
+    pub source_is_up: LabelGuardedIntGaugeVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
@@ -201,9 +201,9 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
 
@@ -949,7 +949,7 @@ pub fn start_worker_info_monitor(
                     let role = if m.is_leader { "leader" } else { "follower" };
                     meta_metrics
                         .meta_type
-                        .with_label_values(&[&m.id, role])
+                        .with_label_values(&[m.id.as_str(), role])
                         .set(1);
                 });
             }

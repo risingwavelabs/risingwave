@@ -26,6 +26,7 @@ use risingwave_common::config::{
     AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
     StorageMemoryConfig, load_config,
 };
+use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
@@ -204,6 +205,7 @@ pub async fn compute_node_serve(
             .ok(),
     };
 
+    LicenseManager::get().refresh(system_params.license_key());
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
@@ -225,8 +227,13 @@ pub async fn compute_node_serve(
     );
 
     // Initialize observer manager.
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+        config.batch.developer.compute_client_config.clone(),
+    ));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
-    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let compute_observer_node =
+        ComputeObserverNode::new(system_params_manager.clone(), batch_client_pool.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
     observer_manager.start().await;
@@ -347,10 +354,6 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let batch_client_pool = Arc::new(ComputeClientPool::new(
-        config.batch_exchange_connection_pool_size(),
-        config.batch.developer.compute_client_config.clone(),
-    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),

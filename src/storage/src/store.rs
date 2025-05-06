@@ -35,7 +35,6 @@ use risingwave_hummock_sdk::table_watermark::{
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
-    TracedWriteOptions,
 };
 use risingwave_pb::hummock::PbVnodeWatermark;
 
@@ -352,7 +351,7 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreGet + StaticSendSync {
+pub trait LocalStateStore: StateStoreGet + StateStoreWriteEpochControl + StaticSendSync {
     type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;
@@ -391,12 +390,15 @@ pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
+    // Updates the vnode bitmap corresponding to the local state store
+    // Returns the previous vnode bitmap
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
+}
+
+pub trait StateStoreWriteEpochControl: StaticSendSync {
     fn flush(&mut self) -> impl StorageFuture<'_, usize>;
 
     fn try_flush(&mut self) -> impl StorageFuture<'_, ()>;
-    fn epoch(&self) -> u64;
-
-    fn is_dirty(&self) -> bool;
 
     /// Initializes the state store with given `epoch` pair.
     /// Typically we will use `epoch.curr` as the initialized epoch,
@@ -410,10 +412,6 @@ pub trait LocalStateStore: StateStoreGet + StaticSendSync {
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
-
-    // Updates the vnode bitmap corresponding to the local state store
-    // Returns the previous vnode bitmap
-    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> impl StorageFuture<'_, Arc<Bitmap>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
@@ -477,11 +475,6 @@ pub struct ReadOptions {
     pub cache_policy: CachePolicy,
 
     pub retention_seconds: Option<u32>,
-    pub table_id: TableId,
-    /// Read from historical hummock version of meta snapshot backup.
-    /// It should only be used by `StorageTable` for batch query.
-    pub read_version_from_backup: bool,
-    pub read_committed: bool,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -491,23 +484,32 @@ impl From<TracedReadOptions> for ReadOptions {
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
-            table_id: value.table_id.into(),
-            read_version_from_backup: value.read_version_from_backup,
-            read_committed: value.read_committed,
         }
     }
 }
 
-impl From<ReadOptions> for TracedReadOptions {
-    fn from(value: ReadOptions) -> Self {
-        Self {
+impl ReadOptions {
+    pub fn into_traced_read_options(
+        self,
+        table_id: TableId,
+        epoch: Option<HummockReadEpoch>,
+    ) -> TracedReadOptions {
+        let value = self;
+        let (read_version_from_backup, read_committed) = match epoch {
+            None | Some(HummockReadEpoch::NoWait(_)) => (false, false),
+            Some(HummockReadEpoch::Backup(_)) => (true, false),
+            Some(HummockReadEpoch::Committed(_))
+            | Some(HummockReadEpoch::BatchQueryCommitted(_, _))
+            | Some(HummockReadEpoch::TimeTravel(_)) => (false, true),
+        };
+        TracedReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
             retention_seconds: value.retention_seconds,
-            table_id: value.table_id.into(),
-            read_version_from_backup: value.read_version_from_backup,
-            read_committed: value.read_committed,
+            table_id: table_id.into(),
+            read_version_from_backup,
+            read_committed,
         }
     }
 }
@@ -521,21 +523,6 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
                 .0
         }
         None => 0,
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct WriteOptions {
-    pub epoch: u64,
-    pub table_id: TableId,
-}
-
-impl From<TracedWriteOptions> for WriteOptions {
-    fn from(value: TracedWriteOptions) -> Self {
-        Self {
-            epoch: value.epoch,
-            table_id: value.table_id.into(),
-        }
     }
 }
 

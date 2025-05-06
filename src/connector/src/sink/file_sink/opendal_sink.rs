@@ -35,6 +35,7 @@ use strum_macros::{Display, EnumString};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkEncode;
 use crate::sink::encoder::{
     JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
@@ -75,6 +76,8 @@ pub struct FileSink<S: OpendalSinkBackend> {
     pub(crate) engine_type: EngineType,
     pub(crate) _marker: PhantomData<S>,
 }
+
+impl<S: OpendalSinkBackend> EnforceSecret for FileSink<S> {}
 
 /// The `OpendalSinkBackend` trait unifies the behavior of various sink backends
 /// implemented through `OpenDAL`(`<https://github.com/apache/opendal>`).

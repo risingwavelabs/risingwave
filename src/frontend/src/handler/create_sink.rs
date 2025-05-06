@@ -16,21 +16,28 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
 use either::Either;
+use iceberg::arrow::type_to_arrow_type;
+use iceberg::spec::Transform;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_WITHOUT_BACKFILL, enforce_secret_sink,
 };
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
@@ -56,12 +63,14 @@ use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
-use crate::optimizer::plan_node::{LogicalSource, PartitionComputeInfo, StreamProject, generic};
+use crate::optimizer::plan_node::{
+    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject, generic,
+};
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
@@ -106,18 +115,34 @@ pub async fn gen_sink_plan(
 
     let mut with_options = handler_args.with_options.clone();
 
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret()
+        && Feature::SecretManagement.check_available().is_ok()
+    {
+        enforce_secret_sink(&with_options)?;
+    }
+
     resolve_privatelink_in_with_option(&mut with_options)?;
     let (mut resolved_with_options, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_options,
             session,
-            TelemetryDatabaseObject::Sink,
+            Some(TelemetryDatabaseObject::Sink),
         )?;
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = resolved_with_options.get_connector().unwrap();
+        let Some(connector) = resolved_with_options.get_connector() else {
+            return Err(RwError::from(ErrorCode::ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                CONNECTOR_TYPE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
@@ -374,10 +399,68 @@ pub async fn get_partition_compute_info(
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
-    // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
-    Ok(None)
+    // TODO: check table if exists
+    if _iceberg_config.create_table_if_not_exists {
+        return Ok(None);
+    }
+    let table = _iceberg_config.load_table().await?;
+    let partition_spec = table.metadata().default_partition_spec();
+    if partition_spec.is_unpartitioned() {
+        return Ok(None);
+    }
 
-    // TODO: migrate to iceberg-rust later
+    // Separate the partition spec into two parts: sparse partition and range partition.
+    // Sparse partition means that the data distribution is more sparse at a given time.
+    // Range partition means that the data distribution is likely same at a given time.
+    // Only compute the partition and shuffle by them for the sparse partition.
+    let has_sparse_partition = partition_spec.fields().iter().any(|f| match f.transform {
+        // Sparse partition
+        Transform::Identity | Transform::Truncate(_) | Transform::Bucket(_) => true,
+        // Range partition
+        Transform::Year
+        | Transform::Month
+        | Transform::Day
+        | Transform::Hour
+        | Transform::Void
+        | Transform::Unknown => false,
+    });
+    if !has_sparse_partition {
+        return Ok(None);
+    }
+
+    let arrow_type = type_to_arrow_type(&iceberg::spec::Type::Struct(
+        table.metadata().default_partition_type().clone(),
+    ))
+    .map_err(|_| {
+        RwError::from(ErrorCode::SinkError(
+            "Fail to convert iceberg partition type to arrow type".into(),
+        ))
+    })?;
+    let ArrowDataType::Struct(struct_fields) = arrow_type else {
+        return Err(RwError::from(ErrorCode::SinkError(
+            "Partition type of iceberg should be a struct type".into(),
+        )));
+    };
+
+    let schema = table.metadata().current_schema();
+    let partition_fields = partition_spec
+        .fields()
+        .iter()
+        .map(|f| {
+            let source_f =
+                schema
+                    .field_by_id(f.source_id)
+                    .ok_or(RwError::from(ErrorCode::SinkError(
+                        "Fail to look up iceberg partition field".into(),
+                    )))?;
+            Ok((source_f.name.clone(), f.transform))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
+        partition_type: IcebergArrowConvert.struct_from_fields(&struct_fields)?,
+        partition_fields,
+    })))
 }
 
 pub async fn handle_create_sink(
@@ -413,7 +496,7 @@ pub async fn handle_create_sink(
             );
         }
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Sink))?;
 
         (sink, graph, target_table_catalog, dependencies)
     };
@@ -422,7 +505,7 @@ pub async fn handle_create_sink(
     if let Some(table_catalog) = target_table_catalog {
         use crate::handler::alter_table_column::hijack_merger_for_target_table;
 
-        let (mut graph, mut table, source) =
+        let (mut graph, mut table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
         sink.original_target_columns = table
@@ -456,7 +539,7 @@ pub async fn handle_create_sink(
                 replace_job_plan::ReplaceTable {
                     table: Some(table),
                     source,
-                    job_type: TableJobType::General as _,
+                    job_type: target_job_type as _,
                 },
             )),
             fragment_graph: Some(graph),
@@ -509,7 +592,7 @@ pub fn fetch_incoming_sinks(
 pub(crate) async fn reparse_table_for_sink(
     session: &Arc<SessionImpl>,
     table_catalog: &Arc<TableCatalog>,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
+) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { name, .. } = &definition else {
@@ -521,7 +604,7 @@ pub(crate) async fn reparse_table_for_sink(
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
 
-    let (graph, table, source, _) = generate_stream_graph_for_replace_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,
@@ -532,7 +615,7 @@ pub(crate) async fn reparse_table_for_sink(
     )
     .await?;
 
-    Ok((graph, table, source))
+    Ok((graph, table, source, job_type))
 }
 
 pub(crate) fn insert_merger_to_union_with_project(
@@ -693,7 +776,7 @@ fn bind_sink_format_desc(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(value.row_options.as_slice())?,
             session,
-            TelemetryDatabaseObject::Sink,
+            Some(TelemetryDatabaseObject::Sink),
         )?;
     ensure_connection_type_allowed(
         connection_type_flag,

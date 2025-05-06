@@ -18,8 +18,8 @@ use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::bail;
-use arrow_udf_flight::Client;
-use arrow_udf_flight::arrow_flight::flight_service_client::FlightServiceClient;
+use arrow_udf_runtime::remote::arrow_flight::flight_service_client::FlightServiceClient;
+use arrow_udf_runtime::remote::{Client, arrow_flight};
 use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
 use risingwave_common::array::arrow::arrow_schema_udf::{self, Fields};
@@ -231,7 +231,7 @@ impl ExternalFunction {
     async fn call_with_retry(
         &self,
         input: &RecordBatch,
-    ) -> Result<RecordBatch, arrow_udf_flight::Error> {
+    ) -> Result<RecordBatch, arrow_udf_runtime::remote::Error> {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
             match self.client.call(&self.remote_name, input).await {
@@ -250,7 +250,7 @@ impl ExternalFunction {
     async fn call_with_always_retry_on_network_error(
         &self,
         input: &RecordBatch,
-    ) -> Result<RecordBatch, arrow_udf_flight::Error> {
+    ) -> Result<RecordBatch, arrow_udf_runtime::remote::Error> {
         let mut backoff = Duration::from_millis(100);
         loop {
             match self.client.call(&self.remote_name, input).await {
@@ -271,21 +271,23 @@ impl ExternalFunction {
 }
 
 /// Returns true if the arrow flight error is caused by a connection error.
-fn is_connection_error(err: &arrow_udf_flight::Error) -> bool {
+fn is_connection_error(err: &arrow_udf_runtime::remote::Error) -> bool {
     match err {
         // Connection refused
-        arrow_udf_flight::Error::Tonic(status) if status.code() == tonic::Code::Unavailable => true,
+        arrow_udf_runtime::remote::Error::Tonic(status)
+            if status.code() == tonic::Code::Unavailable =>
+        {
+            true
+        }
         _ => false,
     }
 }
 
-fn is_tonic_error(err: &arrow_udf_flight::Error) -> bool {
+fn is_tonic_error(err: &arrow_udf_runtime::remote::Error) -> bool {
     matches!(
         err,
-        arrow_udf_flight::Error::Tonic(_)
-            | arrow_udf_flight::Error::Flight(
-                arrow_udf_flight::arrow_flight::error::FlightError::Tonic(_)
-            )
+        arrow_udf_runtime::remote::Error::Tonic(_)
+            | arrow_udf_runtime::remote::Error::Flight(arrow_flight::error::FlightError::Tonic(_))
     )
 }
 

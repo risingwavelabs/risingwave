@@ -43,9 +43,7 @@ use tracing::warn;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
-use crate::task::{
-    ActorId, AtomicU64Ref, PartialGraphId, SharedContext, StreamEnvironment, UpDownActorIds,
-};
+use crate::task::{ActorId, AtomicU64Ref, PartialGraphId, StreamEnvironment, UpDownActorIds};
 
 mod managed_state;
 mod progress;
@@ -68,7 +66,7 @@ use risingwave_pb::stream_service::{
     StreamingControlStreamResponse, streaming_control_stream_response,
 };
 
-use crate::executor::exchange::permit::Receiver;
+use crate::executor::exchange::permit::{Receiver, channel_from_config};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::{
@@ -223,6 +221,11 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
     },
+    RegisterLocalUpstreamOutput {
+        actor_id: ActorId,
+        upstream_actor_id: ActorId,
+        tx: permit::Sender,
+    },
 }
 
 #[derive(strum_macros::Display)]
@@ -238,7 +241,9 @@ pub(super) enum LocalActorOperation {
         result_sender: oneshot::Sender<StreamResult<Receiver>>,
     },
     #[cfg(test)]
-    GetCurrentSharedContext(oneshot::Sender<(Arc<SharedContext>, LocalBarrierManager)>),
+    GetCurrentLocalBarrierManager(oneshot::Sender<LocalBarrierManager>),
+    #[cfg(test)]
+    TakePendingNewOutputRequest(ActorId, oneshot::Sender<Vec<(ActorId, NewOutputRequest)>>),
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
     InspectState {
@@ -515,36 +520,42 @@ impl LocalBarrierWorker {
                 ids,
                 result_sender,
             } => {
-                let result = try {
-                    if self.term_id != term_id {
+                let err = if self.term_id != term_id {
+                    {
                         warn!(
                             ?ids,
                             term_id,
                             current_term_id = self.term_id,
                             "take receiver on unmatched term_id"
                         );
-                        Err(anyhow!(
+                        anyhow!(
                             "take receiver {:?} on unmatched term_id {} to current term_id {}",
                             ids,
                             term_id,
                             self.term_id
-                        ))?;
+                        )
                     }
-                    let result = match self.state.databases.entry(database_id) {
+                } else {
+                    match self.state.databases.entry(database_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
                                 pending_requests.push((ids, result_sender));
                                 return;
                             }
-                            DatabaseStatus::Running(database) => database
-                                .local_barrier_manager
-                                .shared_context
-                                .take_receiver(ids),
+                            DatabaseStatus::Running(database) => {
+                                let (upstream_actor_id, actor_id) = ids;
+                                database.new_actor_remote_output_request(
+                                    actor_id,
+                                    upstream_actor_id,
+                                    result_sender,
+                                );
+                                return;
+                            }
                             DatabaseStatus::Suspended(_) => {
-                                Err(anyhow!("database suspended").into())
+                                anyhow!("database suspended")
                             }
                             DatabaseStatus::Resetting(_) => {
-                                Err(anyhow!("database resetting").into())
+                                anyhow!("database resetting")
                             }
                             DatabaseStatus::Unspecified => {
                                 unreachable!()
@@ -557,23 +568,35 @@ impl LocalBarrierWorker {
                             )]));
                             return;
                         }
-                    };
-                    result?
+                    }
                 };
-                let _ = result_sender.send(result);
+                let _ = result_sender.send(Err(err.into()));
             }
             #[cfg(test)]
-            LocalActorOperation::GetCurrentSharedContext(sender) => {
+            LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
                 let database_status = self
                     .state
                     .databases
                     .get(&crate::task::TEST_DATABASE_ID)
                     .unwrap();
                 let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
-                let _ = sender.send((
-                    database_state.local_barrier_manager.shared_context.clone(),
-                    database_state.local_barrier_manager.clone(),
-                ));
+                let _ = sender.send(database_state.local_barrier_manager.clone());
+            }
+            #[cfg(test)]
+            LocalActorOperation::TakePendingNewOutputRequest(actor_id, sender) => {
+                let database_status = self
+                    .state
+                    .databases
+                    .get_mut(&crate::task::TEST_DATABASE_ID)
+                    .unwrap();
+
+                let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
+                assert!(!database_state.actor_states.contains_key(&actor_id));
+                let requests = database_state
+                    .actor_pending_new_output_requests
+                    .remove(&actor_id)
+                    .unwrap();
+                let _ = sender.send(requests);
             }
             #[cfg(test)]
             LocalActorOperation::Flush(sender) => {
@@ -669,6 +692,8 @@ mod await_epoch_completed_future {
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
+
+use crate::executor::exchange::permit;
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
@@ -842,10 +867,6 @@ impl LocalBarrierWorker {
             .get_mut(&DatabaseId::new(request.database_id))
             .expect("should exist");
         if let Some(state) = database_status.state_for_request() {
-            state
-                .local_barrier_manager
-                .shared_context
-                .add_actors(request.broadcast_info.iter().cloned());
             state.transform_to_issued(barrier, request)?;
         }
         Ok(())
@@ -891,18 +912,19 @@ impl LocalBarrierWorker {
             Entry::Occupied(entry) => {
                 let status = entry.into_mut();
                 if let DatabaseStatus::ReceivedExchangeRequest(pending_requests) = status {
-                    let database = DatabaseManagedBarrierState::new(
+                    let mut database = DatabaseManagedBarrierState::new(
                         database_id,
                         self.term_id.clone(),
                         self.actor_manager.clone(),
                         vec![],
                     );
-                    for (ids, result_sender) in pending_requests.drain(..) {
-                        let result = database
-                            .local_barrier_manager
-                            .shared_context
-                            .take_receiver(ids);
-                        let _ = result_sender.send(result);
+                    for ((upstream_actor_id, actor_id), result_sender) in pending_requests.drain(..)
+                    {
+                        database.new_actor_remote_output_request(
+                            actor_id,
+                            upstream_actor_id,
+                            result_sender,
+                        );
                     }
                     *status = DatabaseStatus::Running(database);
                 }
@@ -1034,7 +1056,9 @@ impl DatabaseManagedBarrierState {
 pub struct LocalBarrierManager {
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
     actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
-    pub shared_context: Arc<SharedContext>,
+    pub(crate) database_id: DatabaseId,
+    pub(crate) term_id: String,
+    pub(crate) env: StreamEnvironment,
 }
 
 impl LocalBarrierWorker {
@@ -1095,9 +1119,16 @@ impl<T> EventSender<T> {
     }
 }
 
+pub(crate) enum NewOutputRequest {
+    Local(permit::Sender),
+    Remote(permit::Sender),
+}
+
 impl LocalBarrierManager {
     pub(super) fn new(
-        shared_context: Arc<SharedContext>,
+        database_id: DatabaseId,
+        term_id: String,
+        env: StreamEnvironment,
     ) -> (
         Self,
         UnboundedReceiver<LocalBarrierEvent>,
@@ -1109,7 +1140,9 @@ impl LocalBarrierManager {
             Self {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: err_tx,
-                shared_context,
+                database_id,
+                term_id,
+                env,
             },
             event_rx,
             err_rx,
@@ -1143,6 +1176,20 @@ impl LocalBarrierManager {
         self.send_event(LocalBarrierEvent::RegisterBarrierSender {
             actor_id,
             barrier_sender: tx,
+        });
+        rx
+    }
+
+    pub fn register_local_upstream_output(
+        &self,
+        actor_id: ActorId,
+        upstream_actor_id: ActorId,
+    ) -> permit::Receiver {
+        let (tx, rx) = channel_from_config(self.env.config());
+        self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
+            actor_id,
+            upstream_actor_id,
+            tx,
         });
         rx
     }
@@ -1223,8 +1270,6 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 pub(crate) mod barrier_test_utils {
-    use std::sync::Arc;
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_pb::stream_service::streaming_control_stream_request::{
@@ -1242,11 +1287,10 @@ pub(crate) mod barrier_test_utils {
     use crate::executor::Barrier;
     use crate::task::barrier_manager::{ControlStreamHandle, EventSender, LocalActorOperation};
     use crate::task::{
-        ActorId, LocalBarrierManager, SharedContext, TEST_DATABASE_ID, TEST_PARTIAL_GRAPH_ID,
+        ActorId, LocalBarrierManager, NewOutputRequest, TEST_DATABASE_ID, TEST_PARTIAL_GRAPH_ID,
     };
 
     pub(crate) struct LocalBarrierTestEnv {
-        pub shared_context: Arc<SharedContext>,
         pub local_barrier_manager: LocalBarrierManager,
         pub(super) actor_op_tx: EventSender<LocalActorOperation>,
         pub request_tx: UnboundedSender<Result<StreamingControlStreamRequest, Status>>,
@@ -1271,7 +1315,6 @@ pub(crate) mod barrier_test_utils {
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             subscriptions: vec![],
-                            actor_infos: vec![],
                         }],
                     }],
                     term_id: "for_test".into(),
@@ -1283,13 +1326,12 @@ pub(crate) mod barrier_test_utils {
                 streaming_control_stream_response::Response::Init(_)
             );
 
-            let (shared_context, local_barrier_manager) = actor_op_tx
-                .send_and_await(LocalActorOperation::GetCurrentSharedContext)
+            let local_barrier_manager = actor_op_tx
+                .send_and_await(LocalActorOperation::GetCurrentLocalBarrierManager)
                 .await
                 .unwrap();
 
             Self {
-                shared_context,
                 local_barrier_manager,
                 actor_op_tx,
                 request_tx,
@@ -1312,7 +1354,6 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                            broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],
                             subscriptions_to_remove: vec![],
@@ -1330,6 +1371,16 @@ pub(crate) mod barrier_test_utils {
             let (tx, rx) = oneshot::channel();
             actor_op_tx.send_event(LocalActorOperation::Flush(tx));
             rx.await.unwrap()
+        }
+
+        pub(crate) async fn take_pending_new_output_requests(
+            &self,
+            actor_id: ActorId,
+        ) -> Vec<(ActorId, NewOutputRequest)> {
+            self.actor_op_tx
+                .send_and_await(|tx| LocalActorOperation::TakePendingNewOutputRequest(actor_id, tx))
+                .await
+                .unwrap()
         }
     }
 }

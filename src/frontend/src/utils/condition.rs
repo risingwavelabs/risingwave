@@ -528,7 +528,6 @@ impl Condition {
                     false
                 }
             });
-
         // optimize for single row conjunctions. More optimisations may come later
         // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
         // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan

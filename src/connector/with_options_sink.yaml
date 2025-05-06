@@ -453,6 +453,15 @@ IcebergConfig:
   - name: gcs.credential
     field_type: String
     required: false
+  - name: azblob.account_name
+    field_type: String
+    required: false
+  - name: azblob.account_key
+    field_type: String
+    required: false
+  - name: azblob.endpoint_url
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
@@ -522,6 +531,11 @@ IcebergConfig:
   - name: enable_config_load
     field_type: bool
     comments: enable config load.
+    required: false
+    default: Default::default
+  - name: hosted_catalog
+    field_type: bool
+    comments: This is only used by iceberg engine to enable the hosted catalog.
     required: false
     default: Default::default
   - name: primary_key
@@ -1181,6 +1195,10 @@ SqlServerConfig:
   - name: sqlserver.database
     field_type: String
     required: true
+  - name: sqlserver.schema
+    field_type: String
+    required: false
+    default: '"dbo" . to_owned ()'
   - name: sqlserver.table
     field_type: String
     required: true

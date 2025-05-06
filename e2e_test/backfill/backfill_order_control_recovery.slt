@@ -1,0 +1,57 @@
+# Test that after recovery, backfill order control can still allow the job to resume.
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+statement ok
+create table t1 (v1 int);
+
+statement ok
+create table t2 (v1 int);
+
+statement ok
+create table t3 (v1 int);
+
+statement ok
+insert into t1 values (1);
+
+statement ok
+insert into t2 values (1);
+
+statement ok
+insert into t3 values (1);
+
+statement ok
+set backfill_rate_limit = 0;
+
+statement ok
+set background_ddl=true;
+
+statement ok
+create materialized view m1
+with (backfill_order = FIXED(t1 -> t2, t2 -> t3))
+ as select v1 from t1
+union
+select v1 from t2
+union
+select v1 from t3;
+
+statement ok
+recover;
+
+statement ok
+alter materialized view m1 set backfill_rate_limit = default;
+
+statement ok
+wait;
+
+statement ok
+drop materialized view m1 cascade;
+
+statement ok
+drop table if exists t1 cascade;
+
+statement ok
+drop table if exists t2 cascade;
+
+statement ok
+drop table if exists t3 cascade;

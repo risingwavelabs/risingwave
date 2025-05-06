@@ -17,7 +17,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arrow_udf_wasm::Runtime;
+use arrow_udf_runtime::wasm::Runtime;
 use educe::Educe;
 use futures_util::StreamExt;
 use itertools::Itertools;
@@ -120,7 +120,7 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
     let body = Some(script.clone());
 
     let wasm_binary = std::thread::spawn(move || {
-        let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+        let mut opts = arrow_udf_runtime::wasm::build::BuildOpts::default();
         // Use the same chrono feature setting as src/expr/impl/Cargo.toml
         // Use a fixed chrono version 0.4.39 because the latest 0.4.40 failed to compile.
         // TODO: may avoid setting a fixed version when succeed to compile with latest chrono version
@@ -137,7 +137,7 @@ chrono = { version = "=0.4.39", default-features = false, features = [
         // use a fixed tempdir to reuse the build cache
         opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
 
-        arrow_udf_wasm::build::build_with(&opts)
+        arrow_udf_runtime::wasm::build::build_with(&opts)
     })
     .join()
     .unwrap()
@@ -222,7 +222,7 @@ struct WasmFunction {
     runtime: Runtime,
     name: String,
     #[educe(Debug(ignore))]
-    func: arrow_udf_wasm::FunctionHandle,
+    func: arrow_udf_runtime::wasm::FunctionHandle,
 }
 
 #[async_trait::async_trait]
@@ -249,7 +249,7 @@ struct WasmTableFunction {
     runtime: Runtime,
     name: String,
     #[educe(Debug(ignore))]
-    func: arrow_udf_wasm::TableFunctionHandle,
+    func: arrow_udf_runtime::wasm::TableFunctionHandle,
 }
 
 #[async_trait::async_trait]
@@ -308,7 +308,7 @@ fn wasm_identifier_v1(
     ret: &DataType,
     table_function: bool,
 ) -> String {
-    /// Convert a data type to string used in `arrow-udf-wasm`.
+    /// Convert a data type to string used in `arrow-udf-runtime/wasm`.
     fn datatype_name(ty: &DataType) -> String {
         match ty {
             DataType::Boolean => "boolean".to_owned(),
