@@ -281,9 +281,6 @@ fn task_main(
                     ctx.pb
                         .set_message(format!("pubsub {}:{}", c.address, c.port));
                 }
-                ServiceConfig::RedPanda(_) => {
-                    return Err(anyhow!("redpanda is only supported in RiseDev compose."));
-                }
                 ServiceConfig::Redis(c) => {
                     let mut service = RedisService::new(c.clone())?;
                     service.execute(&mut ctx)?;

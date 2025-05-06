@@ -79,8 +79,8 @@ impl HummockServiceOpts {
                     - or directly use `./risedev d for-ctl` to start the cluster.
                     * use `./risedev ctl` to use risectl.
 
-                    For `./risedev apply-compose-deploy` users,
-                    * `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+                    For production use cases,
+                    * please set `RW_HUMMOCK_URL` to the same address specified for the meta node.
                 ";
                 bail!(MESSAGE);
             }
