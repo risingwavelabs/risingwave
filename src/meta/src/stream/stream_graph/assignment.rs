@@ -17,259 +17,87 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 
-use anyhow::{Context, Result, anyhow};
-/// Defines the vnode distribution strategy for hierarchical assignment.
+use anyhow::anyhow;
+
+use crate::stream;
+
+/// Assign items to weighted containers with optional capacity scaling and deterministic tie-breaking.
 ///
-/// - `RawWorkerWeights`: Distribute vnodes across workers using the original worker weight values.
-/// - `ActorCounts`: Distribute vnodes based on the number of actors assigned to each worker.
-#[derive(Debug, Copy, Clone)]
-#[non_exhaustive]
-pub enum BalancedBy {
-    /// Use each worker's raw weight when allocating vnodes.
-    RawWorkerWeights,
-
-    /// Use the count of actors per worker as the weight for vnode distribution.
-    ActorCounts,
-}
-
-/// Defines the capacity assignment strategy for containers.
+/// Distributes a slice of items (`&[I]`) across a set of containers (`BTreeMap<C, NonZeroUsize>`)
+/// using a three-phase algorithm:
 ///
-/// - `Weighted`: Distribute items proportionally to container weights, applying any configured scale factor.
-/// - `Unbounded`: No capacity limit; containers can receive any number of items.
-#[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
-enum CapacityMode {
-    /// Use each container’s weight (and optional scale factor) to bound how many items it can receive.
-    Weighted,
-
-    /// Ignore per-container quotas entirely—every container can take an unlimited number of items.
-    Unbounded,
-}
-
-pub struct Assigner<S> {
-    salt: S,
-    actor_capacity_mode: CapacityMode,
-    vnode_capacity_mode: CapacityMode,
-    balanced_by: BalancedBy,
-}
-
-/// Builder for `Assigner`
-pub struct AssignerBuilder<S> {
-    salt: S,
-    actor_capacity_mode: CapacityMode,
-    vnode_capacity_mode: CapacityMode,
-    balanced_by: BalancedBy,
-}
-
-impl<S: Hash + Copy> AssignerBuilder<S> {
-    pub fn new(salt: S) -> Self {
-        Self {
-            salt,
-            actor_capacity_mode: CapacityMode::Weighted,
-            vnode_capacity_mode: CapacityMode::Weighted,
-            balanced_by: BalancedBy::RawWorkerWeights,
-        }
-    }
-
-    pub fn actor_capacity_weighted(mut self) -> Self {
-        self.actor_capacity_mode = CapacityMode::Weighted;
-        self
-    }
-
-    pub fn actor_capacity_unbounded(mut self) -> Self {
-        self.actor_capacity_mode = CapacityMode::Unbounded;
-        self
-    }
-
-    pub fn vnode_capacity_weighted(mut self) -> Self {
-        self.vnode_capacity_mode = CapacityMode::Weighted;
-        self
-    }
-
-    pub fn vnode_capacity_unbounded(mut self) -> Self {
-        self.actor_capacity_mode = CapacityMode::Unbounded;
-        self
-    }
-
-    pub fn actor_oriented_balancing(mut self) -> Self {
-        self.balanced_by = BalancedBy::ActorCounts;
-        self
-    }
-
-    pub fn worker_oriented_balancing(mut self) -> Self {
-        self.balanced_by = BalancedBy::RawWorkerWeights;
-        self
-    }
-
-    pub fn build(self) -> Assigner<S> {
-        Assigner {
-            salt: self.salt,
-            actor_capacity_mode: self.actor_capacity_mode,
-            vnode_capacity_mode: self.vnode_capacity_mode,
-            balanced_by: self.balanced_by,
-        }
-    }
-}
-
-impl<S: Hash + Copy> Assigner<S> {
-    /// Core: assign items → containers according to capacity mode.
-    pub fn assign_actors<C, I>(
-        &self,
-        workers: &BTreeMap<C, NonZeroUsize>,
-        actors: &[I],
-    ) -> BTreeMap<C, Vec<I>>
-    where
-        C: Ord + Hash + Eq + Copy + Clone + Debug,
-        I: Hash + Eq + Copy + Clone + Debug,
-    {
-        let scale_fn = match self.actor_capacity_mode {
-            CapacityMode::Weighted => weighted_scale,
-            CapacityMode::Unbounded => unbounded_scale,
-        };
-
-        assign_items_weighted_with_scale_fn(workers, actors, self.salt, scale_fn)
-    }
-
-    /// Assign a sequence of `actor_count` placeholders and return
-    /// how many each container received.
-    pub fn assign_actors_counts<C>(
-        &self,
-        workers: &BTreeMap<C, NonZeroUsize>,
-        actor_count: usize,
-    ) -> BTreeMap<C, usize>
-    where
-        C: Ord + Hash + Eq + Copy + Clone + Debug,
-    {
-        let synthetic_items: Vec<usize> = (0..actor_count).collect();
-        Self::map_values_to_len(self.assign_actors(workers, &synthetic_items))
-    }
-
-    /// Hierarchical assign: workers → actors → vnodes
-    pub fn assign_hierarchical<W, A, V>(
-        &self,
-        workers: &BTreeMap<W, NonZeroUsize>,
-        actors: &[A],
-        vnodes: &[V],
-    ) -> Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
-    where
-        W: Ord + Hash + Eq + Copy + Clone + Debug,
-        A: Ord + Hash + Eq + Copy + Clone + Debug,
-        V: Hash + Eq + Copy + Clone + Debug,
-    {
-        assign_hierarchical(workers, actors, vnodes, self.salt, self.balanced_by)
-            .with_context(|| "hierarchical assignment failed")
-    }
-
-    /// Hierarchical assign of `actor_count` & `vnode_count`, returning
-    /// how many vnodes each actor gets under each worker.
-    pub fn assign_hierarchical_counts<W, A>(
-        &self,
-        workers: &BTreeMap<W, NonZeroUsize>,
-        actor_count: usize,
-        vnode_count: usize,
-    ) -> anyhow::Result<BTreeMap<W, BTreeMap<A, usize>>>
-    where
-        W: Ord + Hash + Eq + Copy + Clone + Debug,
-        A: Ord + Hash + Eq + Copy + Clone + Debug + From<usize>,
-    {
-        let actors: Vec<A> = (0..actor_count).map(A::from).collect();
-        let vnodes: Vec<usize> = (0..vnode_count).collect();
-        let full = self.assign_hierarchical(workers, &actors, &vnodes)?;
-        Ok(full
-            .into_iter()
-            .map(|(w, actor_map)| (w, Self::map_values_to_len(actor_map)))
-            .collect())
-    }
-
-    /// Helper: turn `HashMap<K, Vec<V>>` into `HashMap<K, usize>` by taking each vec’s length.
-    fn map_values_to_len<K, V>(map: BTreeMap<K, Vec<V>>) -> BTreeMap<K, usize>
-    where
-        K: Eq + Hash + Ord,
-    {
-        map.into_iter().map(|(k, v)| (k, v.len())).collect()
-    }
-}
-
-/// A no-op capacity scaling function: always returns `None`.
-fn unbounded_scale<C, I>(_containers: &BTreeMap<C, NonZeroUsize>, _items: &[I]) -> Option<f64> {
-    None
-}
-
-/// A unit capacity scaling function: always returns `Some(1.0)`.
-fn weighted_scale<C, I>(_containers: &BTreeMap<C, NonZeroUsize>, _items: &[I]) -> Option<f64> {
-    Some(1.0)
-}
-
-/// Assign items to containers without any capacity limit.
+/// # Type Parameters
+/// - `C`: Container identifier. Must implement `Ord + Hash + Eq + Copy + Debug`.
+/// - `I`: Item type. Must implement `Hash + Eq + Copy + Debug`.
+/// - `S`: Salt type for tie-breaking. Must implement `Hash + Copy`.
 ///
 /// # Parameters
-/// - `containers`: Map of container identifiers to their non-zero weights.
-/// - `items`: Slice of items to distribute.
-/// - `salt`: Hashing salt to vary the distribution of remainder buckets and weighted rendezvous.
+/// - `containers`: Map of containers to their non-zero weights (`BTreeMap<C, NonZeroUsize>`).
+/// - `items`: Slice of items (`&[I]`) to distribute.
+/// - `salt`: A salt value to vary deterministic tie-breaks between equal remainders.
+/// - `capacity_scale_factor_fn`: Callback `(containers, items) -> Option<f64>`:
+///     - `Some(f)`: Scale each container’s base quota by `f` (ceiled, but never below base).
+///     - `None`: Remove upper bound (capacity = `usize::MAX`).
 ///
 /// # Returns
-/// A map from each container to its assigned items.
-pub fn assign_items_unbounded<C, I, S>(
-    containers: &BTreeMap<C, NonZeroUsize>,
-    items: &[I],
-    salt: S,
-) -> BTreeMap<C, Vec<I>>
-where
-    C: Ord + Hash + Eq + Copy + Clone + Debug,
-    I: Hash + Eq + Copy + Clone + Debug,
-    S: Hash + Copy,
-{
-    assign_items_weighted_with_scale_fn(containers, items, salt, unbounded_scale)
-}
-
-/// Assign items to containers proportionally by weight with a default scale factor of 1.0.
-///
-/// # Parameters
-/// - `containers`: Map of container identifiers to their non-zero weights.
-/// - `items`: Slice of items to distribute.
-/// - `salt`: Hashing salt to vary the distribution of remainder buckets and weighted rendezvous.
-///
-/// # Returns
-/// A map from each container to its assigned items.
-pub fn assign_items_weighted<C, I, S>(
-    containers: &BTreeMap<C, NonZeroUsize>,
-    items: &[I],
-    salt: S,
-) -> BTreeMap<C, Vec<I>>
-where
-    C: Ord + Hash + Eq + Copy + Clone + Debug,
-    I: Hash + Eq + Copy + Clone + Debug,
-    S: Hash + Copy,
-{
-    assign_items_weighted_with_scale_fn(containers, items, salt, weighted_scale)
-}
-
-/// Assign items to containers based on their weight proportion and a salting mechanism.
-///
-/// This function distributes a slice of items (`&[I]`) among a set of containers (`BTreeMap<C, NonZeroUsize>`)
-/// according to a two-phase algorithm:
-///
-/// 1. **Quota Calculation (integer-based)**:
-///    - Compute the total weight of all containers as u128.
-///    - For each container with weight `w`:
-///      - `ideal_num = items.len() as u128 * w.get() as u128`
-///      - `base_quota = ideal_num / total_weight`
-///      - `remainder_part = ideal_num % total_weight`
-///    - Sum all `base_quota` as initial assignment; let `rem_count = items.len() - sum(base_quota)`.
-///    - Distribute `rem_count` extra slots to containers by descending `remainder_part`. Ties broken by hashing `(container, salt)`.
-///
-/// 2. **Capacity Scaling**:
-///    - Apply an optional scale factor (`Option<f64>`) to each `base_quota`:
-///      - If `Some(f)`, `scaled = ceil(base_quota as f64 * f)` but at least `base_quota`.
-///      - If `None`, unlimited capacity (`usize::MAX`).
-///
-/// 3. **Weighted Rendezvous Assignment**:
-///    - For each item, compute `raw = stable_hash((item, container, salt))`,
-///      normalize to `r = (raw + 1) / (MAX+2)`, and `key = -ln(r) / weight`.
-///    - Assign to the container with the smallest `key`.
+/// A `BTreeMap<C, Vec<I>>` mapping each container to the list of assigned items.
+/// - If `containers` is empty, returns an empty map.
+/// - If `items` is empty, returns a map from each container key to an empty `Vec<I>`.
 ///
 /// # Panics
-/// Panics if the sum of weights is zero or if an invariant is violated (no eligible container).
+/// - If the sum of all container weights is zero.
+/// - If, during weighted rendezvous, no eligible container remains (invariant violation).
+///
+/// # Complexity
+/// Runs in **O(N · M)** time, where N = `containers.len()` and M = `items.len()`.
+/// Each item is compared against all containers via a weighted rendezvous hash.
+///
+/// # Example
+/// ```rust
+/// # use std::collections::BTreeMap;
+/// # use std::num::NonZeroUsize;
+/// # use risingwave_meta::stream::assign_items_weighted_with_scale_fn;
+///
+/// let mut caps = BTreeMap::new();
+/// caps.insert("fast", NonZeroUsize::new(3).unwrap());
+/// caps.insert("slow", NonZeroUsize::new(1).unwrap());
+///
+/// let tasks = vec!["task1", "task2", "task3", "task4"];
+/// let result =
+///     assign_items_weighted_with_scale_fn(&caps, &tasks, 0u8, |_containers, _items| Some(1.0));
+///
+/// // `fast` should receive roughly 3 tasks, `slow` roughly 1
+/// assert_eq!(result.values().map(Vec::len).sum::<usize>(), tasks.len());
+/// ```
+///
+/// # Algorithm
+///
+/// 1. **Quota Calculation**  
+///    - Compute `total_weight = sum(w_i)` as `u128`.  
+///    - For each container `i` with weight `w_i`:  
+///      ```text
+///      ideal_i     = M * w_i
+///      base_quota_i = floor(ideal_i / total_weight)
+///      rem_i        = ideal_i % total_weight
+///      ```  
+///    - Let `rem_count = M - sum(base_quota_i)` and sort containers by `rem_i` (desc),
+///      breaking ties by `stable_hash((container, salt))`.  
+///    - Give `+1` slot to the first `rem_count` containers.
+///
+/// 2. **Capacity Scaling**  
+///    - If `Some(f)`: For each container,  
+///      `quota_i = max(base_quota_i, ceil(base_quota_i as f64 * f))`.  
+///    - If `None`: Set `quota_i = usize::MAX`.
+///
+/// 3. **Weighted Rendezvous Assignment**  
+///    - For each item `x`, compute for each container `i`:  
+///      ```text
+///      h = stable_hash((x, i, salt))
+///      r = (h + 1) / (MAX_HASH + 2)       // 0 < r ≤ 1
+///      key_i = -ln(r) / weight_i
+///      ```  
+///    - Assign `x` to the container with the smallest `key_i`.
+/// ```  
 pub fn assign_items_weighted_with_scale_fn<C, I, S>(
     containers: &BTreeMap<C, NonZeroUsize>,
     items: &[I],
@@ -283,7 +111,7 @@ where
 {
     // Early exit if there is nothing to assign
     if containers.is_empty() || items.is_empty() {
-        return containers.keys().map(|&c| (c, vec![])).collect();
+        return BTreeMap::default();
     }
 
     // Integer-based quota calculation
@@ -293,17 +121,17 @@ where
         "Sum of container weights must be non-zero"
     );
 
-    struct Info<C> {
+    struct QuotaInfo<C> {
         container: C,
         quota: usize,
         rem_part: u128,
     }
 
-    let mut infos: Vec<Info<C>> = containers
+    let mut infos: Vec<QuotaInfo<C>> = containers
         .iter()
         .map(|(&container, &weight)| {
             let ideal_num = (items.len() as u128).saturating_mul(weight.get() as u128);
-            Info {
+            QuotaInfo {
                 container,
                 quota: (ideal_num / total_weight) as usize,
                 rem_part: ideal_num % total_weight,
@@ -388,155 +216,49 @@ fn stable_hash<T: Hash>(t: &T) -> u64 {
     hasher.finish()
 }
 
-/// Distributes virtual nodes to actors via a two-layered weighted assignment:
-///
-/// 1. **Actors → Workers (Weighted)**
-///    - Distribute actors across workers according to their provided weights.
-/// 2. **`VNodes` → Active Workers (Equal Weight)**
-///    - Consider only workers assigned at least one actor; treat each with weight = 1.
-///    - Distribute vnodes uniformly across these active workers.
-/// 3. **`VNodes` → Actors within Workers (Round-Robin)**
-///    - For each worker, assign its vnodes evenly to its actors in a round-robin fashion.
-///
-/// # Type Parameters
-/// - `W`: Worker identifier type. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
-/// - `A`: Actor identifier type. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
-/// - `V`: Virtual node type. Must implement `Hash + Eq + Copy + Clone + Debug`.
-/// - `S`: Salt type for hashing tie-breakers. Must implement `Hash + Copy`.
-///
-/// # Parameters
-/// - `workers`: A `BTreeMap<W, NonZeroUsize>` mapping each worker to its weight.
-/// - `actors`: A slice of actors to distribute among workers.
-/// - `vnodes`: A slice of virtual nodes to assign to actors.
-/// - `salt`: A hashing salt to ensure deterministic yet varied tie-breaking.
-///
-/// # Returns
-/// A nested `BTreeMap<W, BTreeMap<A, Vec<V>>>` mapping each worker to a map of actors and their assigned vnodes.
-///
-/// # Errors
-/// Returns an error if the number of actors exceeds the number of vnodes.
-///
-/// # Example
-/// ```rust
-/// # use std::collections::BTreeMap;
-/// # use std::num::NonZeroUsize;
-///
-/// # use crate::risingwave_meta::stream::assign_hierarchical_worker_oriented;
-///
-/// // Define worker weights
-/// let mut workers = BTreeMap::new();
-/// workers.insert("worker1", NonZeroUsize::new(3).unwrap());
-/// workers.insert("worker2", NonZeroUsize::new(2).unwrap());
-///
-/// // Actors and virtual nodes
-/// let actors = vec!["actorA", "actorB", "actorC"];
-/// let vnodes = (0..6).collect::<Vec<_>>();
-///
-/// // Perform hierarchical assignment with salt = 42
-/// let assignment =
-///     assign_hierarchical_worker_oriented(&workers, &actors, &vnodes, 42u64).unwrap();
-///
-/// // Inspect results
-/// for (worker, map) in assignment {
-///     println!("{}:", worker);
-///     for (actor, vlist) in map {
-///         println!("  {} -> {:?}", actor, vlist);
-///     }
-/// }
-/// ```
-pub fn assign_hierarchical_worker_oriented<W, A, V, S>(
-    workers: &BTreeMap<W, NonZeroUsize>,
-    actors: &[A],
-    vnodes: &[V],
-    salt: S,
-) -> Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
-where
-    W: Ord + Hash + Eq + Copy + Clone + Debug,
-    A: Ord + Hash + Eq + Copy + Clone + Debug,
-    V: Hash + Eq + Copy + Clone + Debug,
-    S: Hash + Copy,
-{
-    assign_hierarchical(workers, actors, vnodes, salt, BalancedBy::RawWorkerWeights)
+/// A no-op capacity scaling function: always returns `None`.
+pub fn unbounded_scale<C, I>(_containers: &BTreeMap<C, NonZeroUsize>, _items: &[I]) -> Option<f64> {
+    None
 }
 
-/// Assigns virtual nodes to actors with actor‑oriented balancing.
-///
-/// This convenience wrapper calls `assign_hierarchical` with `BalancedBy::ActorCounts`,
-/// resulting in:
-///
-/// 1. **Actors → Workers (Weighted by worker weight)**
-/// 2. **`VNodes` → Workers (Weighted by number of actors per worker)**
-/// 3. **`VNodes` → Actors (Round‑robin within each worker)**
-///
-/// # Type Parameters
-/// - `W`: Worker identifier. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
-/// - `A`: Actor identifier. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
-/// - `V`: Virtual node type. Must implement `Hash + Eq + Copy + Clone + Debug`.
-/// - `S`: Salt type for hashing tie‑breakers. Must implement `Hash + Copy`.
-///
-/// # Parameters
-/// - `workers`: A `BTreeMap<W, NonZeroUsize>` mapping each worker to its weight.
-/// - `actors`: A slice of actors to assign.
-/// - `vnodes`: A slice of virtual nodes to distribute.
-/// - `salt`: A hashing salt to ensure deterministic yet varied tie‑breaking.
-///
-/// # Returns
-/// A `BTreeMap<W, BTreeMap<A, Vec<V>>>` mapping each worker to its actors and assigned vnodes,
-/// with balancing based on actor counts.
-///
-/// # Errors
-/// Returns an error if `actors.len() > vnodes.len()`.
-///
-/// # Example
-/// ```rust
-/// # use std::collections::BTreeMap;
-/// # use std::num::NonZeroUsize;
-///
-/// # use crate::risingwave_meta::stream::assign_hierarchical_actor_oriented;
-///
-/// // Define worker weights
-/// let mut workers = BTreeMap::new();
-/// workers.insert("w1", NonZeroUsize::new(4).unwrap());
-/// workers.insert("w2", NonZeroUsize::new(2).unwrap());
-///
-/// // Actors and virtual nodes
-/// let actors = vec!["a1", "a2", "a3"];
-/// let vnodes = (0..6).collect::<Vec<_>>();
-///
-/// // Distribute with actor‑oriented balancing, salt = 99
-/// let assignment = assign_hierarchical_actor_oriented(&workers, &actors, &vnodes, 99u64).unwrap();
-///
-/// // Validate structure
-/// assert_eq!(assignment.len(), 2);
-/// for (worker, actor_map) in &assignment {
-///     // Each actor under this worker has at most one more vnode than any other
-///     let counts: Vec<usize> = actor_map.values().map(Vec::len).collect();
-///     let min = *counts.iter().min().unwrap();
-///     let max = *counts.iter().max().unwrap();
-///     assert!(max - min <= 1);
-/// }
-/// ```
-pub fn assign_hierarchical_actor_oriented<W, A, V, S>(
-    workers: &BTreeMap<W, NonZeroUsize>,
-    actors: &[A],
-    vnodes: &[V],
-    salt: S,
-) -> Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
-where
-    W: Ord + Hash + Eq + Copy + Clone + Debug,
-    A: Ord + Hash + Eq + Copy + Clone + Debug,
-    V: Hash + Eq + Copy + Clone + Debug,
-    S: Hash + Copy,
-{
-    assign_hierarchical(workers, actors, vnodes, salt, BalancedBy::ActorCounts)
+/// A unit capacity scaling function: always returns `Some(1.0)`.
+pub fn weighted_scale<C, I>(_containers: &BTreeMap<C, NonZeroUsize>, _items: &[I]) -> Option<f64> {
+    Some(1.0)
 }
 
-/// Hierarchically distributes virtual nodes to actors via two stages of weighted assignment.
+/// Defines the capacity assignment strategy for containers.
 ///
-/// This core function performs:
-/// 1. **Actors → Workers**: Assigns each actor to a worker based on either raw worker weights or actor counts.
-/// 2. **`VNodes` → Workers**: Distributes virtual nodes among the resulting active workers according to the selected strategy.
-/// 3. **`VNodes` → Actors**: Within each worker, assigns its vnodes to its actors in a round-robin fashion.
+/// - `Weighted`: Distribute items proportionally to container weights, applying any configured scale factor.
+/// - `Unbounded`: No capacity limit; containers can receive any number of items.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum CapacityMode {
+    /// Use each container’s weight (and optional scale factor) to bound how many items it can receive.
+    Weighted,
+
+    /// Ignore per-container quotas entirely—every container can take an unlimited number of items.
+    Unbounded,
+}
+
+/// Defines the vnode distribution strategy for hierarchical assignment.
+///
+/// - `RawWorkerWeights`: Distribute vnodes across workers using the original worker weight values.
+/// - `ActorCounts`: Distribute vnodes based on the number of actors assigned to each worker.
+#[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
+pub enum BalancedBy {
+    /// Use each worker's raw weight when allocating vnodes.
+    RawWorkerWeights,
+
+    /// Use the count of actors per worker as the weight for vnode distribution.
+    ActorCounts,
+}
+
+/// Hierarchically distributes virtual nodes to actors in two weighted stages with deterministic tie-breaking.
+///
+/// This function first assigns each actor to a worker, then distributes all virtual nodes among
+/// those active workers, and finally partitions each worker’s vnodes among its actors in a simple
+/// round-robin fashion.
 ///
 /// # Type Parameters
 /// - `W`: Worker identifier. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
@@ -545,60 +267,107 @@ where
 /// - `S`: Salt type for deterministic tie-breaking. Must implement `Hash + Copy`.
 ///
 /// # Parameters
-/// - `workers`: A `BTreeMap<W, NonZeroUsize>` mapping each worker to its weight.
-/// - `actors`: A slice of actors to assign.
-/// - `virtual_nodes`: A slice of virtual nodes to distribute.
-/// - `salt`: A hashing salt to vary tie-break decisions per invocation.
-/// - `balanced_by`: A `BalancedBy` enum deciding whether to balance vnodes by raw worker weights or by actor counts.
+/// - `workers`: A `BTreeMap<W, NonZeroUsize>` mapping each worker to its positive weight.
+/// - `actors`: A slice of actors (`&[A]`) to place on workers.
+/// - `virtual_nodes`: A slice of vnodes (`&[V]`) to distribute across actors.
+/// - `salt`: A salt value to break ties in hashing, kept constant per invocation for reproducibility.
+/// - `actor_capacity_mode`: A `CapacityMode` deciding how actors are packed onto workers:
+///     - `Weighted`: respect `workers` weights when placing actors.
+///     - `Unbounded`: ignore capacity limits when placing actors.
+/// - `balanced_by`: A `BalancedBy` enum determining vnode distribution strategy:
+///     - `RawWorkerWeights`: prioritize original worker weights (with actor count as lower bound).
+///     - `ActorCounts`: prioritize equal vnode counts per actor (actor-oriented).
 ///
 /// # Returns
-/// A nested `BTreeMap<W, BTreeMap<A, Vec<V>>>` where each worker key maps to another map of its actors and their assigned vnodes.
+/// A `BTreeMap<W, BTreeMap<A, Vec<V>>>` mapping each worker to its map of actors and their assigned vnodes.
+/// - Only workers with at least one actor appear in the result.
+/// - Each actor receives at least one vnode (invariant).
 ///
 /// # Errors
-/// Returns an error if `actors.len() > virtual_nodes.len()`, since each actor must receive at least one vnode.
+/// - Returns an error if `actors` is empty or `virtual_nodes` is empty.
+/// - Returns an error if `actors.len() > virtual_nodes.len()`, since each actor must receive at least one vnode.
+///
+/// # Complexity
+/// Runs in **O((W + A + V) · log W + V · W)** time:
+/// - Actor → Worker assignment is O(A · W) via weighted rendezvous + O(W + A) map operations.
+/// - VNode → Worker assignment is O(V · W) plus quota computation O(W log W).
+/// - VNode → Actor partition is O(V).
 ///
 /// # Example
 /// ```rust
 /// # use std::collections::BTreeMap;
 /// # use std::num::NonZeroUsize;
+/// # use risingwave_meta::stream::{assign_hierarchical, BalancedBy, CapacityMode};
 ///
-/// # use crate::risingwave_meta::stream::assign_hierarchical;
-/// # use crate::risingwave_meta::stream::BalancedBy;
+/// // Define two workers with numeric IDs and weights
+/// let mut workers: BTreeMap<u8, NonZeroUsize> = BTreeMap::new();
+/// workers.insert(1, NonZeroUsize::new(2).unwrap());
+/// workers.insert(2, NonZeroUsize::new(3).unwrap());
 ///
-/// let mut workers = BTreeMap::new();
-/// workers.insert("w1", NonZeroUsize::new(2).unwrap());
-/// workers.insert("w2", NonZeroUsize::new(3).unwrap());
+/// // Actors also identified by numbers
+/// let actors: Vec<u16> = vec![10, 20, 30];
 ///
-/// let actors = vec!["a1", "a2", "a3"];
-/// let vnodes = (0..9).collect::<Vec<_>>();
+/// // Virtual nodes are simple 0–8
+/// let vnodes: Vec<u16> = (0..9).collect();
 ///
-/// // Balance vnodes by raw worker weight, salt = 7
 /// let assignment = assign_hierarchical(
 ///     &workers,
 ///     &actors,
 ///     &vnodes,
-///     7u8,
-///     BalancedBy::RawWorkerWeights,
+///     0u8,                          // salt
+///     CapacityMode::Weighted,       // actor -> worker mode
+///     BalancedBy::RawWorkerWeights, // vnode -> worker mode
 /// )
 /// .unwrap();
 ///
-/// for (worker, actor_map) in assignment {
-///     println!("Worker {}: {:?}", worker, actor_map);
+/// for (worker_id, actor_map) in assignment {
+///     println!("Worker {}:", worker_id);
+///     for (actor_id, vn_list) in actor_map {
+///         println!("  Actor {} -> {:?}", actor_id, vn_list);
+///     }
 /// }
 /// ```
+///
+/// # Algorithm
+///
+/// 1. **Actors → Workers**
+///    - Use weighted or unbounded rendezvous hashing to assign each actor to exactly one worker,
+///      based on `actor_capacity_mode` and `workers` weights.
+///    - Build `actor_to_worker: BTreeMap<W, Vec<A>>`.
+///
+/// 2. **VNodes → Workers**
+///    - If `RawWorkerWeights`: compute per-worker quotas with `compute_worker_quotas`, ensuring
+///      each active worker’s quota ≥ its actor count and quotas sum = total vnodes.
+///    - If `ActorCounts`: set each worker’s weight = its actor count.
+///    - Run `assign_items_weighted_with_scale_fn` on vnodes vs. the computed weights,
+///      yielding `vnode_to_worker: BTreeMap<W, Vec<V>>`.
+///
+/// 3. **VNodes → Actors**
+///    - For each worker, take its vnode list and assign them to actors in simple round-robin:
+///      iterate vnodes in order, dispatching index `% actor_list.len()`.
+///    - Collect into final `BTreeMap<W, BTreeMap<A, Vec<V>>>`.
 pub fn assign_hierarchical<W, A, V, S>(
     workers: &BTreeMap<W, NonZeroUsize>,
     actors: &[A],
     virtual_nodes: &[V],
     salt: S,
+    actor_capacity_mode: CapacityMode,
     balanced_by: BalancedBy,
-) -> Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
+) -> anyhow::Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
 where
     W: Ord + Hash + Eq + Copy + Clone + Debug,
     A: Ord + Hash + Eq + Copy + Clone + Debug,
     V: Hash + Eq + Copy + Clone + Debug,
     S: Hash + Copy,
 {
+    if actors.is_empty() {
+        return Err(anyhow!("no actors to assign"));
+    }
+
+    if virtual_nodes.is_empty() {
+        return Err(anyhow!("no vnodes to assign"));
+    }
+
     // Validate input: ensure vnode count can cover all actors
     if actors.len() > virtual_nodes.len() {
         return Err(anyhow!(
@@ -608,858 +377,530 @@ where
         ));
     }
 
+    let actor_capacity_fn = match actor_capacity_mode {
+        CapacityMode::Weighted => weighted_scale,
+        CapacityMode::Unbounded => unbounded_scale,
+    };
+
     // Distribute actors across workers based on their weight
-    let actor_to_worker: BTreeMap<W, Vec<A>> = assign_items_weighted(workers, actors, salt);
+    let actor_to_worker: BTreeMap<W, Vec<A>> =
+        assign_items_weighted_with_scale_fn(workers, actors, salt, actor_capacity_fn);
 
     // Build unit-weight map for active workers (those with assigned actors)
-    let mut worker_weights: BTreeMap<W, NonZeroUsize> = BTreeMap::new();
+    let mut active_worker_weights: BTreeMap<W, NonZeroUsize> = BTreeMap::new();
 
     match balanced_by {
         BalancedBy::RawWorkerWeights => {
             // Worker oriented: balanced by raw worker weights
+            let mut actor_counts: HashMap<W, usize> = HashMap::new();
             for (&worker, actor_list) in &actor_to_worker {
                 if !actor_list.is_empty() {
                     let worker_weight = workers.get(&worker).expect("Worker should exist");
-                    worker_weights.insert(worker, *worker_weight);
+                    active_worker_weights.insert(worker, *worker_weight);
+                    actor_counts.insert(worker, actor_list.len());
                 }
             }
+
+            // Recalculate the worker weight to prevent actors from being assigned to vnode.
+            active_worker_weights = compute_worker_quotas(
+                &active_worker_weights,
+                &actor_counts,
+                virtual_nodes.len(),
+                salt,
+            );
         }
         BalancedBy::ActorCounts => {
             // Actor oriented: balanced by actor counts
             for (&worker, actor_list) in &actor_to_worker {
-                if let Some(worker_weight) = NonZeroUsize::new(actor_list.len()) {
-                    worker_weights.insert(worker, worker_weight);
-                }
+                active_worker_weights.insert(worker, NonZeroUsize::new(actor_list.len()).unwrap());
             }
         }
     }
 
     // Distribute vnodes evenly among the active workers
-    let vnode_to_worker: BTreeMap<W, Vec<V>> =
-        assign_items_weighted(&worker_weights, virtual_nodes, salt);
+    let vnode_to_worker: BTreeMap<W, Vec<V>> = assign_items_weighted_with_scale_fn(
+        &active_worker_weights,
+        virtual_nodes,
+        salt,
+        weighted_scale,
+    );
 
     // Assign each worker's vnodes to its actors in a round-robin fashion
-    let mut result = BTreeMap::new();
+    let mut assignment = BTreeMap::new();
     for (worker, actor_list) in actor_to_worker {
         let assigned_vnodes = vnode_to_worker.get(&worker).cloned().unwrap_or_default();
-        assert!(!assigned_vnodes.is_empty());
+
+        // Actors and vnodes can only both be empty at the same time or both be non-empty at the same time.
+        assert_eq!(
+            assigned_vnodes.is_empty(),
+            actor_list.is_empty(),
+            "Invariant violation: empty actor list should have empty vnodes"
+        );
+
+        debug_assert!(
+            assigned_vnodes.len() >= actor_list.len(),
+            "Invariant violation: assigned vnodes should be at least as many as actors"
+        );
+
+        // Within the same worker, use a simple round-robin approach to distribute vnodes relatively evenly among actors.
         let mut actor_map = BTreeMap::new();
         for (index, vnode) in assigned_vnodes.into_iter().enumerate() {
             let actor = actor_list[index % actor_list.len()];
             actor_map.entry(actor).or_insert(Vec::new()).push(vnode);
         }
-        result.insert(worker, actor_map);
+        assignment.insert(worker, actor_map);
     }
 
-    Ok(result)
+    Ok(assignment)
 }
+
+/// Computes per-worker VNode quotas based on actor counts and worker weights.
+///
+/// This function allocates virtual nodes to workers such that:
+/// - Each active worker receives at least as many virtual nodes as it has actors (`base_quota`).
+/// - The remaining virtual nodes (`extra_vnodes`) are distributed proportionally to the original worker weights.
+/// - Deterministic tie-breaking on equal remainders uses a hash of (`salt`, `worker_id`).
+///
+/// # Type Parameters
+/// - `W`: Worker identifier type. Must implement `Ord`, `Copy`, `Hash`, `Eq`, and `Debug`.
+/// - `S`: Salt type. Used for deterministic hashing. Must implement `Hash` and `Copy`.
+///
+/// # Parameters
+/// - `workers`: A `BTreeMap` mapping each worker ID to its non-zero weight (`NonZeroUsize`).
+/// - `actor_counts`: A `HashMap` mapping each worker ID to the number of actors assigned.
+/// - `total_vnodes`: The total number of virtual nodes to distribute across all active workers.
+/// - `salt`: A salt value for deterministic tie-breaking in remainder sorting.
+///
+/// # Returns
+/// A `BTreeMap` from worker ID to its allocated quota (`NonZeroUsize`), such that the sum of all quotas equals `total_vnodes`.
+///
+/// # Panics
+/// Panics if any computed quota is zero, which should not occur when `total_vnodes >= sum(actor_counts)`.
+///
+/// # Algorithm
+/// 1. Compute `base_total` as the sum of all actor counts.
+/// 2. Compute `extra_vnodes = total_vnodes - base_total`.
+/// 3. For each active worker:
+///    a. Set `base_quota` equal to its actor count.
+///    b. Compute `ideal_extra = extra_vnodes * weight / total_weight`.
+///    c. Record `extra_floor = floor(ideal_extra)` and `extra_remainder = ideal_extra % total_weight`.
+/// 4. Sort workers by descending `extra_remainder`; tie-break by `stable_hash((salt, worker_id))` ascending.
+/// 5. Distribute the remaining slots (`extra_vnodes - sum(extra_floor)`) by incrementing `extra_floor` for the top workers.
+/// 6. Final quota for each worker is `base_quota + extra_floor`.
+pub fn compute_worker_quotas<W, S>(
+    workers: &BTreeMap<W, NonZeroUsize>,
+    actor_counts: &HashMap<W, usize>,
+    total_vnodes: usize,
+    salt: S,
+) -> BTreeMap<W, NonZeroUsize>
+where
+    W: Ord + Copy + Hash + Eq + Debug,
+    S: Hash + Copy,
+{
+    let base_total: usize = actor_counts.values().sum();
+    let extra_vnodes = total_vnodes - base_total;
+
+    // Quota calculation is only performed for Workers with actors.
+    let active_workers: Vec<W> = actor_counts.keys().copied().collect();
+    let total_weight: u128 = active_workers
+        .iter()
+        .map(|&worker_id| workers[&worker_id].get() as u128)
+        .sum();
+
+    // Temporary structure: stores calculation information
+    struct QuotaInfo<W> {
+        worker_id: W,
+        base_quota: usize,
+        extra_floor: usize,
+        extra_remainder: u128,
+    }
+
+    // Preliminary calculation of floor and remainder
+    let mut quota_list: Vec<QuotaInfo<W>> = active_workers
+        .into_iter()
+        .map(|worker_id| {
+            let base_quota = actor_counts[&worker_id];
+            let weight = workers[&worker_id].get() as u128;
+            let ideal_extra = extra_vnodes as u128 * weight;
+            let extra_floor = (ideal_extra / total_weight) as usize;
+            let extra_remainder = ideal_extra % total_weight;
+            QuotaInfo {
+                worker_id,
+                base_quota,
+                extra_floor,
+                extra_remainder,
+            }
+        })
+        .collect();
+
+    // Distribute the remaining slots (sorted by remainder, the first N get +1)
+    let used_extra: usize = quota_list.iter().map(|quota| quota.extra_floor).sum();
+    let remaining_slots = extra_vnodes - used_extra;
+    quota_list.sort_by(|a, b| {
+        // First, sort by remainder in descending order.
+        b.extra_remainder
+            .cmp(&a.extra_remainder)
+            // If remainders are the same, then sort by the hash value of (salt, worker_id) in ascending order.
+            .then_with(|| stable_hash(&(salt, a.worker_id)).cmp(&stable_hash(&(salt, b.worker_id))))
+    });
+    for info in quota_list.iter_mut().take(remaining_slots) {
+        info.extra_floor += 1;
+    }
+
+    // Construct the final quotas
+    let mut quotas = BTreeMap::new();
+    for info in quota_list {
+        let total = info.base_quota + info.extra_floor;
+        quotas.insert(info.worker_id, NonZeroUsize::new(total).unwrap());
+    }
+    quotas
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::num::NonZeroUsize;
 
     use super::*;
 
-    const SALT_FOR_TEST: u64 = 42;
-
-    macro_rules! nz {
-        ($e:expr) => {
-            NonZeroUsize::new($e).unwrap()
-        };
+    /// Always returns a scale factor of 1.0 (no-op scaling)
+    fn unit_scale<C, I>(_: &BTreeMap<C, NonZeroUsize>, _: &[I]) -> Option<f64> {
+        Some(1.0)
     }
 
     #[test]
-    fn evenly_distributes_equal_weights() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(1, nz!(1));
-        containers.insert(2, nz!(1));
-        containers.insert(3, nz!(1));
-        let items: Vec<u32> = (0..9).collect();
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        for (&c, v) in &result {
-            assert_eq!(v.len(), 3, "Container {:?} expected 3 items", c);
-        }
-    }
-
-    #[test]
-    fn respects_weight_ratios() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(10, nz!(1));
-        containers.insert(20, nz!(3));
-        let items: Vec<u32> = (0..40).collect();
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let c1 = result.get(&10).unwrap().len();
-        let c2 = result.get(&20).unwrap().len();
-        assert!(
-            c2 > c1 * 2 && c2 < c1 * 4,
-            "Weight ratio violated: c1={} c2={}",
-            c1,
-            c2
-        );
-    }
-
-    #[test]
-    fn handles_empty_inputs() {
-        let empty: BTreeMap<u32, NonZeroUsize> = BTreeMap::new();
+    fn empty_containers_or_items_yields_empty_map() {
+        let empty_containers: BTreeMap<&str, NonZeroUsize> = BTreeMap::new();
         let items = vec![1, 2, 3];
-        assert!(assign_items_weighted(&empty, &items, SALT_FOR_TEST).is_empty());
-
-        let mut one: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        one.insert(42, nz!(10));
-        let none: Vec<u32> = Vec::new();
-        let result = assign_items_weighted(&one, &none, SALT_FOR_TEST);
-        assert_eq!(result.get(&42).unwrap().len(), 0);
-    }
-
-    #[test]
-    fn scale_factor_increases_capacity() {
-        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
-        containers.insert('A', nz!(1));
-        containers.insert('B', nz!(1));
-        let items: Vec<u32> = (0..4).collect();
         let result =
-            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
-                Some(2.0)
-            });
-        assert_eq!(
-            result.get(&'A').unwrap().len() + result.get(&'B').unwrap().len(),
-            4
+            assign_items_weighted_with_scale_fn(&empty_containers, &items, 0u8, unit_scale);
+        assert!(
+            result.is_empty(),
+            "Expected empty map when containers empty"
         );
+
+        let mut containers = BTreeMap::new();
+        containers.insert("c1", NonZeroUsize::new(1).unwrap());
+        let empty_items: Vec<i32> = Vec::new();
+        let result2 =
+            assign_items_weighted_with_scale_fn(&containers, &empty_items, 0u8, unit_scale);
+        assert!(result2.is_empty(), "Expected empty map when items empty");
     }
 
     #[test]
-    fn exact_quota_match_for_small_weights() {
-        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
-        containers.insert('A', nz!(1));
-        containers.insert('B', nz!(2));
-        let items: Vec<u8> = (0..3).collect();
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let a_count = result.get(&'A').unwrap().len();
-        let b_count = result.get(&'B').unwrap().len();
-        assert_eq!(a_count, 1, "Expected A to get exactly 1 item");
-        assert_eq!(b_count, 2, "Expected B to get exactly 2 items");
+    fn single_container_receives_all_items() {
+        let mut containers = BTreeMap::new();
+        containers.insert("only", NonZeroUsize::new(5).unwrap());
+        let items = vec![10, 20, 30];
+
+        let assignment = assign_items_weighted_with_scale_fn(&containers, &items, 1u8, unit_scale);
+
+        assert_eq!(assignment.len(), 1, "Only one container should be present");
+        let assigned = &assignment[&"only"];
+        assert_eq!(assigned, &items, "Single container should get all items");
     }
 
     #[test]
-    fn handles_more_containers_than_items() {
-        let mut containers: BTreeMap<&str, NonZeroUsize> = BTreeMap::new();
-        containers.insert("X", nz!(1));
-        containers.insert("Y", nz!(1));
-        containers.insert("Z", nz!(1));
-        let items = vec![100, 200];
-        let result = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let non_empty = result.values().filter(|v| !v.is_empty()).count();
-        assert_eq!(
-            non_empty, 2,
-            "Exactly two containers should receive an item"
-        );
-        let zero = result.values().filter(|v| v.is_empty()).count();
-        assert_eq!(zero, 1, "Exactly one container should receive zero items");
+    fn equal_weights_divisible_split_evenly() {
+        let mut containers = BTreeMap::new();
+        containers.insert("A", NonZeroUsize::new(1).unwrap());
+        containers.insert("B", NonZeroUsize::new(1).unwrap());
+        let items = vec![1, 2, 3, 4];
+
+        let result = assign_items_weighted_with_scale_fn(&containers, &items, 2u8, unit_scale);
+        let a_count = result[&"A"].len();
+        let b_count = result[&"B"].len();
+        assert_eq!(a_count, 2, "Container A should receive 2 items");
+        assert_eq!(b_count, 2, "Container B should receive 2 items");
+        assert_eq!(a_count + b_count, items.len(), "All items must be assigned");
     }
 
     #[test]
-    fn deterministic_across_invocations() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(10, nz!(3));
-        containers.insert(20, nz!(5));
-        let items: Vec<i32> = (0..20).collect();
-        let first = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let second = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        assert_eq!(first, second, "Assignment must be deterministic");
-    }
-
-    #[test]
-    fn scale_less_than_one_behaves_as_one() {
-        let mut containers: BTreeMap<char, NonZeroUsize> = BTreeMap::new();
-        containers.insert('A', nz!(1));
-        containers.insert('B', nz!(1));
-        let items: Vec<u8> = (0..6).collect();
-        let default = assign_items_weighted(&containers, &items, SALT_FOR_TEST);
-        let scaled_down =
-            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
-                Some(0.5)
-            });
-        assert_eq!(default, scaled_down, "scale < 1 should not alter quotas");
-    }
-
-    #[test]
-    fn scale_factor_limits_are_respected() {
-        let mut containers: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        containers.insert(1, nz!(1));
-        containers.insert(2, nz!(1));
-        let items: Vec<u32> = (0..4).collect();
-        let result =
-            assign_items_weighted_with_scale_fn(&containers, &items, SALT_FOR_TEST, |_, _| {
-                Some(1.5)
-            });
-        for (&c, v) in &result {
-            assert!(
-                v.len() <= 3,
-                "Container {:?} exceeded scaled quota of 3, got {}",
-                c,
-                v.len()
-            );
-        }
-        let total_assigned: usize = result.values().map(|v| v.len()).sum();
-        assert_eq!(total_assigned, 4, "All items should be assigned");
-    }
-
-    #[test]
-    fn empty_inputs_return_empty_vectors() {
-        let empty: BTreeMap<u32, NonZeroUsize> = BTreeMap::new();
+    fn equal_weights_non_divisible_split_remainder_assigned() {
+        let mut containers = BTreeMap::new();
+        containers.insert("X", NonZeroUsize::new(1).unwrap());
+        containers.insert("Y", NonZeroUsize::new(1).unwrap());
         let items = vec![1, 2, 3];
-        assert!(assign_items_weighted(&empty, &items, SALT_FOR_TEST).is_empty());
 
-        let mut one: BTreeMap<usize, NonZeroUsize> = BTreeMap::new();
-        one.insert(99, nz!(5));
-        let none: Vec<i32> = Vec::new();
-        let result = assign_items_weighted(&one, &none, SALT_FOR_TEST);
-        assert_eq!(result.get(&99).unwrap().len(), 0);
-    }
-}
-
-#[cfg(test)]
-mod test_worker_oriented {
-    use std::collections::{BTreeMap, HashSet};
-    use std::num::NonZeroUsize;
-
-    use super::*;
-
-    fn build_hierarchy(
-        worker_count: usize,
-        actor_count: usize,
-        vnode_count: usize,
-    ) -> BTreeMap<i32, BTreeMap<i32, Vec<i32>>> {
-        let workers: BTreeMap<i32, NonZeroUsize> = (0..worker_count)
-            .map(|i| (i as i32, NonZeroUsize::new(1).unwrap()))
-            .collect();
-        let actors: Vec<i32> = (0..actor_count).map(|i| i as i32).collect();
-        let vnodes: Vec<i32> = (0..vnode_count).map(|i| i as i32).collect();
-        assign_hierarchical_worker_oriented(&workers, &actors, &vnodes, 0_i32)
-            .unwrap_or_else(|e| panic!("build_hierarchy failed: {}", e))
-    }
-
-    #[test]
-    fn test_balanced_small() {
-        let hierarchy = build_hierarchy(4, 10, 16);
-
-        let vnode_counts: Vec<usize> = hierarchy
-            .values()
-            .map(|actor_map| actor_map.values().map(Vec::len).sum())
-            .collect();
-        let min_v = *vnode_counts.iter().min().unwrap();
-        let max_v = *vnode_counts.iter().max().unwrap();
+        let result = assign_items_weighted_with_scale_fn(&containers, &items, 5u8, unit_scale);
+        let x_count = result.get(&"X").map(Vec::len).unwrap_or(0);
+        let y_count = result.get(&"Y").map(Vec::len).unwrap_or(0);
+        assert_eq!(x_count + y_count, items.len(), "All items must be assigned");
         assert!(
-            max_v - min_v <= 1,
-            "Vnodes per worker not balanced: min={}, max={}",
-            min_v,
-            max_v
-        );
-
-        for actor_map in hierarchy.values() {
-            let counts: Vec<usize> = actor_map.values().map(Vec::len).collect();
-            let min_a = *counts.iter().min().unwrap();
-            let max_a = *counts.iter().max().unwrap();
-            assert!(
-                max_a - min_a <= 1,
-                "Vnodes per actor not balanced: min={}, max={}",
-                min_a,
-                max_a
-            );
-        }
-
-        let assigned: HashSet<i32> = hierarchy
-            .values()
-            .flat_map(|actor_map| actor_map.values().flatten().cloned())
-            .collect();
-        assert_eq!(assigned.len(), 16, "Some vnodes were not assigned");
-    }
-
-    fn check_balanced(worker_count: usize, actor_count: usize, vnode_count: usize) {
-        let workers: BTreeMap<i32, NonZeroUsize> = (0..worker_count)
-            .map(|i| (i as i32, NonZeroUsize::new(1).unwrap()))
-            .collect();
-        let actors: Vec<i32> = (0..actor_count).map(|i| i as i32).collect();
-        let vnodes: Vec<i32> = (0..vnode_count).map(|i| i as i32).collect();
-
-        check_worker_vnode_balance(&workers, &actors, &vnodes);
-    }
-
-    #[test]
-    fn test_various_scenarios() {
-        // (worker_count, actor_count, vnode_count)
-        let scenarios = vec![
-            (1, 1, 1),
-            (1, 1, 5),
-            (5, 1, 5),
-            (5, 1, 10),
-            (5, 5, 5),
-            (5, 5, 10),
-            (5, 10, 10),
-            (5, 10, 20),
-            (10, 1, 10),
-            (10, 5, 10),
-            (10, 5, 20),
-            (10, 10, 20),
-            (10, 20, 20),
-            (3, 2, 3),
-            (3, 3, 5),
-            (4, 3, 4),
-            (4, 10, 40),
-            (20, 10, 20),
-        ];
-
-        for &(w, a, v) in &scenarios {
-            println!(
-                "worker count: {}, actor count: {}, vnode count: {}",
-                w, a, v
-            );
-            check_balanced(w, a, v);
-        }
-
-        let bad = (5, 10, 5);
-        assert!(
-            assign_hierarchical_worker_oriented(
-                &BTreeMap::from_iter((0..bad.0).map(|i| (i, NonZeroUsize::new(1).unwrap()))),
-                &(0..bad.1).collect::<Vec<_>>(),
-                &(0..bad.2).collect::<Vec<_>>(),
-                0_i32
-            )
-            .is_err(),
-            "Expected error when actors > vnodes"
+            (x_count == 2 && y_count == 1) || (x_count == 1 && y_count == 2),
+            "One container should get 2 items, the other 1, but got {} and {}",
+            x_count,
+            y_count
         );
     }
 
     #[test]
-    fn test_enum_scenarios() {
-        for worker_count in 1..20 {
-            let vnode_count = 256;
-            for actor_count in 1..=vnode_count {
-                check_balanced(worker_count, actor_count, vnode_count);
-            }
-        }
+    fn unequal_weights_respect_base_quota() {
+        let mut containers = BTreeMap::new();
+        containers.insert("low", NonZeroUsize::new(1).unwrap());
+        containers.insert("high", NonZeroUsize::new(3).unwrap());
+        let items = vec![100, 200, 300, 400];
+
+        let result = assign_items_weighted_with_scale_fn(&containers, &items, 7u8, unit_scale);
+        let low_count = result[&"low"].len();
+        let high_count = result[&"high"].len();
+        // low weight should get 1, high weight 3
+        assert_eq!(low_count, 1, "Low-weight container should get 1 item");
+        assert_eq!(high_count, 3, "High-weight container should get 3 items");
     }
 
     #[test]
-    fn test_worker_eq_actor() {
-        for worker_count in 1..200 {
-            let vnode_count = 256;
-            let actor_count = worker_count;
-            check_balanced(worker_count, actor_count, vnode_count);
-        }
+    fn deterministic_given_same_salt() {
+        let mut containers = BTreeMap::new();
+        containers.insert("A", NonZeroUsize::new(2).unwrap());
+        containers.insert("B", NonZeroUsize::new(1).unwrap());
+        let items = vec![5, 6, 7, 8];
+
+        let out1 = assign_items_weighted_with_scale_fn(&containers, &items, 42u8, unit_scale);
+        let out2 = assign_items_weighted_with_scale_fn(&containers, &items, 42u8, unit_scale);
+        assert_eq!(out1, out2, "Same salt should produce identical assignments");
     }
 
     #[test]
-    fn test_unbalance() {
-        for weight in 1..1024 {
-            let actor_count = 2;
-            let vnode_count = 50;
-
-            let mut workers: BTreeMap<i32, NonZeroUsize> = BTreeMap::new();
-            workers.insert(1, NonZeroUsize::new(weight).unwrap());
-            workers.insert(1, NonZeroUsize::new(1).unwrap());
-
-            let actors: Vec<i32> = (0..actor_count).collect();
-            let vnodes: Vec<i32> = (0..vnode_count).collect();
-
-            check_worker_vnode_balance(&workers, &actors, &vnodes);
-        }
-    }
-
-    fn check_worker_vnode_balance(
-        workers: &BTreeMap<i32, NonZeroUsize>,
-        actors: &[i32],
-        vnodes: &[i32],
-    ) {
-        let worker_count = workers.len();
-        let actor_count = actors.len();
-        let vnode_count = vnodes.len();
-
-        let hierarchy = assign_hierarchical_worker_oriented(workers, actors, vnodes, 42_i32)
-            .expect("should succeed");
-
-        let hierarchy: HashMap<_, _> = hierarchy
-            .into_iter()
-            .filter(|(_, v)| !v.is_empty())
-            .collect();
-
-        let vnode_count_per_worker: Vec<usize> = hierarchy
-            .values()
-            .map(|m| m.values().map(Vec::len).sum())
-            .collect();
-
-        let min_count = *vnode_count_per_worker.iter().min().unwrap_or(&0);
-        let max_count = *vnode_count_per_worker.iter().max().unwrap_or(&0);
-        assert!(
-            max_count - min_count <= 1,
-            "Vnodes per worker not balanced (workers={}, vnodes={}): min={}, max={}",
-            worker_count,
-            vnode_count,
-            min_count,
-            max_count
-        );
-
-        let assigned_actors: HashSet<i32> =
-            hierarchy.values().flat_map(|m| m.keys().cloned()).collect();
-        assert_eq!(
-            assigned_actors.len(),
-            actor_count,
-            "Some actors were not assigned (workers={}, actors={})",
-            worker_count,
-            actor_count
-        );
-
-        let assigned_vnodes: HashSet<i32> = hierarchy
-            .values()
-            .flat_map(|m| m.values().flatten().cloned())
-            .collect();
-        assert_eq!(
-            assigned_vnodes.len(),
-            vnode_count,
-            "Some vnodes were not assigned (workers={}, vnodes={})",
-            worker_count,
-            vnode_count
-        );
-    }
-}
-
-#[cfg(test)]
-mod test_actor_oriented {
-    use std::collections::{BTreeMap, HashSet};
-    use std::num::NonZeroUsize;
-
-    use anyhow::Result;
-
-    use super::*;
-
-    /// Helper: collect all actors assigned exactly once
-    fn collect_assigned_actors<W, A, V>(map: &BTreeMap<W, BTreeMap<A, Vec<V>>>) -> Vec<A>
-    where
-        W: Eq + std::hash::Hash,
-        A: Eq + std::hash::Hash + Copy,
-    {
-        map.values()
-            .flat_map(|actor_map| actor_map.keys().cloned())
-            .collect()
-    }
-
-    /// Helper: collect all vnodes assigned exactly once
-    fn collect_assigned_vnodes<W, A, V>(map: &BTreeMap<W, BTreeMap<A, Vec<V>>>) -> Vec<V>
-    where
-        W: Eq + std::hash::Hash,
-        A: Eq + std::hash::Hash,
-        V: Eq + std::hash::Hash + Copy,
-    {
-        map.values()
-            .flat_map(|actor_map| actor_map.values().flat_map(|vns| vns.iter().cloned()))
-            .collect()
-    }
-
-    #[test]
-    fn test_balanced_equal_weights() -> Result<()> {
-        let workers = BTreeMap::from([
-            ("w1", NonZeroUsize::new(1).unwrap()),
-            ("w2", NonZeroUsize::new(1).unwrap()),
-        ]);
-        let actors = vec!["a1", "a2", "a3", "a4"];
-        let vnodes: Vec<_> = (1..=8).collect();
-
-        let result = assign_hierarchical_actor_oriented(&workers, &actors, &vnodes, 42_u64)?;
-
-        // 1. The difference in the number of actors assigned to each worker should be ≤ 1
-        let actor_counts: Vec<_> = result.values().map(|actor_map| actor_map.len()).collect();
-        let max_a = *actor_counts.iter().max().unwrap();
-        let min_a = *actor_counts.iter().min().unwrap();
-        assert!(max_a - min_a <= 1, "actors per worker not balanced");
-
-        // 2. All actors are assigned without any duplicates.
-        let assigned_actors = collect_assigned_actors(&result);
-        let unique_actors: HashSet<_> = assigned_actors.iter().collect();
-        assert_eq!(
-            unique_actors.len(),
-            actors.len(),
-            "actor missing or duplicated"
-        );
-
-        // 3. The difference in the number of vnodes on each worker with vnodes should be ≤ 1.
-        let vnode_counts_per_worker: Vec<_> = result
-            .values()
-            .map(|actor_map| actor_map.values().map(Vec::len).sum::<usize>())
-            .collect();
-        let max_vw = *vnode_counts_per_worker.iter().max().unwrap();
-        let min_vw = *vnode_counts_per_worker.iter().min().unwrap();
-        assert!(max_vw - min_vw <= 1, "vnodes per worker not balanced");
-
-        // 4. All vnodes are assigned without any duplicates.
-        let assigned_vnodes = collect_assigned_vnodes(&result);
-        assert_eq!(
-            assigned_vnodes.len(),
-            vnodes.len(),
-            "some vnodes missing or extra"
-        );
-        let unique_vnodes: HashSet<_> = assigned_vnodes.iter().collect();
-        assert_eq!(unique_vnodes.len(), vnodes.len(), "vnodes duplicated");
-
-        // 5. The difference in vnode allocation between actors should be ≤ 1, and each actor must have at least 1 vnode.
-        let vnode_counts_per_actor: Vec<_> = result
-            .values()
-            .flat_map(|actor_map| actor_map.values().map(Vec::len))
-            .collect();
-        let max_va = *vnode_counts_per_actor.iter().max().unwrap();
-        let min_va = *vnode_counts_per_actor.iter().min().unwrap();
-        assert!(max_va - min_va <= 1, "vnodes per actor not balanced");
-        assert!(min_va >= 1, "some actor got zero vnodes");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_odd_numbers_distribution() -> Result<()> {
-        let workers = BTreeMap::from([
-            ("w1", NonZeroUsize::new(1).unwrap()),
-            ("w2", NonZeroUsize::new(1).unwrap()),
-        ]);
-        let actors = vec!["x", "y", "z"];
-        let vnodes: Vec<_> = (1..=5).collect();
-
-        let result = assign_hierarchical_actor_oriented(&workers, &actors, &vnodes, 99_u64)?;
-
-        // actor per worker: 3 actors, 2 workers → {2,1} 差 1
-        let actor_counts: Vec<_> = result.values().map(|m| m.len()).collect();
-        let max_a = *actor_counts.iter().max().unwrap();
-        let min_a = *actor_counts.iter().min().unwrap();
-        assert_eq!(max_a - min_a, 1, "unexpected actor balance");
-
-        // vnodes per worker: 5 vnodes, 2 workers → 差 1
-        let vnode_counts: Vec<_> = result
-            .values()
-            .map(|m| m.values().map(Vec::len).sum::<usize>())
-            .collect();
-        let max_vw = *vnode_counts.iter().max().unwrap();
-        let min_vw = *vnode_counts.iter().min().unwrap();
-        assert_eq!(max_vw - min_vw, 1, "unexpected vnode-per-worker balance");
-
-        // Each actor must have at least 1 vnode, and the difference in vnodes among actors should be ≤ 1.
-        let vnode_per_actor: Vec<_> = result
-            .values()
-            .flat_map(|m| m.values().map(Vec::len))
-            .collect();
-        let max_va = *vnode_per_actor.iter().max().unwrap();
-        let min_va = *vnode_per_actor.iter().min().unwrap();
-        assert!(min_va >= 1, "some actor got zero vnodes");
-        assert!(max_va - min_va <= 1, "unexpected vnode-per-actor balance");
-
-        // All vnodes are assigned without any duplicates.
-        let assigned: Vec<_> = collect_assigned_vnodes(&result);
-        let unique: HashSet<_> = assigned.iter().collect();
-        assert_eq!(assigned.len(), vnodes.len());
-        assert_eq!(unique.len(), vnodes.len());
-
-        Ok(())
-    }
-
-    /// Helper to unwrap the hierarchy or panic in tests
-    fn build_hierarchy(
-        workers: &BTreeMap<i32, NonZeroUsize>,
-        actors: &[i32],
-        vnodes: &[i32],
-        salt: i32,
-    ) -> BTreeMap<i32, BTreeMap<i32, Vec<i32>>> {
-        assign_hierarchical_actor_oriented(workers, actors, vnodes, salt)
-            .unwrap_or_else(|e| panic!("Failed to build hierarchy: {}", e))
-    }
-
-    #[test]
-    fn actor_distribution_balanced() {
-        let workers = BTreeMap::from([
+    fn test_compute_worker_quotas_equal_weights() {
+        // Three workers, each with weight 1, one actor each, total_vnodes = 6
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![
             (1, NonZeroUsize::new(1).unwrap()),
             (2, NonZeroUsize::new(1).unwrap()),
             (3, NonZeroUsize::new(1).unwrap()),
-        ]);
-        let actors: Vec<i32> = (0..10).collect();
-        let vnodes: Vec<i32> = (0..20).collect();
+        ]
+        .into_iter()
+        .collect();
+        let mut actor_counts = HashMap::new();
+        actor_counts.insert(1, 1);
+        actor_counts.insert(2, 1);
+        actor_counts.insert(3, 1);
+        let total_vnodes = 6;
+        let salt = 42u64;
 
-        let hierarchy = build_hierarchy(&workers, &actors, &vnodes, 0);
-
-        // Check the number of actors assigned to each worker, max - min <= 1.
-        let counts: Vec<usize> = hierarchy
-            .values()
-            .map(|actor_map| actor_map.len())
-            .collect();
-        let min = *counts.iter().min().unwrap();
-        let max = *counts.iter().max().unwrap();
-        assert!(
-            max - min <= 1,
-            "Actor distribution across workers is not balanced: min={}, max={}",
-            min,
-            max
-        );
+        let quotas = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
+        // Each worker should have quota = 2
+        for (&worker_id, &quota) in &quotas {
+            assert_eq!(quota.get(), 2, "Worker {} expected quota 2", worker_id);
+        }
+        // Sum of quotas equals total_vnodes
+        let sum: usize = quotas.values().map(|q| q.get()).sum();
+        assert_eq!(sum, total_vnodes);
     }
 
     #[test]
-    fn vnode_assignment_and_balance() {
-        let workers = BTreeMap::from([
+    fn test_compute_worker_quotas_unequal_weights() {
+        // Two workers: id 1 weight 2, id 2 weight 1, one actor each, total_vnodes = 6
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![
+            (1, NonZeroUsize::new(2).unwrap()),
+            (2, NonZeroUsize::new(1).unwrap()),
+        ]
+        .into_iter()
+        .collect();
+        let mut actor_counts = HashMap::new();
+        actor_counts.insert(1, 1);
+        actor_counts.insert(2, 1);
+        let total_vnodes = 6;
+        let salt = 100u64;
+
+        let quotas = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
+        // Worker 1 should get 4, worker 2 should get 2
+        assert_eq!(quotas[&1].get(), 4);
+        assert_eq!(quotas[&2].get(), 2);
+        // Sum of quotas equals total_vnodes
+        let sum: usize = quotas.values().map(|q| q.get()).sum();
+        assert_eq!(sum, total_vnodes);
+    }
+
+    #[test]
+    fn test_compute_worker_quotas_minimum_base() {
+        // Worker with no actors should not appear in quotas
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![
             (1, NonZeroUsize::new(1).unwrap()),
             (2, NonZeroUsize::new(1).unwrap()),
-        ]);
-        let actors = vec![0, 1, 2, 3];
-        let vnodes: Vec<i32> = (0..8).collect();
+        ]
+        .into_iter()
+        .collect();
+        let mut actor_counts = HashMap::new();
+        actor_counts.insert(1, 2);
+        // worker 2 has zero actors
+        let total_vnodes = 5;
+        let salt = 7u8;
 
-        let hierarchy = build_hierarchy(&workers, &actors, &vnodes, 42);
-
-        // 1) All actors have been assigned.
-        let mut assigned_actors: Vec<i32> = hierarchy
-            .iter()
-            .flat_map(|(_, actor_map)| actor_map.keys().cloned())
-            .collect();
-        assigned_actors.sort_unstable();
-        assigned_actors.dedup();
-        assert_eq!(assigned_actors, actors, "Not all actors were assigned");
-
-        // 2) Each actor must have at least one vnode, and the number of vnodes among actors should be balanced (max - min <= 1).
-        let mut vnode_counts: Vec<usize> = Vec::new();
-        for actor_map in hierarchy.values() {
-            for vns in actor_map.values() {
-                assert!(!vns.is_empty(), "Actor has no vnodes assigned");
-                vnode_counts.push(vns.len());
-            }
-        }
-        let min_v = *vnode_counts.iter().min().unwrap();
-        let max_v = *vnode_counts.iter().max().unwrap();
-        assert!(
-            max_v - min_v <= 1,
-            "VNode distribution among actors not balanced: min={}, max={}",
-            min_v,
-            max_v
-        );
-
-        // 3) The number of vnodes on each worker with vnodes should also be balanced.
-        let worker_vnode_counts: Vec<usize> = hierarchy
-            .values()
-            .map(|actor_map| actor_map.values().map(Vec::len).sum())
-            .collect();
-        let min_wv = *worker_vnode_counts.iter().min().unwrap();
-        let max_wv = *worker_vnode_counts.iter().max().unwrap();
-        assert!(
-            max_wv - min_wv <= 1,
-            "VNode distribution among workers not balanced: min={}, max={}",
-            min_wv,
-            max_wv
-        );
-
-        // 4) No vnodes are missing.
-        let mut all_vnodes: Vec<i32> = hierarchy
-            .values()
-            .flat_map(|actor_map| actor_map.values().cloned())
-            .flatten()
-            .collect();
-        all_vnodes.sort_unstable();
-        all_vnodes.dedup();
-        let mut original = vnodes.clone();
-        original.sort_unstable();
-        assert_eq!(all_vnodes, original, "Some vnodes were not assigned");
-    }
-
-    fn check_hierarchy_balanced(worker_count: usize, actor_count: usize, vnode_count: usize) {
-        // 构造输入
-        let workers: BTreeMap<i32, NonZeroUsize> = (0..worker_count)
-            .map(|i| (i as i32, NonZeroUsize::new(1).unwrap()))
-            .collect();
-        let actors: Vec<i32> = (0..actor_count).map(|i| i as i32).collect();
-        let vnodes: Vec<i32> = (0..vnode_count).map(|i| i as i32).collect();
-        let salt = 0_i32;
-
-        let hierarchy = assign_hierarchical_worker_oriented(&workers, &actors, &vnodes, salt)
-            .expect("assign_hierarchical should succeed");
-
-        println!("h {:#?}", hierarchy);
-
-        // 1. Verify that actors are distributed evenly among workers.
-        let actor_counts: Vec<usize> = hierarchy.values().map(|m| m.len()).collect();
-        let min_actors = *actor_counts.iter().min().unwrap_or(&0);
-        let max_actors = *actor_counts.iter().max().unwrap_or(&0);
-        assert!(
-            max_actors - min_actors <= 1,
-            "Actors per worker not balanced: min={}, max={}",
-            min_actors,
-            max_actors
-        );
-
-        // 2. Verify that vnodes are distributed evenly among workers.
-        let vnode_counts_per_worker: Vec<usize> = hierarchy
-            .values()
-            .map(|m| m.values().map(Vec::len).sum())
-            .collect();
-        let min_vpw = *vnode_counts_per_worker.iter().min().unwrap_or(&0);
-        let max_vpw = *vnode_counts_per_worker.iter().max().unwrap_or(&0);
-        assert!(
-            max_vpw - min_vpw <= 1,
-            "Vnodes per worker not balanced: min={}, max={}",
-            min_vpw,
-            max_vpw
-        );
-
-        // 3. Verify that all vnodes are assigned.
-        let assigned: HashSet<i32> = hierarchy
-            .values()
-            .flat_map(|m| m.values().flatten().cloned())
-            .collect();
-        assert_eq!(
-            assigned.len(),
-            vnode_count,
-            "Some vnodes were not assigned: assigned={}, expected={}",
-            assigned.len(),
-            vnode_count
-        );
+        let quotas = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
+        // Only worker 1 should be present
+        assert_eq!(quotas.len(), 1);
+        // Its quota should equal total_vnodes
+        assert_eq!(quotas[&1].get(), total_vnodes);
     }
 
     #[test]
-    fn test_small_balanced() {
-        check_hierarchy_balanced(3, 5, 8); // 3 workers, 5 actors, 8 vnodes
-    }
-
-    #[test]
-    fn test_medium_balanced() {
-        check_hierarchy_balanced(4, 10, 16); // 4 workers, 10 actors, 16 vnodes
-    }
-
-    #[test]
-    fn test_equal_counts() {
-        check_hierarchy_balanced(5, 5, 5); // 5 workers, 5 actors, 5 vnodes
-    }
-
-    fn check_balanced(worker_count: usize, actor_count: usize, vnode_count: usize) {
-        let workers: BTreeMap<i32, NonZeroUsize> = (0..worker_count)
-            .map(|i| (i as i32, NonZeroUsize::new(1).unwrap()))
-            .collect();
-        let actors: Vec<i32> = (0..actor_count).map(|i| i as i32).collect();
-        let vnodes: Vec<i32> = (0..vnode_count).map(|i| i as i32).collect();
-
-        let hierarchy = assign_hierarchical_actor_oriented(&workers, &actors, &vnodes, 42_i32)
-            .expect("should succeed");
-
-        let hierarchy: HashMap<_, _> = hierarchy
+    #[should_panic]
+    fn test_compute_worker_quotas_invalid_total() {
+        // total_vnodes less than sum of actor_counts should panic
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
             .into_iter()
-            .filter(|(_, v)| !v.is_empty())
             .collect();
+        let mut actor_counts = HashMap::new();
+        actor_counts.insert(1, 3);
+        let total_vnodes = 2; // less than base_total = 3
+        let salt = 0u16;
 
-        println!("result {:?}", hierarchy);
-
-        // 1. Actors are distributed evenly among workers.
-        let actor_per_worker: Vec<usize> = hierarchy.values().map(|m| m.len()).collect();
-        let min_awo = *actor_per_worker.iter().min().unwrap_or(&0);
-        let max_awo = *actor_per_worker.iter().max().unwrap_or(&0);
-        assert!(
-            max_awo - min_awo <= 1,
-            "Actors per worker not balanced (workers={}, actors={}): min={}, max={}",
-            worker_count,
-            actor_count,
-            min_awo,
-            max_awo
-        );
-
-        // 2. Vnodes are distributed evenly among workers.
-        // let vnode_per_worker: Vec<usize> = hierarchy
-        //     .values()
-        //     .map(|m| m.values().map(Vec::len).sum())
-        //     .collect();
-        // let min_vwo = *vnode_per_worker.iter().min().unwrap_or(&0);
-        // let max_vwo = *vnode_per_worker.iter().max().unwrap_or(&0);
-        // assert!(
-        //     max_vwo - min_vwo <= 1,
-        //     "Vnodes per worker not balanced (workers={}, vnodes={}): min={}, max={}",
-        //     worker_count,
-        //     vnode_count,
-        //     min_vwo,
-        //     max_vwo
-        // );
-
-        // 3. Vnodes are distributed evenly among actors.
-        let mut vnode_per_actor = Vec::new();
-        for actor_map in hierarchy.values() {
-            for vns in actor_map.values() {
-                vnode_per_actor.push(vns.len());
-            }
-        }
-        let min_vao = *vnode_per_actor.iter().min().unwrap_or(&0);
-        let max_vao = *vnode_per_actor.iter().max().unwrap_or(&0);
-        assert!(
-            max_vao - min_vao <= 1,
-            "Vnodes per actor not balanced (actors={}, vnodes={}): min={}, max={}",
-            actor_count,
-            vnode_count,
-            min_vao,
-            max_vao
-        );
-
-        // 4. All actors are assigned.
-        let assigned_actors: HashSet<i32> =
-            hierarchy.values().flat_map(|m| m.keys().cloned()).collect();
-        assert_eq!(
-            assigned_actors.len(),
-            actor_count,
-            "Some actors were not assigned (workers={}, actors={})",
-            worker_count,
-            actor_count
-        );
-
-        // 5. All vnodes are assigned.
-        let assigned_vnodes: HashSet<i32> = hierarchy
-            .values()
-            .flat_map(|m| m.values().flatten().cloned())
-            .collect();
-        assert_eq!(
-            assigned_vnodes.len(),
-            vnode_count,
-            "Some vnodes were not assigned (workers={}, vnodes={})",
-            worker_count,
-            vnode_count
-        );
+        // This should panic due to underflow of extra_vnodes
+        let _ = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
     }
 
     #[test]
-    fn test_various_scenarios() {
-        // (worker_count, actor_count, vnode_count)
-        let scenarios = vec![
-            (1, 1, 1),
-            (1, 1, 5),
-            (5, 1, 5),
-            (5, 1, 10),
-            (5, 5, 5),
-            (5, 5, 10),
-            (5, 10, 10),
-            (5, 10, 20),
-            (10, 1, 10),
-            (10, 5, 10),
-            (10, 5, 20),
-            (10, 10, 20),
-            (10, 20, 20),
-            (3, 2, 3),
-            (3, 3, 5),
-            (4, 3, 4),
-            (4, 10, 40),
-            (20, 10, 20),
-        ];
+    fn error_on_empty_actors() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
+            .into_iter()
+            .collect();
+        let actors: Vec<u16> = vec![];
+        let vnodes: Vec<u16> = vec![1, 2];
 
-        for &(w, a, v) in &scenarios {
-            println!(
-                "worker count: {}, actor count: {}, vnode count: {}",
-                w, a, v
-            );
-            check_balanced(w, a, v);
+        let err = assign_hierarchical(
+            &workers,
+            &actors,
+            &vnodes,
+            0u8,
+            CapacityMode::Weighted,
+            BalancedBy::ActorCounts,
+        )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("no actors to assign"));
+    }
+
+    #[test]
+    fn error_on_empty_vnodes() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
+            .into_iter()
+            .collect();
+        let actors: Vec<u16> = vec![10, 20];
+        let vnodes: Vec<u16> = vec![];
+
+        let err = assign_hierarchical(
+            &workers,
+            &actors,
+            &vnodes,
+            1u8,
+            CapacityMode::Unbounded,
+            BalancedBy::RawWorkerWeights,
+        )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("no vnodes to assign"));
+    }
+
+    #[test]
+    fn error_when_more_actors_than_vnodes() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
+            .into_iter()
+            .collect();
+        let actors: Vec<u16> = vec![1, 2, 3];
+        let vnodes: Vec<u16> = vec![100];
+
+        let err = assign_hierarchical(
+            &workers,
+            &actors,
+            &vnodes,
+            7u8,
+            CapacityMode::Weighted,
+            BalancedBy::ActorCounts,
+        )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("exceeds vnode count"));
+    }
+
+    #[test]
+    fn single_worker_all_actors_and_vnodes() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(5).unwrap())]
+            .into_iter()
+            .collect();
+        let actors: Vec<u16> = vec![10, 20, 30];
+        let vnodes: Vec<u16> = vec![100, 200, 300];
+
+        let assignment = assign_hierarchical(
+            &workers,
+            &actors,
+            &vnodes,
+            42u8,
+            CapacityMode::Weighted,
+            BalancedBy::RawWorkerWeights,
+        )
+            .unwrap();
+
+        // Only one worker should appear
+        assert_eq!(assignment.len(), 1);
+        let inner = &assignment[&1u8];
+        // Each actor must get exactly one vnode
+        for &actor in &actors {
+            let assigned = inner.get(&actor).unwrap();
+            assert_eq!(assigned.len(), 1, "Actor {} should have one vnode", actor);
         }
+        // All vnodes assigned
+        let total: usize = inner.values().map(Vec::len).sum();
+        assert_eq!(total, vnodes.len());
+    }
 
-        // Test invalid scenario: actor_count > vnode_count.
-        let bad = (5, 10, 5);
-        assert!(
-            assign_hierarchical_worker_oriented(
-                &BTreeMap::from_iter((0..bad.0).map(|i| (i, NonZeroUsize::new(1).unwrap()))),
-                &(0..bad.1).collect::<Vec<_>>(),
-                &(0..bad.2).collect::<Vec<_>>(),
-                0_i32
-            )
-            .is_err(),
-            "Expected error when actors > vnodes"
-        );
+    #[test]
+    fn two_workers_balanced_by_actorcounts() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![
+            (1, NonZeroUsize::new(1).unwrap()),
+            (2, NonZeroUsize::new(1).unwrap()),
+        ]
+            .into_iter()
+            .collect();
+        let actors: Vec<u16> = vec![10, 20];
+        let vnodes: Vec<u16> = vec![0, 1];
+
+        let assignment = assign_hierarchical(
+            &workers,
+            &actors,
+            &vnodes,
+            5u8,
+            CapacityMode::Weighted,
+            BalancedBy::ActorCounts,
+        )
+            .unwrap();
+
+        // Both workers should appear
+        assert_eq!(assignment.len(), 2);
+        for (&w, inner) in &assignment {
+            // Each worker has exactly one actor
+            assert_eq!(inner.len(), 1, "Worker {} should have one actor", w);
+            // That actor has exactly one vnode
+            let (_, vlist) = inner.iter().next().unwrap();
+            assert_eq!(vlist.len(), 1, "Worker {} actor should have one vnode", w);
+        }
+    }
+
+    #[test]
+    fn rawworkerweights_respects_worker_weight() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![
+            (1, NonZeroUsize::new(1).unwrap()),
+            (2, NonZeroUsize::new(3).unwrap()),
+        ]
+            .into_iter()
+            .collect();
+        let actors: Vec<u16> = vec![10, 20, 30, 40];
+        let vnodes: Vec<u16> = vec![0, 1, 2, 3, 4, 5, 6];
+
+        let assignment = assign_hierarchical(
+            &workers,
+            &actors,
+            &vnodes,
+            9u8,
+            CapacityMode::Weighted,
+            BalancedBy::RawWorkerWeights,
+        )
+            .unwrap();
+
+        let w1_total: usize = assignment.get(&1).unwrap().values().map(Vec::len).sum();
+        let w2_total: usize = assignment.get(&2).unwrap().values().map(Vec::len).sum();
+        // Worker 2 has triple weight, so should get roughly 3/4 of vnodes
+        assert!(w2_total > w1_total, "Worker 2 should receive more vnodes than Worker 1");
+        assert_eq!(w1_total + w2_total, vnodes.len(), "All vnodes must be assigned");
     }
 }
