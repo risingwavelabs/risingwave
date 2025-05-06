@@ -29,6 +29,8 @@ fi
 
 echo "--- Build Rust components"
 
+apt-get install -y libblas-dev liblapack-dev libomp-dev
+
 if [[ "$profile" == "ci-dev" ]]; then
     RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
 else
