@@ -44,6 +44,10 @@ anchors:
         RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
 
 steps:
+  - label: "check ci image"
+    command: "ci/check-ci-image.sh -c"
+  - wait
+
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
     key: "build"

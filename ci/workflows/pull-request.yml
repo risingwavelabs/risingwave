@@ -53,15 +53,8 @@ other-sql-backend: &other-sql-backend
 
 
 steps:
-  - label: "check ci image rebuild"
-    plugins:
-      - monorepo-diff#v1.2.0:
-          diff: "git diff --name-only origin/main"
-          watch:
-            - path: "ci/build-ci-image.sh"
-              config:
-                command: "ci/build-ci-image.sh"
-                label: "ci build images"
+  - label: "check ci image & rebuild if changed"
+    command: "ci/build-ci-image.sh"
   - wait
 
   - label: "build"
