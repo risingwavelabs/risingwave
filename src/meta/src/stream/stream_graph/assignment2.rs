@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::num::NonZeroUsize;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use crate::stream::assign_hierarchical;
-use crate::stream::stream_graph::assignment;
 use crate::stream::stream_graph::assignment::{BalancedBy, CapacityMode};
 
 pub struct Assigner<S> {
