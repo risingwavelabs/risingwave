@@ -37,6 +37,7 @@ use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::MqttCommon;
 use crate::deserialize_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam};
@@ -62,6 +63,12 @@ pub struct MqttConfig {
     // if set, will use a field value as the topic name, if topic is also set it will be used as a fallback
     #[serde(rename = "topic.field")]
     pub topic_field: Option<String>,
+}
+
+impl EnforceSecret for MqttConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        MqttCommon::enforce_one(prop)
+    }
 }
 
 pub enum RowEncoderWrapper {
@@ -112,6 +119,17 @@ pub struct MqttSink {
     format_desc: SinkFormatDesc,
     is_append_only: bool,
     name: String,
+}
+
+impl EnforceSecret for MqttSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            MqttConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 // sink write

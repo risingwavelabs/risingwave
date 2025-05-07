@@ -13,3 +13,4 @@ jsonschema
 google-auth
 google-api-core
 google-cloud-kms
+pulsar-client==3.6.1

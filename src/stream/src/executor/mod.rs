@@ -37,11 +37,13 @@ use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
+use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
-    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
+    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
+    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
+    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
@@ -297,6 +299,8 @@ pub struct AddMutation {
     pub pause: bool,
     /// (`upstream_mv_table_id`,  `subscriber_id`)
     pub subscriptions_to_add: Vec<(TableId, u32)>,
+    /// nodes which should start backfill
+    pub backfill_nodes_to_pause: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -310,9 +314,13 @@ pub enum Mutation {
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     AddAndUpdate(AddMutation, UpdateMutation),
+    ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
         subscriptions_to_drop: Vec<(u32, TableId)>,
+    },
+    StartFragmentBackfill {
+        fragment_ids: HashSet<FragmentId>,
     },
 }
 
@@ -514,7 +522,9 @@ impl Barrier {
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
-            | Mutation::DropSubscriptions { .. } => false,
+            | Mutation::DropSubscriptions { .. }
+            | Mutation::ConnectorPropsChange(_)
+            | Mutation::StartFragmentBackfill { .. } => false,
         }
     }
 
@@ -524,6 +534,26 @@ impl Barrier {
             Some(Mutation::Add(AddMutation { pause, .. }))
             | Some(Mutation::AddAndUpdate(AddMutation { pause, .. }, _)) => *pause,
             _ => false,
+        }
+    }
+
+    pub fn is_backfill_pause_on_startup(&self, backfill_fragment_id: FragmentId) -> bool {
+        match self.mutation.as_deref() {
+            Some(Mutation::Add(AddMutation {
+                backfill_nodes_to_pause,
+                ..
+            }))
+            | Some(Mutation::AddAndUpdate(
+                AddMutation {
+                    backfill_nodes_to_pause,
+                    ..
+                },
+                _,
+            )) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
+            _ => {
+                tracing::warn!("expected an AddMutation on Startup, instead got {:?}", self);
+                true
+            }
         }
     }
 
@@ -671,6 +701,7 @@ impl Mutation {
                 splits,
                 pause,
                 subscriptions_to_add,
+                backfill_nodes_to_pause,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -693,6 +724,7 @@ impl Mutation {
                         upstream_mv_table_id: table_id.table_id,
                     })
                     .collect(),
+                backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -739,6 +771,29 @@ impl Mutation {
                     )
                     .collect(),
             }),
+            Mutation::ConnectorPropsChange(map) => {
+                PbMutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
+                    connector_props_infos: map
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                ConnectorPropsInfo {
+                                    connector_props_info: options
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+            }
+            Mutation::StartFragmentBackfill { fragment_ids } => {
+                PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                    fragment_ids: fragment_ids.iter().copied().collect(),
+                })
+            }
         }
     }
 
@@ -822,6 +877,7 @@ impl Mutation {
                         },
                     )
                     .collect(),
+                backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
             }),
 
             PbMutation::Splits(s) => {
@@ -857,6 +913,33 @@ impl Mutation {
                     .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
                     .collect(),
             },
+            PbMutation::ConnectorPropsChange(alter_connector_props) => {
+                Mutation::ConnectorPropsChange(
+                    alter_connector_props
+                        .connector_props_infos
+                        .iter()
+                        .map(|(actor_id, options)| {
+                            (
+                                *actor_id,
+                                options
+                                    .connector_props_info
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            }
+            PbMutation::StartFragmentBackfill(start_fragment_backfill) => {
+                Mutation::StartFragmentBackfill {
+                    fragment_ids: start_fragment_backfill
+                        .fragment_ids
+                        .iter()
+                        .copied()
+                        .collect(),
+                }
+            }
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

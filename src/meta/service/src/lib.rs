@@ -26,6 +26,7 @@ pub mod ddl_service;
 pub mod event_log_service;
 pub mod health_service;
 pub mod heartbeat_service;
+pub mod hosted_iceberg_catalog_service_impl;
 pub mod hummock_service;
 pub mod meta_member_service;
 pub mod notification_service;

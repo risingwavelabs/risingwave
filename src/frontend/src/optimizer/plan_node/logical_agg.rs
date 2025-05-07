@@ -1369,6 +1369,23 @@ impl ToStream for LogicalAgg {
             return logical_dedup.to_stream(ctx);
         }
 
+        if self.agg_calls().iter().any(|call| {
+            matches!(
+                call.agg_type,
+                AggType::Builtin(PbAggKind::ApproxCountDistinct)
+            )
+        }) {
+            if stream_input.append_only() {
+                self.core.ctx().session_ctx().notice_to_user(
+                    "Streaming `APPROX_COUNT_DISTINCT` is still a preview feature and subject to change. Please do not use it in production environment.",
+                );
+            } else {
+                bail_not_implemented!(
+                    "Streaming `APPROX_COUNT_DISTINCT` is only supported in append-only stream"
+                );
+            }
+        }
+
         let plan = self.gen_dist_stream_agg_plan(stream_input)?;
 
         let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {

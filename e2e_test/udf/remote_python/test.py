@@ -16,6 +16,7 @@ import socket
 import struct
 import sys
 import time
+import random
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
@@ -278,6 +279,11 @@ def return_all_arrays(
     }
 
 
+@udf(input_types=[], result_type="INT")
+def random_int() -> int:
+    return random.randint(0, 100)
+
+
 if __name__ == "__main__":
     server = UdfServer(location="localhost:8815")
     server.add_function(int_42)
@@ -297,4 +303,5 @@ if __name__ == "__main__":
     server.add_function(jsonb_array_struct_identity)
     server.add_function(return_all)
     server.add_function(return_all_arrays)
+    server.add_function(random_int)
     server.serve()

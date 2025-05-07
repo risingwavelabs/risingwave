@@ -7,7 +7,7 @@ repository = { workspace = true }
 
 [dependencies]
 fs-err = "3"
-sysinfo = { version = "0.34", default-features = false, features = ["system"] }
+sysinfo = { version = "0.35", default-features = false, features = ["system"] }
 thiserror-ext = { workspace = true }
 tracing = "0.1"
 

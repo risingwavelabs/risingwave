@@ -77,7 +77,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.4.0-alpha"
+version = "2.5.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -100,8 +100,14 @@ normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-foyer = { version = "0.16.1", features = ["serde", "tracing", "nightly"] }
-mixtrics = { version = "0.0.6", features = ["prometheus"] }
+# Switch to a crate-io version after new foyer version is released.
+# foyer = { version = "0.16.1", features = ["serde", "tracing", "nightly"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "82168c1beb68c0835e82fe956ab6fcea73eef18b", features = [
+    "serde",
+    "tracing",
+    "nightly",
+] }
+mixtrics = { version = "0.1", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -159,21 +165,19 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "14c3387c388f64e99dd2a811cdd5f554fe7680c3", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9c210b9", features = [
     "storage-s3",
     "storage-gcs",
+    "storage-azblob",
 ] }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "14c3387c388f64e99dd2a811cdd5f554fe7680c3" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "14c3387c388f64e99dd2a811cdd5f554fe7680c3" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9c210b9" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9c210b9" }
 opendal = "0.49"
-arrow-udf-js = "0.6.1"
-arrow-udf-wasm = { version = "0.5.1", features = ["build"] }
-arrow-udf-python = "0.4.1"
-arrow-udf-flight = "0.4.2"
+arrow-udf-runtime = "0.7.0"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
+deltalake = { version = "0.24", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.14.0"
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }

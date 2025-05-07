@@ -678,6 +678,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 level0_stop_write_threshold_max_size = 28;
       // The limitation of the max sst count of the trivial move task
       uint32 sst_allowed_trivial_move_max_count = 29;
+      // Enable the optimization of the interval selection for the level0 compaction
+      bool enable_optimize_l0_interval_selection = 30;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -895,6 +897,9 @@ message CompactionConfig {
 
   // The limitation of the max sst count of the trivial move task
   optional uint32 sst_allowed_trivial_move_max_count = 29;
+
+  // Enable the optimization of the interval selection for the level0 compaction
+  optional bool enable_optimize_l0_interval_selection = 30;
 }
 
 message TableStats {

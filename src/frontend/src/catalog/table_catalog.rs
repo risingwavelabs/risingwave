@@ -15,7 +15,6 @@
 use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Context as _;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -287,7 +286,7 @@ impl TableCatalog {
     /// See [`Self::create_sql_ast_purified`] for more details.
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()
-            .map(|stmt| stmt.to_string())
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.create_sql())
     }
 
@@ -487,7 +486,7 @@ impl TableCatalog {
     /// See [`Self::create_sql_ast`] for more details.
     pub fn create_sql(&self) -> String {
         self.create_sql_ast()
-            .map(|stmt| stmt.to_string())
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.definition.clone())
     }
 
@@ -511,11 +510,7 @@ impl TableCatalog {
     }
 
     fn create_sql_ast_from_persisted(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse definition sql")?
-            .into_iter()
-            .exactly_one()
-            .context("expecting exactly one statement in definition")?)
+        Ok(Parser::parse_exactly_one(&self.definition)?)
     }
 
     /// Get a reference to the table catalog's version.

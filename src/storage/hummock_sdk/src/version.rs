@@ -488,7 +488,8 @@ impl HummockVersion {
                         .map(|item| EpochNewChangeLogCommon {
                             new_value: std::mem::take(&mut item.new_value),
                             old_value: std::mem::take(&mut item.old_value),
-                            epochs: item.epochs.clone(),
+                            non_checkpoint_epochs: item.non_checkpoint_epochs.clone(),
+                            checkpoint_epoch: item.checkpoint_epoch,
                         });
                 table_change_log.insert(*table_id, TableChangeLogCommon::new(change_log_iter));
             }
@@ -1178,9 +1179,10 @@ impl From<HummockVersionDelta> for LocalHummockVersionDelta {
                         ChangeLogDeltaCommon {
                             truncate_epoch: v.truncate_epoch,
                             new_log: EpochNewChangeLogCommon {
-                                epochs: v.new_log.epochs,
                                 new_value: Vec::new(),
                                 old_value: Vec::new(),
+                                non_checkpoint_epochs: v.new_log.non_checkpoint_epochs,
+                                checkpoint_epoch: v.new_log.checkpoint_epoch,
                             },
                         },
                     )
@@ -1206,9 +1208,10 @@ impl From<HummockVersion> for LocalHummockVersion {
                     let epoch_new_change_logs: Vec<EpochNewChangeLogCommon<()>> = v
                         .change_log_into_iter()
                         .map(|epoch_new_change_log| EpochNewChangeLogCommon {
-                            epochs: epoch_new_change_log.epochs,
                             new_value: Vec::new(),
                             old_value: Vec::new(),
+                            non_checkpoint_epochs: epoch_new_change_log.non_checkpoint_epochs,
+                            checkpoint_epoch: epoch_new_change_log.checkpoint_epoch,
                         })
                         .collect();
                     (k, TableChangeLogCommon::new(epoch_new_change_logs))

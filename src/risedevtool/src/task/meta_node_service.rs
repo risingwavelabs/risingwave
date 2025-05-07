@@ -22,7 +22,7 @@ use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
 use url::Url;
 
-use super::{ExecuteContext, Task, risingwave_cmd};
+use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name, is_env_set};
 use crate::{
     Application, HummockInMemoryStrategy, MetaBackend, MetaNodeConfig, add_hummock_backend,
@@ -240,7 +240,7 @@ impl Task for MetaNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = risingwave_cmd("meta-node")?;
+        let mut cmd = ctx.risingwave_cmd("meta-node")?;
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(

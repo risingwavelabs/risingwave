@@ -33,6 +33,7 @@ mod functions;
 mod query;
 mod relation;
 mod scalar;
+mod table_functions;
 mod time_window;
 mod types;
 mod utils;

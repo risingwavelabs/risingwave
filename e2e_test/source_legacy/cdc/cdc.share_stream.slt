@@ -69,6 +69,16 @@ create table products_test ( id INT PRIMARY KEY,
    description STRING
 ) from mysql_mytest table 'products';
 
+# wrong database name
+statement error The database name `wrong_mytest` in the FROM clause is not included in the database name `mytest` in source definition
+create table products_test (
+ id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+)
+from mysql_mytest table 'wrong_mytest.products';
+
 statement ok
 create schema rw;
 
@@ -364,6 +374,9 @@ create source pg_source with (
  database.name = '${PGDATABASE:postgres}',
  slot.name = 'pg_slot'
 );
+
+statement ok
+show create source pg_source;
 
 # test postgres backfill data types
 statement ok
