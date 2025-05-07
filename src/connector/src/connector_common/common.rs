@@ -640,19 +640,19 @@ impl AsyncSleep for KinesisAsyncSleepImpl {
 }
 
 const fn kinesis_default_connect_timeout_ms() -> u64 {
-    1000 * 10
+    10000
 }
 
 const fn kinesis_default_read_timeout_ms() -> u64 {
-    1000 * 10
+    10000
 }
 
 const fn kinesis_default_operation_timeout_ms() -> u64 {
-    1000 * 10
+    10000
 }
 
 const fn kinesis_default_operation_attempt_timeout_ms() -> u64 {
-    1000 * 10
+    10000
 }
 
 const fn kinesis_default_init_backoff_ms() -> u64 {
@@ -660,7 +660,7 @@ const fn kinesis_default_init_backoff_ms() -> u64 {
 }
 
 const fn kinesis_default_max_backoff_ms() -> u64 {
-    1000 * 20
+    20000
 }
 
 const fn kinesis_default_max_retry_limit() -> u32 {

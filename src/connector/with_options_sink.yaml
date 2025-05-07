@@ -873,19 +873,19 @@ KinesisSinkConfig:
   - name: kinesis.sdk.connect_timeout_ms
     field_type: u64
     required: false
-    default: 1000 * 10
+    default: '10000'
   - name: kinesis.sdk.read_timeout_ms
     field_type: u64
     required: false
-    default: 1000 * 10
+    default: '10000'
   - name: kinesis.sdk.operation_timeout_ms
     field_type: u64
     required: false
-    default: 1000 * 10
+    default: '10000'
   - name: kinesis.sdk.operation_attempt_timeout_ms
     field_type: u64
     required: false
-    default: 1000 * 10
+    default: '10000'
   - name: kinesis.sdk.max_retry_limit
     field_type: u32
     required: false
@@ -897,7 +897,7 @@ KinesisSinkConfig:
   - name: kinesis.sdk.max_backoff_ms
     field_type: u64
     required: false
-    default: 1000 * 20
+    default: '20000'
 MongodbConfig:
   fields:
   - name: mongodb.url
