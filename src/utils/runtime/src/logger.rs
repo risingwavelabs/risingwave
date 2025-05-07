@@ -190,7 +190,7 @@ fn disabled_filter() -> filter::Targets {
 /// RUST_LOG="risingwave_storage::hummock::event_handler=off,batch_execute=off,risingwave_batch::task=off" ENABLE_PRETTY_LOG=true risedev d
 /// ```
 pub fn init_risingwave_logger(settings: LoggerSettings) {
-    let deployment = Deployment::current();
+    let deployment = CURRENT_DEPLOYMENT.get_mut();
 
     // Default timer for logging with local time offset.
     let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
