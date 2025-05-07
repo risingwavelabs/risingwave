@@ -5211,6 +5211,123 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcloud-auth"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "059e4cb9bbfb037d0dc0ddce9d55debbec7615b0580322b454a8512b26e76ba8"
+dependencies = [
+ "async-trait",
+ "base64 0.21.7",
+ "gcloud-metadata",
+ "gcloud-token",
+ "home",
+ "jsonwebtoken",
+ "reqwest 0.12.9",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.63",
+ "time",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
+name = "gcloud-bigquery"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b796afff61a4c56710573b1911795c71bda10871b131c75164d3039a199ccb13"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "async-stream",
+ "async-trait",
+ "backon 1.2.0",
+ "base64 0.21.7",
+ "bigdecimal 0.4.7",
+ "gcloud-auth",
+ "gcloud-gax",
+ "gcloud-googleapis",
+ "gcloud-token",
+ "num-bigint",
+ "prost-types 0.13.4",
+ "reqwest 0.12.9",
+ "reqwest-middleware",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.63",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gcloud-gax"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00def59b6f24b6d0a8468175591ce43e03a0ece87c437880f28e6dd5cd4a3ebd"
+dependencies = [
+ "gcloud-token",
+ "http 1.3.1",
+ "thiserror 1.0.63",
+ "tokio",
+ "tokio-retry2",
+ "tonic",
+ "tower 0.4.13",
+ "tracing",
+]
+
+[[package]]
+name = "gcloud-googleapis"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef59df1b78ca8ed045e38d42db4991cab9bd9dd9ceba431e034e6b53c9ceb5da"
+dependencies = [
+ "prost 0.13.4",
+ "prost-types 0.13.4",
+ "tonic",
+]
+
+[[package]]
+name = "gcloud-metadata"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d575310b4546530f6b21ee000c20155f11f9291fa0b67ea0949fd48aa49ed70"
+dependencies = [
+ "reqwest 0.12.9",
+ "thiserror 1.0.63",
+ "tokio",
+]
+
+[[package]]
+name = "gcloud-pubsub"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b22c7b380042c63447ab25b224b58aa7f4c89eb5ccff5aba5201e489fb569b1e"
+dependencies = [
+ "async-channel 1.9.0",
+ "async-stream",
+ "gcloud-auth",
+ "gcloud-gax",
+ "gcloud-googleapis",
+ "gcloud-token",
+ "prost-types 0.13.4",
+ "thiserror 1.0.63",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "gcloud-token"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84e20db637faf228be7bbf39a9e3ea3e36e6ead323662974f53926f21dcee39e"
+dependencies = [
+ "async-trait",
+]
+
+[[package]]
 name = "gcp-bigquery-client"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5361,123 +5478,6 @@ dependencies = [
  "futures-core",
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "google-cloud-auth"
-version = "0.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "357160f51a60ec3e32169ad687f4abe0ee1e90c73b449aa5d11256c4f1cf2ff6"
-dependencies = [
- "async-trait",
- "base64 0.21.7",
- "google-cloud-metadata",
- "google-cloud-token",
- "home",
- "jsonwebtoken",
- "reqwest 0.12.9",
- "serde",
- "serde_json",
- "thiserror 1.0.63",
- "time",
- "tokio",
- "tracing",
- "urlencoding",
-]
-
-[[package]]
-name = "google-cloud-bigquery"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09bf057f5a44f4975252492feea3a7b26ca0693cbe12511317504c3c02fca5e"
-dependencies = [
- "anyhow",
- "arrow",
- "async-stream",
- "async-trait",
- "backon 1.2.0",
- "base64 0.21.7",
- "bigdecimal 0.4.7",
- "google-cloud-auth",
- "google-cloud-gax",
- "google-cloud-googleapis",
- "google-cloud-token",
- "num-bigint",
- "prost-types 0.13.4",
- "reqwest 0.12.9",
- "reqwest-middleware",
- "serde",
- "serde_json",
- "thiserror 1.0.63",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "google-cloud-gax"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de13e62d7e0ffc3eb40a0113ddf753cf6ec741be739164442b08893db4f9bfca"
-dependencies = [
- "google-cloud-token",
- "http 1.3.1",
- "thiserror 1.0.63",
- "tokio",
- "tokio-retry2",
- "tonic",
- "tower 0.4.13",
- "tracing",
-]
-
-[[package]]
-name = "google-cloud-googleapis"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0edfdfb507593d47605b3bb2fb36628b391e3d397e520b85852dea2412c8e2d1"
-dependencies = [
- "prost 0.13.4",
- "prost-types 0.13.4",
- "tonic",
-]
-
-[[package]]
-name = "google-cloud-metadata"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04f945a208886a13d07636f38fb978da371d0abc3e34bad338124b9f8c135a8f"
-dependencies = [
- "reqwest 0.12.9",
- "thiserror 1.0.63",
- "tokio",
-]
-
-[[package]]
-name = "google-cloud-pubsub"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bebc6e7327e49a66ffb40508c673b7643191bd6b509530193bda97f09272cdcf"
-dependencies = [
- "async-channel 1.9.0",
- "async-stream",
- "google-cloud-auth",
- "google-cloud-gax",
- "google-cloud-googleapis",
- "google-cloud-token",
- "prost-types 0.13.4",
- "thiserror 1.0.63",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "google-cloud-token"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c12ba8b21d128a2ce8585955246977fbce4415f680ebf9199b6f9d6d725f"
-dependencies = [
- "async-trait",
 ]
 
 [[package]]
@@ -10270,8 +10270,8 @@ dependencies = [
  "chrono",
  "console",
  "fs-err",
+ "gcloud-pubsub",
  "glob",
- "google-cloud-pubsub",
  "indicatif",
  "itertools 0.14.0",
  "log",
@@ -10887,12 +10887,12 @@ dependencies = [
  "fs-err",
  "futures",
  "futures-async-stream",
+ "gcloud-bigquery",
+ "gcloud-gax",
+ "gcloud-googleapis",
+ "gcloud-pubsub",
  "gcp-bigquery-client",
  "glob",
- "google-cloud-bigquery",
- "google-cloud-gax",
- "google-cloud-googleapis",
- "google-cloud-pubsub",
  "iceberg",
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",

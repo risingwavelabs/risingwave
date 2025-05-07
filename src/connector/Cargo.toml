@@ -50,10 +50,10 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-bigquery = { version = "0.15.0", features = ["auth"] }
-google-cloud-gax = "0.19.2"
-google-cloud-googleapis = { version = "0.16", features = ["pubsub", "bigquery"] }
-google-cloud-pubsub = "0.30"
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = ["auth"] }
+google-cloud-gax = { package = "gcloud-gax", version = "1" }
+google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = ["pubsub", "bigquery"] }
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
