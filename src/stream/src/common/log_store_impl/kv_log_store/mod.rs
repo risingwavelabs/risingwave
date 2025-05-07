@@ -50,6 +50,7 @@ use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
+#[derive(Debug)]
 pub(crate) enum LogStoreVnodeProgress {
     None,
     PerVnode(HashMap<VirtualNode, (Epoch, Option<SeqId>)>),
@@ -1326,6 +1327,7 @@ mod tests {
                     assert_eq!(epoch, epoch1);
                     assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
                 }
+
                 _ => unreachable!(),
             }
             match reader.next_item().await.unwrap() {

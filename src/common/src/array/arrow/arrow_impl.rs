@@ -1190,11 +1190,16 @@ impl FromIntoArrow for Interval {
     type ArrowType = ArrowIntervalType;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::to_interval(value)
+        Interval::from_month_day_usec(value.months, value.days, value.nanoseconds / 1000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
-        <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::from_interval(self)
+        ArrowIntervalType {
+            months: self.months(),
+            days: self.days(),
+            // TODO: this may overflow and we need `try_into`
+            nanoseconds: self.usecs() * 1000,
+        }
     }
 }
 

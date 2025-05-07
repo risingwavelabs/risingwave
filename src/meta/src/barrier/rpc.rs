@@ -458,7 +458,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         jobs: HashMap<TableId, InflightStreamingJobInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
-        state_table_log_epochs: &mut HashMap<TableId, Vec<Vec<u64>>>,
+        state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
@@ -486,6 +486,8 @@ impl ControlStreamManager {
             actor_splits: build_actor_connector_splits(&source_split_assignments),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
+            // TODO(kwannoel): recover using backfill order plan
+            backfill_nodes_to_pause: Default::default(),
         });
 
         fn resolve_jobs_committed_epoch(

@@ -464,6 +464,9 @@ pub async fn handle(
             }
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },
+        Statement::DescribeFragment { fragment_id } => {
+            describe::handle_describe_fragment(handler_args, fragment_id).await
+        }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,

@@ -189,33 +189,24 @@ impl StreamMaterialize {
                     user_distributed_by
                 }
                 TableType::MaterializedView => {
-                    match user_distributed_by {
-                        RequiredDist::PhysicalDist(Distribution::HashShard(_)) => {
-                            user_distributed_by
-                        }
-                        RequiredDist::Any => {
-                            // ensure the same pk will not shuffle to different node
-                            let required_dist = RequiredDist::shard_by_key(
-                                input.schema().len(),
-                                input.expect_stream_key(),
-                            );
+                    assert_matches!(user_distributed_by, RequiredDist::Any);
+                    // ensure the same pk will not shuffle to different node
+                    let required_dist =
+                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key());
 
-                            // If the input is a stream join, enforce the stream key as the materialized
-                            // view distribution key to avoid slow backfilling caused by
-                            // data skew of the dimension table join key.
-                            // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
-                            let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
-                                || matches!(input.as_stream_temporal_join(), Some(_join))
-                                || matches!(input.as_stream_delta_join(), Some(_join));
+                    // If the input is a stream join, enforce the stream key as the materialized
+                    // view distribution key to avoid slow backfilling caused by
+                    // data skew of the dimension table join key.
+                    // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
+                    let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
+                        || matches!(input.as_stream_temporal_join(), Some(_join))
+                        || matches!(input.as_stream_delta_join(), Some(_join));
 
-                            if is_stream_join {
-                                return Ok(required_dist.enforce(input, &Order::any()));
-                            }
-
-                            required_dist
-                        }
-                        _ => unreachable!("{:?}", user_distributed_by),
+                    if is_stream_join {
+                        return Ok(required_dist.enforce(input, &Order::any()));
                     }
+
+                    required_dist
                 }
                 TableType::Index => {
                     assert_matches!(

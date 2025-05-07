@@ -1,6 +1,6 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
-    "description": "List of profiles used by `dev`, `playground`, or `compose`.",
+    "description": "List of profiles used by `dev`.",
     "type": "object",
     "patternProperties": {
         "^[_a-zA-Z0-9][a-zA-Z0-9_-]*$": {

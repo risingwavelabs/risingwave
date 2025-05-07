@@ -79,6 +79,7 @@ impl CreatingStreamingJobControl {
             "new creating job"
         );
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
+        // FIXME(kwannoel): support backfill order control for snapshot backfill
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(
                 job_id,
@@ -123,6 +124,7 @@ impl CreatingStreamingJobControl {
             // we assume that when handling snapshot backfill, the cluster must not be paused
             pause: false,
             subscriptions_to_add: Default::default(),
+            backfill_nodes_to_pause: Default::default(),
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
@@ -165,7 +167,7 @@ impl CreatingStreamingJobControl {
 
     fn resolve_upstream_log_epochs(
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<Vec<u64>>>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         committed_epoch: u64,
         upstream_curr_epoch: u64,
     ) -> MetaResult<Vec<BarrierInfo>> {
@@ -173,18 +175,22 @@ impl CreatingStreamingJobControl {
         let table_id = snapshot_backfill_upstream_tables.iter().next().unwrap();
         let mut epochs_iter = upstream_table_log_epochs[table_id].iter();
         loop {
-            let epochs = epochs_iter.next().expect("not reach committed epoch yet");
-            if *epochs.last().unwrap() < committed_epoch {
+            let (_, checkpoint_epoch) = epochs_iter.next().expect("not reach committed epoch yet");
+            if *checkpoint_epoch < committed_epoch {
                 continue;
             }
-            assert_eq!(*epochs.last().unwrap(), committed_epoch);
+            assert_eq!(*checkpoint_epoch, committed_epoch);
             break;
         }
         let mut ret = vec![];
         let mut prev_epoch = committed_epoch;
         let mut pending_non_checkpoint_barriers = vec![];
-        for epochs in epochs_iter {
-            for (i, epoch) in epochs.iter().enumerate() {
+        for (non_checkpoint_epochs, checkpoint_epoch) in epochs_iter {
+            for (i, epoch) in non_checkpoint_epochs
+                .iter()
+                .chain([checkpoint_epoch])
+                .enumerate()
+            {
                 assert!(*epoch > prev_epoch);
                 pending_non_checkpoint_barriers.push(prev_epoch);
                 ret.push(BarrierInfo {
@@ -211,7 +217,7 @@ impl CreatingStreamingJobControl {
         job_id: TableId,
         definition: &String,
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<Vec<u64>>>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         backfill_epoch: u64,
         committed_epoch: u64,
         upstream_curr_epoch: u64,
@@ -251,7 +257,7 @@ impl CreatingStreamingJobControl {
 
     fn recover_consuming_log_store(
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<Vec<u64>>>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         committed_epoch: u64,
         upstream_curr_epoch: u64,
         stream_job_fragments: StreamJobFragments,
@@ -287,7 +293,7 @@ impl CreatingStreamingJobControl {
         job_id: TableId,
         definition: String,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<Vec<u64>>>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         backfill_epoch: u64,
         committed_epoch: u64,
         upstream_curr_epoch: u64,

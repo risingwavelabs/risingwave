@@ -226,8 +226,10 @@ impl<S: LocalStateStore> LogStoreStateWriter<'_, S> {
         tracing::trace!(epoch, start_seq_id, end_seq_id, "write_chunk");
         for (i, (op, row)) in chunk.rows().enumerate() {
             let seq_id = start_seq_id + (i as SeqId);
+            tracing::trace!(seq_id, epoch, ?op, ?row, "write_row");
             assert!(seq_id <= end_seq_id);
             let (vnode, key, value) = self.inner.serde.serialize_data_row(epoch, seq_id, op, row);
+            tracing::trace!(seq_id, ?vnode, "write_row_vnode");
             if let Some(written_vnodes) = &mut self.written_vnodes {
                 written_vnodes.set(vnode.to_index(), true);
             }

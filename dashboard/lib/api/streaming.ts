@@ -20,6 +20,7 @@ import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
   Database,
+  Index,
   Schema,
   Sink,
   Source,
@@ -181,8 +182,19 @@ export async function getTables() {
   return await getTableCatalogsInner("tables")
 }
 
-export async function getIndexes() {
-  return await getTableCatalogsInner("indexes")
+export async function getIndexes(): Promise<(Table & Index)[]> {
+  let index_tables = await getTableCatalogsInner("indexes")
+  let index_items: Index[] = (await api.get("/index_items")).map(Index.fromJSON)
+
+  // Join them by id.
+  return index_tables.flatMap((x) => {
+    let index = index_items.find((y) => y.id === x.id)
+    if (index === undefined) {
+      return []
+    } else {
+      return [{ ...x, ...index }]
+    }
+  })
 }
 
 export async function getInternalTables() {

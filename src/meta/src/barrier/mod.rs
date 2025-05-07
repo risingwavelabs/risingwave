@@ -28,6 +28,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
+mod backfill_order_control;
 mod checkpoint;
 mod command;
 mod complete_task;
@@ -42,6 +43,8 @@ mod schedule;
 mod trace;
 mod utils;
 mod worker;
+
+pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -103,7 +106,8 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
     database_job_infos: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
-    state_table_log_epochs: HashMap<TableId, Vec<Vec<u64>>>,
+    /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
+    state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
@@ -201,7 +205,8 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 struct DatabaseRuntimeInfoSnapshot {
     job_infos: HashMap<TableId, InflightStreamingJobInfo>,
     state_table_committed_epochs: HashMap<TableId, u64>,
-    state_table_log_epochs: HashMap<TableId, Vec<Vec<u64>>>,
+    /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
+    state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     subscription_info: InflightSubscriptionInfo,
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,

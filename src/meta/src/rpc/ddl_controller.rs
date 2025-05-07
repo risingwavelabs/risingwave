@@ -1542,9 +1542,13 @@ impl DdlController {
         cluster_info: &StreamingClusterInfo,
         resource_group: String,
     ) -> MetaResult<NonZeroUsize> {
-        let available = cluster_info.parallelism(resource_group);
+        let available = cluster_info.parallelism(&resource_group);
         let Some(available) = NonZeroUsize::new(available) else {
-            bail_unavailable!("no available slots to schedule");
+            bail_unavailable!(
+                "no available slots to schedule in resource group \"{}\", \
+                 have you allocated any compute nodes within this resource group?",
+                resource_group
+            );
         };
 
         if let Some(specified) = specified {
@@ -1557,7 +1561,9 @@ impl DdlController {
             }
             if specified > available {
                 bail_unavailable!(
-                    "not enough parallelism to schedule, required: {}, available: {}",
+                    "insufficient parallelism to schedule in resource group \"{}\", \
+                     required: {}, available: {}",
+                    resource_group,
                     specified,
                     available,
                 );
@@ -1570,7 +1576,9 @@ impl DdlController {
                 DefaultParallelism::Default(num) => {
                     if num > available {
                         bail_unavailable!(
-                            "not enough parallelism to schedule, required: {}, available: {}",
+                            "insufficient parallelism to schedule in resource group \"{}\", \
+                            required: {}, available: {}",
+                            resource_group,
                             num,
                             available,
                         );
@@ -1581,8 +1589,9 @@ impl DdlController {
 
             if default_parallelism > max {
                 tracing::warn!(
-                    "too many parallelism available, use max parallelism {} instead",
-                    max
+                    max_parallelism = max.get(),
+                    resource_group,
+                    "too many parallelism available, use max parallelism instead",
                 );
             }
             Ok(default_parallelism.min(max))
@@ -1593,6 +1602,7 @@ impl DdlController {
     /// - Add the upstream fragments to the fragment graph
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
+    /// - Construct the fragment level backfill order control.
     pub(crate) async fn build_stream_job(
         &self,
         stream_ctx: StreamContext,
@@ -1606,7 +1616,10 @@ impl DdlController {
         let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
-        // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
+        // 1. Fragment Level ordering graph
+        let fragment_backfill_ordering = fragment_graph.create_fragment_backfill_ordering();
+
+        // 2. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
         let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
@@ -1683,7 +1696,7 @@ impl DdlController {
             Some(resource_group) => resource_group,
         };
 
-        // 2. Build the actor graph.
+        // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
         let parallelism = self.resolve_stream_parallelism(
@@ -1721,7 +1734,7 @@ impl DdlController {
         } = actor_graph_builder.generate_graph(&self.env, &stream_job, expr_context)?;
         assert!(replace_upstream.is_empty());
 
-        // 3. Build the table fragments structure that will be persisted in the stream manager,
+        // 4. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
@@ -1811,6 +1824,7 @@ impl DdlController {
             option: CreateStreamingJobOption {},
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
+            fragment_backfill_ordering,
         };
 
         Ok((
