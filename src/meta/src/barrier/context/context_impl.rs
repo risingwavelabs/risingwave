@@ -55,7 +55,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked(database_id, "cluster is under recovering");
+            .abort_and_mark_blocked(database_id, "cluster is recovering");
     }
 
     fn mark_ready(&self, options: MarkReadyOptions) {

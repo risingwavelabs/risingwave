@@ -427,14 +427,14 @@ mod runner {
                 .await
             {
                 let err_string = err.to_string();
-                // cluster could be still under recovering if killed before, retry if
+                // cluster could be recovering if killed before, retry if
                 // meets `no reader for dml in table with id {}`.
                 let allowed_errs = [
                     "no reader for dml in table",
                     "error reading a body from connection: broken pipe",
                     "failed to inject barrier",
                     "get error from control stream",
-                    "cluster is under recovering",
+                    "cluster is recovering",
                 ];
                 let should_retry = i < MAX_RETRY
                     && allowed_errs
