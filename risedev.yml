@@ -909,6 +909,11 @@ profile:
         user-managed: true
         address: schemaregistry
         port: 8082
+      - use: pulsar
+        address: pulsar-server
+        broker-port: 6650
+        http-port: 8080
+        user-managed: true
       - use: mysql
         port: 3306
         address: mysql
@@ -1444,6 +1449,14 @@ template:
 
     # Memory limit for Redpanda
     memory: 16G
+
+  # Apache Pulsar. Currently user-managed only
+  pulsar:
+    id: pulsar
+    address: localhost
+    broker-port: 6650
+    http-port: 8080
+    user-managed: true
 
   # redis service
   redis:
