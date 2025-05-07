@@ -1,0 +1,110 @@
+############################ Setup
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS svm_top100_holders_mv_test;
+
+statement ok
+DROP TABLE IF EXISTS base cascade;
+
+# This will strictly generate the same sequence of random numbers
+# using the same seed, so the test is deterministic.
+# owner_seed: 27, token_mint_seed: 155, balance_seed: 283
+statement ok
+CREATE TABLE IF NOT EXISTS base (
+    owner INT,
+    token_mint INT,
+    timestamp INT,
+    balance INT,
+) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '1000',
+    fields.owner.kind='random',
+    fields.owner.seed='27',
+    fields.owner.min='1',
+    fields.owner.max='20',
+    fields.token_mint.kind='random',
+    fields.token_mint.seed='155',
+    fields.token_mint.min='1',
+    fields.token_mint.max='20',
+    fields.timestamp.kind='sequence',
+    fields.timestamp.start='1',
+    fields.timestamp.end='1000000000',
+    fields.balance.kind='random',
+    fields.balance.seed='283',
+    fields.balance.min='1',
+    fields.balance.max='3',
+) format plain encode json;
+
+statement ok
+CREATE MATERIALIZED VIEW svm_balance_update_realtime_source AS
+SELECT
+    concat('0x', owner)::varchar as owner,
+    concat('0x', token_mint)::varchar as token_mint,
+    to_timestamp(timestamp)::timestamptz as timestamp,
+    balance::decimal as balance
+FROM base;
+CREATE MATERIALIZED VIEW svm_balances_mv_test AS
+SELECT
+    token_mint,
+    owner,
+    last_value(timestamp ORDER BY timestamp) AS timestamp,
+    last_value(balance ORDER BY timestamp) AS balance
+FROM svm_balance_update_realtime_source
+GROUP BY token_mint, owner
+HAVING last_value(balance ORDER BY timestamp) > 0
+ORDER BY token_mint, balance DESC;
+
+# Let snapshot be created
+sleep 10s
+
+############################ Test create MV with different order key and stream key
+
+statement ok
+set background_ddl=true;
+
+statement ok
+set backfill_rate_limit=100;
+
+statement ok
+CREATE MATERIALIZED VIEW svm_top100_holders_mv_test AS
+SELECT
+  token_mint,
+  owner,
+  timestamp,
+  balance,
+  rank
+FROM ( SELECT
+    token_mint,
+    owner,
+    timestamp,
+    balance,
+    RANK() OVER (
+      PARTITION BY token_mint
+      ORDER BY balance DESC
+    ) AS rank
+  FROM svm_balances_mv_test
+)
+WHERE rank <= 100
+ORDER BY
+  token_mint,
+  balance DESC;
+
+sleep 60s
+
+statement ok
+DROP MATERIALIZED VIEW svm_top100_holders_mv_test;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=0;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS svm_balances_mv_test;
+
+statement ok
+DROP TABLE IF EXISTS base cascade;
+
+statement ok
+flush;
