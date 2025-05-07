@@ -520,7 +520,7 @@ mod tests {
                     predicate::eq((Bound::Unbounded, Bound::Unbounded)),
                     predicate::always(),
                 )
-                .returning(move |_, _, _| {
+                .returning(move |_, _| {
                     let iter = MockReplayIterStream::new(vec![(
                         TracedBytes::from(vec![1]),
                         TracedBytes::from(vec![0]),
