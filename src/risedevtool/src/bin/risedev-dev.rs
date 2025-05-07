@@ -281,6 +281,23 @@ fn task_main(
                     ctx.pb
                         .set_message(format!("pubsub {}:{}", c.address, c.port));
                 }
+                ServiceConfig::Pulsar(c) => {
+                    // TODO: support starting pulsar in RiseDev. Currently it's user-managed only
+                    if !c.user_managed {
+                        anyhow::bail!(
+                            "Non user-managed Pulsar is not supported yet. Please use user-managed Pulsar."
+                        );
+                    }
+                    DummyService::new(&c.id).execute(&mut ctx)?;
+                    let mut task = risedev::TcpReadyCheckTask::new(
+                        c.address.clone(),
+                        c.broker_port,
+                        c.user_managed,
+                    )?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("pulsar {}:{}", c.address, c.broker_port));
+                }
                 ServiceConfig::Redis(c) => {
                     let mut service = RedisService::new(c.clone())?;
                     service.execute(&mut ctx)?;

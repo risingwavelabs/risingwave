@@ -788,6 +788,11 @@ profile:
         user-managed: true
         address: schemaregistry
         port: 8082
+      - use: pulsar
+        address: pulsar-server
+        broker-port: 6650
+        http-port: 8080
+        user-managed: true
       - use: mysql
         port: 3306
         address: mysql
@@ -1292,6 +1297,14 @@ template:
     port: 5980
 
     persist-data: true
+
+  # Apache Pulsar. Currently user-managed only
+  pulsar:
+    id: pulsar
+    address: localhost
+    broker-port: 6650
+    http-port: 8080
+    user-managed: true
 
   # redis service
   redis:
