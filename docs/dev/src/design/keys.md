@@ -2,6 +2,20 @@
 
 Document the different Keys in RisingWave.
 
+## Order Key
+
+The order key is user-specified, in SQL. For example:
+
+```sql
+create materialized view m1 as select * from t1 order by i, id;
+```
+
+The order key is `i, id`, which is the order of the columns in the `order by` clause.
+
+It is used to ensure locality of records in storage, and locality of record updates in streaming.
+To ensure storage locality, when deriving the storage key, we will use the order key as a prefix.
+To ensure streaming locality, we will use the order key as a prefix of the stream key.
+
 ## Stream Key
 
 The key which can identify records in the RisingWave stream.
@@ -23,10 +37,28 @@ The record corresponding to key `(0, 1)` has been inserted with `(0, 1, 2, 3)`.
 It may not be the minimal set of columns required to identify a record,
 for instance `group key` could be part of the stream key, to specify the distribution of records.
 
-## Primary Key (Storage)
+## Distribution key
+
+This key specifies the distribution of the data streams, as mentioned in [Consistent Hash - Streaming](../design/consistent-hash.md#streaming).
+We want data to be distributed in a way that minimizes data skew, and maximizes data locality, for more efficient stateful processing.
+
+We will use the user-specified `order by` clause to determine the distribution key of an MV.
+For example, given the following query:
+```sql
+create materialized view mv1 as select id, i from t1 order by i, id;
+```
+
+The distribution key of `mv1` will be `[i, id]`, which is the same as the order key.
+
+To ensure data consistency of updates (U-, U+), the distribution key must always be a prefix of the stream key.
+This ensures that updates on the same key are not sent to different partitions.
+Otherwise if they are exchanged back to the same partition,
+the order of updates may be different from the order of the original stream.
+
+## Primary Key
 
 This discusses the internal primary key (pk) which we often see in streaming operators.
-It is different from the primary key in SQL.
+It is different from the user-specified primary key in SQL.
 
 A more appropriate name for this would be `Storage Primary Key`.
 
