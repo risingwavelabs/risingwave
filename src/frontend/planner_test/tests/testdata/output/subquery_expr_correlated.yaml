@@ -401,8 +401,7 @@
         ├─LogicalJoin { type: Inner, on: true, output: all }
         │ ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         │ │ └─LogicalScan { table: a, columns: [a.a1] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalScan { table: b, columns: [] }
+        │ └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           │ └─LogicalScan { table: a, columns: [a.a1] }

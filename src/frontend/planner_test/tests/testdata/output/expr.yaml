@@ -102,9 +102,7 @@
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
     ├─BatchExchange { order: [], dist: Single }
     │ └─BatchScan { table: b, columns: [b.b2], distribution: SomeShard }
-    └─BatchSimpleAgg { aggs: [] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchValues { rows: [[]] }
 - name: in-list with non-const - correlated ref
   sql: |
     create table t (v1 int);
