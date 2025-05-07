@@ -458,7 +458,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         jobs: HashMap<TableId, InflightStreamingJobInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
-        state_table_log_epochs: &mut HashMap<TableId, Vec<Vec<u64>>>,
+        state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,

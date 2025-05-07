@@ -172,6 +172,9 @@ impl IntraCompactionPicker {
                     .max_l0_compact_level_count
                     .unwrap_or(compaction_config::max_l0_compact_level_count())
                     as usize,
+                self.config
+                    .enable_optimize_l0_interval_selection
+                    .unwrap_or(compaction_config::enable_optimize_l0_interval_selection()),
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
@@ -187,21 +190,17 @@ impl IntraCompactionPicker {
             let mut select_input_size = 0;
             let mut total_file_count = 0;
             for input in l0_select_tables_vec {
-                let mut max_level_size = 0;
-                for level_select_table in &input.sstable_infos {
-                    let level_select_size = level_select_table
-                        .iter()
-                        .map(|sst| sst.sst_size)
-                        .sum::<u64>();
-
-                    max_level_size = std::cmp::max(max_level_size, level_select_size);
-                }
-
                 let mut select_level_inputs = Vec::with_capacity(input.sstable_infos.len());
-                for level_select_sst in input.sstable_infos {
+                let mut target_sub_level_id = None;
+                for (sub_level_id, level_select_sst) in input.sstable_infos {
                     if level_select_sst.is_empty() {
                         continue;
                     }
+
+                    if target_sub_level_id.is_none() {
+                        target_sub_level_id = Some(sub_level_id);
+                    }
+
                     select_level_inputs.push(InputLevel {
                         level_idx: 0,
                         level_type: LevelType::Nonoverlapping,
@@ -215,7 +214,7 @@ impl IntraCompactionPicker {
 
                 let result = CompactionInput {
                     input_levels: select_level_inputs,
-                    target_sub_level_id: level.sub_level_id,
+                    target_sub_level_id: target_sub_level_id.unwrap(),
                     select_input_size,
                     total_file_count: total_file_count as u64,
                     ..Default::default()

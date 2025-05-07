@@ -28,7 +28,11 @@ use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
     + Send
     + 'static;
-pub trait BuildBoxCoordinatorTrait = FnMut(DatabaseConnection, Option<UnboundedSender<IcebergCompactionStat>>) -> BoxCoordinator
+pub trait BuildBoxCoordinatorTrait = FnMut(
+        DatabaseConnection,
+        SinkParam,
+        Option<UnboundedSender<IcebergCompactionStat>>,
+    ) -> BoxCoordinator
     + Send
     + 'static;
 
@@ -77,7 +81,11 @@ impl Sink for TestSink {
         db: DatabaseConnection,
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
     ) -> crate::sink::Result<Self::Coordinator> {
-        Ok(build_box_coordinator(db, iceberg_compact_stat_sender))
+        Ok(build_box_coordinator(
+            db,
+            self.param.clone(),
+            iceberg_compact_stat_sender,
+        ))
     }
 }
 
@@ -133,13 +141,14 @@ pub fn register_build_coordinated_sink(
 pub fn register_build_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
 ) -> TestSinkRegistryGuard {
-    register_build_sink_inner(build_box_log_sinker, |_, _| {
+    register_build_sink_inner(build_box_log_sinker, |_, _, _| {
         unreachable!("no coordinator registered")
     })
 }
 
 fn build_box_coordinator(
     db: DatabaseConnection,
+    sink_param: SinkParam,
     iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
 ) -> BoxCoordinator {
     (get_registry()
@@ -147,7 +156,7 @@ fn build_box_coordinator(
         .lock()
         .as_mut()
         .expect("should not be empty")
-        .1)(db, iceberg_compact_stat_sender)
+        .1)(db, sink_param, iceberg_compact_stat_sender)
 }
 
 async fn build_box_log_sinker(

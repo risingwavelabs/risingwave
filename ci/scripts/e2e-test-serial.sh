@@ -90,6 +90,7 @@ if [[ "$profile" == "ci-release" ]]; then
   echo "--- e2e, $mode, backfill"
   # only run in release-mode. It's too slow for dev-mode.
   risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
+  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
 fi
 
 echo "--- Kill cluster"
@@ -101,7 +102,7 @@ cluster_start
 risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
 risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 
-if [[ $mode != "single-node" ]]; then
+if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
   risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 fi
 

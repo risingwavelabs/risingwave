@@ -392,7 +392,7 @@ impl SimulationTestSink {
                     let err_rate = err_rate.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
-                    move |_, _| {
+                    move |_, _, _| {
                         Box::new(TestCoordinator {
                             err_rate: err_rate.clone(),
                             store: store.clone(),
