@@ -495,7 +495,7 @@ where
 /// 4. Sort workers by descending `extra_remainder`; tie-break by `stable_hash((salt, worker_id))` ascending.
 /// 5. Distribute the remaining slots (`extra_vnodes - sum(extra_floor)`) by incrementing `extra_floor` for the top workers.
 /// 6. Final quota for each worker is `base_quota + extra_floor`.
-pub fn compute_worker_quotas<W, S>(
+fn compute_worker_quotas<W, S>(
     workers: &BTreeMap<W, NonZeroUsize>,
     actor_counts: &HashMap<W, usize>,
     total_vnodes: usize,
