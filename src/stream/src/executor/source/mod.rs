@@ -221,7 +221,7 @@ pub async fn check_fd_limit(barrier: &Barrier) -> StreamExecutorResult<()> {
         && let Some(kafka_broker_size) = extra_info.kafka_broker_size
         && AVAILABLE_ULIMIT_NOFILE.load(std::sync::atomic::Ordering::SeqCst) != -1
     {
-        tracing::debug!(
+        tracing::info!(
             "check_fd_limit: kafka_broker_size: {}, available_ulimit_nofile: {}",
             kafka_broker_size,
             AVAILABLE_ULIMIT_NOFILE.load(std::sync::atomic::Ordering::SeqCst)
