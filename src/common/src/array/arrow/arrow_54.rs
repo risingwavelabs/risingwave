@@ -21,28 +21,3 @@ pub use {
     arrow_54_array as arrow_array, arrow_54_buffer as arrow_buffer, arrow_54_cast as arrow_cast,
     arrow_54_schema as arrow_schema,
 };
-
-use crate::array::Interval;
-
-impl super::ArrowIntervalTypeTrait for ArrowIntervalType {
-    fn to_interval(self) -> Interval {
-        // XXX: the arrow-rs decoding is incorrect
-        // let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        Interval::from_month_day_usec(self.months, self.days, self.nanoseconds / 1000)
-    }
-
-    fn from_interval(value: Interval) -> Self {
-        // XXX: the arrow-rs encoding is incorrect
-        // arrow_array::types::IntervalMonthDayNanoType::make_value(
-        //     self.months(),
-        //     self.days(),
-        //     // TODO: this may overflow and we need `try_into`
-        //     self.usecs() * 1000,
-        // )
-        Self {
-            months: value.months(),
-            days: value.days(),
-            nanoseconds: value.usecs() * 1000,
-        }
-    }
-}
