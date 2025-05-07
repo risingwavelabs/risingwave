@@ -4,6 +4,9 @@ anchors:
         # Agent terminated because the AWS EC2 spot instance killed by AWS.
         - signal_reason: agent_stop
           limit: 3
+        - exit_status: -1
+          signal_reason: none
+          limit: 3
   - plugins:
     # we need to override args, so didn't include image here in the anchor
     - docker-compose: &docker-compose
