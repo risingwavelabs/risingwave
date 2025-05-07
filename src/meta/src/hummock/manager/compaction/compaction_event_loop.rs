@@ -30,6 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
+use anyhow::Context;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -163,7 +164,7 @@ impl CompactionEventDispatcher for HummockCompactionEventDispatcher {
     async fn on_event_remotely(&self, context_id: u32, event: Self::EventType) -> Result<()> {
         if let Some(tx) = &self.tx {
             tx.send((context_id, event))
-                .map_err(|e| anyhow::anyhow!("Failed to send event: {}", e.as_report()))?;
+                .with_context(|| format!("Failed to send event to compactor {context_id}"))?;
         } else {
             unreachable!();
         }
