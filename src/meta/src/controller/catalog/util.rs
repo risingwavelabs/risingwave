@@ -407,7 +407,9 @@ impl CatalogController {
             for (fragment_id, stream_node, fragment_mask) in fragments {
                 {
                     // dirty downstream should be materialize fragment of table
-                    assert!(fragment_mask & FragmentTypeFlag::Mview as i32 > 0);
+                    if fragment_mask & FragmentTypeFlag::Mview as i32 == 0 {
+                        continue;
+                    }
 
                     let mut dirty_upstream_fragment_ids = HashSet::new();
 
@@ -440,14 +442,20 @@ impl CatalogController {
                         fragment_id
                     );
 
-                    Fragment::update_many()
-                        .col_expr(
-                            fragment::Column::StreamNode,
-                            StreamNode::from(&pb_stream_node).into(),
-                        )
-                        .filter(fragment::Column::FragmentId.eq(fragment_id))
-                        .exec(txn)
-                        .await?;
+                    if !dirty_upstream_fragment_ids.is_empty() {
+                        tracing::info!(
+                            "fixing dirty stream node in downstream fragment {}",
+                            fragment_id
+                        );
+                        Fragment::update_many()
+                            .col_expr(
+                                fragment::Column::StreamNode,
+                                StreamNode::from(&pb_stream_node).into(),
+                            )
+                            .filter(fragment::Column::FragmentId.eq(fragment_id))
+                            .exec(txn)
+                            .await?;
+                    }
                 }
             }
         }
