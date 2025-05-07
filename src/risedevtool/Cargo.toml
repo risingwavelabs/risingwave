@@ -16,7 +16,7 @@ chrono = { version = "0.4", default-features = false, features = [
 console = "0.15"
 fs-err = "3.1.0"
 glob = "0.3"
-google-cloud-pubsub = "0.30"
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 indicatif = "0.17"
 itertools = { workspace = true }
 log = "0.4"
