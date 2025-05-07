@@ -510,16 +510,23 @@ impl DataType {
     /// # Panics
     ///
     /// Panics if the type is not a list type.
-    pub fn as_list(&self) -> &DataType {
+    pub fn as_list_element_type(&self) -> &DataType {
         match self {
             DataType::List(t) => t,
             t => panic!("expect list type, got {t}"),
         }
     }
 
+    pub fn into_list_element_type(self) -> DataType {
+        match self {
+            DataType::List(t) => *t,
+            t => panic!("expect list type, got {t}"),
+        }
+    }
+
     /// Return a new type that removes the outer list, and get the innermost element type.
     ///
-    /// Use [`DataType::as_list`] if you only want the element type of a list.
+    /// Use [`DataType::as_list_element_type`] if you only want the element type of a list.
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;

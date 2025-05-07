@@ -194,7 +194,6 @@ pub struct PrometheusConfig {
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
-    pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
 }
 
@@ -315,20 +314,6 @@ pub struct PubsubConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct RedPandaConfig {
-    #[serde(rename = "use")]
-    phantom_use: Option<String>,
-    pub id: String,
-    pub internal_port: u16,
-    pub outside_port: u16,
-    pub address: String,
-    pub cpus: usize,
-    pub memory: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[serde(deny_unknown_fields)]
 pub struct RedisConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -426,7 +411,6 @@ pub enum ServiceConfig {
     SchemaRegistry(SchemaRegistryConfig),
     Pubsub(PubsubConfig),
     Redis(RedisConfig),
-    RedPanda(RedPandaConfig),
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
@@ -460,7 +444,6 @@ impl ServiceConfig {
             Self::Kafka(c) => &c.id,
             Self::Pubsub(c) => &c.id,
             Self::Redis(c) => &c.id,
-            Self::RedPanda(c) => &c.id,
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
@@ -485,7 +468,6 @@ impl ServiceConfig {
             Self::Kafka(c) => Some(c.port),
             Self::Pubsub(c) => Some(c.port),
             Self::Redis(c) => Some(c.port),
-            Self::RedPanda(_c) => None,
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
@@ -509,7 +491,6 @@ impl ServiceConfig {
             Self::Kafka(c) => c.user_managed,
             Self::Pubsub(_c) => false,
             Self::Redis(_c) => false,
-            Self::RedPanda(_c) => false,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
@@ -531,9 +512,7 @@ impl ServiceConfig {
                 Observability
             }
             ServiceConfig::Opendal(_) | ServiceConfig::AwsS3(_) => RisingWave,
-            ServiceConfig::Kafka(_)
-            | ServiceConfig::SchemaRegistry(_)
-            | ServiceConfig::RedPanda(_) => Kafka,
+            ServiceConfig::Kafka(_) | ServiceConfig::SchemaRegistry(_) => Kafka,
             ServiceConfig::Pubsub(_) => Pubsub,
             ServiceConfig::Redis(_) => Redis,
             ServiceConfig::MySql(my_sql_config) => {

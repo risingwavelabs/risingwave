@@ -4480,7 +4480,11 @@ impl Parser<'_> {
     }
 
     pub fn parse_describe(&mut self) -> ModalResult<Statement> {
-        let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENTS]) {
+        let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENT, Keyword::FRAGMENTS]) {
+            Some(Keyword::FRAGMENT) => {
+                let fragment_id = self.parse_literal_uint()? as u32;
+                return Ok(Statement::DescribeFragment { fragment_id });
+            }
             Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
             None => DescribeKind::Plain,
             Some(_) => unreachable!(),

@@ -474,127 +474,6 @@ profile:
       #   port: 9092
       #   persist-data: true
 
-  ######################################
-  ### Configurations used in Compose ###
-  ######################################
-
-  compose:
-    steps:
-      - use: minio
-        id: minio-0
-        address: ${id}
-        listen-address: "0.0.0.0"
-        console-address: "0.0.0.0"
-
-      - use: meta-node
-        # Id must starts with `meta-node`, therefore to be picked up by other
-        # components.
-        id: meta-node-0
-
-        # Advertise address can be `id`, so as to use docker's DNS. If running
-        # in host network mode, we should use IP directly in this field.
-        address: ${id}
-
-        listen-address: "0.0.0.0"
-
-      - use: compute-node
-        id: compute-node-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: frontend
-        id: frontend-node-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: compactor
-        id: compactor-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: redpanda
-
-      - use: prometheus
-        id: prometheus-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: grafana
-        listen-address: "0.0.0.0"
-        address: ${id}
-        id: grafana-0
-
-      - use: tempo
-        listen-address: "0.0.0.0"
-        address: ${id}
-        id: tempo-0
-
-  # special config for deployment, see related PR for more information
-  compose-3node-deploy:
-    steps:
-      # - use: minio
-      #   id: minio-0
-      #   address: ${dns-host:rw-source-0}
-      #   listen-address: "0.0.0.0"
-      #   console-address: "0.0.0.0"
-
-      - use: aws-s3
-        bucket: ${terraform:s3-bucket}
-
-      - use: meta-node
-        # Id must starts with `meta-node`, therefore to be picked up by other
-        # components.
-        id: meta-node-0
-
-        # Advertise address can be `id`, so as to use docker's DNS. If running
-        # in host network mode, we should use IP directly in this field.
-        address: ${dns-host:rw-meta-0}
-        listen-address: "0.0.0.0"
-
-      - use: compute-node
-        id: compute-node-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-compute-0}
-        async-stack-trace: verbose
-        enable-tiered-cache: true
-
-      - use: compute-node
-        id: compute-node-1
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-compute-1}
-        async-stack-trace: verbose
-        enable-tiered-cache: true
-
-      - use: compute-node
-        id: compute-node-2
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-compute-2}
-        async-stack-trace: verbose
-        enable-tiered-cache: true
-
-      - use: frontend
-        id: frontend-node-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-meta-0}
-
-      - use: compactor
-        id: compactor-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-source-0}
-        compaction-worker-threads-number: 15
-
-      - use: redpanda
-        address: ${dns-host:rw-source-0}
-
-      - use: prometheus
-        id: prometheus-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-meta-0}
-
-      - use: grafana
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-meta-0}
-        id: grafana-0
 
   #################################
   ### Configurations used on CI ###
@@ -1052,14 +931,6 @@ profile:
       - use: prometheus
       - use: grafana
 
-compose:
-  risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
-  prometheus: "prom/prometheus:latest"
-  minio: "quay.io/minio/minio:latest"
-  redpanda: "redpandadata/redpanda:latest"
-  grafana: "grafana/grafana-oss:latest"
-  tempo: "grafana/tempo:latest"
-
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
@@ -1250,9 +1121,6 @@ template:
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
 
-    # Redpanda used by this Prometheus instance
-    provide-redpanda: "redpanda*"
-
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
@@ -1424,26 +1292,6 @@ template:
     port: 5980
 
     persist-data: true
-
-  # Only supported in RiseDev compose
-  redpanda:
-    # Id to be picked-up by services
-    id: redpanda
-
-    # Port used inside docker-compose cluster (e.g. create MV)
-    internal-port: 29092
-
-    # Port used on host (e.g. import data, connecting using kafkacat)
-    outside-port: 9092
-
-    # Connect address
-    address: ${id}
-
-    # Number of CPUs to use
-    cpus: 8
-
-    # Memory limit for Redpanda
-    memory: 16G
 
   # redis service
   redis:
