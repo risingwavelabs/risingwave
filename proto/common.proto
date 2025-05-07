@@ -151,3 +151,18 @@ message ColumnOrder {
 message Uint32Vector {
   repeated uint32 data = 1;
 }
+
+enum ObjectType {
+  DATABASE = 0;
+  SCHEMA = 1;
+  TABLE = 2;
+  MVIEW = 3;
+  SOURCE = 4;
+  SINK = 5;
+  VIEW = 6;
+  INDEX = 7;
+  FUNCTION = 8;
+  CONNECTION = 9;
+  SUBSCRIPTION = 10;
+  SECRET = 11;
+}

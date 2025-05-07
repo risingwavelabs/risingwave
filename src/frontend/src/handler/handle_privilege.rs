@@ -12,11 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::user::PbGrantPrivilege;
+use risingwave_common::acl;
+use risingwave_pb::common::PbObjectType;
+use risingwave_pb::user::alter_default_privilege_request::{
+    Operation as AlterDefaultPrivilegeOperation, PbGrantPrivilege as OpGrantPrivilege,
+    PbRevokePrivilege as OpRevokePrivilege,
+};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege};
 use risingwave_sqlparser::ast::{
-    DefaultPrivilegeOperation, GrantObjects, Ident, ObjectName, Privileges, Statement,
+    DefaultPrivilegeOperation, GrantObjects, Ident, PrivilegeObjectType, Privileges, Statement,
 };
 
 use super::RwPgResponse;
@@ -28,6 +36,7 @@ use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
+use crate::user::UserId;
 use crate::user::user_privilege::{
     available_privilege_actions, check_privilege_type, get_prost_action,
 };
@@ -360,6 +369,73 @@ fn make_prost_privilege(
     Ok(prost_privileges)
 }
 
+/// Bind user from idents to user ids.
+fn bind_user_from_idents(session: &SessionImpl, names: Vec<Ident>) -> Result<Vec<UserId>> {
+    let user_reader = session.env().user_info_reader();
+    let reader = user_reader.read_guard();
+    let mut users = HashSet::new();
+    for name in &names {
+        if let Some(user) = reader.get_user_by_name(&name.real_value()) {
+            users.insert(user.id);
+        } else {
+            return Err(ErrorCode::BindError("User does not exist".to_owned()).into());
+        }
+    }
+    Ok(users.into_iter().collect())
+}
+
+fn derive_object_type(object_type: &PrivilegeObjectType) -> PbObjectType {
+    match object_type {
+        PrivilegeObjectType::Schemas => PbObjectType::Schema,
+        PrivilegeObjectType::Tables => PbObjectType::Table,
+        PrivilegeObjectType::Views => PbObjectType::View,
+        PrivilegeObjectType::Mviews => PbObjectType::Mview,
+        PrivilegeObjectType::Sources => PbObjectType::Source,
+        PrivilegeObjectType::Sinks => PbObjectType::Sink,
+        PrivilegeObjectType::Functions => PbObjectType::Function,
+        PrivilegeObjectType::Secrets => PbObjectType::Secret,
+        PrivilegeObjectType::Subscriptions => PbObjectType::Subscription,
+        PrivilegeObjectType::Connections => PbObjectType::Connection,
+    }
+}
+
+fn make_prost_actions(
+    privileges: Privileges,
+    object_type: &PrivilegeObjectType,
+) -> Result<Vec<PbAction>> {
+    let all_acls = match object_type {
+        PrivilegeObjectType::Tables => &acl::ALL_AVAILABLE_TABLE_MODES,
+        PrivilegeObjectType::Sources => &acl::ALL_AVAILABLE_SOURCE_MODES,
+        PrivilegeObjectType::Sinks => &acl::ALL_AVAILABLE_SINK_MODES,
+        PrivilegeObjectType::Mviews => &acl::ALL_AVAILABLE_MVIEW_MODES,
+        PrivilegeObjectType::Views => &acl::ALL_AVAILABLE_VIEW_MODES,
+        PrivilegeObjectType::Functions => &acl::ALL_AVAILABLE_FUNCTION_MODES,
+        PrivilegeObjectType::Connections => &acl::ALL_AVAILABLE_CONNECTION_MODES,
+        PrivilegeObjectType::Secrets => &acl::ALL_AVAILABLE_SECRET_MODES,
+        PrivilegeObjectType::Subscriptions => &acl::ALL_AVAILABLE_SUBSCRIPTION_MODES,
+        PrivilegeObjectType::Schemas => &acl::ALL_AVAILABLE_SCHEMA_MODES,
+    };
+
+    match privileges {
+        Privileges::All { .. } => Ok(all_acls.iter().map(Into::into).collect()),
+        Privileges::Actions(actions) => {
+            let actions = actions
+                .into_iter()
+                .map(|action| get_prost_action(&action))
+                .collect::<Vec<_>>();
+            for action in &actions {
+                if !all_acls.has_mode((*action).into()) {
+                    return Err(ErrorCode::BindError(format!(
+                        "Invalid privilege type for the given object: {action:?}"
+                    ))
+                    .into());
+                }
+            }
+            Ok(actions)
+        }
+    }
+}
+
 pub async fn handle_grant_privilege(
     handler_args: HandlerArgs,
     stmt: Statement,
@@ -375,24 +451,16 @@ pub async fn handle_grant_privilege(
     else {
         return Err(ErrorCode::BindError("Invalid grant statement".to_owned()).into());
     };
-    let mut users = vec![];
-    {
+    let users = bind_user_from_idents(&session, grantees)?;
+    if let Some(granted_by) = &granted_by {
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
-        for grantee in grantees {
-            if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
-                users.push(user.id);
-            } else {
-                return Err(ErrorCode::BindError("Grantee does not exist".to_owned()).into());
-            }
+
+        // We remark that the user name is always case-sensitive.
+        if reader.get_user_by_name(&granted_by.real_value()).is_none() {
+            return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
         }
-        if let Some(granted_by) = &granted_by {
-            // We remark that the user name is always case-sensitive.
-            if reader.get_user_by_name(&granted_by.real_value()).is_none() {
-                return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
-            }
-        }
-    };
+    }
 
     let privileges = make_prost_privilege(&session, privileges, objects)?;
     let user_info_writer = session.user_info_writer()?;
@@ -418,26 +486,18 @@ pub async fn handle_revoke_privilege(
     else {
         return Err(ErrorCode::BindError("Invalid revoke statement".to_owned()).into());
     };
-    let mut users = vec![];
+    let users = bind_user_from_idents(&session, grantees)?;
     let mut granted_by_id = None;
-    {
+    if let Some(granted_by) = &granted_by {
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
-        for grantee in grantees {
-            if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
-                users.push(user.id);
-            } else {
-                return Err(ErrorCode::BindError("Grantee does not exist".to_owned()).into());
-            }
+
+        if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
+            granted_by_id = Some(user.id);
+        } else {
+            return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
         }
-        if let Some(granted_by) = &granted_by {
-            if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
-                granted_by_id = Some(user.id);
-            } else {
-                return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
-            }
-        }
-    };
+    }
     let privileges = make_prost_privilege(&session, privileges, objects)?;
     let user_info_writer = session.user_info_writer()?;
     user_info_writer
@@ -470,7 +530,87 @@ pub async fn handle_alter_default_privileges(
         );
     };
 
-    todo!("");
+    // If target users are not specified, use the current user.
+    let users = match target_users {
+        None => vec![session.user_id()],
+        Some(users) => {
+            let users = bind_user_from_idents(&session, users)?;
+            if !session.is_super_user() && users.len() > 1 {
+                return Err(ErrorCode::BindError(
+                    "Only superuser can alter default privileges for multiple users".to_owned(),
+                )
+                .into());
+            } else if !session.is_super_user()
+                && users.iter().any(|user| *user != session.user_id())
+            {
+                return Err(ErrorCode::BindError(
+                    "Only superuser can alter default privileges for other users".to_owned(),
+                )
+                .into());
+            }
+            users
+        }
+    };
+
+    // If schema names are not specified,
+    // users will be grant/revoke privileges on all schemas in the current database.
+    let schemas = match schema_names {
+        None => vec![],
+        Some(names) => {
+            let catalog_reader = session.env().catalog_reader();
+            let reader = catalog_reader.read_guard();
+            let mut schemas = vec![];
+            for name in names {
+                let schema_name = Binder::resolve_schema_name(name)?;
+                let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
+                schemas.push(schema.id());
+            }
+            schemas
+        }
+    };
+
+    let alter_operation = match operation {
+        DefaultPrivilegeOperation::Grant {
+            privileges,
+            object_type,
+            grantees,
+            with_grant_option,
+        } => {
+            let grantees = bind_user_from_idents(&session, grantees)?;
+            AlterDefaultPrivilegeOperation::GrantPrivilege(OpGrantPrivilege {
+                actions: make_prost_actions(privileges, &object_type)?
+                    .into_iter()
+                    .map(|a| a as i32)
+                    .collect(),
+                object_type: derive_object_type(&object_type) as i32,
+                grantees,
+                with_grant_option,
+            })
+        }
+        DefaultPrivilegeOperation::Revoke {
+            privileges,
+            object_type,
+            grantees,
+            revoke_grant_option,
+            ..
+        } => {
+            let grantees = bind_user_from_idents(&session, grantees)?;
+            AlterDefaultPrivilegeOperation::RevokePrivilege(OpRevokePrivilege {
+                actions: make_prost_actions(privileges, &object_type)?
+                    .into_iter()
+                    .map(|a| a as i32)
+                    .collect(),
+                object_type: derive_object_type(&object_type) as i32,
+                grantees,
+                revoke_grant_option,
+            })
+        }
+    };
+
+    let user_info_writer = session.user_info_writer()?;
+    user_info_writer
+        .alter_default_privilege(users, session.database_id(), schemas, alter_operation)
+        .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::ALTER_DEFAULT_PRIVILEGES,
@@ -480,7 +620,7 @@ pub async fn handle_alter_default_privileges(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
-    use risingwave_pb::user::grant_privilege::Action;
+    use risingwave_pb::user::Action;
 
     use super::*;
     use crate::test_utils::LocalFrontend;

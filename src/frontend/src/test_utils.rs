@@ -67,6 +67,7 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -941,6 +942,16 @@ impl UserInfoWriter for MockUserInfoWriter {
             }
         }
         Ok(())
+    }
+
+    async fn alter_default_privilege(
+        &self,
+        _users: Vec<UserId>,
+        _database_id: DatabaseId,
+        _schemas: Vec<SchemaId>,
+        _operation: AlterDefaultPrivilegeOperation,
+    ) -> Result<()> {
+        todo!()
     }
 }
 

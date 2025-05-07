@@ -5562,7 +5562,7 @@ impl Parser<'_> {
             PrivilegeObjectType::Subscriptions
         } else if self.parse_keyword(Keyword::SCHEMAS) {
             PrivilegeObjectType::Schemas
-        }else {
+        } else {
             return self.expected("TABLES, SOURCES, SINKS, MATERIALIZED VIEWS, VIEWS, FUNCTIONS, SECRETS, CONNECTIONS, SUBSCRIPTIONS or SCHEMAS");
         };
 
@@ -5582,7 +5582,7 @@ impl Parser<'_> {
         let schema_names = if self.parse_keywords(&[Keyword::IN, Keyword::SCHEMA]) {
             Some(self.parse_comma_separated(Parser::parse_object_name)?)
         } else {
-          None
+            None
         };
         let keyword = self.expect_one_of_keywords(&[Keyword::GRANT, Keyword::REVOKE])?;
         let for_grant = keyword == Keyword::GRANT;
@@ -5590,6 +5590,9 @@ impl Parser<'_> {
             let privileges = self.parse_privileges()?;
             self.expect_keyword(Keyword::ON)?;
             let object_type = self.parse_privilege_object_types()?;
+            if schema_names.is_some() && object_type == PrivilegeObjectType::Schemas {
+                parser_err!("cannot use IN SCHEMA clause when using GRANT/REVOKE ON SCHEMAS");
+            }
             self.expect_keyword(Keyword::TO)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
 
@@ -5612,6 +5615,9 @@ impl Parser<'_> {
             let privileges = self.parse_privileges()?;
             self.expect_keyword(Keyword::ON)?;
             let object_type = self.parse_privilege_object_types()?;
+            if schema_names.is_some() && object_type == PrivilegeObjectType::Schemas {
+                parser_err!("cannot use IN SCHEMA clause when using GRANT/REVOKE ON SCHEMAS");
+            }
             self.expect_keyword(Keyword::FROM)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
             let cascade = self.parse_keyword(Keyword::CASCADE);

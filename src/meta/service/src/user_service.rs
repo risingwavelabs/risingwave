@@ -18,9 +18,10 @@ use risingwave_meta_model::UserId;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
-    CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse,
-    GrantPrivilegeRequest, GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
-    UpdateUserRequest, UpdateUserResponse,
+    AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse, CreateUserRequest,
+    CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilegeRequest,
+    GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse, UpdateUserRequest,
+    UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -145,5 +146,16 @@ impl UserService for UserServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn alter_default_privilege(
+        &self,
+        request: Request<AlterDefaultPrivilegeRequest>,
+    ) -> Result<Response<AlterDefaultPrivilegeResponse>, Status> {
+        /// 1. check if the grantor has the privilege to alter default privileges
+        /// 2. insert into `default_privilege` table
+        /// 3. it seems like not necessary to update the version?
+        todo!()
     }
 }
