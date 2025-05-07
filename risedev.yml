@@ -1300,11 +1300,14 @@ template:
 
   # Apache Pulsar. Currently user-managed only
   pulsar:
-    id: pulsar
+    id: pulsar-${broker-port}
     address: localhost
     broker-port: 6650
     http-port: 8080
-    user-managed: true
+    user-managed: false
+    # Only effective when NOT user managed
+    image: "apachepulsar/pulsar:4.0.4"
+    persist-data: true
 
   # redis service
   redis:
