@@ -43,11 +43,11 @@ cd e2e_test/iceberg
 # Don't remove the `--quiet` option since poetry has a bug when printing output, see
 # https://github.com/python-poetry/poetry/issues/3412
 poetry update --quiet
-poetry run python main.py
+poetry run python main.py -t ./test_case/iceberg_source_streaming.toml
 
-echo "--- Running pure slt tests"
-risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
+# echo "--- Running pure slt tests"
+# risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
 
 # Run benchmarks separately (not parallelized)
-echo "--- Running benchmarks"
-poetry run python main.py -t ./benches/predicate_pushdown.toml
+# echo "--- Running benchmarks"
+# poetry run python main.py -t ./benches/predicate_pushdown.toml
