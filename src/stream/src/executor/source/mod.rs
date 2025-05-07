@@ -221,6 +221,11 @@ pub async fn check_fd_limit(barrier: &Barrier) -> StreamExecutorResult<()> {
         && let Some(kafka_broker_size) = extra_info.kafka_broker_size
         && AVAILABLE_ULIMIT_NOFILE.load(std::sync::atomic::Ordering::SeqCst) != -1
     {
+        tracing::debug!(
+            "check_fd_limit: kafka_broker_size: {}, available_ulimit_nofile: {}",
+            kafka_broker_size,
+            AVAILABLE_ULIMIT_NOFILE.load(std::sync::atomic::Ordering::SeqCst)
+        );
         // test and set `AVAILABLE_ULIMIT_NOFILE` and make the operation atomic
         // if AVAILABLE_ULIMIT_NOFILE - 2 * kafka_broker_size < 0, return error
         if AVAILABLE_ULIMIT_NOFILE
@@ -228,10 +233,10 @@ pub async fn check_fd_limit(barrier: &Barrier) -> StreamExecutorResult<()> {
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |current| {
-                    if current - 2 * (kafka_broker_size as i64) < 0 {
+                    if current - 3 * (kafka_broker_size as i64) < 0 {
                         None
                     } else {
-                        Some(current - 2 * kafka_broker_size as i64)
+                        Some(current - 3 * kafka_broker_size as i64)
                     }
                 },
             )
