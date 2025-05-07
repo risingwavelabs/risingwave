@@ -106,7 +106,7 @@ jobs:
       matrix:
         branch: ${{ fromJson(needs.get-target-release-branches.outputs.branches) }}
     steps:
-      - name: checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Create PR to branch
@@ -117,9 +117,39 @@ jobs:
           commit_sha: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
           pr_branch: ${{ matrix.branch }}
           pr_labels: "cherry-pick"
-          pr_body: ${{ format('Cherry picking \#{0} onto branch {1}', needs.get-target-release-branches.outputs.pr_number, matrix.branch) }}
+          pr_body: "Cherry picking #${{ needs.get-target-release-branches.outputs.pr_number }} onto branch ${{ matrix.branch }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # This job runs after all cherry-pick attempts and reports the final status
+  report_status:
+    needs: [get-target-release-branches, release_pull_request]
+    if: needs.get-target-release-branches.outputs.branches != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report final status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jobStatus = '${{ needs.release_pull_request.result }}';
+            const prNumber = ${{ needs.get-target-release-branches.outputs.pr_number }};
+
+            if (jobStatus === 'success') {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: '✅ Cherry-pick PRs (or issues if encountered conflicts) have been created successfully to all target branches.'
+              });
+            } else if (jobStatus === 'failure') {
+              const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `❌ Cherry-pick failed for one or more branches. Please check the [workflow run logs](${runUrl}) and consider retrying or manually cherry-picking.`
+              });
+            }
 
 permissions:
   issues: write

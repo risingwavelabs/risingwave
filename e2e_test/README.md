@@ -18,6 +18,7 @@ Refer to the [RisingWave Developer Guide](https://risingwavelabs.github.io/risin
 
 See the [connector development guide](http://risingwavelabs.github.io/risingwave/connector/intro.html#end-to-end-tests).
 
+
 ## Environment variables in SLT
 
 If you run `risedev slt` the following environment variables are set:
@@ -27,3 +28,24 @@ SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
 SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
 SLT_DB = "dev"
 ```
+
+## SLT Coverage Check
+
+The `check_slt_coverage.py` script provides a basic assessment of SLT coverage, i.e., whether all SLT files are referenced by CI scripts under `ci/scripts`.
+
+### Usage
+
+```bash
+python3 e2e_test/check_slt_coverage.py -d                   # show directory-level analysis
+python3 e2e_test/check_slt_coverage.py -d -o output.json    # save detailed results to file
+
+python3 e2e_test/check_slt_coverage.py --help               # for more options
+```
+
+### Coverage Ignore File
+
+The `e2e_test/.coverageignore` file uses gitignore-like syntax to specify patterns for files that should be excluded from coverage analysis. This is useful for:
+
+- Test files that are manually executed
+- Template files that generate other test files
+- Tests only meant for local development

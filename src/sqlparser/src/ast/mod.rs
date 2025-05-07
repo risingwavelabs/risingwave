@@ -179,12 +179,27 @@ impl Ident {
         }
     }
 
+    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident`.
+    pub fn from_real_value(value: &str) -> Self {
+        let needs_quotes = value
+            .chars()
+            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
+
+        if needs_quotes {
+            Self::with_quote_unchecked('"', value.replace('"', "\"\""))
+        } else {
+            Self::new_unchecked(value)
+        }
+    }
+
     pub fn quote_style(&self) -> Option<char> {
         self.quote_style
     }
 }
 
 impl From<&str> for Ident {
+    // FIXME: the result is wrong if value contains quote or is case sensitive,
+    //        should use `Ident::from_real_value` instead.
     fn from(value: &str) -> Self {
         Ident {
             value: value.to_owned(),
@@ -3057,6 +3072,7 @@ pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
+    BackfillOrder(BackfillOrderStrategy),
 }
 
 impl fmt::Display for SqlOptionValue {
@@ -3066,6 +3082,9 @@ impl fmt::Display for SqlOptionValue {
             SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
             SqlOptionValue::ConnectionRef(connection_ref) => {
                 write!(f, "{}", connection_ref)
+            }
+            SqlOptionValue::BackfillOrder(order) => {
+                write!(f, "{}", order)
             }
         }
     }
@@ -3642,6 +3661,36 @@ impl fmt::Display for DiscardType {
         use DiscardType::*;
         match self {
             All => write!(f, "ALL"),
+        }
+    }
+}
+
+// We decouple "default" from none,
+// so we can choose strategies that make the most sense.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BackfillOrderStrategy {
+    #[default]
+    Default,
+    None,
+    Auto,
+    Fixed(Vec<(ObjectName, ObjectName)>),
+}
+
+impl fmt::Display for BackfillOrderStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use BackfillOrderStrategy::*;
+        match self {
+            Default => write!(f, "DEFAULT"),
+            None => write!(f, "NONE"),
+            Auto => write!(f, "AUTO"),
+            Fixed(map) => {
+                let mut parts = vec![];
+                for (start, end) in map {
+                    parts.push(format!("{} -> {}", start, end));
+                }
+                write!(f, "{}", display_comma_separated(&parts))
+            }
         }
     }
 }

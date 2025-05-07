@@ -25,7 +25,9 @@ use core::fmt;
 use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
-use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
+use winnow::combinator::{
+    alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated, separated_pair,
+};
 use winnow::{ModalResult, Parser as _};
 
 use crate::ast::*;
@@ -1862,6 +1864,14 @@ impl Parser<'_> {
         }
     }
 
+    pub fn expect_word(&mut self, expected: &str) -> ModalResult<()> {
+        if self.parse_word(expected) {
+            Ok(())
+        } else {
+            self.expected(expected)
+        }
+    }
+
     /// Look for an expected keyword and consume it if it exists
     #[must_use]
     pub fn parse_keyword(&mut self, expected: Keyword) -> bool {
@@ -3050,10 +3060,12 @@ impl Parser<'_> {
     }
 
     pub fn parse_sql_option(&mut self) -> ModalResult<SqlOption> {
+        const CONNECTION_REF_KEY: &str = "connection";
+        const BACKFILL_ORDER: &str = "backfill_order";
+
         let name = self.parse_object_name()?;
         self.expect_token(&Token::Eq)?;
         let value = {
-            const CONNECTION_REF_KEY: &str = "connection";
             if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
                 let connection_name = self.parse_object_name()?;
                 // tolerate previous buggy Display that outputs `connection = connection foo`
@@ -3064,6 +3076,9 @@ impl Parser<'_> {
                     _ => connection_name,
                 };
                 SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
+            } else if name.real_value().eq_ignore_ascii_case(BACKFILL_ORDER) {
+                let order = self.parse_backfill_order_strategy()?;
+                SqlOptionValue::BackfillOrder(order)
             } else {
                 self.parse_value_and_obj_ref::<false>()?
             }
@@ -3867,7 +3882,9 @@ impl Parser<'_> {
     pub fn ensure_parse_value(&mut self) -> ModalResult<Value> {
         match self.parse_value_and_obj_ref::<true>()? {
             SqlOptionValue::Value(value) => Ok(value),
-            SqlOptionValue::SecretRef(_) | SqlOptionValue::ConnectionRef(_) => unreachable!(),
+            SqlOptionValue::SecretRef(_)
+            | SqlOptionValue::ConnectionRef(_)
+            | SqlOptionValue::BackfillOrder(_) => unreachable!(),
         }
     }
 
@@ -3953,6 +3970,34 @@ impl Parser<'_> {
             }),
         ))
         .parse_next(self)
+    }
+
+    fn parse_backfill_order_strategy(&mut self) -> ModalResult<BackfillOrderStrategy> {
+        alt((
+            Keyword::DEFAULT.value(BackfillOrderStrategy::Default),
+            Keyword::NONE.value(BackfillOrderStrategy::None),
+            Keyword::AUTO.value(BackfillOrderStrategy::Auto),
+            Self::parse_fixed_backfill_order.map(BackfillOrderStrategy::Fixed),
+            fail.expect("backfill order strategy"),
+        ))
+        .parse_next(self)
+    }
+
+    fn parse_fixed_backfill_order(&mut self) -> ModalResult<Vec<(ObjectName, ObjectName)>> {
+        self.expect_word("FIXED")?;
+        self.expect_token(&Token::LParen)?;
+        let edges = separated(
+            0..,
+            separated_pair(
+                Self::parse_object_name,
+                Token::Arrow,
+                Self::parse_object_name,
+            ),
+            Token::Comma,
+        )
+        .parse_next(self)?;
+        self.expect_token(&Token::RParen)?;
+        Ok(edges)
     }
 
     pub fn parse_number_value(&mut self) -> ModalResult<String> {
