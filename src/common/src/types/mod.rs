@@ -526,7 +526,7 @@ impl DataType {
 
     /// Return a new type that removes the outer list, and get the innermost element type.
     ///
-    /// Use [`DataType::as_list`] if you only want the element type of a list.
+    /// Use [`DataType::as_list_element_type`] if you only want the element type of a list.
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
