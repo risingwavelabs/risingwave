@@ -14,7 +14,6 @@
 
 mod actor;
 mod assignment;
-mod assignment2;
 mod fragment;
 mod id;
 mod schedule;
