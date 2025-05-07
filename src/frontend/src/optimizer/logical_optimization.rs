@@ -584,7 +584,7 @@ impl LogicalOptimizer {
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
-        // Remove nodes with empty output scheam.
+        // Remove nodes with constant output.
         plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         // Remove project to make common sub-plan sharing easier.
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
