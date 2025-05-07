@@ -16,23 +16,23 @@ use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 
-/// Eliminate useless (identity or empty) [`LogicalProject`] nodes.
-pub struct ProjectEliminateRule {}
-impl Rule for ProjectEliminateRule {
+/// Remove empty output [`LogicalAgg`] nodes.
+pub struct EmptyAggRemoveRule {}
+impl Rule for EmptyAggRemoveRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let project = plan.as_logical_project()?;
-        if project.is_identity() || project.schema().is_empty() {
-            // If the project is identity, all `InputRef`s can directly point to the input;
-            // If the project is empty, there won't be any columns referencing the input.
-            Some(project.input())
+        let agg = plan.as_logical_agg()?;
+        if agg.agg_calls().is_empty() && agg.group_key().is_empty() {
+            assert!(agg.schema().is_empty());
+            // empty simple agg should produce a single empty row
+            Some(LogicalValues::new(vec![vec![]], agg.schema().clone(), agg.ctx()).into())
         } else {
             None
         }
     }
 }
 
-impl ProjectEliminateRule {
+impl EmptyAggRemoveRule {
     pub fn create() -> BoxedRule {
-        Box::new(ProjectEliminateRule {})
+        Box::new(EmptyAggRemoveRule {})
     }
 }
