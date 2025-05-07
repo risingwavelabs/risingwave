@@ -765,9 +765,7 @@ impl KinesisCommon {
                 .connect_timeout(Duration::from_millis(
                     self.sdk_options.sdk_connect_timeout_ms,
                 ))
-                .read_timeout(Duration::from_millis(
-                    self.sdk_options.sdk_read_timeout_ms,
-                ))
+                .read_timeout(Duration::from_millis(self.sdk_options.sdk_read_timeout_ms))
                 .operation_timeout(Duration::from_millis(
                     self.sdk_options.sdk_operation_timeout_ms,
                 ))
@@ -778,12 +776,8 @@ impl KinesisCommon {
             builder.set_timeout_config(Some(timeout_config));
 
             let retry_config = aws_smithy_types::retry::RetryConfig::standard()
-                .with_initial_backoff(Duration::from_millis(
-                    self.sdk_options.sdk_init_backoff_ms,
-                ))
-                .with_max_backoff(Duration::from_millis(
-                    self.sdk_options.sdk_max_backoff_ms,
-                ))
+                .with_initial_backoff(Duration::from_millis(self.sdk_options.sdk_init_backoff_ms))
+                .with_max_backoff(Duration::from_millis(self.sdk_options.sdk_max_backoff_ms))
                 .with_max_attempts(self.sdk_options.sdk_max_retry_limit);
             builder.set_retry_config(Some(retry_config));
         }
