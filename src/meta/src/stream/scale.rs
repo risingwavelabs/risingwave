@@ -1878,8 +1878,8 @@ impl ScaleController {
         ) in job_parallelism_updates
         {
             let assigner = AssignerBuilder::new(table_id)
-                .worker_oriented_balancing()
-                .actor_capacity_weighted()
+                .with_worker_oriented_balancing()
+                .with_capacity_weighted()
                 .build();
 
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
@@ -1934,7 +1934,8 @@ impl ScaleController {
 
                         assert_eq!(*should_be_one, 1);
 
-                        let assignment = assigner.assign_actors_counts(&available_worker_slots, 1);
+                        let assignment =
+                            assigner.count_actors_per_worker(&available_worker_slots, 1);
 
                         let (chosen_target_worker_id, should_be_one) =
                             assignment.iter().exactly_one().ok().with_context(|| {
@@ -1972,8 +1973,10 @@ impl ScaleController {
                                     "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
                                 );
 
-                                let target_worker_slots = assigner
-                                    .assign_actors_counts(&available_worker_slots, max_parallelism);
+                                let target_worker_slots = assigner.count_actors_per_worker(
+                                    &available_worker_slots,
+                                    max_parallelism,
+                                );
 
                                 target_plan.insert(
                                     fragment_id,
@@ -1987,7 +1990,7 @@ impl ScaleController {
                                     "available parallelism for table {table_id} is limit by adaptive strategy {adaptive_parallelism_strategy}, resetting to {target_slot_count}"
                                 );
 
-                                let target_worker_slots = assigner.assign_actors_counts(
+                                let target_worker_slots = assigner.count_actors_per_worker(
                                     &available_worker_slots,
                                     target_slot_count,
                                 );
@@ -2023,7 +2026,7 @@ impl ScaleController {
                             }
 
                             let target_worker_slots =
-                                assigner.assign_actors_counts(&available_worker_slots, n);
+                                assigner.count_actors_per_worker(&available_worker_slots, n);
 
                             target_plan.insert(
                                 fragment_id,

@@ -21,7 +21,6 @@ mod schedule;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use assignment::*;
-pub use assignment2::*;
 pub use fragment::{
     CompleteStreamFragmentGraph, FragmentBackfillOrder, StreamFragmentGraph,
     fill_snapshot_backfill_epoch,
