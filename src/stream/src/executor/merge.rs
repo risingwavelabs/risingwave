@@ -953,6 +953,7 @@ mod tests {
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
+                connector_extra_info: None,
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);

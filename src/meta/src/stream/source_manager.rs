@@ -404,9 +404,30 @@ impl SourceManager {
         &self,
         table_fragments: &StreamJobFragments,
     ) -> Option<ConnectorExtraInfo> {
-        let source_ids = table_fragments.stream_source_fragments().keys();
-
-        todo!()
+        let mut res_extra_info: Option<ConnectorExtraInfo> = None;
+        for source_id in table_fragments.stream_source_fragments().keys() {
+            let core = self.core.lock().await;
+            let handle = core.managed_sources.get(source_id)?;
+            let extra_info = handle.extra_info.lock().await;
+            res_extra_info = match (res_extra_info, *extra_info) {
+                (None, None) => None,
+                (Some(a), Some(b)) => match (a.kafka_broker_size, b.kafka_broker_size) {
+                    (Some(a_size), Some(b_size)) => Some(ConnectorExtraInfo {
+                        kafka_broker_size: Some(a_size + b_size),
+                    }),
+                    (Some(a_size), None) => Some(ConnectorExtraInfo {
+                        kafka_broker_size: Some(a_size),
+                    }),
+                    (None, Some(b_size)) => Some(ConnectorExtraInfo {
+                        kafka_broker_size: Some(b_size),
+                    }),
+                    (None, None) => None,
+                },
+                (None, Some(b)) => Some(b),
+                (Some(a), None) => Some(a),
+            }
+        }
+        res_extra_info
     }
 
     /// create and register connector worker for source.

@@ -11063,6 +11063,7 @@ dependencies = [
  "risingwave_meta_model",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "rlimit",
  "rumqttc",
  "rust_decimal",
  "rustls-native-certs 0.8.0",

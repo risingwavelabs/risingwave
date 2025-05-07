@@ -37,7 +37,9 @@
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
 
-use std::{sync::{atomic::AtomicI64, LazyLock}, time::Duration};
+use std::sync::LazyLock;
+use std::sync::atomic::AtomicI64;
+use std::time::Duration;
 
 use duration_str::parse_std;
 use serde::de;
@@ -64,7 +66,11 @@ pub use with_options::{Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesEx
 mod with_options_test;
 
 pub static AVAILABLE_ULIMIT_NOFILE: LazyLock<AtomicI64> = LazyLock::new(|| {
-    todo!()
+    if let Ok(nofile_limit) = rlimit::Resource::NOFILE.get_soft() {
+        AtomicI64::new(nofile_limit as i64)
+    } else {
+        AtomicI64::new(-1)
+    }
 });
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>

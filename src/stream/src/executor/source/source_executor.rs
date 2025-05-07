@@ -43,6 +43,7 @@ use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additiona
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
+use crate::executor::source::check_fd_limit;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -454,6 +455,10 @@ impl<S: StateStore> SourceExecutor<S> {
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
+
+        if is_uninitialized {
+            check_fd_limit(&first_barrier).await?;
+        }
 
         yield Message::Barrier(first_barrier);
 
@@ -1003,6 +1008,7 @@ mod tests {
                 pause: false,
                 subscriptions_to_add: vec![],
                 backfill_nodes_to_pause: Default::default(),
+                connector_extra_info: None,
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1081,6 +1087,7 @@ mod tests {
         let mut epoch = test_epoch(1);
         let init_barrier =
             Barrier::new_test_barrier(epoch).with_mutation(Mutation::Add(AddMutation {
+                connector_extra_info: None,
                 adds: HashMap::new(),
                 added_actors: HashSet::new(),
                 splits: hashmap! {

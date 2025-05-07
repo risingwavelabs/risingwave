@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common_rate_limit::RateLimiter;
+use risingwave_connector::AVAILABLE_ULIMIT_NOFILE;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{
     BoxSourceChunkStream, BoxStreamingFileSourceChunkStream, SourceColumnDesc, SplitId,
@@ -28,6 +30,8 @@ use risingwave_connector::source::{
 use risingwave_pb::plan_common::AdditionalColumn;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 pub use state_table_handler::*;
+
+use crate::executor::StreamExecutorResult;
 
 mod executor_core;
 pub use executor_core::StreamSourceCore;
@@ -210,4 +214,33 @@ pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
         .factor(BACKOFF_FACTOR)
         .max_delay(MAX_DELAY)
         .map(jitter)
+}
+
+pub async fn check_fd_limit(barrier: &Barrier) -> StreamExecutorResult<()> {
+    if let Some(extra_info) = barrier.get_connector_extra_info()
+        && let Some(kafka_broker_size) = extra_info.kafka_broker_size
+        && AVAILABLE_ULIMIT_NOFILE.load(std::sync::atomic::Ordering::SeqCst) != -1
+    {
+        // test and set `AVAILABLE_ULIMIT_NOFILE` and make the operation atomic
+        // if AVAILABLE_ULIMIT_NOFILE - 2 * kafka_broker_size < 0, return error
+        if AVAILABLE_ULIMIT_NOFILE
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |current| {
+                    if current - 2 * (kafka_broker_size as i64) < 0 {
+                        None
+                    } else {
+                        Some(current - 2 * kafka_broker_size as i64)
+                    }
+                },
+            )
+            .is_err()
+        {
+            return Err(StreamExecutorError::connector_error(anyhow!(
+                "not enough file descriptors, please consider increasing nodes."
+            )));
+        }
+    }
+    Ok(())
 }

@@ -304,6 +304,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     );
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
+            connector_extra_info: None,
             adds: HashMap::new(),
             added_actors: HashSet::new(),
             splits,
