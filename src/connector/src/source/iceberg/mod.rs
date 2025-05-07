@@ -18,7 +18,7 @@ mod metrics;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -398,7 +398,10 @@ impl IcebergSplitEnumerator {
             .build()
             .map_err(|e| anyhow!(e))?;
 
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+        let file_scan_stream = scan
+            .plan_files()
+            .await
+            .context("failed to plan files in list_splits_batch_scan")?;
 
         #[for_await]
         for task in file_scan_stream {
@@ -476,7 +479,10 @@ impl IcebergSplitEnumerator {
             .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+        let file_scan_stream = scan
+            .plan_files()
+            .await
+            .context("failed to plan files in list_splits_batch_count_star")?;
 
         #[for_await]
         for task in file_scan_stream {
@@ -504,7 +510,10 @@ impl IcebergSplitEnumerator {
             .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
+        let file_scan_stream = scan
+            .plan_files()
+            .await
+            .context("failed to plan files in all_delete_parameters")?;
         let schema = scan.snapshot().schema(table.metadata())?;
         let mut equality_ids = vec![];
         let mut have_position_delete = false;
