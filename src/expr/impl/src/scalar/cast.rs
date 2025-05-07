@@ -200,8 +200,8 @@ fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
 fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
-        ctx.return_type.as_list().clone(),
-        vec![InputRefExpression::new(ctx.arg_types[0].as_list().clone(), 0).boxed()],
+        ctx.return_type.as_list_element_type().clone(),
+        vec![InputRefExpression::new(ctx.arg_types[0].as_list_element_type().clone(), 0).boxed()],
     )
     .unwrap();
     let items = Arc::new(ArrayImpl::from(input.to_owned()));

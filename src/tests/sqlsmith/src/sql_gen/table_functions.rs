@@ -24,9 +24,10 @@ use crate::sql_gen::{SqlGenerator, Table};
 impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates table functions.
     pub(crate) fn gen_table_func(&mut self) -> (TableFactor, Table) {
-        match self.rng.random_range(0..=1) {
+        match self.rng.random_range(0..=2) {
             0..=0 => self.gen_generate_series(),
             1..=1 => self.gen_range(),
+            2..=2 => self.gen_unnest(),
             _ => unreachable!(),
         }
     }
@@ -69,6 +70,23 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let table = Table::new(table_name, vec![]);
 
         let relation = create_tvf("range", alias, create_args(args), false);
+
+        (relation, table)
+    }
+
+    /// Generates `UNNEST`.
+    /// `UNNEST(arr1 [, arr2, ...])`
+    fn gen_unnest(&mut self) -> (TableFactor, Table) {
+        let table_name = self.gen_table_name_with_prefix("unnest");
+        let alias = create_table_alias(&table_name);
+
+        let depth = self.rng.random_range(0..=5);
+        let list_type = self.gen_list_data_type(depth);
+
+        let array_expr = self.gen_simple_scalar(&list_type);
+
+        let table = Table::new(table_name, vec![]);
+        let relation = create_tvf("unnest", alias, create_args(vec![array_expr]), false);
 
         (relation, table)
     }
