@@ -224,8 +224,8 @@ impl Scheduler {
         );
 
         let assigner = AssignerBuilder::new(streaming_job_id)
-            .worker_oriented_balancing()
-            .actor_capacity_weighted()
+            .with_worker_oriented_balancing()
+            .with_capacity_weighted()
             .build();
 
         let worker_weights = workers
@@ -238,7 +238,7 @@ impl Scheduler {
             })
             .collect();
 
-        let assignment = assigner.assign_actors_counts(&worker_weights, parallelism);
+        let assignment = assigner.count_actors_per_worker(&worker_weights, parallelism);
 
         let scheduled_worker_slots = assignment
             .into_iter()
@@ -253,7 +253,7 @@ impl Scheduler {
         let default_hash_mapping =
             WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
-        let single_assignment = assigner.assign_actors_counts(&worker_weights, 1);
+        let single_assignment = assigner.count_actors_per_worker(&worker_weights, 1);
 
         let default_single_worker_id = single_assignment.keys().exactly_one().cloned().unwrap();
         let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id as _, 0);
