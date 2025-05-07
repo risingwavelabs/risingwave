@@ -124,7 +124,7 @@ jobs:
   # This job runs after all cherry-pick attempts and reports the final status
   report_status:
     needs: [get-target-release-branches, release_pull_request]
-    if: always() && needs.get-target-release-branches.outputs.branches != '[]'
+    if: always() && needs.get-target-release-branches.result == 'success' && needs.get-target-release-branches.outputs.branches != '[]'
     runs-on: ubuntu-latest
     steps:
       - name: Report final status
