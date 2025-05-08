@@ -382,7 +382,7 @@ where
             //       only necessary place to log errors.
             if let Err(error) = &result {
                 use risingwave_common::util::deployment::Deployment;
-                if cfg!(debug_assertions) || Deployment::current().is_ci() {
+                if cfg!(debug_assertions) {
                     // Print backtrace in debug mode.
                     // Print it here is the last resort.
                     // It's useful only when:
@@ -390,6 +390,7 @@ where
                     // - backtrace is captured in the error
                     // - backtrace is not printed in the middle
                     tracing::error!(error = ?error.as_report(), "error when process message");
+                    tracing::error!(error = ?error, "Debug error");
                 } else {
                     tracing::error!(error = %error.as_report(), "error when process message");
                 }
