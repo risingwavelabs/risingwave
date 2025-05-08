@@ -9,12 +9,11 @@ services:
     ports:
       - 5432
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
-    command:
-      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=30"]
+    command: [ "postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=30" ]
 
   mysql:
     image: mysql:8.0
@@ -26,7 +25,7 @@ services:
       - MYSQL_USER=mysqluser
       - MYSQL_PASSWORD=mysqlpw
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456"]
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -43,7 +42,7 @@ services:
       - MYSQL_USER=mysqluser
       - MYSQL_PASSWORD=mysqlpw
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456"]
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -86,7 +85,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - mysql-meta
@@ -102,7 +101,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - mysql-meta
@@ -123,15 +122,27 @@ services:
       - sqlserver-server
     volumes:
       - ..:/risingwave
+    stop_grace_period: 30s
+
+  iceberg-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mysql
+      - db
+      - message_queue
+      - schemaregistry
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     volumes:
       - ..:/risingwave
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql-meta
       - db
@@ -139,14 +150,14 @@ services:
       - ..:/risingwave
 
   iceberg-engine-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - db
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -157,7 +168,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250310
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       db:
         condition: service_healthy
@@ -215,7 +226,7 @@ services:
     ports:
       - 6378:6379
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 30s
       retries: 50
@@ -235,7 +246,7 @@ services:
       - 8030:8030
       - 8040:8040
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9030" ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -261,7 +272,7 @@ services:
       - 29020:9020
       - 29030:9030
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9030" ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -310,7 +321,7 @@ services:
       - "8080"
       - "6650"
     healthcheck:
-      test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
+      test: [ "CMD-SHELL", "bin/pulsar-admin brokers healthcheck" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -332,12 +343,7 @@ services:
     container_name: mongodb-setup
     depends_on:
       - mongodb
-    entrypoint:
-      [
-        "bash",
-        "-c",
-        "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10",
-      ]
+    entrypoint: [ "bash", "-c", "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10" ]
     restart: "no"
     volumes:
       - ./mongodb/config-replica.js:/config-replica.js
@@ -362,22 +368,18 @@ services:
     ports:
       - 1883:1883
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "(mosquitto_sub -h localhost -p 1883 -t 'topic' -E -i probe 2>&1 | grep Error) && exit 1 || exit 0",
-        ]
+      test: [ "CMD-SHELL", "(mosquitto_sub -h localhost -p 1883 -t 'topic' -E -i probe 2>&1 | grep Error) && exit 1 || exit 0" ]
       interval: 10s
       timeout: 10s
       retries: 6
   nats-server:
     image: nats:latest
-    command: ["-js"]
+    command: [ "-js" ]
     ports:
       - "4222:4222"
       - "8222:8222"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8222/healthz"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8222/healthz" ]
       interval: 10s
       timeout: 5s
       retries: 3
