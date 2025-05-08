@@ -38,7 +38,7 @@ statement ok
 drop subscription test_schema.test_subscription;
 
 statement ok
-drop subscription test_schema.t1;
+drop table test_schema.t1;
 
 statement ok
 drop schema test_schema;
