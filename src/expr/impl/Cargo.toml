@@ -27,7 +27,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+chrono-tz = { version = "0.9", features = ["case-insensitive"] }
 constant_time_eq = "0.4"
 educe = "0.6"
 fancy-regex = "0.14"

@@ -22,6 +22,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
+ic-core = { git = "https://github.com/nimtable/IC.git", rev = "76fe2cf" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
