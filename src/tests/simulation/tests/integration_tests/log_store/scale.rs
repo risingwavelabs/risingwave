@@ -28,7 +28,7 @@ use crate::log_store::utils::*;
 // ```sh
 // RUST_LOG='\
 //   risingwave_stream::executor::sync_kv_log_store=trace,\
-//   integration_tests::log_store::recovery=info,\
+//   integration_tests::log_store::scale=info,\
 //   risingwave_stream::common::log_store_impl::kv_log_store=trace\
 // '\
 // ./risedev sit-test test_recover_synced_log_store >out.log 2>&1
@@ -41,9 +41,11 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         .run("alter system set per_database_isolation = false")
         .await?;
 
-    let amplification_factor = 20000;
-    let dimension_count = 5;
+    let amplification_factor = 40000;
+    let dimension_count = 10;
     let result_count = amplification_factor * dimension_count;
+
+    tracing::info!("setup cluster");
 
     const UNALIGNED_MV_NAME: &str = "unaligned_mv";
     const ALIGNED_MV_NAME: &str = "aligned_mv";
@@ -52,11 +54,16 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
     {
         setup_base_tables(&mut cluster, amplification_factor, dimension_count).await?;
         setup_mv(&mut cluster, UNALIGNED_MV_NAME, true).await?;
+        tracing::info!("setup tables and mv");
         run_amplification_workload(&mut cluster, dimension_count).await?;
+        tracing::info!("ran amplification workload");
 
-        cluster.simple_kill_nodes(vec!["compute-1"]).await;
-        tracing::info!("killed compute nodes");
-        cluster.wait_for_recovery().await?;
+        /// Trigger a number of scale operations
+        for i in 0..5 {
+            cluster.kill_nodes_and_restart(vec!["compute-1", "compute-2"], 6).await;
+            tracing::info!("killed compute nodes");
+            cluster.wait_for_recovery().await?;
+        }
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
     }
 
