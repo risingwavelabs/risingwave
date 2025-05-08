@@ -11,7 +11,7 @@ pub(crate) async fn start_sync_log_store_cluster() -> Result<Cluster> {
 
     let config_path = {
         let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
-        file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
+        file.write_all(include_bytes!("../../../../../config/ci-sim-log-store.toml"))
             .expect("failed to write config file");
         file.into_temp_path()
     };
