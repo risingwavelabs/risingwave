@@ -858,6 +858,8 @@ category = "RiseDev - Build"
 dependencies = ["prepare"]
 condition = { env_set = [
     "ENABLE_BUILD_RW_CONNECTOR",
+], env_not_set = [
+    "USE_SYSTEM_RISINGWAVE",
 ], files_modified = { input = [
     "./java/connector-node/**/*",
 ], output = [
