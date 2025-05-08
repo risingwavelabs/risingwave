@@ -43,8 +43,3 @@ message SubscribeIcebergCompactionEventResponse {
 
 	uint64 create_at = 7;
 }
-
-// service IcebergCompactionService {
-// 	// SubscribeIcebergCompactionEvent is a bi-directional streaming rpc.
-// 	rpc SubscribeIcebergCompactionEvent(stream SubscribeIcebergCompactionEventRequest) returns (stream SubscribeIcebergCompactionEventResponse);
-// }
