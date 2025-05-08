@@ -1353,7 +1353,8 @@ impl ToStream for LogicalAgg {
         let stream_input = self.input().to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
-        if stream_input.append_only() && self.agg_calls().is_empty() {
+        if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
+        {
             let input = if self.group_key().len() != self.input().schema().len() {
                 let cols = &self.group_key().to_vec();
                 LogicalProject::with_mapping(
