@@ -72,8 +72,9 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
     const SINK_NAME: &'static str = T::SINK_NAME;
 
     // Disable sink decoupling for all trivial sinks because it introduces overhead without any benefit
-    fn is_sink_decouple(_user_specified: &SinkDecouple) -> Result<bool> {
-        Ok(false)
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
+        // TODO(kwannoel): also enable by default, once it's shown to be stable
+        Ok(T::SINK_NAME == TABLE_SINK && matches!(user_specified, SinkDecouple::Enable))
     }
 
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {

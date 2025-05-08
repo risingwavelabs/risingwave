@@ -43,7 +43,9 @@ use super::stream::prelude::*;
 use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, StreamSyncLogStore, generic,
+};
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
@@ -425,6 +427,15 @@ impl StreamSink {
             SinkLogStoreType::KvLogStore
         } else {
             SinkLogStoreType::InMemoryLogStore
+        };
+
+        // sink into table should have logstore for sink_decouple
+        println!("any target table: {:?}", target_table.is_some());
+        println!("sink decouple: {:?}", sink_decouple);
+        let input = if sink_decouple && target_table.is_some() {
+            StreamSyncLogStore::new(input).into()
+        } else {
+            input
         };
 
         Ok(Self::new(input, sink_desc, log_store_type))
