@@ -8,18 +8,19 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
-default = ["rw-static-link"]
+default = ["rw-static-link", "all-connectors"]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
+all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-sources"]
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator", "risingwave_connector"]
 
 [package.metadata.cargo-udeps.ignore]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator", "risingwave_connector"]
 
 [dependencies]
 clap = { workspace = true }
@@ -31,6 +32,8 @@ risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
+# put here just to tweak feature flags
+risingwave_connector = { workspace = true, optional = true }
 risingwave_ctl = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
