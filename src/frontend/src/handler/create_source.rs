@@ -906,30 +906,35 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
-    // check the system parameter `enforce_secret_on_cloud`
+    // check the system parameter `enforce_secret`
     if session
         .env()
         .system_params_manager()
         .get_params()
         .load()
-        .enforce_secret_on_cloud()
+        .enforce_secret()
         && Feature::SecretManagement.check_available().is_ok()
     {
         // check enforce using secret for some props on cloud
-        ConnectorProperties::enforce_secret_on_cloud(&with_properties)?;
+        ConnectorProperties::enforce_secret_source(&with_properties)?;
     }
 
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_properties,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = with_properties.get_connector().unwrap();
+        let Some(connector) = with_properties.get_connector() else {
+            return Err(RwError::from(ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                UPSTREAM_SOURCE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 

@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod compaction;
 mod jni_catalog;
 mod mock_catalog;
 mod storage_catalog;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -22,7 +24,10 @@ use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_K
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
-use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
+use iceberg::io::{
+    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
+    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD,
+};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
 use risingwave_common::bail;
@@ -54,6 +59,13 @@ pub struct IcebergCommon {
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
+
+    #[serde(rename = "azblob.account_name")]
+    pub azblob_account_name: Option<String>,
+    #[serde(rename = "azblob.account_key")]
+    pub azblob_account_key: Option<String>,
+    #[serde(rename = "azblob.endpoint_url")]
+    pub azblob_endpoint_url: Option<String>,
 
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
@@ -179,6 +191,24 @@ impl IcebergCommon {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("gcs unsupported in {} catalog", &catalog_type);
+                }
+            }
+
+            if let (
+                Some(azblob_account_name),
+                Some(azblob_account_key),
+                Some(azblob_endpoint_url),
+            ) = (
+                &self.azblob_account_name,
+                &self.azblob_account_key,
+                &self.azblob_endpoint_url,
+            ) {
+                iceberg_configs.insert(AZBLOB_ACCOUNT_NAME.to_owned(), azblob_account_name.clone());
+                iceberg_configs.insert(AZBLOB_ACCOUNT_KEY.to_owned(), azblob_account_key.clone());
+                iceberg_configs.insert(AZBLOB_ENDPOINT.to_owned(), azblob_endpoint_url.clone());
+
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("azblob unsupported in {} catalog", &catalog_type);
                 }
             }
 
@@ -402,6 +432,14 @@ impl IcebergCommon {
                             .warehouse(warehouse)
                             .credential(self.gcs_credential.clone())
                             .enable_config_load(self.enable_config_load)
+                            .build(),
+                    ),
+                    "azblob" => StorageCatalogConfig::Azblob(
+                        storage_catalog::StorageCatalogAzblobConfig::builder()
+                            .warehouse(warehouse)
+                            .account_name(self.azblob_account_name.clone())
+                            .account_key(self.azblob_account_key.clone())
+                            .endpoint(self.azblob_endpoint_url.clone())
                             .build(),
                     ),
                     scheme => bail!("Unsupported warehouse scheme: {}", scheme),

@@ -29,6 +29,7 @@ pub mod google_pubsub;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+use risingwave_common::bail;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
@@ -88,12 +89,14 @@ use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
-use crate::error::ConnectorError;
+use crate::WithPropertiesExt;
+use crate::connector_common::IcebergCompactionStat;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::file_sink::fs::FsSink;
@@ -122,7 +125,6 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
                 { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
-                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
@@ -303,6 +305,21 @@ impl SinkParam {
             sink_from_name: sink_catalog.sink_from_name,
         })
     }
+}
+
+pub fn enforce_secret_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()> {
+    use crate::enforce_secret::EnforceSecret;
+
+    let connector = props
+        .get_connector()
+        .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+    let key_iter = props.key_iter();
+    match_sink_name_str!(
+        connector.as_str(),
+        PropType,
+        PropType::enforce_secret(key_iter),
+        |other| bail!("connector '{}' is not supported", other)
+    )
 }
 
 pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
@@ -601,6 +618,7 @@ fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
@@ -649,6 +667,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
@@ -657,7 +679,11 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _db: DatabaseConnection,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+    ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }

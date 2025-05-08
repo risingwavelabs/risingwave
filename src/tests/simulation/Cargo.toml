@@ -34,14 +34,16 @@ risingwave_compute = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
-risingwave_expr_impl = { workspace = true, features = ["udf"] }
+risingwave_expr_impl = { workspace = true } # Note: no UDF support (except for SQL functions)
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
+sea-orm = { workspace = true }
 serde = "1.0.188"
 serde_derive = "1.0.188"
 serde_json = "1.0.107"

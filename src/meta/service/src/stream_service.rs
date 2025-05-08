@@ -19,11 +19,13 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
+use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
-use risingwave_meta_model::{ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -325,25 +327,29 @@ impl StreamManagerService for StreamServiceImpl {
         let distributions = fragment_descs
             .into_iter()
             .map(|(fragment_desc, upstreams)| {
-                list_fragment_distribution_response::FragmentDistribution {
-                    fragment_id: fragment_desc.fragment_id as _,
-                    table_id: fragment_desc.job_id as _,
-                    distribution_type: PbFragmentDistributionType::from(
-                        fragment_desc.distribution_type,
-                    ) as _,
-                    state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-                    upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
-                    fragment_type_mask: fragment_desc.fragment_type_mask as _,
-                    parallelism: fragment_desc.parallelism as _,
-                    vnode_count: fragment_desc.vnode_count as _,
-                    node: Some(fragment_desc.stream_node.to_protobuf()),
-                }
+                fragment_desc_to_distribution(fragment_desc, upstreams)
             })
             .collect_vec();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
         }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_fragment_by_id(
+        &self,
+        request: Request<GetFragmentByIdRequest>,
+    ) -> Result<Response<GetFragmentByIdResponse>, Status> {
+        let req = request.into_inner();
+        let fragment_desc = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_desc_by_id(req.fragment_id as i32)
+            .await?;
+        let distribution =
+            fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
+        Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
     #[cfg_attr(coverage, coverage(off))]
@@ -487,5 +493,57 @@ impl StreamManagerService for StreamServiceImpl {
             .list_rate_limits()
             .await?;
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
+    }
+
+    async fn alter_connector_props(
+        &self,
+        request: Request<AlterConnectorPropsRequest>,
+    ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
+        let request = request.into_inner();
+        if request.object_type != (AlterConnectorPropsObject::Sink as i32) {
+            unimplemented!()
+        }
+
+        let new_config = self
+            .metadata_manager
+            .update_sink_props_by_sink_id(
+                request.object_id as i32,
+                request.changed_props.clone().into_iter().collect(),
+            )
+            .await?;
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.object_id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
+
+        let mut mutation = HashMap::default();
+        mutation.insert(request.object_id, new_config.clone());
+
+        let _i = self
+            .barrier_scheduler
+            .run_command(database_id, Command::ConnectorPropsChange(mutation))
+            .await?;
+
+        Ok(Response::new(AlterConnectorPropsResponse {}))
+    }
+}
+
+fn fragment_desc_to_distribution(
+    fragment_desc: FragmentDesc,
+    upstreams: Vec<FragmentId>,
+) -> FragmentDistribution {
+    FragmentDistribution {
+        fragment_id: fragment_desc.fragment_id as _,
+        table_id: fragment_desc.job_id as _,
+        distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
+        state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
+        upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+        fragment_type_mask: fragment_desc.fragment_type_mask as _,
+        parallelism: fragment_desc.parallelism as _,
+        vnode_count: fragment_desc.vnode_count as _,
+        node: Some(fragment_desc.stream_node.to_protobuf()),
     }
 }

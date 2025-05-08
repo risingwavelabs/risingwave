@@ -624,6 +624,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0StopWriteThresholdMaxSize(c) => {
                 target.level0_stop_write_threshold_max_size = Some(*c);
             }
+            MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
+                target.enable_optimize_l0_interval_selection = Some(*c);
+            }
         }
     }
 }

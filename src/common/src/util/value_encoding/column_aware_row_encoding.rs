@@ -104,7 +104,7 @@ mod new_serde {
     ) {
         match value {
             ScalarRefImpl::Struct(s) => new_serialize_struct(data_type.as_struct(), s, buf),
-            ScalarRefImpl::List(l) => new_serialize_list(data_type.as_list(), l, buf),
+            ScalarRefImpl::List(l) => new_serialize_list(data_type.as_list_element_type(), l, buf),
             ScalarRefImpl::Map(m) => new_serialize_map(data_type.as_map(), m, buf),
 
             _ => plain::serialize_scalar(value, buf),

@@ -22,7 +22,7 @@ export async function fetch_todo(id) {
 }
 $$ WITH (async = true);
 
-query I
+query I retry 3 backoff 5s
 select fetch_todo(1);
 ----
 Do something nice for someone you care about

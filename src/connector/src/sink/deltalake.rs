@@ -27,6 +27,7 @@ use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveTyp
 use deltalake::operations::transaction::CommitBuilder;
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
+use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
@@ -39,6 +40,7 @@ use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use sea_orm::DatabaseConnection;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
 
 use super::coordinate::CoordinatedLogSinker;
@@ -48,7 +50,8 @@ use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
     SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
 };
-use crate::connector_common::AwsAuthProps;
+use crate::connector_common::{AwsAuthProps, IcebergCompactionStat};
+use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -68,6 +71,24 @@ pub struct DeltaLakeCommon {
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
+}
+
+impl EnforceSecret for DeltaLakeCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "gcs.service.account",
+    };
+
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        AwsAuthProps::enforce_one(prop)?;
+        if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+            return Err(EnforceSecretError {
+                key: prop.to_owned(),
+            }
+            .into());
+        }
+
+        Ok(())
+    }
 }
 
 impl DeltaLakeCommon {
@@ -171,6 +192,12 @@ pub struct DeltaLakeConfig {
     pub r#type: String,
 }
 
+impl EnforceSecret for DeltaLakeConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        DeltaLakeCommon::enforce_one(prop)
+    }
+}
+
 impl DeltaLakeConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<DeltaLakeConfig>(
@@ -185,6 +212,17 @@ impl DeltaLakeConfig {
 pub struct DeltaLakeSink {
     pub config: DeltaLakeConfig,
     param: SinkParam,
+}
+
+impl EnforceSecret for DeltaLakeSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            DeltaLakeCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl DeltaLakeSink {
@@ -291,6 +329,7 @@ impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -315,6 +354,11 @@ impl Sink for DeltaLakeSink {
         .await?;
 
         Ok(writer)
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        DeltaLakeConfig::from_btreemap(config.clone())?;
+        Ok(())
     }
 
     async fn validate(&self) -> Result<()> {
@@ -369,7 +413,11 @@ impl Sink for DeltaLakeSink {
         true
     }
 
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _db: DatabaseConnection,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+    ) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
         })

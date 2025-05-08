@@ -1,0 +1,18 @@
+statement error
+select * from a.b.c
+----
+    db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: database not found: a
+
+
+statement error
+select * FROM database_name.information_schema.tables;
+----
+    db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: database not found: database_name
