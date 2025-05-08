@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::Write;
-use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
 use madsim::runtime::init_logger;
-use rand::{Rng, rng as thread_rng};
-use risingwave_common::bail;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
@@ -39,7 +34,7 @@ use crate::log_store::utils::*;
 // ./risedev sit-test test_recover_synced_log_store >out.log 2>&1
 // ```
 #[tokio::test]
-async fn test_recover_synced_log_store() -> Result<()> {
+async fn test_scale_in_synced_log_store() -> Result<()> {
     init_logger();
     let mut cluster = start_sync_log_store_cluster().await?;
     cluster
@@ -59,9 +54,7 @@ async fn test_recover_synced_log_store() -> Result<()> {
         setup_mv(&mut cluster, UNALIGNED_MV_NAME, true).await?;
         run_amplification_workload(&mut cluster, dimension_count).await?;
 
-        cluster
-            .kill_nodes(vec!["compute-1", "compute-2", "compute-3"], 5)
-            .await;
+        cluster.simple_kill_nodes(vec!["compute-1"]).await;
         tracing::info!("killed compute nodes");
         cluster.wait_for_recovery().await?;
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
