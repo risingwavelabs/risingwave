@@ -47,7 +47,7 @@ async fn test_recover_synced_log_store() -> Result<()> {
         .await?;
 
     let amplification_factor = 20000;
-    let dimension_count = 5;
+    let dimension_count = 10;
     let result_count = amplification_factor * dimension_count;
 
     const UNALIGNED_MV_NAME: &str = "unaligned_mv";
