@@ -827,8 +827,7 @@ message SubscribeIcebergCompactionEventRequest {
 
 message IcebergCompactionTask {
   uint64 task_id = 1;
-  bytes table_ident = 2;
-  map<string, string> props = 3;
+  map<string, string> props = 2;
 }
 
 message SubscribeIcebergCompactionEventResponse {

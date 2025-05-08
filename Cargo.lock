@@ -6738,7 +6738,7 @@ dependencies = [
 [[package]]
 name = "ic-codegen"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/IC.git?rev=1be5b85#1be5b85ebdc3353c9f138f5c35c9187dca2636b0"
+source = "git+https://github.com/nimtable/IC.git?rev=76fe2cf#76fe2cf0afd2e40cc800b37ca8122e062a3a2a84"
 dependencies = [
  "prost 0.12.6",
  "prost-build 0.12.6",
@@ -6749,7 +6749,7 @@ dependencies = [
 [[package]]
 name = "ic-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/IC.git?rev=1be5b85#1be5b85ebdc3353c9f138f5c35c9187dca2636b0"
+source = "git+https://github.com/nimtable/IC.git?rev=76fe2cf#76fe2cf0afd2e40cc800b37ca8122e062a3a2a84"
 dependencies = [
  "async-stream",
  "async-trait",

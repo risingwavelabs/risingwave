@@ -14,7 +14,6 @@
 
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
-use risingwave_connector::connector_common::IcebergCommon;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
@@ -34,7 +33,7 @@ use risingwave_hummock_sdk::{
     HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
     full_key_can_concat,
 };
-use risingwave_pb::hummock::{IcebergCompactionTask, LevelType};
+use risingwave_pb::hummock::LevelType;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -651,15 +650,6 @@ pub async fn compact(
         compaction_catalog_agent_ref,
     )
     .await
-}
-
-pub async fn compact_iceberg(iceberg_compaction_task: IcebergCompactionTask, shutdown_rx: Receiver<()>) {
-    let IcebergCompactionTask {table_ident, props, task_id} = iceberg_compaction_task;
-    let iceberg_catalog = IcebergCommon::create_catalog(
-        table_ident,
-        &props,
-    ).await.unwrap();
-    Compaction::new()
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.

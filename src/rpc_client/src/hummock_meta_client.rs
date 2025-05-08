@@ -17,12 +17,14 @@ use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, SstObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{
-    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
 pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventResponse, tonic::Status>;
-pub type IcebergCompactionEventItem = std::result::Result<SubscribeIcebergCompactionEventResponse, tonic::Status>;
+pub type IcebergCompactionEventItem =
+    std::result::Result<SubscribeIcebergCompactionEventResponse, tonic::Status>;
 
 use crate::error::Result;
 

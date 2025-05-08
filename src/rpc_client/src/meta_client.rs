@@ -112,7 +112,8 @@ use tonic::{Code, Request, Streaming};
 use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo, IcebergCompactionEventItem,
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    IcebergCompactionEventItem,
 };
 use crate::meta_rpc_client_method_impl;
 

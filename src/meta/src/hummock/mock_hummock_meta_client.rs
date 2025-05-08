@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
-use risingwave_pb::hummock::SubscribeIcebergCompactionEventRequest;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
@@ -40,11 +39,12 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTa
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
-    compact_task,
+    SubscribeIcebergCompactionEventRequest, compact_task,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,IcebergCompactionEventItem
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    IcebergCompactionEventItem,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};

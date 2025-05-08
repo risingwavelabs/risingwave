@@ -18,10 +18,13 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, SubscribeIcebergCompactionEventRequest};
+use risingwave_pb::hummock::{
+    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeIcebergCompactionEventRequest,
+};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{
-    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo, IcebergCompactionEventItem, MetaClient
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    IcebergCompactionEventItem, MetaClient,
 };
 use tokio::sync::mpsc::UnboundedSender;
 

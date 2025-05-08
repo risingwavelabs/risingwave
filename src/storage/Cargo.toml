@@ -22,6 +22,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
+ic-core = { git = "https://github.com/nimtable/IC.git", rev = "76fe2cf" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -38,14 +39,13 @@ risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_trace = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_connector = { workspace = true }
-ic-core = { git = "https://github.com/nimtable/IC.git", rev = "1be5b85" }
 scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
