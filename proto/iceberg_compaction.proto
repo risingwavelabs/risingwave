@@ -27,8 +27,9 @@ message SubscribeIcebergCompactionEventRequest {
 }
 
 message IcebergCompactionTask {
-  bytes table_ident = 1;
-  map<string, string> props = 2;
+  // Now we only support iceberg table full compaction.
+  // compactor will get the information of the iceberg table from the properties
+  map<string, string> props = 1;
 }
 
 message SubscribeIcebergCompactionEventResponse {
