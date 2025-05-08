@@ -648,8 +648,14 @@ impl SubscriptionCursor {
                 pks,
             )
         } else {
-            let subscription_from_table_name =
-                ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
+            let catalog_reader = handler_args.session.env.catalog_reader().read_guard();
+            let schema_name = catalog_reader
+                .get_schema_by_id(&table_catalog.database_id, &table_catalog.schema_id)?
+                .name();
+            let subscription_from_table_name = ObjectName(vec![
+                Ident::from(schema_name.as_str()),
+                Ident::from(table_catalog.name.as_str()),
+            ]);
             let pk_names = pks
                 .iter()
                 .map(|f| {
