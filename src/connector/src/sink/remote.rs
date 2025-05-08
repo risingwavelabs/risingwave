@@ -55,7 +55,7 @@ use rw_futures_util::drop_either_future;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, unbounded_channel};
+use tokio::sync::mpsc::{Receiver, UnboundedSender, unbounded_channel};
 use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
@@ -65,6 +65,7 @@ use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
 use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
+use crate::connector_common::IcebergCompactionStat;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedLogSinker;
@@ -567,7 +568,11 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         true
     }
 
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _db: DatabaseConnection,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+    ) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }

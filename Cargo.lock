@@ -11482,6 +11482,7 @@ dependencies = [
  "futures",
  "hex",
  "http 1.3.1",
+ "iceberg",
  "indexmap 2.9.0",
  "itertools 0.14.0",
  "jsonbb",
