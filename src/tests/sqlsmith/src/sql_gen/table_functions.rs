@@ -36,11 +36,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             0 => self.gen_generate_series(),
             1 => self.gen_range(),
             2 => self.gen_unnest(),
-            3 => self.gen_jsonb_array_elements(),
-            4 => self.gen_jsonb_array_elements_text(),
-            5 => self.gen_jsonb_each(),
-            6 => self.gen_jsonb_each_text(),
-            7 => self.gen_jsonb_object_keys(),
+            3..=7 => self.gen_jsonb_func(),
             _ => unreachable!(),
         }
     }
@@ -104,97 +100,37 @@ impl<R: Rng> SqlGenerator<'_, R> {
         (relation, table)
     }
 
-    /// Generates `JSONB_ARRAY_ELEMENTS`.
-    /// `JSONB_ARRAY_ELEMENTS(jsonb)`
-    fn gen_jsonb_array_elements(&mut self) -> (TableFactor, Table) {
-        let table_name = self.gen_table_name_with_prefix("jsonb_array_elements");
-        let alias = create_table_alias(&table_name);
-
-        let depth = self.rng.random_range(1..=5);
-        let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Array);
-
-        let table = Table::new(table_name, vec![]);
-        let relation = create_tvf(
-            "jsonb_array_elements",
-            alias,
-            create_args(vec![jsonb_expr]),
-            false,
-        );
-
-        (relation, table)
+    /// Generates one of the JSONB-related table functions,
+    /// including:
+    /// - `JSON_ARRAY_ELEMENTS(JSONB)`
+    /// - `JSON_ARRAY_ELEMENTS_TEXT(JSONB)`
+    /// - `JSON_EACH(JSONB)`
+    /// - `JSON_EACH_TEXT(JSONB)`
+    /// - `JSON_OBJECT_KEYS(JSONB)`
+    ///
+    /// These functions require specific top-level JSONB types:
+    /// - `JSON_ARRAY_ELEMENTS[_TEXT]` expects a JSON array
+    /// - `JSON_EACH[_TEXT]` and `JSON_OBJECT_KEYS` expect a JSON object
+    fn gen_jsonb_func(&mut self) -> (TableFactor, Table) {
+        match self.rng.random_range(0..=4) {
+            0 => self.gen_jsonb_tvf("jsonb_array_elements", JsonTopLevelKind::Array),
+            1 => self.gen_jsonb_tvf("jsonb_array_elements_text", JsonTopLevelKind::Array),
+            2 => self.gen_jsonb_tvf("jsonb_each", JsonTopLevelKind::Object),
+            3 => self.gen_jsonb_tvf("jsonb_each_text", JsonTopLevelKind::Object),
+            4 => self.gen_jsonb_tvf("jsonb_object_keys", JsonTopLevelKind::Object),
+            _ => unreachable!(),
+        }
     }
 
-    /// Generates `JSONB_ARRAY_ELEMENTS_TEXT`.
-    /// `JSONB_ARRAY_ELEMENTS_TEXT(jsonb)`
-    fn gen_jsonb_array_elements_text(&mut self) -> (TableFactor, Table) {
-        let table_name = self.gen_table_name_with_prefix("jsonb_array_elements_text");
+    fn gen_jsonb_tvf(&mut self, name: &str, kind: JsonTopLevelKind) -> (TableFactor, Table) {
+        let table_name = self.gen_table_name_with_prefix(name);
         let alias = create_table_alias(&table_name);
 
         let depth = self.rng.random_range(1..=5);
-        let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Array);
+        let jsonb_expr = self.gen_jsonb(depth, kind);
 
         let table = Table::new(table_name, vec![]);
-        let relation = create_tvf(
-            "jsonb_array_elements_text",
-            alias,
-            create_args(vec![jsonb_expr]),
-            false,
-        );
-
-        (relation, table)
-    }
-
-    /// Generates `JSONB_EACH`.
-    /// `JSONB_EACH(jsonb)`
-    fn gen_jsonb_each(&mut self) -> (TableFactor, Table) {
-        let table_name = self.gen_table_name_with_prefix("jsonb_each");
-        let alias = create_table_alias(&table_name);
-
-        let depth = self.rng.random_range(1..=5);
-        let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Object);
-
-        let table = Table::new(table_name, vec![]);
-        let relation = create_tvf("jsonb_each", alias, create_args(vec![jsonb_expr]), false);
-
-        (relation, table)
-    }
-
-    /// Generates `JSONB_EACH_TEXT`.
-    /// `JSONB_EACH_TEXT(jsonb)`
-    fn gen_jsonb_each_text(&mut self) -> (TableFactor, Table) {
-        let table_name = self.gen_table_name_with_prefix("jsonb_each_text");
-        let alias = create_table_alias(&table_name);
-
-        let depth = self.rng.random_range(1..=5);
-        let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Object);
-
-        let table = Table::new(table_name, vec![]);
-        let relation = create_tvf(
-            "jsonb_each_text",
-            alias,
-            create_args(vec![jsonb_expr]),
-            false,
-        );
-
-        (relation, table)
-    }
-
-    /// Generates `JSONB_EACH_TEXT`.
-    /// `JSONB_EACH_TEXT(jsonb)`
-    fn gen_jsonb_object_keys(&mut self) -> (TableFactor, Table) {
-        let table_name: String = self.gen_table_name_with_prefix("jsonb_object_keys");
-        let alias = create_table_alias(&table_name);
-
-        let depth = self.rng.random_range(1..=5);
-        let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Object);
-
-        let table = Table::new(table_name, vec![]);
-        let relation = create_tvf(
-            "jsonb_object_keys",
-            alias,
-            create_args(vec![jsonb_expr]),
-            false,
-        );
+        let relation = create_tvf(name, alias, create_args(vec![jsonb_expr]), false);
 
         (relation, table)
     }
@@ -268,13 +204,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             return match self.rng.random_range(0..=3) {
                 0 => format!("\"{}\"", self.gen_random_string()),
                 1 => self.rng.random_range(-1000..1000).to_string(),
-                2 => {
-                    if self.rng.random_bool(0.5) {
-                        "true".into()
-                    } else {
-                        "false".into()
-                    }
-                }
+                2 => self.flip_coin().to_string(),
                 3 => "null".into(),
                 _ => unreachable!(),
             };
@@ -290,13 +220,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             self.rng.random_range(0..=5)
         } {
             0 => "null".into(),
-            1 => {
-                if self.rng.random_bool(0.5) {
-                    "true".into()
-                } else {
-                    "false".into()
-                }
-            }
+            1 => self.flip_coin().to_string(),
             2 => self.rng.random_range(-1000..1000).to_string(),
             3 => format!("\"{}\"", self.gen_random_string()),
             4 => {
