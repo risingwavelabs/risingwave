@@ -25,15 +25,17 @@ pub(crate) async fn start_sync_log_store_cluster() -> Result<Cluster> {
 
     let config_path = {
         let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
-        file.write_all(include_bytes!("../../../../../config/ci-sim-log-store.toml"))
-            .expect("failed to write config file");
+        file.write_all(include_bytes!(
+            "../../../../../config/ci-sim-log-store.toml"
+        ))
+        .expect("failed to write config file");
         file.into_temp_path()
     };
 
     Cluster::start(Configuration {
         config_path: ConfigPath::Temp(config_path.into()),
         frontend_nodes: 1,
-        compute_nodes: 3,
+        compute_nodes: 5,
         meta_nodes: 1,
         compactor_nodes: 1,
         compute_node_cores: 2,
@@ -133,7 +135,7 @@ pub(crate) async fn wait_unaligned_join(
             }
             return Ok(());
         }
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_millis(1)).await;
     }
     // In a subsequent step we will compare the results, and print the missing records.
     tracing::error!(

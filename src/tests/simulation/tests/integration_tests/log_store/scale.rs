@@ -21,6 +21,7 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
+use itertools::Itertools;
 
 use crate::log_store::utils::*;
 
@@ -42,7 +43,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         .await?;
 
     let amplification_factor = 40000;
-    let dimension_count = 10;
+    let dimension_count = 5;
     let result_count = amplification_factor * dimension_count;
 
     tracing::info!("setup cluster");
@@ -58,12 +59,18 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         run_amplification_workload(&mut cluster, dimension_count).await?;
         tracing::info!("ran amplification workload");
 
-        /// Trigger a number of scale operations
-        for i in 0..3 {
-            cluster.kill_nodes_and_restart(vec!["compute-1", "compute-2"], 6).await;
-            tracing::info!("killed compute nodes");
+        /// Trigger a number of scale operations, with different combinations of nodes
+        for (a, b) in (1..=5).tuple_combinations() {
+            cluster
+                .kill_nodes(vec![
+                    format!("compute-{a}"),
+                    format!("compute-{b}"),
+                ], 6)
+                .await;
+            tracing::info!("killed compute nodes: {a}, {b}");
             cluster.wait_for_recovery().await?;
         }
+
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
     }
 
