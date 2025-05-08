@@ -60,7 +60,7 @@ async fn test_recover_synced_log_store() -> Result<()> {
         run_amplification_workload(&mut cluster, dimension_count).await?;
 
         cluster
-            .kill_nodes(vec!["compute-1", "compute-2", "compute-3"], 5)
+            .kill_nodes(vec!["compute-1", "compute-2", "compute-3", "compute-4", "compute-5"], 5)
             .await;
         tracing::info!("killed compute nodes");
         cluster.wait_for_recovery().await?;
