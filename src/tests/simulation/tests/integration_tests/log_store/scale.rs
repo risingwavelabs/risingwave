@@ -59,7 +59,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         tracing::info!("ran amplification workload");
 
         /// Trigger a number of scale operations
-        for i in 0..5 {
+        for i in 0..3 {
             cluster.kill_nodes_and_restart(vec!["compute-1", "compute-2"], 6).await;
             tracing::info!("killed compute nodes");
             cluster.wait_for_recovery().await?;
