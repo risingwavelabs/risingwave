@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod compaction;
 mod jni_catalog;
 mod mock_catalog;
 mod storage_catalog;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
