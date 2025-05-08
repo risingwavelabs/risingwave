@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use chrono::{Duration, NaiveDateTime};
-use rand::distr::Alphanumeric;
 use rand::Rng;
+use rand::distr::Alphanumeric;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value,
 };
@@ -104,7 +104,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         (relation, table)
     }
 
-    /// Generates `JSONB_ARRARY_ELEMENTS`.
+    /// Generates `JSONB_ARRAY_ELEMENTS`.
     /// `JSONB_ARRAY_ELEMENTS(jsonb)`
     fn gen_jsonb_array_elements(&mut self) -> (TableFactor, Table) {
         let table_name = self.gen_table_name_with_prefix("jsonb_array_elements");
@@ -114,12 +114,17 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Array);
 
         let table = Table::new(table_name, vec![]);
-        let relation = create_tvf("jsonb_array_elements", alias, create_args(vec![jsonb_expr]), false);
+        let relation = create_tvf(
+            "jsonb_array_elements",
+            alias,
+            create_args(vec![jsonb_expr]),
+            false,
+        );
 
         (relation, table)
     }
 
-    /// Generates `JSONB_ARRARY_ELEMENTS_TEXT`.
+    /// Generates `JSONB_ARRAY_ELEMENTS_TEXT`.
     /// `JSONB_ARRAY_ELEMENTS_TEXT(jsonb)`
     fn gen_jsonb_array_elements_text(&mut self) -> (TableFactor, Table) {
         let table_name = self.gen_table_name_with_prefix("jsonb_array_elements_text");
@@ -129,7 +134,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Array);
 
         let table = Table::new(table_name, vec![]);
-        let relation = create_tvf("jsonb_array_elements_text", alias, create_args(vec![jsonb_expr]), false);
+        let relation = create_tvf(
+            "jsonb_array_elements_text",
+            alias,
+            create_args(vec![jsonb_expr]),
+            false,
+        );
 
         (relation, table)
     }
@@ -159,7 +169,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Object);
 
         let table = Table::new(table_name, vec![]);
-        let relation = create_tvf("jsonb_each_text", alias, create_args(vec![jsonb_expr]), false);
+        let relation = create_tvf(
+            "jsonb_each_text",
+            alias,
+            create_args(vec![jsonb_expr]),
+            false,
+        );
 
         (relation, table)
     }
@@ -174,7 +189,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let jsonb_expr = self.gen_jsonb(depth, JsonTopLevelKind::Object);
 
         let table = Table::new(table_name, vec![]);
-        let relation = create_tvf("jsonb_object_keys", alias, create_args(vec![jsonb_expr]), false);
+        let relation = create_tvf(
+            "jsonb_object_keys",
+            alias,
+            create_args(vec![jsonb_expr]),
+            false,
+        );
 
         (relation, table)
     }
@@ -243,12 +263,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
     }
 
-    fn gen_json_value(
-        &mut self,
-        depth: usize,
-        max_depth: usize,
-        kind: JsonTopLevelKind,
-    ) -> String {
+    fn gen_json_value(&mut self, depth: usize, max_depth: usize, kind: JsonTopLevelKind) -> String {
         if depth >= max_depth {
             return match self.rng.random_range(0..=3) {
                 0 => format!("\"{}\"", self.gen_random_string()),
@@ -264,7 +279,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 _ => unreachable!(),
             };
         }
-    
+
         match if depth == 0 {
             match kind {
                 JsonTopLevelKind::Array => 4,
@@ -296,8 +311,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 let fields: Vec<String> = (0..len)
                     .map(|_| {
                         let key = self.gen_random_string();
-                        let val =
-                            self.gen_json_value(depth + 1, max_depth, JsonTopLevelKind::Any);
+                        let val = self.gen_json_value(depth + 1, max_depth, JsonTopLevelKind::Any);
                         format!("\"{}\":{}", key, val)
                     })
                     .collect();
@@ -305,7 +319,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             }
             _ => unreachable!(),
         }
-    }    
+    }
 
     fn gen_random_string(&mut self) -> String {
         let len = self.rng.random_range(3..8);
