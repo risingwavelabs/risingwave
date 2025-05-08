@@ -16,12 +16,12 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use madsim::runtime::init_logger;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
-use itertools::Itertools;
 
 use crate::log_store::utils::*;
 
@@ -62,10 +62,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         /// Trigger a number of scale operations, with different combinations of nodes
         for (a, b) in (1..=5).tuple_combinations() {
             cluster
-                .kill_nodes(vec![
-                    format!("compute-{a}"),
-                    format!("compute-{b}"),
-                ], 6)
+                .kill_nodes(vec![format!("compute-{a}"), format!("compute-{b}")], 6)
                 .await;
             tracing::info!("killed compute nodes: {a}, {b}");
             cluster.wait_for_recovery().await?;
