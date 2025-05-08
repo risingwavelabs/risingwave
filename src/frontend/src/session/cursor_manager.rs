@@ -36,7 +36,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
-use crate::catalog::TableId;
+use crate::catalog::{DatabaseId, SchemaId, TableId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{
@@ -299,8 +299,14 @@ impl SubscriptionCursor {
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (chunk_stream, fields, init_query_timer) =
-                Self::initiate_query(None, &dependent_table_id, handler_args.clone()).await?;
+            let (chunk_stream, fields, init_query_timer) = Self::initiate_query(
+                None,
+                &dependent_table_id,
+                handler_args.clone(),
+                &subscription.database_id,
+                &subscription.schema_id,
+            )
+            .await?;
             let pinned_epoch = handler_args
                 .session
                 .env
@@ -368,6 +374,8 @@ impl SubscriptionCursor {
                                     Some(rw_timestamp),
                                     &self.dependent_table_id,
                                     handler_args.clone(),
+                                    &self.subscription.database_id,
+                                    &self.subscription.schema_id,
                                 )
                                 .await?;
                             Self::init_row_stream(
@@ -589,6 +597,8 @@ impl SubscriptionCursor {
                 Some(0),
                 &self.dependent_table_id,
                 handler_args,
+                &self.subscription.database_id,
+                &self.subscription.schema_id,
             ),
             State::Fetch {
                 from_snapshot,
@@ -600,12 +610,16 @@ impl SubscriptionCursor {
                         None,
                         &self.dependent_table_id,
                         handler_args,
+                        &self.subscription.database_id,
+                        &self.subscription.schema_id,
                     )
                 } else {
                     Self::init_batch_plan_for_subscription_cursor(
                         Some(rw_timestamp),
                         &self.dependent_table_id,
                         handler_args,
+                        &self.subscription.database_id,
+                        &self.subscription.schema_id,
                     )
                 }
             }
@@ -620,6 +634,8 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handler_args: HandlerArgs,
+        database_id: &DatabaseId,
+        schema_id: &SchemaId,
     ) -> Result<BatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
@@ -650,7 +666,7 @@ impl SubscriptionCursor {
         } else {
             let catalog_reader = handler_args.session.env.catalog_reader().read_guard();
             let schema_name = catalog_reader
-                .get_schema_by_id(&table_catalog.database_id, &table_catalog.schema_id)?
+                .get_schema_by_id(database_id, schema_id)?
                 .name();
             let subscription_from_table_name = ObjectName(vec![
                 Ident::from(schema_name.as_str()),
@@ -686,12 +702,16 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handler_args: HandlerArgs,
+        database_id: &DatabaseId,
+        schema_id: &SchemaId,
     ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant)> {
         let init_query_timer = Instant::now();
         let plan_result = Self::init_batch_plan_for_subscription_cursor(
             rw_timestamp,
             dependent_table_id,
             handler_args.clone(),
+            database_id,
+            schema_id,
         )?;
         let plan_fragmenter_result = gen_batch_plan_fragmenter(&handler_args.session, plan_result)?;
         let (chunk_stream, fields) =
