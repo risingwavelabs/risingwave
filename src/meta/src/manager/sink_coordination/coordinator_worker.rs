@@ -25,6 +25,7 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_connector::connector_common::IcebergCompactionStat;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{
     Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkParam, build_sink,
@@ -33,7 +34,7 @@ use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
 use tonic::Status;
 use tracing::{error, warn};
@@ -369,6 +370,7 @@ impl CoordinatorWorker {
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
+        iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
@@ -383,7 +385,10 @@ impl CoordinatorWorker {
         };
 
         dispatch_sink!(sink, sink, {
-            let coordinator = match sink.new_coordinator(db).await {
+            let coordinator = match sink
+                .new_coordinator(db, Some(iceberg_compact_stat_sender))
+                .await
+            {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(
