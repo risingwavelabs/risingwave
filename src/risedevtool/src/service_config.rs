@@ -314,6 +314,23 @@ pub struct PubsubConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct PulsarConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub broker_port: u16,
+    pub http_port: u16,
+
+    pub user_managed: bool,
+    pub image: String,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct RedisConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -410,6 +427,7 @@ pub enum ServiceConfig {
     Kafka(KafkaConfig),
     SchemaRegistry(SchemaRegistryConfig),
     Pubsub(PubsubConfig),
+    Pulsar(PulsarConfig),
     Redis(RedisConfig),
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
@@ -422,6 +440,7 @@ pub enum TaskGroup {
     Observability,
     Kafka,
     Pubsub,
+    Pulsar,
     MySql,
     Postgres,
     SqlServer,
@@ -443,6 +462,7 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::Kafka(c) => &c.id,
             Self::Pubsub(c) => &c.id,
+            Self::Pulsar(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
@@ -467,6 +487,7 @@ impl ServiceConfig {
             Self::AwsS3(_) => None,
             Self::Kafka(c) => Some(c.port),
             Self::Pubsub(c) => Some(c.port),
+            Self::Pulsar(c) => Some(c.http_port),
             Self::Redis(c) => Some(c.port),
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
@@ -490,6 +511,7 @@ impl ServiceConfig {
             Self::AwsS3(_c) => false,
             Self::Kafka(c) => c.user_managed,
             Self::Pubsub(_c) => false,
+            Self::Pulsar(c) => c.user_managed,
             Self::Redis(_c) => false,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
@@ -514,6 +536,7 @@ impl ServiceConfig {
             ServiceConfig::Opendal(_) | ServiceConfig::AwsS3(_) => RisingWave,
             ServiceConfig::Kafka(_) | ServiceConfig::SchemaRegistry(_) => Kafka,
             ServiceConfig::Pubsub(_) => Pubsub,
+            ServiceConfig::Pulsar(_) => Pulsar,
             ServiceConfig::Redis(_) => Redis,
             ServiceConfig::MySql(my_sql_config) => {
                 if matches!(my_sql_config.application, Application::Metastore) {

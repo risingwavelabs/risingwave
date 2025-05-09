@@ -12,28 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod transaction;
+use crate::sink::catalog::SinkId;
 
-pub type ColumnFamily = String;
-pub type Key = Vec<u8>;
-pub type Value = Vec<u8>;
-
-use thiserror::Error;
-pub use transaction::*;
-
-// Error of metastore
-#[derive(Debug, Error)]
-pub enum MetaStoreError {
-    #[error("item not found: {0}")]
-    ItemNotFound(String),
-    #[error("transaction abort")]
-    TransactionAbort(),
-    #[error("internal error: {0}")]
-    Internal(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+pub struct IcebergCompactionStat {
+    pub sink_id: SinkId,
 }
-
-pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;

@@ -27,6 +27,8 @@ use risingwave_pb::hummock::{
     CancelCompactTask, CompactTaskAssignment, CompactTaskProgress,
     SubscribeCompactionEventResponse, SubscribeIcebergCompactionEventResponse,
 };
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventResponse;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::MetaResult;
@@ -34,6 +36,7 @@ use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModelError;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
+pub type IcebergCompactorManagerRef = Arc<IcebergCompactorManager>;
 
 pub const TASK_RUN_TOO_LONG: &str = "running too long";
 pub const TASK_NOT_FOUND: &str = "task not found";
