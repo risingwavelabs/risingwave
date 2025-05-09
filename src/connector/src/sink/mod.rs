@@ -89,12 +89,13 @@ use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::WithPropertiesExt;
+use crate::connector_common::IcebergCompactionStat;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -678,7 +679,11 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _db: DatabaseConnection,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+    ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }

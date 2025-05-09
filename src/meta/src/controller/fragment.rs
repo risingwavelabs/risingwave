@@ -525,6 +525,48 @@ impl CatalogController {
         Ok(object_ids)
     }
 
+    pub async fn get_fragment_desc_by_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<Option<(FragmentDesc, Vec<FragmentId>)>> {
+        let inner = self.inner.read().await;
+
+        // Get the fragment description
+        let fragment_opt = FragmentModel::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::DistributionType,
+                fragment::Column::StateTableIds,
+                fragment::Column::VnodeCount,
+                fragment::Column::StreamNode,
+            ])
+            .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+            .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
+            .filter(fragment::Column::FragmentId.eq(fragment_id))
+            .group_by(fragment::Column::FragmentId)
+            .into_model::<FragmentDesc>()
+            .one(&inner.db)
+            .await?;
+
+        let Some(fragment) = fragment_opt else {
+            return Ok(None); // Fragment not found
+        };
+
+        // Get upstream fragments
+        let upstreams: Vec<FragmentId> = FragmentRelation::find()
+            .select_only()
+            .column(fragment_relation::Column::SourceFragmentId)
+            .filter(fragment_relation::Column::TargetFragmentId.eq(fragment_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(Some((fragment, upstreams)))
+    }
+
     pub async fn list_fragment_database_ids(
         &self,
         select_fragment_ids: Option<Vec<FragmentId>>,

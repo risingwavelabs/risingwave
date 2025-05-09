@@ -749,13 +749,14 @@ impl ListValue {
                 }
                 self.skip_whitespace();
                 if self.try_consume('}') {
-                    return Ok(ListValue::empty(self.data_type.as_list()));
+                    return Ok(ListValue::empty(self.data_type.as_list_element_type()));
                 }
-                let mut builder = ArrayBuilderImpl::with_type(0, self.data_type.as_list().clone());
+                let mut builder =
+                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_element_type().clone());
                 loop {
                     let mut parser = Self {
                         input: self.input,
-                        data_type: self.data_type.as_list(),
+                        data_type: self.data_type.as_list_element_type(),
                     };
                     builder.append(parser.parse()?);
                     self.input = parser.input;

@@ -1542,9 +1542,13 @@ impl DdlController {
         cluster_info: &StreamingClusterInfo,
         resource_group: String,
     ) -> MetaResult<NonZeroUsize> {
-        let available = cluster_info.parallelism(resource_group);
+        let available = cluster_info.parallelism(&resource_group);
         let Some(available) = NonZeroUsize::new(available) else {
-            bail_unavailable!("no available slots to schedule");
+            bail_unavailable!(
+                "no available slots to schedule in resource group \"{}\", \
+                 have you allocated any compute nodes within this resource group?",
+                resource_group
+            );
         };
 
         if let Some(specified) = specified {
@@ -1557,7 +1561,9 @@ impl DdlController {
             }
             if specified > available {
                 bail_unavailable!(
-                    "not enough parallelism to schedule, required: {}, available: {}",
+                    "insufficient parallelism to schedule in resource group \"{}\", \
+                     required: {}, available: {}",
+                    resource_group,
                     specified,
                     available,
                 );
@@ -1570,7 +1576,9 @@ impl DdlController {
                 DefaultParallelism::Default(num) => {
                     if num > available {
                         bail_unavailable!(
-                            "not enough parallelism to schedule, required: {}, available: {}",
+                            "insufficient parallelism to schedule in resource group \"{}\", \
+                            required: {}, available: {}",
+                            resource_group,
                             num,
                             available,
                         );
@@ -1581,8 +1589,9 @@ impl DdlController {
 
             if default_parallelism > max {
                 tracing::warn!(
-                    "too many parallelism available, use max parallelism {} instead",
-                    max
+                    max_parallelism = max.get(),
+                    resource_group,
+                    "too many parallelism available, use max parallelism instead",
                 );
             }
             Ok(default_parallelism.min(max))

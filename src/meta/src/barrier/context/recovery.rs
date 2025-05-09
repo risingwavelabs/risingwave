@@ -140,7 +140,10 @@ impl GlobalBarrierWorkerContextImpl {
     fn resolve_hummock_version_epochs(
         background_jobs: &HashMap<TableId, (String, StreamJobFragments)>,
         version: &HummockVersion,
-    ) -> MetaResult<(HashMap<TableId, u64>, HashMap<TableId, Vec<Vec<u64>>>)> {
+    ) -> MetaResult<(
+        HashMap<TableId, u64>,
+        HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+    )> {
         let table_committed_epoch: HashMap<_, _> = version
             .state_table_info
             .info()
@@ -204,11 +207,16 @@ impl GlobalBarrierWorkerContextImpl {
                     {
                         let epochs = table_change_log
                             .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
-                            .map(|epoch_log| epoch_log.epochs.clone())
+                            .map(|epoch_log| {
+                                (
+                                    epoch_log.non_checkpoint_epochs.clone(),
+                                    epoch_log.checkpoint_epoch,
+                                )
+                            })
                             .collect_vec();
                         let first_epochs = epochs.first();
-                        if let Some(first_epochs) = &first_epochs
-                            && first_epochs.last() == Some(&downstream_committed_epoch)
+                        if let Some((_, first_checkpoint_epoch)) = &first_epochs
+                            && *first_checkpoint_epoch == downstream_committed_epoch
                         {
                         } else {
                             return Err(anyhow!(

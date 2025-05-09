@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "expr",
         "health",
         "hummock",
+        "iceberg_compaction",
         "java_binding",
         "meta",
         "monitor_service",

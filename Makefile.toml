@@ -858,6 +858,8 @@ category = "RiseDev - Build"
 dependencies = ["prepare"]
 condition = { env_set = [
     "ENABLE_BUILD_RW_CONNECTOR",
+], env_not_set = [
+    "USE_SYSTEM_RISINGWAVE",
 ], files_modified = { input = [
     "./java/connector-node/**/*",
 ], output = [
@@ -1383,56 +1385,6 @@ script = '''
 #!/usr/bin/env bash
 set -e
 cargo run -p risedev --bin risedev-docslt -- "$@"
-'''
-
-[tasks.compose]
-category = "RiseDev - Compose"
-description = "Compose a docker-compose.yaml file"
-script = '''
-#!/usr/bin/env bash
-set -e
-rm -rf ${PREFIX_DOCKER}/*
-mkdir -p "${PREFIX_DOCKER}"
-cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
-echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
-'''
-
-[tasks.compose-deploy]
-category = "RiseDev - Compose"
-description = "Compose a docker-compose.yaml deploy directory"
-script = '''
-#!/usr/bin/env bash
-set -e
-rm -rf "${PREFIX_DOCKER}"/*
-mkdir -p "${PREFIX_DOCKER}"
-cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
-echo docker-compose file and deploy.sh generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
-echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput sgr0) to do the deployment.
-'''
-
-[tasks.apply-compose-deploy]
-category = "RiseDev - Compose"
-description = "Run deploy.sh"
-script = '''
-#!/usr/bin/env bash
-set -e
-
-.risingwave/rw-docker/deploy.sh "$@"
-
-echo
-echo "Deploy finished!"
-
-cat .risingwave/rw-docker/_message.partial.sh
-'''
-
-[tasks.apply-compose-docker]
-category = "RiseDev - Compose"
-description = "Run deploy.sh"
-script = '''
-#!/usr/bin/env bash
-set -e
-
-cp -a .risingwave/rw-docker/* docker
 '''
 
 [tasks.generate-example-config]
