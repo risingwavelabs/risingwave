@@ -314,7 +314,6 @@ impl HummockManager {
             ),
             metrics,
             metadata_manager,
-            // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
             event_sender: tx,
             object_store,

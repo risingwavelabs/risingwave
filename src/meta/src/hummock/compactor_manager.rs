@@ -34,6 +34,7 @@ use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModelError;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
+pub type IcebergCompactorManagerRef = Arc<IcebergCompactorManager>;
 
 pub const TASK_RUN_TOO_LONG: &str = "running too long";
 pub const TASK_NOT_FOUND: &str = "task not found";

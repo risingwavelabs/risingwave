@@ -29,6 +29,7 @@ use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
+use risingwave_meta::hummock::IcebergCompactorManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManager;
 use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
@@ -474,9 +475,20 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
-    let iceberg_compaction_mgr =
-        IcebergCompactionManager::new(metadata_manager.clone(), iceberg_compaction_stat_rx);
-    sub_tasks.push(iceberg_compaction_mgr.start());
+    let (iceberg_compactor_event_tx, _iceberg_compactor_event_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+    let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
+    let iceberg_compaction_mgr = Arc::new(IcebergCompactionManager::new(
+        metadata_manager.clone(),
+        iceberg_compactor_manager.clone(),
+        iceberg_compactor_event_tx,
+    ));
+
+    sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_rx,
+    ));
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -554,6 +566,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         metadata_manager.clone(),
         backup_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
