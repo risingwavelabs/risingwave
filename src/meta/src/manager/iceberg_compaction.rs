@@ -36,6 +36,9 @@ pub type IcebergCompactionManagerRef = std::sync::Arc<IcebergCompactionManager>;
 
 type CompactorChangeTx = UnboundedSender<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
+type CompactorChangeRx =
+    UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
+
 pub struct IcebergCompactionManager {
     iceberg_commits: RwLock<HashMap<SinkId, usize>>,
     metadata_manager: MetadataManager,
@@ -45,17 +48,21 @@ pub struct IcebergCompactionManager {
 }
 
 impl IcebergCompactionManager {
-    pub fn new(
+    pub fn build(
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
-        compactor_streams_change_tx: CompactorChangeTx,
-    ) -> Self {
-        Self {
-            iceberg_commits: RwLock::new(HashMap::new()),
-            metadata_manager,
-            iceberg_compactor_manager,
-            compactor_streams_change_tx,
-        }
+    ) -> (Arc<Self>, CompactorChangeRx) {
+        let (compactor_streams_change_tx, compactor_streams_change_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        (
+            Arc::new(Self {
+                iceberg_commits: RwLock::new(HashMap::new()),
+                metadata_manager,
+                iceberg_compactor_manager,
+                compactor_streams_change_tx,
+            }),
+            compactor_streams_change_rx,
+        )
     }
 
     pub fn compaction_stat_loop(
