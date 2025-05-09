@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::{collections::{HashMap, HashSet}, sync::LazyLock};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use risingwave_common::catalog::Schema;
+use risingwave_common::{catalog::Schema, types::DataType};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
@@ -31,19 +31,60 @@ static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::de
 
 pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
     let mut datums: Vec<Option<ScalarImpl>> = vec![];
+    let mut money_fields: HashSet<&str> = HashSet::new();
+    for (column, _) in row.cells(){
+        if column.column_type() == tiberius::ColumnType::Money{
+            money_fields.insert(column.name());
+            println!("这里 {:?}", column.name());
+        }
+    }
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let name = rw_field.name.as_str();
-        let datum = match row.try_get::<ScalarImplTiberiusWrapper, usize>(i) {
-            Ok(datum) => datum.map(|d| d.0),
-            Err(err) => {
-                log_error!(name, err, "parse column failed");
-                None
-            }
+        let datum = match money_fields.contains(name){
+            true => {
+                match row.try_get::<f64, usize>(i) {
+                    Ok(Some(value)) => {
+                        Some(convert_i64_to_type(value, &rw_field.data_type))
+                    },
+                    Ok(None) => None,
+                    Err(err) => {
+                        log_error!(name, err, "parse column failed");
+                        None
+                    }
+                }
+            },
+            false => {
+                match row.try_get::<ScalarImplTiberiusWrapper, usize>(i) {
+                    Ok(datum) => datum.map(|d| d.0),
+                    Err(err) => {
+                        log_error!(name, err, "parse column failed");
+                        None
+                    }
+                }
+            },
         };
+        
         datums.push(datum);
     }
     OwnedRow::new(datums)
+}
+
+
+pub fn convert_i64_to_type(value: f64, data_type: &DataType) -> ScalarImpl {
+    match data_type {
+        DataType::Decimal => {
+            // 假设你有一个构造 Decimal 的方式
+            println!("这里f64 -> decimal");
+            ScalarImpl::Decimal(Decimal::try_from(value).unwrap()) // 处理可能的 None
+        },
+        // DataType::Float64 => {
+        //     ScalarImpl::Float64(Flo)
+        // },
+        _ => {
+            panic!("Unsupported data type")
+        }
+    }
 }
 macro_rules! impl_tiberius_wrapper {
     ($wrapper_name:ident, $variant_name:ident) => {
@@ -63,6 +104,7 @@ impl_tiberius_wrapper!(DateTiberiusWrapper, Date);
 impl_tiberius_wrapper!(TimestampTiberiusWrapper, Timestamp);
 impl_tiberius_wrapper!(TimestamptzTiberiusWrapper, Timestamptz);
 impl_tiberius_wrapper!(DecimalTiberiusWrapper, Decimal);
+
 
 macro_rules! impl_chrono_tiberius_wrapper {
     ($wrapper_name:ident, $variant_name:ident, $chrono:ty) => {

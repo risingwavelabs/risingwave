@@ -136,14 +136,16 @@ CREATE SOURCE upper_mssql_source WITH (
 
 # ------------ Create source/table/mv stage ------------
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+
+export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 statement ok
 CREATE SOURCE mssql_source WITH (
     connector = 'sqlserver-cdc',
-    hostname = '${SQLCMDSERVER:sqlserver-server}',
-    port = '${SQLCMDPORT:1433}',
-    username = '${SQLCMDUSER:SA}',
-    password = '${SQLCMDPASSWORD}',
-    database.name = '${SQLCMDDBNAME}',
+    hostname = 'localhost',
+    port = '1433',
+    username = 'sa',
+    password = 'SomeTestOnly@SA',
+    database.name = 'mydb',
 );
 
 statement ok
@@ -153,7 +155,7 @@ CREATE SOURCE upper_mssql_source WITH (
     port = '${SQLCMDPORT:1433}',
     username = '${SQLCMDUSER:SA}',
     password = '${SQLCMDPASSWORD}',
-    database.name = 'UpperDB',
+    database.name = 'wcy',
 );
 
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
