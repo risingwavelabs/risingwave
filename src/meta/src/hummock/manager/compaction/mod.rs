@@ -33,8 +33,7 @@ use std::time::Instant;
 use anyhow::Context;
 use compaction_event_loop::{
     HummockCompactionEventDispatcher, HummockCompactionEventHandler, HummockCompactionEventLoop,
-    HummockCompactorDedicatedEventLoop, IcebergCompactionEventDispatcher,
-    IcebergCompactionEventHandler, IcebergCompactionEventLoop,
+    HummockCompactorDedicatedEventLoop,
 };
 use fail::fail_point;
 use itertools::Itertools;
@@ -63,7 +62,6 @@ use risingwave_pb::hummock::{
     CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
     SubscribeCompactionEventRequest, TableOption, TableSchema, compact_task,
 };
-use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use thiserror_ext::AsReport;
 use tokio::sync::RwLockWriteGuard;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -287,51 +285,12 @@ impl HummockManager {
         join_handle_vec
     }
 
-    // TODO(li0k): move this to iceberg compaction manager
-    // when iceberg compaction manager is ready.
-    pub fn iceberg_compaction_event_loop(
-        hummock_manager: Arc<Self>,
-        compactor_streams_change_rx: UnboundedReceiver<(
-            u32,
-            Streaming<SubscribeIcebergCompactionEventRequest>,
-        )>,
-    ) -> Vec<(JoinHandle<()>, Sender<()>)> {
-        let mut join_handle_vec = Vec::default();
-
-        let iceberg_compaction_event_handler =
-            IcebergCompactionEventHandler::new(hummock_manager.iceberg_compactor_manager.clone());
-
-        let iceberg_compaction_event_dispatcher =
-            IcebergCompactionEventDispatcher::new(iceberg_compaction_event_handler);
-
-        let event_loop = IcebergCompactionEventLoop::new(
-            iceberg_compaction_event_dispatcher,
-            hummock_manager.metrics.clone(),
-            compactor_streams_change_rx,
-        );
-
-        let (event_loop_join_handle, event_loop_shutdown_tx) = event_loop.run();
-        join_handle_vec.push((event_loop_join_handle, event_loop_shutdown_tx));
-
-        join_handle_vec
-    }
-
     pub fn add_compactor_stream(
         &self,
         context_id: u32,
         req_stream: Streaming<SubscribeCompactionEventRequest>,
     ) {
         self.compactor_streams_change_tx
-            .send((context_id, req_stream))
-            .unwrap();
-    }
-
-    pub fn add_iceberg_compactor_stream(
-        &self,
-        context_id: u32,
-        req_stream: Streaming<SubscribeIcebergCompactionEventRequest>,
-    ) {
-        self.iceberg_compactor_streams_change_tx
             .send((context_id, req_stream))
             .unwrap();
     }

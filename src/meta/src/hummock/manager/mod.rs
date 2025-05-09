@@ -37,7 +37,6 @@ use risingwave_pb::hummock::{
     HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
     SubscribeCompactionEventRequest,
 };
-use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Semaphore};
@@ -72,6 +71,7 @@ mod utils;
 mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
+pub use compaction::compaction_event_loop::*;
 use compaction::*;
 pub use compaction::{GroupState, GroupStateValidator};
 pub(crate) use utils::*;
@@ -141,9 +141,6 @@ pub struct HummockManager {
     // and is maintained in memory. All event_streams are consumed through a separate event loop
     compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
 
-    iceberg_compactor_streams_change_tx:
-        UnboundedSender<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>,
-
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
@@ -186,10 +183,6 @@ impl HummockManager {
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-        iceberg_compactor_streams_change_tx: UnboundedSender<(
-            u32,
-            Streaming<SubscribeIcebergCompactionEventRequest>,
-        )>,
     ) -> Result<HummockManagerRef> {
         let compaction_group_manager = CompactionGroupManager::new(&env).await?;
         Self::new_impl(
@@ -199,7 +192,6 @@ impl HummockManager {
             compactor_manager,
             compaction_group_manager,
             compactor_streams_change_tx,
-            iceberg_compactor_streams_change_tx,
         )
         .await
     }
@@ -216,10 +208,6 @@ impl HummockManager {
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-        iceberg_compactor_streams_change_tx: UnboundedSender<(
-            u32,
-            Streaming<SubscribeIcebergCompactionEventRequest>,
-        )>,
     ) -> HummockManagerRef {
         let compaction_group_manager = CompactionGroupManager::new_with_config(&env, config)
             .await
@@ -232,7 +220,6 @@ impl HummockManager {
             compactor_manager,
             compaction_group_manager,
             compactor_streams_change_tx,
-            iceberg_compactor_streams_change_tx,
         )
         .await
         .unwrap()
@@ -247,10 +234,6 @@ impl HummockManager {
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
-        )>,
-        iceberg_compactor_streams_change_tx: UnboundedSender<(
-            u32,
-            Streaming<SubscribeIcebergCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
@@ -352,7 +335,6 @@ impl HummockManager {
                 },
             ),
             compactor_streams_change_tx,
-            iceberg_compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new().into(),
             now: Mutex::new(0),

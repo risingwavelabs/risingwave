@@ -29,8 +29,12 @@ use tokio::task::JoinHandle;
 use tonic::Streaming;
 
 use crate::MetaResult;
-use crate::hummock::IcebergCompactorManagerRef;
+use crate::hummock::{
+    IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
+    IcebergCompactorManagerRef,
+};
 use crate::manager::MetadataManager;
+use crate::rpc::metrics::MetaMetrics;
 
 pub type IcebergCompactionManagerRef = std::sync::Arc<IcebergCompactionManager>;
 
@@ -45,12 +49,15 @@ pub struct IcebergCompactionManager {
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
 
     compactor_streams_change_tx: CompactorChangeTx,
+
+    pub metrics: Arc<MetaMetrics>,
 }
 
 impl IcebergCompactionManager {
     pub fn build(
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
+        metrics: Arc<MetaMetrics>,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -60,6 +67,7 @@ impl IcebergCompactionManager {
                 metadata_manager,
                 iceberg_compactor_manager,
                 compactor_streams_change_tx,
+                metrics,
             }),
             compactor_streams_change_rx,
         )
@@ -136,5 +144,33 @@ impl IcebergCompactionManager {
         self.compactor_streams_change_tx
             .send((context_id, req_stream))
             .unwrap();
+    }
+
+    pub fn iceberg_compaction_event_loop(
+        iceberg_compaction_manager: Arc<Self>,
+        compactor_streams_change_rx: UnboundedReceiver<(
+            u32,
+            Streaming<SubscribeIcebergCompactionEventRequest>,
+        )>,
+    ) -> Vec<(JoinHandle<()>, Sender<()>)> {
+        let mut join_handle_vec = Vec::default();
+
+        let iceberg_compaction_event_handler = IcebergCompactionEventHandler::new(
+            iceberg_compaction_manager.iceberg_compactor_manager.clone(),
+        );
+
+        let iceberg_compaction_event_dispatcher =
+            IcebergCompactionEventDispatcher::new(iceberg_compaction_event_handler);
+
+        let event_loop = IcebergCompactionEventLoop::new(
+            iceberg_compaction_event_dispatcher,
+            iceberg_compaction_manager.metrics.clone(),
+            compactor_streams_change_rx,
+        );
+
+        let (event_loop_join_handle, event_loop_shutdown_tx) = event_loop.run();
+        join_handle_vec.push((event_loop_join_handle, event_loop_shutdown_tx));
+
+        join_handle_vec
     }
 }
