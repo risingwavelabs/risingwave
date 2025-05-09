@@ -33,7 +33,7 @@ risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 # put here just to tweak feature flags
-risingwave_connector = { workspace = true, optional = true }
+risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }

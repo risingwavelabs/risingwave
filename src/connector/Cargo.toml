@@ -11,7 +11,7 @@ repository = { workspace = true }
 default = []
 all-sinks = ["sink-deltalake"]
 all-sources = []
-sink-deltalake = ["deltalake"]
+sink-deltalake = ["dep:deltalake"]
 
 [dependencies]
 anyhow = "1"

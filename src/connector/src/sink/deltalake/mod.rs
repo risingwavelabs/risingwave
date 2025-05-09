@@ -16,8 +16,6 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "sink-deltalake")] {
         mod imp;
         pub use imp::*;
-    } else {
-        pub use dummy::*;
     }
 }
 
@@ -124,64 +122,18 @@ impl DeltaLakeSink {
 /// Dummy implementation
 #[cfg(not(feature = "sink-deltalake"))]
 mod dummy {
+    use crate::sink::prelude::*;
+    use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, err_feature_not_enabled};
 
-    use std::collections::BTreeMap;
-
-    use anyhow::anyhow;
-    use sea_orm::DatabaseConnection;
-    use tokio::sync::mpsc::UnboundedSender;
-
-    use super::*;
-    use crate::connector_common::IcebergCompactionStat;
-    use crate::sink::DummySinkCommitCoordinator;
-    use crate::sink::trivial::{TrivialSink, TrivialSinkName};
-
-    const ERROR_MESSAGE: &str = "RisingWave is not compiled with feature `sink-deltalake`";
-
-    #[derive(Debug)]
-    pub struct DeltaLakeSinkName;
-
-    impl TrivialSinkName for DeltaLakeSinkName {
-        const SINK_NAME: &'static str = DELTALAKE_SINK;
+    impl FeatureNotEnabledSinkMarker for super::DeltaLakeSink {
+        const SINK_NAME: &'static str = super::DELTALAKE_SINK;
     }
 
-    impl Sink for DeltaLakeSink {
-        type Coordinator = DummySinkCommitCoordinator;
-        type LogSinker = TrivialSink<DeltaLakeSinkName>;
-
-        const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
-        const SINK_NAME: &'static str = DELTALAKE_SINK;
-
-        async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-            Err(SinkError::Config(anyhow!("{}", ERROR_MESSAGE)))
-        }
-
-        fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
-            Err(SinkError::Config(anyhow!("{}", ERROR_MESSAGE)))
-        }
-
-        async fn validate(&self) -> Result<()> {
-            Err(SinkError::Config(anyhow!("{}", ERROR_MESSAGE)))
-        }
-
-        fn is_coordinated_sink(&self) -> bool {
-            true
-        }
-
-        async fn new_coordinator(
-            &self,
-            _db: DatabaseConnection,
-            _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
-        ) -> Result<Self::Coordinator> {
-            Err(SinkError::Config(anyhow!("{}", ERROR_MESSAGE)))
-        }
-    }
-
-    impl TryFrom<SinkParam> for DeltaLakeSink {
+    impl TryFrom<SinkParam> for super::DeltaLakeSink {
         type Error = SinkError;
 
         fn try_from(_param: SinkParam) -> std::result::Result<Self, Self::Error> {
-            Err(SinkError::Config(anyhow!("{}", ERROR_MESSAGE)))
+            Err(err_feature_not_enabled(super::DELTALAKE_SINK))
         }
     }
 }
