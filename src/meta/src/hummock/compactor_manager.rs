@@ -22,10 +22,8 @@ use risingwave_hummock_sdk::compact::statistics_compact_task;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
-use risingwave_pb::hummock::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTaskAssignment, CompactTaskProgress,
-    SubscribeCompactionEventResponse, SubscribeIcebergCompactionEventResponse,
+    CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventResponse;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;

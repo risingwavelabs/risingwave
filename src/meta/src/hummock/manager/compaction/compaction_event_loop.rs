@@ -42,14 +42,13 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
-use risingwave_pb::hummock::subscribe_iceberg_compaction_event_request::{
+use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
     Event as IcebergRequestEvent, PullTask as IcebergPullTask,
 };
-use risingwave_pb::hummock::subscribe_iceberg_compaction_event_response::{
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
-};
-use risingwave_pb::hummock::{
-    CompactTaskProgress, SubscribeCompactionEventRequest, SubscribeIcebergCompactionEventRequest,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;

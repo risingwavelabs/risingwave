@@ -61,9 +61,9 @@ use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
-    SubscribeCompactionEventRequest, SubscribeIcebergCompactionEventRequest, TableOption,
-    TableSchema, compact_task,
+    SubscribeCompactionEventRequest, TableOption, TableSchema, compact_task,
 };
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use thiserror_ext::AsReport;
 use tokio::sync::RwLockWriteGuard;
 use tokio::sync::mpsc::UnboundedReceiver;

@@ -35,8 +35,9 @@ use risingwave_meta_model::{
 };
 use risingwave_pb::hummock::{
     HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
-    SubscribeCompactionEventRequest, SubscribeIcebergCompactionEventRequest,
+    SubscribeCompactionEventRequest,
 };
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Semaphore};
