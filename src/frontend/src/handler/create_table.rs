@@ -1423,8 +1423,6 @@ pub async fn handle_create_table(
                 table,
                 graph,
                 job_type,
-                column_defs,
-                constraints,
                 table_name,
             )
             .await?;
@@ -1442,8 +1440,6 @@ pub async fn create_iceberg_engine_table(
     table: PbTable,
     graph: StreamFragmentGraph,
     job_type: TableJobType,
-    column_defs: Vec<ColumnDef>,
-    constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
     // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
@@ -1589,40 +1585,14 @@ pub async fn create_iceberg_engine_table(
         }
     };
 
+    let table_catalog = TableCatalog::from(table.clone());
+
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
-    let mut pks = column_defs
-        .into_iter()
-        .filter(|c| {
-            c.options
-                .iter()
-                .any(|o| matches!(o.option, ColumnOption::Unique { is_primary: true }))
-        })
-        .map(|c| c.name.to_string())
+    let mut pks = table_catalog.pk_column_names()
+        .iter()
+        .map(|c| c.to_string())
         .collect::<Vec<String>>();
-
-    // Fetch primary key from constraints
-    if pks.is_empty() {
-        pks = constraints
-            .into_iter()
-            .filter(|c| {
-                matches!(
-                    c,
-                    TableConstraint::Unique {
-                        is_primary: true,
-                        ..
-                    }
-                )
-            })
-            .flat_map(|c| match c {
-                TableConstraint::Unique { columns, .. } => columns
-                    .into_iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>(),
-                _ => vec![],
-            })
-            .collect::<Vec<String>>();
-    }
 
     // For the table without primary key. We will use `_row_id` as primary key
     let sink_from = if pks.is_empty() {
