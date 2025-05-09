@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::common::WorkerType;
 use sync_point::sync_point;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
@@ -93,11 +92,6 @@ impl HummockManager {
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
         if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
-            if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager.remove_compactor(worker_node.id);
-
-                // TODO: remove iceberg compactor
-            }
             self.release_contexts(vec![worker_node.id])
                 .await
                 .unwrap_or_else(|err| {

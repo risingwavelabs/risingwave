@@ -455,7 +455,9 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
                             }
 
                             _ => {
+                                // remove compactor from compactor manager
                                 tracing::warn!(context_id, "compactor stream poll err, recv stream may be destroyed");
+                                self.hummock_compactor_dispatcher.remove_compactor(context_id);
                                 continue
                             },
                         };
