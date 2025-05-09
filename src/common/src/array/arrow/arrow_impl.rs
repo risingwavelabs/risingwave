@@ -1355,6 +1355,23 @@ impl TryFrom<&arrow_array::StringArray> for JsonbArray {
     }
 }
 
+impl From<&IntervalArray> for arrow_array::StringArray {
+    fn from(array: &IntervalArray) -> Self {
+        let mut builder =
+            arrow_array::builder::StringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(interval) => {
+                    write!(&mut builder, "{}", interval).unwrap();
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
+    }
+}
+
 impl From<&JsonbArray> for arrow_array::LargeStringArray {
     fn from(array: &JsonbArray) -> Self {
         let mut builder =

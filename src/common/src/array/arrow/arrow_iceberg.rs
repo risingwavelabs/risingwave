@@ -24,7 +24,9 @@ pub use super::arrow_54::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
     is_parquet_schema_match_source_schema,
 };
-use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
+use crate::array::{
+    Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
+};
 use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
@@ -102,7 +104,7 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Time => self.time_type_to_arrow(),
             DataType::Timestamp => self.timestamp_type_to_arrow(),
             DataType::Timestamptz => self.timestamptz_type_to_arrow(),
-            DataType::Interval => self.interval_type_to_arrow(),
+            DataType::Interval => self.varchar_type_to_arrow(),
             DataType::Varchar => self.varchar_type_to_arrow(),
             DataType::Bytea => self.bytea_type_to_arrow(),
             DataType::Serial => self.serial_type_to_arrow(),
@@ -167,6 +169,13 @@ impl ToArrow for IcebergArrowConvert {
             .with_precision_and_scale(precision, max_scale)
             .map_err(ArrayError::from_arrow)?;
         Ok(Arc::new(array) as ArrayRef)
+    }
+
+    fn interval_to_arrow(
+        &self,
+        array: &IntervalArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::StringArray::from(array)))
     }
 }
 
@@ -251,7 +260,7 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Time => self.time_type_to_arrow(),
             DataType::Timestamp => self.timestamp_type_to_arrow(),
             DataType::Timestamptz => self.timestamptz_type_to_arrow(),
-            DataType::Interval => self.interval_type_to_arrow(),
+            DataType::Interval => self.varchar_type_to_arrow(),
             DataType::Varchar => self.varchar_type_to_arrow(),
             DataType::Bytea => self.bytea_type_to_arrow(),
             DataType::Serial => self.serial_type_to_arrow(),
