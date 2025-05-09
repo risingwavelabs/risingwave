@@ -21,7 +21,6 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
-use risingwave_pb::stream_plan::BackfillOrderStrategy as PbBackfillOrderStrategy;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use thiserror_ext::AsReport;
 
@@ -160,19 +159,13 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, dependent_udfs, bound_query, backfill_order_strategy) = {
+    let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound_query = binder.bind_query(query)?;
-        let backfill_order_strategy = bind_backfill_order_strategy(
-            handler_args.session.as_ref(),
-            handler_args.with_options.backfill_order_strategy(),
-        )?;
-
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
             bound_query,
-            backfill_order_strategy,
         )
     };
     handle_create_mv_bound(
@@ -184,7 +177,6 @@ pub async fn handle_create_mv(
         dependent_udfs,
         columns,
         emit_mode,
-        backfill_order_strategy,
     )
     .await
 }
@@ -228,7 +220,6 @@ pub async fn handle_create_mv_bound(
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-    backfill_order_strategy: PbBackfillOrderStrategy,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -319,8 +310,15 @@ It only indicates the physical clustering of the data, which may improve the per
             return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
         }
 
+        let context: OptimizerContextRef = context.into();
+
         let (plan, table) =
-            gen_create_mv_plan_bound(&session, context.into(), query, name, columns, emit_mode)?;
+            gen_create_mv_plan_bound(&session, context.clone(), query, name, columns, emit_mode)?;
+
+        let backfill_order_strategy = bind_backfill_order_strategy(
+            context.session_ctx().as_ref(),
+            context.with_options().backfill_order_strategy(),
+        )?;
 
         // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
         // during binding instead of visiting the optimized plan.
