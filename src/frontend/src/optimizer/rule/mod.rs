@@ -240,6 +240,8 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
+mod empty_agg_remove_rule;
+pub use empty_agg_remove_rule::*;
 mod add_logstore_rule;
 mod pull_up_correlated_predicate_agg_rule;
 mod source_to_iceberg_scan_rule;
@@ -341,6 +343,7 @@ macro_rules! for_all_rules {
             , { SourceToKafkaScanRule }
             , { SourceToIcebergScanRule }
             , { AddLogstoreRule }
+            , { EmptyAggRemoveRule }
         }
     };
 }

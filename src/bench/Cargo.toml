@@ -42,7 +42,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.29", features = ["fs", "mman"] }
+nix = { version = "0.30", features = ["fs", "mman"] }
 
 [[bin]]
 name = "sink-bench"
