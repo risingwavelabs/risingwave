@@ -112,6 +112,9 @@ pub mod health;
 #[rustfmt::skip]
 #[path = "sim/telemetry.rs"]
 pub mod telemetry;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/iceberg_compaction.rs")]
+pub mod iceberg_compaction;
 
 #[rustfmt::skip]
 #[path = "sim/secret.rs"]
