@@ -28,6 +28,9 @@ use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::*;
+use risingwave_pb::iceberg_compaction::{
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+};
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::RwReceiverStream;
@@ -69,6 +72,8 @@ macro_rules! fields_to_kvs {
 #[async_trait::async_trait]
 impl HummockManagerService for HummockServiceImpl {
     type SubscribeCompactionEventStream = RwReceiverStream<SubscribeCompactionEventResponse>;
+    type SubscribeIcebergCompactionEventStream =
+        RwReceiverStream<SubscribeIcebergCompactionEventResponse>;
 
     async fn unpin_version_before(
         &self,
@@ -451,6 +456,13 @@ impl HummockManagerService for HummockServiceImpl {
         }
 
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+        _request: Request<Streaming<SubscribeIcebergCompactionEventRequest>>,
+    ) -> Result<Response<Self::SubscribeIcebergCompactionEventStream>, tonic::Status> {
+        unimplemented!("Iceberg compaction service is not implemented yet");
     }
 
     async fn report_compaction_task(

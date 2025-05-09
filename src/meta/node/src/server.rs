@@ -44,7 +44,7 @@ use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::health_service::HealthServiceImpl;
 use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
-use risingwave_meta_service::hosted_iceberg_catalog_service_impl::HostedIcebergCatalogServiceImpl;
+use risingwave_meta_service::hosted_iceberg_catalog_service::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
