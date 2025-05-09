@@ -1589,13 +1589,14 @@ pub async fn create_iceberg_engine_table(
 
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
-    let mut pks = table_catalog.pk_column_names()
+    let mut pks = table_catalog
+        .pk_column_names()
         .iter()
         .map(|c| c.to_string())
         .collect::<Vec<String>>();
 
     // For the table without primary key. We will use `_row_id` as primary key
-    let sink_from = if pks.is_empty() {
+    let sink_from = if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
         let [stmt]: [_; 1] = Parser::parse_sql(&format!(
             "select {} as {}, * from {}",
