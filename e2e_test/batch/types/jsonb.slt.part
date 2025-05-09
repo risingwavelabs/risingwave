@@ -302,3 +302,11 @@ query T
 select JSONB_POPULATE_RECORD(NULL::struct<id DOUBLE>, '{"id": "1e10"}'::jsonb) AS v;
 ----
  (10000000000)
+
+statement ok
+CREATE TABLE IF NOT EXISTS cast_t (host text, message text, payload jsonb);
+
+query T
+SELECT * FROM JSONB_POPULATE_RECORD(null::cast_t, '{"host": "abc", "message": "bcd", "payload": {"d": 4, "e": "zzz"}}');
+----
+abc bcd {"d": 4, "e": "zzz"}
