@@ -40,8 +40,7 @@ use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, RemoteTableAccessor,
 };
 use risingwave_storage::hummock::compactor::{
-    CompactionAwaitTreeRegRef, CompactionExecutor, CompactorContext,
-    new_compaction_await_tree_reg_ref,
+    new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactionExecutor, CompactorContext, CompactorType
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
@@ -274,6 +273,7 @@ pub async fn compactor_serve(
             hummock_meta_client.clone(),
             sstable_object_id_manager.clone(),
             compaction_catalog_manager_ref,
+            CompactorType::Hummock
         ),
     ];
 

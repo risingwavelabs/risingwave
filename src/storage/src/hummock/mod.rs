@@ -53,6 +53,7 @@ pub use recent_filter::*;
 
 pub mod block_stream;
 mod time_travel_version_cache;
+mod iceberg_compactor_runner;
 
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};

@@ -30,6 +30,8 @@ message IcebergCompactionTask {
   // Now we only support iceberg table full compaction.
   // compactor will get the information of the iceberg table from the properties
   map<string, string> props = 1;
+
+  uint64 task_id = 2;
 }
 
 message SubscribeIcebergCompactionEventResponse {

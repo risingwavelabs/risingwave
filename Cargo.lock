@@ -12176,6 +12176,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_common_service",
+ "risingwave_connector",
  "risingwave_expr",
  "risingwave_hummock_sdk",
  "risingwave_hummock_trace",
