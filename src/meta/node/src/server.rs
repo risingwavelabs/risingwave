@@ -475,6 +475,7 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
+    // TODO: introduce compactor event stream handler to handle iceberg compaction events.
     let (iceberg_compactor_event_tx, _iceberg_compactor_event_rx) =
         tokio::sync::mpsc::unbounded_channel();
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
