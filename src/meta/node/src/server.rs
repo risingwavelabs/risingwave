@@ -478,9 +478,10 @@ pub async fn start_service_as_election_leader(
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
-    let (iceberg_compaction_mgr, _iceberg_compactor_event_rx) = IcebergCompactionManager::build(
+    let (iceberg_compaction_mgr, iceberg_compactor_event_rx) = IcebergCompactionManager::build(
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
+        meta_metrics.clone(),
     );
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
@@ -611,9 +612,15 @@ pub async fn start_service_as_election_leader(
         Some(backup_manager),
     ));
     sub_tasks.extend(HummockManager::compaction_event_loop(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_streams_change_rx,
     ));
+
+    sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compactor_event_rx,
+    ));
+
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
