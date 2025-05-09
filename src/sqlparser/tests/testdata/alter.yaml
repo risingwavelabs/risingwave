@@ -10,4 +10,4 @@
 - input: ALTER SOURCE t ADD COLUMN id INT;
   formatted_sql: ALTER SOURCE t ADD COLUMN id INT
 - input: ALTER SINK t_sink CONNECTOR WITH (properties.allow.auto.create.topics = 'true');
-  formatted_sql:  ALTER SINK t_sink CONNECTOR WITH (properties.allow.auto.create.topics = 'true')
+  formatted_sql: ALTER SINK t_sink CONNECTOR WITH (properties.allow.auto.create.topics = 'true')
