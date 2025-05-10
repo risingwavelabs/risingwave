@@ -45,13 +45,18 @@ pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
+pub mod prelude {
+    pub use crate::sink::{
+        Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkError,
+        SinkParam, SinkWriterParam,
+    };
+}
 
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
 use ::clickhouse::error::Error as ClickHouseError;
-use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -1005,8 +1010,9 @@ impl From<ClickHouseError> for SinkError {
     }
 }
 
-impl From<DeltaTableError> for SinkError {
-    fn from(value: DeltaTableError) -> Self {
+#[cfg(feature = "sink-deltalake")]
+impl From<::deltalake::DeltaTableError> for SinkError {
+    fn from(value: ::deltalake::DeltaTableError) -> Self {
         SinkError::DeltaLake(anyhow!(value))
     }
 }

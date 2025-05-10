@@ -94,6 +94,7 @@ ignored = [
     "serde_json",
     "linkme",
     "tempfile",
+    "cfg-if",
 ]
 [workspace.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]

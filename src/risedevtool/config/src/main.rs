@@ -75,6 +75,7 @@ pub enum Components {
     Coredump,
     NoBacktrace,
     Udf,
+    NoDefaultFeatures,
 }
 
 impl Components {
@@ -97,6 +98,7 @@ impl Components {
             Self::Coredump => "[Runtime] Enable coredump",
             Self::NoBacktrace => "[Runtime] Disable backtrace",
             Self::Udf => "[Build] Enable UDF",
+            Self::NoDefaultFeatures => "[Build] Disable default features",
         }
         .into()
     }
@@ -195,7 +197,17 @@ As a result, RisingWave will dump the core on panics.
 With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
                 "
             }
-            Self::Udf => "Required if you want to support UDF.",
+            Self::Udf => {
+                "
+Add --features udf to build command (by default disabled).
+Required if you want to support UDF."
+            }
+            Self::NoDefaultFeatures => {
+                "
+Add --no-default-features to build command.
+Currently, default features are: rw-static-link, all-connectors
+"
+            }
         }
         .into()
     }
@@ -219,6 +231,7 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
             "ENABLE_UDF" => Some(Self::Udf),
+            "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
             _ => None,
         }
     }
@@ -242,6 +255,7 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::Coredump => "ENABLE_COREDUMP",
             Self::NoBacktrace => "DISABLE_BACKTRACE",
             Self::Udf => "ENABLE_UDF",
+            Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
         }
         .into()
     }

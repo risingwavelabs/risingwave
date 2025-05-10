@@ -37,6 +37,7 @@ env_scripts = [
   is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
   is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
   is_udf_enabled = get_env ENABLE_UDF
+  is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -54,7 +55,7 @@ env_scripts = [
   end
 
   if ${is_not_release} and ${is_dynamic_linking}
-    set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
+    set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link"
   else
     set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
   end
@@ -62,6 +63,12 @@ env_scripts = [
   if ${is_udf_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features udf"
+  end
+
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+
+  if ${is_default_features_disabled}
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features"
   end
 
   if ${is_hummock_trace}
