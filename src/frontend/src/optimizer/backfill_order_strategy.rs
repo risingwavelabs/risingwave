@@ -23,12 +23,12 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_sqlparser::ast::{BackfillOrderStrategy, ObjectName};
 
-use crate::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::Result;
 use crate::session::SessionImpl;
+use crate::{Binder, PlanRef};
 
 // FIXME(kwannoel): we can flatten the strategy earlier
 /// We don't use query binder directly because its binding rules are different from a query.
@@ -38,27 +38,36 @@ use crate::session::SessionImpl;
 pub fn plan_backfill_order_strategy(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
+    plan: PlanRef,
 ) -> Result<PbBackfillOrderStrategy> {
-    let pb_strategy = match backfill_order_strategy {
-        BackfillOrderStrategy::Auto
-        | BackfillOrderStrategy::Default
-        | BackfillOrderStrategy::None => None,
-        BackfillOrderStrategy::Fixed(orders) => {
-            let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
-            for (start_name, end_name) in orders {
-                let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
-                let end_relation_id = bind_backfill_relation_id_by_name(session, end_name)?;
-                order
-                    .entry(start_relation_id)
-                    .or_default()
-                    .data
-                    .push(end_relation_id);
-            }
-            if has_cycle(&order) {
-                bail!("Backfill order strategy has a cycle");
-            }
-            Some(PbStrategy::Fixed(BackfillOrderFixed { order }))
+    fn plan_fixed_strategy(
+        session: &SessionImpl,
+        orders: Vec<(ObjectName, ObjectName)>,
+    ) -> Result<Option<PbStrategy>> {
+        let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
+        for (start_name, end_name) in orders {
+            let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
+            let end_relation_id = bind_backfill_relation_id_by_name(session, end_name)?;
+            order
+                .entry(start_relation_id)
+                .or_default()
+                .data
+                .push(end_relation_id);
         }
+        if has_cycle(&order) {
+            bail!("Backfill order strategy has a cycle");
+        }
+        Ok(Some(PbStrategy::Fixed(BackfillOrderFixed { order })))
+    }
+
+    fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> PbStrategy {
+        todo!()
+    }
+
+    let pb_strategy = match backfill_order_strategy {
+        BackfillOrderStrategy::Default | BackfillOrderStrategy::None => None,
+        BackfillOrderStrategy::Auto => Some(plan_auto_strategy(session, plan)),
+        BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders)?,
     };
     Ok(PbBackfillOrderStrategy {
         strategy: pb_strategy,
