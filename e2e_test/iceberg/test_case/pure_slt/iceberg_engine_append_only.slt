@@ -1,0 +1,259 @@
+# test iceberg connection in iceberg engine
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# connection (storage info + catalog info)
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+create table t(id int primary key, name varchar) APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+query ??
+select * from t;
+----
+1 xxx
+
+query ??
+select * from t for system_time as of '2222-12-10 11:48:06';
+----
+1 xxx
+
+statement ok
+DROP TABLE t;
+
+statement ok
+CREATE TABLE full_type_t (
+id bigint primary key,
+v_small_int smallint,
+v_int int,
+v_long bigint,
+v_float real,
+v_double double,
+v_varchar varchar,
+v_bool boolean,
+v_date date,
+v_timestamp timestamptz,
+v_ts_ntz timestamp,
+v_decimal decimal,
+v_map map(int, int),
+v_array int[],
+v_struct struct<a int,b int>,
+v_json jsonb,
+v_one_layer_struct struct<id bigint, v_small_int smallint, v_int int, v_long bigint, v_float real, v_double double, v_varchar varchar, v_bool boolean, v_date date, v_timestamp timestamptz, v_ts_ntz timestamp, v_decimal decimal, v_json jsonb>,
+v_nested_type struct<a int, b map(int, struct<v_bytea bytea>)>[]
+) APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+INSERT INTO full_type_t VALUES
+(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, map {1:100,2:200}, array[1,2,3], row(1,2), '{"a":"foo", "b":"bar"}', row(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, '{"a":"foo", "b":"bar"}'), array[(1,map {1:row(decode('DEADBEEF', 'hex')),2:row(decode('DEADBEEF', 'hex'))}), row(2,map {3:row(decode('DEADBEEF', 'hex')),4:row(decode('DEADBEEF', 'hex'))})]),
+(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, map {3:300}, array[1,null,3], row(3,null), '{"k2":[2,true,4]}', row(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, '{"k2":[2,true,4]}'), array[]::struct<a int, b map (int, struct<v_bytea bytea>)>[]),
+(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', null, null, null, '1', row(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', '1'), array[row(1,map {1:row(decode('DEADBEEF', 'hex')),2:row(decode('DEADBEEF', 'hex'))})]),
+(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', null, null, null, 'true', row(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', 'true'), null);
+
+statement ok
+FLUSH;
+
+sleep 5s
+query ????????????????? rowsort
+select * from full_type_t
+----
+1 1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000 {1:100,2:200} {1,2,3} (1,2) {"a": "foo", "b": "bar"} (1,1,1,1000,1.1,1.11,1-1,t,2022-03-11,"2022-03-11 01:00:00+00:00","2022-03-11 01:00:00",1.1100000000,"{""a"": ""foo"", ""b"": ""bar""}") {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")","(2,\"{3:(\"\"\\\\\\\\xdeadbeef\"\"),4:(\"\"\\\\\\\\xdeadbeef\"\")}\")"}
+2 2 2 2000 2.2 2.22 2-2 f 2022-03-12 2022-03-12 02:00:00+00:00 2022-03-12 02:00:00 2.2200000000 {3:300} {1,NULL,3} (3,) {"k2": [2, true, 4]} (2,2,2,2000,2.2,2.22,2-2,f,2022-03-12,"2022-03-12 02:00:00+00:00","2022-03-12 02:00:00",2.2200000000,"{""k2"": [2, true, 4]}") {}
+3 3 3 3000 3.3 3.33 3-3 t 2022-03-13 2022-03-13 03:00:00+00:00 2022-03-13 03:00:00 999999999999999999.9999999999 NULL NULL NULL 1 (3,3,3,3000,3.3,3.33,3-3,t,2022-03-13,"2022-03-13 03:00:00+00:00","2022-03-13 03:00:00",999999999999999999.9999999999,1) {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")"}
+4 4 4 4000 4.4 4.44 4-4 f 2022-03-14 2022-03-14 04:00:00+00:00 2022-03-14 04:00:00 -999999999999999999.9999999999 NULL NULL NULL true (4,4,4,4000,4.4,4.44,4-4,f,2022-03-14,"2022-03-14 04:00:00+00:00","2022-03-14 04:00:00",-999999999999999999.9999999999,true) NULL
+
+statement ok
+DROP TABLE full_type_t;
+
+
+# test connector with commit_checkpoint_interval
+statement ok
+create table datagen_t (
+  id BIGINT,
+  item_name VARCHAR,
+  description VARCHAR,
+  initial_bid BIGINT,
+  reserve BIGINT,
+  date_time TIMESTAMP,
+  expires TIMESTAMP,
+  seller BIGINT,
+  category BIGINT,
+  extra VARCHAR)
+APPEND ONLY
+with (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = '1',
+  commit_checkpoint_interval = 1
+) engine = iceberg;
+
+sleep 2s
+
+statement ok
+FLUSH;
+
+# Test that no data is missing:
+# For append only table, data is not written to hummock, but sink to iceberg table directly.
+# So atomic DDL should be used to avoid data loss.
+query ok
+select min(id) from datagen_t;
+----
+1
+
+statement ok
+DROP TABLE datagen_t
+
+# test hidden _row_id column for iceberg engine table
+statement ok
+create table t_without_pk(name varchar)
+APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_without_pk values('xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?
+select * from t_without_pk;
+----
+xxx
+
+query ?
+select count(_row_id) from t_without_pk;
+----
+1
+
+statement ok
+DROP TABLE t_without_pk
+
+# test predicate pushdown, fix https://github.com/risingwavelabs/risingwave/issues/20462
+statement ok
+CREATE TABLE price (
+  id            BIGINT,
+  price         NUMERIC,
+  date          DATE
+)
+APPEND ONLY
+with(commit_checkpoint_interval = 1) ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO price (id, price, date) VALUES
+(1, 100.50, '2025-02-01'),
+(2, 200.75, '2025-02-05'),
+(3, 150.25, '2025-02-10');
+
+statement ok
+FLUSH;
+
+sleep 5s
+query ??? rowsort
+SELECT id, price, date FROM price WHERE date <= DATE '2025-02-10' - interval '5' day;
+----
+1 100.5000000000 2025-02-01
+2 200.7500000000 2025-02-05
+
+query ??? rowsort
+SELECT id, price, date FROM price WHERE price < 180.20
+----
+1 100.5000000000 2025-02-01
+3 150.2500000000 2025-02-10
+
+statement ok
+DROP TABLE price;
+
+statement ok
+DROP CONNECTION my_conn;
+
+# test hosted catalog (meta store as jdbc catalog)
+statement ok
+create connection my_hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_hosted_catalog_conn';
+
+statement ok
+create table t_hosted_catalog(id int primary key, name varchar)
+APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_hosted_catalog values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+query ??
+select * from t_hosted_catalog;
+----
+1 xxx
+
+query ?
+select count(*) from rw_catalog.iceberg_tables where table_namespace = 'public' and table_name = 't_hosted_catalog';
+----
+1
+
+query ?
+SELECT table_namespace FROM iceberg_tables WHERE catalog_name = 'dev' AND (table_namespace = 'public' OR table_namespace LIKE '*' ESCAPE '!') LIMIT 1;
+----
+public
+
+statement ok
+DROP TABLE t_hosted_catalog;
+
+query ?
+select count(*) from rw_catalog.iceberg_tables;
+----
+0
+
+statement ok
+DROP CONNECTION public.my_hosted_catalog_conn;
+
+statement ok
+set sink_decouple = false;
+
+# test iceberg engine without sink decouple
+statement error
+create table t2(id int primary key, name varchar)
+APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+DROP SECRET my_secret;

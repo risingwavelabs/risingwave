@@ -941,6 +941,7 @@ impl DdlController {
             id = job_id,
             definition = streaming_job.definition(),
             create_type = streaming_job.create_type().as_str_name(),
+            job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
         let _permit = self
