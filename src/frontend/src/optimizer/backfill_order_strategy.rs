@@ -27,23 +27,40 @@ use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::Result;
+use crate::optimizer::backfill_order_strategy::auto::plan_auto_strategy;
+use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
 use crate::session::SessionImpl;
 use crate::{Binder, PlanRef};
 
-// FIXME(kwannoel): we can flatten the strategy earlier
-/// We don't use query binder directly because its binding rules are different from a query.
-/// We only bind tables, materialized views and sources.
-/// Queries won't bind duplicate relations in the same query context.
-/// But backfill order strategy can have duplicate relations.
-pub fn plan_backfill_order_strategy(
-    session: &SessionImpl,
-    backfill_order_strategy: BackfillOrderStrategy,
-    plan: PlanRef,
-) -> Result<PbBackfillOrderStrategy> {
-    fn plan_fixed_strategy(
+mod auto {
+    use risingwave_common::catalog::ObjectId;
+    use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
+
+    use crate::PlanRef;
+    use crate::session::SessionImpl;
+
+    pub(super) fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> PbStrategy {
+        todo!()
+    }
+}
+
+mod fixed {
+    use std::collections::HashMap;
+
+    use risingwave_common::bail;
+    use risingwave_common::catalog::ObjectId;
+    use risingwave_pb::common::Uint32Vector;
+    use risingwave_pb::stream_plan::BackfillOrderFixed;
+    use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
+    use risingwave_sqlparser::ast::ObjectName;
+
+    use crate::optimizer::backfill_order_strategy::{bind_backfill_relation_id_by_name, has_cycle};
+    use crate::session::SessionImpl;
+
+    pub(super) fn plan_fixed_strategy(
         session: &SessionImpl,
         orders: Vec<(ObjectName, ObjectName)>,
-    ) -> Result<Option<PbStrategy>> {
+    ) -> crate::error::Result<Option<PbStrategy>> {
         let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
         for (start_name, end_name) in orders {
             let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
@@ -59,11 +76,18 @@ pub fn plan_backfill_order_strategy(
         }
         Ok(Some(PbStrategy::Fixed(BackfillOrderFixed { order })))
     }
+}
 
-    fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> PbStrategy {
-        todo!()
-    }
-
+// FIXME(kwannoel): we can flatten the strategy earlier
+/// We don't use query binder directly because its binding rules are different from a query.
+/// We only bind tables, materialized views and sources.
+/// Queries won't bind duplicate relations in the same query context.
+/// But backfill order strategy can have duplicate relations.
+pub fn plan_backfill_order_strategy(
+    session: &SessionImpl,
+    backfill_order_strategy: BackfillOrderStrategy,
+    plan: PlanRef,
+) -> Result<PbBackfillOrderStrategy> {
     let pb_strategy = match backfill_order_strategy {
         BackfillOrderStrategy::Default | BackfillOrderStrategy::None => None,
         BackfillOrderStrategy::Auto => Some(plan_auto_strategy(session, plan)),
