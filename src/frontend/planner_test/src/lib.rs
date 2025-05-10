@@ -607,7 +607,7 @@ impl TestCase {
             }
         };
 
-        let mut planner = Planner::new_for_stream(context.clone());
+        let mut planner = Planner::new_for_stream(context.clone(), false);
 
         let plan_root = match planner.plan(bound) {
             Ok(plan_root) => {
