@@ -70,6 +70,27 @@ if namespace_filter_enabled:
         "type": "query",
     }
 
+    cluster_json = {
+        "current": {"selected": False, "text": "All", "value": "__all"},
+        "definition": 'label_values(up{risingwave_name=~".+", namespace="$namespace"}, cluster)',
+        "description": "Kubernetes cluster.",
+        "hide": 2,
+        "includeAll": False,
+        "label": "Cluster",
+        "multi": False,
+        "name": "cluster",
+        "options": [],
+        "query": {
+            "query": 'label_values(up{risingwave_name=~".+", namespace="$namespace"}, cluster)',
+            "refId": "StandardVariableQuery",
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 0,
+        "type": "query",
+    }
+
     name_json = {
         "current": {"selected": False, "text": "risingwave", "value": "risingwave"},
         "definition": 'label_values(up{namespace="$namespace", risingwave_name=~".+"}, risingwave_name)',
@@ -90,10 +111,12 @@ if namespace_filter_enabled:
         "type": "query",
     }
     if dynamic_source_enabled:
+        cluster_json = merge(cluster_json, {"datasource": datasource})
         namespace_json = merge(namespace_json, {"datasource": datasource})
         name_json = merge(name_json, {"datasource": datasource})
 
     templating_list.append(namespace_json)
+    templating_list.append(cluster_json)
     templating_list.append(name_json)
 
 
