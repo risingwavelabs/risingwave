@@ -206,6 +206,12 @@ ALTER SOURCE msrc RENAME TO msrc1;
 statement ok
 ALTER TABLE msrc RENAME TO msrc1;
 
+# the associated source name should also be changed to msrc1
+query I
+select count(*) from rw_sources where name = 'msrc1';
+----
+1
+
 query TT
 SHOW CREATE TABLE msrc1;
 ----
