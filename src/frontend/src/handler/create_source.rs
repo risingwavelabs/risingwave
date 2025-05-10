@@ -800,6 +800,8 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Entrypoint for binding source connector.
+/// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,

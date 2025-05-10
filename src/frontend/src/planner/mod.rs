@@ -47,8 +47,15 @@ pub struct Planner {
 #[derive(Debug, Copy, Clone)]
 pub enum PlanFor {
     Stream,
+    /// Is the `Sink` in iceberg table engine.
+    /// It connects to the table node directly, while external stream jobs may connect to an iceberg source.
+    StreamIcebergEngineInternal,
+    /// Other batch queries, e.g., DML.
     Batch,
-    /// `BatchDql` is a special mode for batch.
+    /// Batch `SELECT` queries.
+    ///
+    /// ## Special handling
+    ///
     /// Iceberg engine table will be converted to iceberg source based on this mode.
     BatchDql,
 }
@@ -70,11 +77,15 @@ impl Planner {
         }
     }
 
-    pub fn new_for_stream(ctx: OptimizerContextRef) -> Planner {
+    pub fn new_for_stream(ctx: OptimizerContextRef, is_iceberg_engine_internal: bool) -> Planner {
         Planner {
             ctx,
             share_cache: Default::default(),
-            plan_for: PlanFor::Stream,
+            plan_for: if is_iceberg_engine_internal {
+                PlanFor::StreamIcebergEngineInternal
+            } else {
+                PlanFor::Stream
+            },
         }
     }
 
