@@ -26,11 +26,12 @@ use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::WithOptions;
-use crate::binder::{Binder, BoundQuery, BoundSetExpr, bind_backfill_order_strategy};
+use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::optimizer::backfill_order_strategy::plan_backfill_order_strategy;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
@@ -315,7 +316,7 @@ It only indicates the physical clustering of the data, which may improve the per
         let (plan, table) =
             gen_create_mv_plan_bound(&session, context.clone(), query, name, columns, emit_mode)?;
 
-        let backfill_order_strategy = bind_backfill_order_strategy(
+        let backfill_order_strategy = plan_backfill_order_strategy(
             context.session_ctx().as_ref(),
             context.with_options().backfill_order_strategy(),
         )?;

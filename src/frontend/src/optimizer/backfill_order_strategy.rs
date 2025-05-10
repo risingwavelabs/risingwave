@@ -35,7 +35,7 @@ use crate::session::SessionImpl;
 /// We only bind tables, materialized views and sources.
 /// Queries won't bind duplicate relations in the same query context.
 /// But backfill order strategy can have duplicate relations.
-pub fn bind_backfill_order_strategy(
+pub fn plan_backfill_order_strategy(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
 ) -> Result<PbBackfillOrderStrategy> {
