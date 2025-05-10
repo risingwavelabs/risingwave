@@ -319,6 +319,7 @@ It only indicates the physical clustering of the data, which may improve the per
         let backfill_order_strategy = plan_backfill_order_strategy(
             context.session_ctx().as_ref(),
             context.with_options().backfill_order_strategy(),
+            plan.clone(),
         )?;
 
         // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
