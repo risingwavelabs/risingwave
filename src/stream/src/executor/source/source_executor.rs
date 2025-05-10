@@ -41,10 +41,11 @@ use tokio::time::Instant;
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
-use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
+use crate::executor::source::{AVAILABLE_ULIMIT_NOFILE, check_fd_limit};
 use crate::executor::stream_reader::StreamReaderWithPause;
+use crate::executor::{ConnectorExtraInfo, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -69,6 +70,21 @@ pub struct SourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     is_shared_non_cdc: bool,
+
+    connector_extra_info: Option<ConnectorExtraInfo>,
+}
+
+impl<S: StateStore> Drop for SourceExecutor<S> {
+    fn drop(&mut self) {
+        if let Some(connector_extra_info) = self.connector_extra_info {
+            if let Some(kafka_broker_size) = connector_extra_info.kafka_broker_size {
+                AVAILABLE_ULIMIT_NOFILE.fetch_add(
+                    3 * kafka_broker_size as i64,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }
+        }
+    }
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -89,6 +105,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
+            connector_extra_info: None,
         }
     }
 
@@ -454,6 +471,12 @@ impl<S: StateStore> SourceExecutor<S> {
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
+        self.connector_extra_info = first_barrier.get_connector_extra_info();
+        if let Err(e) = check_fd_limit(&first_barrier).await
+            && is_uninitialized
+        {
+            return Err(StreamExecutorError::connector_error(e));
+        }
 
         yield Message::Barrier(first_barrier);
 
@@ -1003,6 +1026,7 @@ mod tests {
                 pause: false,
                 subscriptions_to_add: vec![],
                 backfill_nodes_to_pause: Default::default(),
+                connector_extra_info: None,
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1081,6 +1105,7 @@ mod tests {
         let mut epoch = test_epoch(1);
         let init_barrier =
             Barrier::new_test_barrier(epoch).with_mutation(Mutation::Add(AddMutation {
+                connector_extra_info: None,
                 adds: HashMap::new(),
                 added_actors: HashSet::new(),
                 splits: hashmap! {

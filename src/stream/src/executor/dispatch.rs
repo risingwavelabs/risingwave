@@ -1396,6 +1396,7 @@ mod tests {
         };
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
+                connector_extra_info: None,
                 dispatchers: dispatcher_updates,
                 merges: Default::default(),
                 vnode_bitmaps: Default::default(),
@@ -1508,6 +1509,7 @@ mod tests {
         };
         let b3 = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Update(
             UpdateMutation {
+                connector_extra_info: None,
                 dispatchers: dispatcher_updates,
                 merges: Default::default(),
                 vnode_bitmaps: Default::default(),

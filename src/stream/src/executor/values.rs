@@ -210,6 +210,7 @@ mod tests {
                 pause: false,
                 subscriptions_to_add: vec![],
                 backfill_nodes_to_pause: Default::default(),
+                connector_extra_info: None,
             }));
         tx.send(first_message).unwrap();
 

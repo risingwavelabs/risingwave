@@ -16,6 +16,7 @@ use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
+use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 
 use super::*;
 
@@ -33,6 +34,7 @@ pub struct SharedSplitMap {
 }
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
+type ConnectorExtraInfoRef = Arc<Mutex<Option<ConnectorExtraInfo>>>;
 
 /// `ConnectorSourceWorker` keeps fetching the latest split metadata from the external source service ([`Self::tick`]),
 /// and maintains it in `current_splits`.
@@ -40,6 +42,7 @@ pub struct ConnectorSourceWorker {
     source_id: SourceId,
     source_name: String,
     current_splits: SharedSplitMapRef,
+    current_extra_info: ConnectorExtraInfoRef,
     // XXX: box or arc?
     enumerator: Box<dyn AnySplitEnumerator>,
     period: Duration,
@@ -94,6 +97,9 @@ pub async fn create_source_worker(
     let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
     let current_splits_ref = splits.clone();
 
+    let extra_info = Arc::new(Mutex::new(None));
+    let current_extra_info_ref = extra_info.clone();
+
     let connector_properties = extract_prop_from_new_source(source)?;
     let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
@@ -108,6 +114,7 @@ pub async fn create_source_worker(
             connector_properties,
             DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
             current_splits_ref.clone(),
+            current_extra_info_ref.clone(),
             metrics,
         )
         .await?;
@@ -128,6 +135,7 @@ pub async fn create_source_worker(
         handle,
         command_tx,
         splits,
+        extra_info,
         enable_drop_split: enable_scale_in,
         enable_adaptive_splits,
     })
@@ -142,7 +150,9 @@ pub fn create_source_worker_async(
     tracing::info!("spawning new watcher for source {}", source.id);
 
     let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+    let extra_info = Arc::new(Mutex::new(None));
     let current_splits_ref = splits.clone();
+    let current_extra_info_ref = extra_info.clone();
     let source_id = source.id;
 
     let connector_properties = extract_prop_from_existing_source(&source)?;
@@ -162,6 +172,7 @@ pub fn create_source_worker_async(
                 connector_properties.clone(),
                 DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
                 current_splits_ref.clone(),
+                current_extra_info_ref.clone(),
                 metrics.clone(),
             )
             .await
@@ -184,6 +195,7 @@ pub fn create_source_worker_async(
             handle,
             command_tx,
             splits,
+            extra_info,
             enable_drop_split,
             enable_adaptive_splits,
         },
@@ -220,6 +232,7 @@ impl ConnectorSourceWorker {
         connector_properties: ConnectorProperties,
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
+        extra_info: ConnectorExtraInfoRef,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let enumerator = connector_properties
@@ -241,6 +254,7 @@ impl ConnectorSourceWorker {
             source_id: source.id as SourceId,
             source_name: source.name.clone(),
             current_splits: splits,
+            current_extra_info: extra_info,
             enumerator,
             period,
             metrics,
@@ -342,6 +356,18 @@ impl ConnectorSourceWorker {
                 })?
             }
         };
+        if let Some(kafka_enumerator) = self
+            .enumerator
+            .as_any()
+            .downcast_ref::<KafkaSplitEnumerator>()
+        {
+            let broker_number = kafka_enumerator.get_broker_number().await?;
+            let extra_info = Some(ConnectorExtraInfo {
+                kafka_broker_size: Some(broker_number),
+            });
+            let mut current_extra_info = self.current_extra_info.lock().await;
+            *current_extra_info = extra_info;
+        }
 
         source_is_up(1);
         self.fail_cnt = 0;
@@ -373,6 +399,7 @@ pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     command_tx: UnboundedSender<SourceWorkerCommand>,
     pub splits: SharedSplitMapRef,
+    pub extra_info: ConnectorExtraInfoRef,
     pub enable_drop_split: bool,
     pub enable_adaptive_splits: bool,
 }

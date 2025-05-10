@@ -206,6 +206,7 @@ pub trait SplitEnumerator: Sized + Send {
 
 pub type SourceContextRef = Arc<SourceContext>;
 pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
+use std::any::Any;
 
 /// Dyn-compatible [`SplitEnumerator`].
 #[async_trait]
@@ -213,10 +214,13 @@ pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+
+    // downcast
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[async_trait]
-impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
+impl<T: SplitEnumerator<Split: Into<SplitImpl>> + 'static> AnySplitEnumerator for T {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         SplitEnumerator::list_splits(self)
             .await
@@ -229,6 +233,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
 
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

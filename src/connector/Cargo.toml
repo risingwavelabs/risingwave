@@ -114,6 +114,7 @@ risingwave_jni_core = { workspace = true }
 risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+rlimit = "0.10"
 rumqttc = { version = "0.24.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs = "0.8"
