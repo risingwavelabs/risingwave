@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
+use foyer::HybridCacheProperties;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectStreamingUploader;
 use tokio::task::JoinHandle;
@@ -221,17 +222,17 @@ impl SstableWriter for BatchUploadWriter {
             }
 
             // Add block cache.
-            if let CachePolicy::Fill(fill_cache_priority) = self.policy {
+            if let CachePolicy::Fill(hint) = self.policy {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_hint(
+                    self.sstable_store.block_cache().insert_with_properties(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
                         },
                         Box::new(block),
-                        fill_cache_priority,
+                        HybridCacheProperties::default().with_hint(hint),
                     );
                 }
             }
@@ -332,17 +333,17 @@ impl SstableWriter for StreamingUploadWriter {
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Add block cache.
-            if let CachePolicy::Fill(fill_high_priority_cache) = self.policy
+            if let CachePolicy::Fill(hint) = self.policy
                 && !self.blocks.is_empty()
             {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_hint(
+                    self.sstable_store.block_cache().insert_with_properties(
                         SstableBlockIndex {
                             sst_id: self.object_id,
                             block_idx: block_idx as _,
                         },
                         Box::new(block),
-                        fill_high_priority_cache,
+                        HybridCacheProperties::default().with_hint(hint),
                     );
                 }
             }

@@ -420,7 +420,7 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
-    use foyer::CacheHint;
+    use foyer::Hint;
     use itertools::Itertools;
     use rand::prelude::*;
     use rand::rng as thread_rng;
@@ -594,7 +594,7 @@ mod tests {
             TableKey(Bytes::from(end_key.user_key.table_key.0)),
         );
         let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+            cache_policy: CachePolicy::Fill(Hint::Normal),
             must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
             max_preload_retry_times: 0,
             prefetch_for_large_query: false,
