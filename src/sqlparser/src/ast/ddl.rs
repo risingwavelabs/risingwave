@@ -238,6 +238,9 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -545,6 +548,13 @@ impl fmt::Display for AlterSourceOperation {
                     "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
                 )
             }
         }

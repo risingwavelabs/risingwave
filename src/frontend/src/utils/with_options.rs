@@ -213,6 +213,30 @@ impl WithOptions {
     }
 }
 
+/// Resolves connection references and secret references in `WithOptions`.
+///
+/// This function takes `WithOptions` (typically from a CREATE/ALTER statement),
+/// resolves any CONNECTION and SECRET references, and merges their properties
+/// with the directly specified options.
+///
+/// # Arguments
+/// * `with_options` - The original `WithOptions` containing user-specified options and references
+/// * `session` - The current user session, used to access catalogs and verify permissions
+/// * `object` - Optional telemetry information about the database object being created/altered
+///
+/// # Returns
+/// A tuple containing:
+/// * `WithOptionsSecResolved` - `WithOptions` with all references resolved and merged
+/// * `PbConnectionType` - The type of the referenced connection (if any)
+/// * `Option<u32>` - The ID of the referenced connection (if any)
+///
+/// # Workflow
+/// 1. Extract connector name, options, secret refs, and connection refs from `with_options`
+/// 2. Resolve any CONNECTION references by looking them up in the catalog
+/// 3. Resolve any SECRET references by looking them up in the catalog
+/// 4. Merge properties from CONNECTION with directly specified options
+/// 5. Perform validation to ensure no conflicts between options
+/// 6. Return the merged options, connection type, and connection ID
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
@@ -244,6 +268,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         };
 
+        // Report telemetry event for connection reference if an object is provided
         if let Some(object) = object {
             // report to telemetry
             report_event(
@@ -263,6 +288,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         }
     }
 
+    // Resolve all SECRET references to their actual secret IDs
     let mut inner_secret_refs = {
         let mut resolved_secret_refs = BTreeMap::new();
         for (key, secret_ref) in secret_refs {
@@ -282,9 +308,11 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         resolved_secret_refs
     };
 
+    // Initialize connection_type to Unspecified (will be updated if connection is used)
     let mut connection_type = PbConnectionType::Unspecified;
     let connection_params_is_none_flag = connection_params.is_none();
 
+    // If we have a connection, merge its properties with directly specified options
     if let Some(connection_params) = connection_params {
         // Do key checks on `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY`, `PRIVATE_LINK_TARGETS_KEY` and `PRIVATELINK_ENDPOINT_KEY`
         // `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY` is generated from `private_link_targets` and `private_link_endpoint`, instead of given by users.
@@ -307,6 +335,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         }
 
+        // Extract connection type and merge properties
         connection_type = connection_params.connection_type();
         for (k, v) in connection_params.properties {
             if options.insert(k.clone(), v).is_some() {
@@ -317,6 +346,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         }
 
+        // Merge secret references from connection
         for (k, v) in connection_params.secret_refs {
             if inner_secret_refs.insert(k.clone(), v).is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
@@ -326,10 +356,10 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         }
 
+        // Schema Registry specific validation
         {
-            // check if not mess up with schema registry connection and glue connection
             if connection_type == PbConnectionType::SchemaRegistry {
-                // Check no AWS related options when using schema registry connection
+                // Ensure no AWS/Glue options are provided when using schema registry connection
                 if options
                     .keys()
                     .chain(inner_secret_refs.keys())
