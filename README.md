@@ -62,18 +62,20 @@ To learn about other installation options, such as using a Docker image, see [Qu
 
 ## Stream, Store, and Query — All in One
 
-RisingWave focuses on delivering a full **end-to-end solution** for streaming data—combining the core capabilities of a stream processor with integrated storage and open-format persistence.
+RisingWave delivers a full **end-to-end streaming data platform** — combining real-time processing with built-in storage and open-format persistence.
 
-RisingWave supports:
+It supports:
 
 * **Ingestion:** Ingest millions of events per second from streaming and batch sources.
 * **Stream processing:** Perform real-time incremental processing to join and analyze live data with historical tables.
 * **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg™) or any destination.
 
-But RisingWave does more. It provides both **online and offline storage**:
+What sets RisingWave apart is its integrated storage engine:
 
 * **Online serving:** Row-based storage optimized for point and range queries with single-digit millisecond latency.
 * **Offline persistence:** Built-in Apache Iceberg™ integration for low-cost, durable storage with open access for external query engines.
+  
+With RisingWave, real-time data isn’t just processed — it’s stored, queried, and shared across your entire stack.
 
 ## Key design decisions
 
