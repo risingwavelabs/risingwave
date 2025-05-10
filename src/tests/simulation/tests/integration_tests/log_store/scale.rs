@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::Write;
-use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
 use madsim::runtime::init_logger;
-use rand::{Rng, rng as thread_rng};
-use risingwave_common::bail;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
@@ -33,22 +29,24 @@ use crate::log_store::utils::*;
 // ```sh
 // RUST_LOG='\
 //   risingwave_stream::executor::sync_kv_log_store=trace,\
-//   integration_tests::log_store::recovery=info,\
+//   integration_tests::log_store::scale=info,\
 //   risingwave_stream::common::log_store_impl::kv_log_store=trace\
 // '\
 // ./risedev sit-test test_recover_synced_log_store >out.log 2>&1
 // ```
 #[tokio::test]
-async fn test_recover_synced_log_store() -> Result<()> {
+async fn test_scale_in_synced_log_store() -> Result<()> {
     init_logger();
     let mut cluster = start_sync_log_store_cluster().await?;
     cluster
         .run("alter system set per_database_isolation = false")
         .await?;
 
-    let amplification_factor = 20000;
-    let dimension_count = 10;
+    let amplification_factor = 80000;
+    let dimension_count = 5;
     let result_count = amplification_factor * dimension_count;
+
+    tracing::info!("setup cluster");
 
     const UNALIGNED_MV_NAME: &str = "unaligned_mv";
     const ALIGNED_MV_NAME: &str = "aligned_mv";
@@ -57,22 +55,19 @@ async fn test_recover_synced_log_store() -> Result<()> {
     {
         setup_base_tables(&mut cluster, amplification_factor, dimension_count).await?;
         setup_mv(&mut cluster, UNALIGNED_MV_NAME, true).await?;
+        tracing::info!("setup tables and mv");
         run_amplification_workload(&mut cluster, dimension_count).await?;
+        tracing::info!("ran amplification workload");
 
-        cluster
-            .kill_nodes(
-                vec![
-                    "compute-1",
-                    "compute-2",
-                    "compute-3",
-                    "compute-4",
-                    "compute-5",
-                ],
-                5,
-            )
-            .await;
-        tracing::info!("killed compute nodes");
-        cluster.wait_for_recovery().await?;
+        /// Trigger a number of scale operations, with different combinations of nodes
+        for (a, b) in (1..=5).tuple_combinations() {
+            cluster
+                .kill_nodes(vec![format!("compute-{a}"), format!("compute-{b}")], 6)
+                .await;
+            tracing::info!("killed compute nodes: {a}, {b}");
+            cluster.wait_for_recovery().await?;
+        }
+
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
     }
 
