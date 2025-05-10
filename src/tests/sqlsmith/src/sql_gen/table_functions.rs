@@ -198,7 +198,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// - Over-constraining with numeric quantifiers
     fn gen_noise_regexp_pattern(&mut self, input: &str) -> String {
         if input.is_empty() {
-            return "[A-Z]{3,}".to_string();
+            return "[A-Z]{3,}".to_owned();
         }
 
         let chars: Vec<char> = input.chars().collect();
@@ -206,7 +206,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
         match self.rng.random_range(0..=3) {
             0 => {
-                let mut s = input.to_string();
+                let mut s = input.to_owned();
                 let pos = self.rng.random_range(0..=len);
                 s.insert(pos, 'Z');
                 regex::escape(&s)
@@ -240,20 +240,20 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_char_class(&mut self, c: char) -> String {
         if c.is_ascii_digit() {
             match self.rng.random_range(0..=2) {
-                0 => "[0-9]".to_string(),
+                0 => "[0-9]".to_owned(),
                 1 => format!("[{}]", c),
-                2 => ".".to_string(),
+                2 => ".".to_owned(),
                 _ => unreachable!(),
             }
         } else if c.is_ascii_alphabetic() {
             match self.rng.random_range(0..=2) {
                 0 => format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase()),
-                1 => "[a-zA-Z]".to_string(),
-                2 => ".".to_string(),
+                1 => "[a-zA-Z]".to_owned(),
+                2 => ".".to_owned(),
                 _ => unreachable!(),
             }
         } else {
-            ".".to_string()
+            ".".to_owned()
         }
     }
 
