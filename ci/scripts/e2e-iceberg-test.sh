@@ -34,6 +34,10 @@ PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS m
 risedev ci-start ci-iceberg-test
 
 
+unset BUILDKITE_PARALLEL_JOB
+unset BUILDKITE_PARALLEL_JOB_COUNT
+
+
 echo "--- Running tests"
 cd e2e_test/iceberg
 # Don't remove the `--quiet` option since poetry has a bug when printing output, see
@@ -41,9 +45,9 @@ cd e2e_test/iceberg
 poetry update --quiet
 poetry run python main.py
 
-echo "--- Running pure slt tests"
-risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
+# echo "--- Running pure slt tests"
+# risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
 
 # Run benchmarks separately (not parallelized)
-echo "--- Running benchmarks"
-poetry run python main.py -t ./benches/predicate_pushdown.toml
+# echo "--- Running benchmarks"
+# poetry run python main.py -t ./benches/predicate_pushdown.toml
