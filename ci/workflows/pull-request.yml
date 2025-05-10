@@ -58,6 +58,10 @@ steps:
       - monorepo-diff#v1.2.0:
           diff: "git diff --name-only origin/main"
           watch:
+            - path: "ci/.env"
+              config:
+                command: "ci/build-ci-image.sh"
+                label: "ci build images"
             - path: "ci/build-ci-image.sh"
               config:
                 command: "ci/build-ci-image.sh"
