@@ -134,11 +134,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
             self.gen_noise_regexp_pattern(&input_string)
         };
         let flags = self.gen_regex_flags();
-    
+
         let input_expr = Expr::Value(Value::SingleQuotedString(input_string));
         let pattern_expr = Expr::Value(Value::SingleQuotedString(pattern));
         let flags_expr = Expr::Value(Value::SingleQuotedString(flags));
-    
+
         let table_name = self.gen_table_name_with_prefix("regexp_match");
         let alias = create_table_alias(&table_name);
         let relation = create_tvf(
@@ -147,10 +147,10 @@ impl<R: Rng> SqlGenerator<'_, R> {
             create_args(vec![input_expr, pattern_expr, flags_expr]),
             false,
         );
-    
+
         let table = Table::new(table_name, vec![]);
         (relation, table)
-    }    
+    }
 
     /// Recursively generates a regular expression pattern that matches the given input string.
     /// The strategy includes:
@@ -174,15 +174,15 @@ impl<R: Rng> SqlGenerator<'_, R> {
             3 => self.add_quantifier(regex::escape(mid)),
             4 => self.gen_matched_regexp_pattern(mid, depth - 1),
             _ => unreachable!(),
-        };    
-        
+        };
+
         let result = format!(
             "{}{}{}",
             regex::escape(prefix),
             mid_transformed,
             regex::escape(suffix)
         );
-    
+
         if self.flip_coin() {
             self.wrap_group(result)
         } else {
@@ -200,10 +200,10 @@ impl<R: Rng> SqlGenerator<'_, R> {
         if input.is_empty() {
             return "[A-Z]{3,}".to_string();
         }
-    
+
         let chars: Vec<char> = input.chars().collect();
         let len = chars.len();
-    
+
         match self.rng.random_range(0..=3) {
             0 => {
                 let mut s = input.to_string();
@@ -256,7 +256,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             ".".to_string()
         }
     }
-    
+
     fn wrap_group(&mut self, inner: String) -> String {
         match self.rng.random_range(0..=2) {
             0 => format!("({})", inner),
