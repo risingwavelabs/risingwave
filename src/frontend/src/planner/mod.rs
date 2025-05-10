@@ -47,8 +47,12 @@ pub struct Planner {
 #[derive(Debug, Copy, Clone)]
 pub enum PlanFor {
     Stream,
+    /// Other batch queries, e.g., DML.
     Batch,
-    /// `BatchDql` is a special mode for batch.
+    /// Batch `SELECT` queries.
+    ///
+    /// ## Special handling
+    ///
     /// Iceberg engine table will be converted to iceberg source based on this mode.
     BatchDql,
 }

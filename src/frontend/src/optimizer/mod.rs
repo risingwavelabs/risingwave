@@ -34,6 +34,7 @@ pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
     SysTableVisitor,
 };
+use risingwave_pb::catalog::PbTable;
 
 mod logical_optimization;
 mod optimizer_context;
@@ -687,7 +688,7 @@ impl PlanRoot {
             webhook_info,
             engine,
         }: CreateTableProps,
-    ) -> Result<StreamMaterialize> {
+    ) -> Result<(PlanRef, PbTable)> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
         // Snapshot backfill is not allowed for create table

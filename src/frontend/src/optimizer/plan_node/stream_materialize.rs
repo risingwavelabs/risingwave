@@ -25,7 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::PbWebhookSourceInfo;
+use risingwave_pb::catalog::{PbTable, PbWebhookSourceInfo};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
@@ -148,7 +148,7 @@ impl StreamMaterialize {
         retention_seconds: Option<NonZeroU32>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
-    ) -> Result<Self> {
+    ) -> Result<(PlanRef, PbTable)> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
         let table = Self::derive_table_catalog(
@@ -172,7 +172,16 @@ impl StreamMaterialize {
             engine,
         )?;
 
-        Ok(Self::new(input, table))
+        if matches!(engine, Engine::Iceberg) && table.append_only {
+            // AppendOnly Iceberg Table Engine, w/o Materialize!
+            // This is quite strange though...
+            // But it seems to be the best way to change without introducing large change.
+            Ok((input, table.to_prost()))
+        } else {
+            let mz = Self::new(input, table);
+            let table = mz.table().to_prost();
+            Ok((mz.into(), table))
+        }
     }
 
     /// Rewrite the input to satisfy the required distribution if necessary, according to the type.

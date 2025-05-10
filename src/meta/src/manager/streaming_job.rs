@@ -176,11 +176,15 @@ impl StreamingJob {
     pub fn set_info_from_graph(&mut self, graph: &StreamFragmentGraph) {
         match self {
             Self::Table(_, table, ..) => {
-                table.fragment_id = graph.table_fragment_id();
+                if let Some(fragment_id) = graph.table_fragment_id() {
+                    table.fragment_id = fragment_id;
+                }
                 table.dml_fragment_id = graph.dml_fragment_id();
             }
             Self::MaterializedView(table) | Self::Index(_, table) => {
-                table.fragment_id = graph.table_fragment_id();
+                if let Some(fragment_id) = graph.table_fragment_id() {
+                    table.fragment_id = fragment_id;
+                }
             }
             Self::Sink(_, _) | Self::Source(_) => {}
         }

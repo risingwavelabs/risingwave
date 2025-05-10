@@ -545,13 +545,13 @@ impl StreamFragmentGraph {
     }
 
     /// Returns the fragment id where the streaming job node located.
-    pub fn table_fragment_id(&self) -> FragmentId {
+    pub fn table_fragment_id(&self) -> Option<FragmentId> {
         self.fragments
             .values()
             .filter(|b| b.job_id.is_some())
             .map(|b| b.fragment_id)
-            .exactly_one()
-            .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
+            .at_most_one()
+            .expect("require at most 1 materialize/sink/cdc source node when creating the streaming job")
     }
 
     /// Returns the fragment id where the table dml is received.
@@ -1058,6 +1058,7 @@ impl CompleteStreamFragmentGraph {
 
                                 let output_indices = {
                                     let nodes = &upstream_fragment.nodes;
+                                    tracing::debug!("upstream_fragment: {:?}", upstream_fragment);
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
@@ -1134,11 +1135,18 @@ impl CompleteStreamFragmentGraph {
         }) = downstream_ctx
         {
             let original_table_fragment_id = GlobalFragmentId::new(original_root_fragment_id);
-            let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+            let table_fragment_id = graph.table_fragment_id().map(GlobalFragmentId::new);
 
             // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
             // existing materialized views.
             for (dispatch_strategy, fragment) in &downstream_fragments {
+                let table_fragment_id = table_fragment_id.expect(
+                    format!(
+                        "table_fragment_id should be present when downstream_fragments is non-empty, downstream_fragments: {:?}",
+                        downstream_fragments
+                    )
+                    .as_str(),
+                );
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 let edge = StreamFragmentEdge {
