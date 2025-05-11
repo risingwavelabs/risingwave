@@ -14,7 +14,6 @@
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_meta_model::WorkerId;
 
 use super::*;
@@ -31,10 +30,10 @@ impl SourceManager {
         fragment_id: FragmentId,
         prev_actor_ids: &[ActorId],
         curr_actor_ids: &[ActorId],
-        x: &_,
+        actor_locations: &HashMap<ActorId, WorkerId>,
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
-        
+
         let prev_splits = prev_actor_ids
             .iter()
             .flat_map(|actor_id| {
@@ -52,6 +51,7 @@ impl SourceManager {
         let diff = reassign_splits(
             fragment_id,
             empty_actor_splits,
+            actor_locations,
             &prev_splits,
             // pre-allocate splits is the first time getting splits and it does not have scale-in scene
             SplitDiffOptions::default(),
@@ -742,9 +742,12 @@ mod tests {
             .flat_map(|splits| splits.iter().map(|split| split.id()))
             .collect();
 
+        let fake_actor_locations = actor_splits.keys().map(|actor_id| (*actor_id, 0)).collect();
+
         let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
+            &fake_actor_locations,
             &discovered_splits,
             opts,
         )
@@ -783,9 +786,12 @@ mod tests {
             enable_adaptive: false,
         };
 
+        let fake_actor_locations = actor_splits.keys().map(|actor_id| (*actor_id, 0)).collect();
+
         let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
+            &fake_actor_locations,
             &discovered_splits,
             opts,
         )
@@ -802,17 +808,20 @@ mod tests {
             reassign_splits(
                 FragmentId::default(),
                 actor_splits,
+                &HashMap::new(),
                 &discovered_splits,
                 Default::default()
             )
             .is_none()
         );
 
-        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
+        let actor_splits: HashMap<_, _> = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
+        let fake_actor_locations = actor_splits.keys().map(|actor_id| (*actor_id, 0)).collect();
         let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
+            &fake_actor_locations,
             &discovered_splits,
             Default::default(),
         )
@@ -822,7 +831,7 @@ mod tests {
             assert!(splits.is_empty())
         }
 
-        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
+        let actor_splits: HashMap<_, _> = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..3)
             .map(|i| {
                 let split = TestSplit { id: i };
@@ -830,9 +839,11 @@ mod tests {
             })
             .collect();
 
+        let fake_actor_locations = actor_splits.keys().map(|actor_id| (*actor_id, 0)).collect();
         let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
+            &fake_actor_locations,
             &discovered_splits,
             Default::default(),
         )
@@ -844,17 +855,18 @@ mod tests {
 
         check_all_splits(&discovered_splits, &diff);
 
-        let actor_splits = (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
+        let actor_splits: HashMap<_, _> = (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..5)
             .map(|i| {
                 let split = TestSplit { id: i };
                 (split.id(), split)
             })
             .collect();
-
+        let fake_actor_locations = actor_splits.keys().map(|actor_id| (*actor_id, 0)).collect();
         let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
+            &fake_actor_locations,
             &discovered_splits,
             Default::default(),
         )
@@ -872,6 +884,8 @@ mod tests {
         actor_splits.insert(3, vec![]);
         actor_splits.insert(4, vec![]);
 
+        let fake_actor_locations = actor_splits.keys().map(|actor_id| (*actor_id, 0)).collect();
+
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..5)
             .map(|i| {
                 let split = TestSplit { id: i };
@@ -882,6 +896,7 @@ mod tests {
         let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
+            &fake_actor_locations,
             &discovered_splits,
             Default::default(),
         )

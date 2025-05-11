@@ -1178,7 +1178,11 @@ impl ScaleController {
         // Because we are in the Pause state, so it's no problem to reallocate
         let mut fragment_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
-            let actors_after_reschedule = &fragment_actors_after_reschedule[fragment_id];
+            let actor_locations_after_reschedule: HashMap<_, _> = fragment_actors_after_reschedule
+                [fragment_id]
+                .iter()
+                .map(|(actor_id, worker_id)| (*actor_id, *worker_id))
+                .collect();
 
             if ctx.stream_source_fragment_ids.contains(fragment_id) {
                 let fragment = &ctx.fragment_map[fragment_id];
@@ -1189,7 +1193,10 @@ impl ScaleController {
                     .map(|actor| actor.actor_id)
                     .collect_vec();
 
-                let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
+                let curr_actor_ids = actor_locations_after_reschedule
+                    .keys()
+                    .cloned()
+                    .collect_vec();
 
                 let actor_splits = self
                     .source_manager
@@ -1197,7 +1204,7 @@ impl ScaleController {
                         *fragment_id,
                         &prev_actor_ids,
                         &curr_actor_ids,
-                        &actor_locations,
+                        &actor_locations_after_reschedule,
                     )
                     .await?;
 
