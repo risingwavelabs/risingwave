@@ -74,7 +74,7 @@ What sets RisingWave apart is its integrated storage engine:
 
 * **Online serving:** Row-based storage optimized for point and range queries with single-digit millisecond latency.
 * **Offline persistence:** Built-in Apache Iceberg™ integration for low-cost, durable storage with open access for external query engines.
-  
+
 With RisingWave, real-time data isn’t just processed — it’s stored, queried, and shared across your entire stack.
 
 ## Key design decisions
