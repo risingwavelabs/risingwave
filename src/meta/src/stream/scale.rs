@@ -979,7 +979,7 @@ impl ScaleController {
                 .cloned()
                 .unwrap();
 
-            let fragment_actor_map = fragment_actors_after_reschedule
+            let actor_locations = fragment_actors_after_reschedule
                 .get(fragment_id)
                 .cloned()
                 .unwrap();
@@ -989,7 +989,7 @@ impl ScaleController {
             // first, find existing actor bitmap, copy them
             let mut fragment_bitmap = HashMap::new();
 
-            for (actor_id, worker_id) in &fragment_actor_map {
+            for (actor_id, worker_id) in &actor_locations {
                 if let Some((root_fragment, root_actor_id)) = actor_group_map.get(actor_id) {
                     let root_bitmap = fragment_updated_bitmap
                         .get(root_fragment)
@@ -1197,6 +1197,7 @@ impl ScaleController {
                         *fragment_id,
                         &prev_actor_ids,
                         &curr_actor_ids,
+                        &actor_locations,
                     )
                     .await?;
 

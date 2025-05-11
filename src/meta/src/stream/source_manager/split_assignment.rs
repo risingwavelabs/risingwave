@@ -14,6 +14,8 @@
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::bail;
+use risingwave_meta_model::WorkerId;
 
 use super::*;
 use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
@@ -29,9 +31,10 @@ impl SourceManager {
         fragment_id: FragmentId,
         prev_actor_ids: &[ActorId],
         curr_actor_ids: &[ActorId],
+        x: &_,
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
-
+        
         let prev_splits = prev_actor_ids
             .iter()
             .flat_map(|actor_id| {
@@ -107,6 +110,12 @@ impl SourceManager {
 
         let mut assigned = HashMap::new();
 
+        let actor_locations: HashMap<_, _> = table_fragments
+            .actor_status
+            .iter()
+            .map(|(actor, status)| (*actor, status.worker_id() as WorkerId))
+            .collect();
+
         'loop_source: for (source_id, fragments) in source_fragments {
             let handle = core
                 .managed_sources
@@ -136,6 +145,7 @@ impl SourceManager {
                 if let Some(diff) = reassign_splits(
                     fragment_id,
                     empty_actor_splits,
+                    &actor_locations,
                     &splits,
                     SplitDiffOptions::default(),
                 ) {
@@ -311,6 +321,16 @@ impl SourceManagerCore {
     pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
+        let actor_locations = self
+            .metadata_manager
+            .catalog_controller
+            .list_actor_locations()
+            .await?;
+        let actor_locations: HashMap<_, _> = actor_locations
+            .into_iter()
+            .map(|location| (location.actor_id as ActorId, location.worker_id))
+            .collect();
+
         'loop_source: for (source_id, handle) in &self.managed_sources {
             let source_fragment_ids = match self.source_fragments.get(source_id) {
                 Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
@@ -361,6 +381,7 @@ impl SourceManagerCore {
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
                     prev_actor_splits,
+                    &actor_locations,
                     &discovered_splits,
                     SplitDiffOptions {
                         enable_scale_in: handle.enable_drop_split,
@@ -446,6 +467,7 @@ impl SourceManagerCore {
 fn reassign_splits<T>(
     fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,
+    actor_locations: &HashMap<ActorId, WorkerId>,
     discovered_splits: &BTreeMap<SplitId, T>,
     opts: SplitDiffOptions,
 ) -> Option<HashMap<ActorId, Vec<T>>>
@@ -455,6 +477,10 @@ where
     // if no actors, return
     if actor_splits.is_empty() {
         return None;
+    }
+
+    for actor_id in actor_splits.keys() {
+        debug_assert!(actor_locations.contains_key(actor_id))
     }
 
     let prev_split_ids: HashSet<_> = actor_splits
@@ -504,6 +530,12 @@ where
 
     tracing::info!(fragment_id, new_discovered_splits = ?new_discovered_splits, "new discovered splits");
 
+    let mut worker_loads: HashMap<WorkerId, usize> = HashMap::new();
+    for (actor_id, splits) in &actor_splits {
+        let worker_id = actor_locations[actor_id];
+        *worker_loads.entry(worker_id).or_default() += splits.len();
+    }
+
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
 
     for (actor_id, mut splits) in actor_splits {
@@ -511,7 +543,14 @@ where
             splits.retain(|split| !dropped_splits.contains(&split.id()));
         }
 
-        heap.push(ActorSplitsAssignment { actor_id, splits })
+        let worker_id = actor_locations[&actor_id];
+        let worker_load = worker_loads.get(&worker_id).cloned().unwrap_or(0);
+
+        heap.push(ActorSplitsAssignment {
+            actor_id,
+            splits,
+            worker_load,
+        })
     }
 
     for split_id in new_discovered_splits {
@@ -527,11 +566,16 @@ where
         peek_ref
             .splits
             .push(discovered_splits.get(&split_id).cloned().unwrap());
+        peek_ref.worker_load += 1;
     }
 
     Some(
         heap.into_iter()
-            .map(|ActorSplitsAssignment { actor_id, splits }| (actor_id, splits))
+            .map(
+                |ActorSplitsAssignment {
+                     actor_id, splits, ..
+                 }| (actor_id, splits),
+            )
             .collect(),
     )
 }
@@ -571,6 +615,7 @@ fn align_splits(
 struct ActorSplitsAssignment<T: SplitMetaData> {
     actor_id: ActorId,
     splits: Vec<T>,
+    worker_load: usize,
 }
 
 impl<T: SplitMetaData + Clone> Eq for ActorSplitsAssignment<T> {}
@@ -590,7 +635,11 @@ impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
 impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Note: this is reversed order, to make BinaryHeap a min heap.
-        other.splits.len().cmp(&self.splits.len())
+        other
+            .worker_load
+            .cmp(&self.worker_load)
+            .then(other.splits.len().cmp(&self.splits.len()))
+            .then(other.actor_id.cmp(&self.actor_id))
     }
 }
 
