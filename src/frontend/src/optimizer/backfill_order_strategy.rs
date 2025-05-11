@@ -29,18 +29,100 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::Result;
 use crate::optimizer::backfill_order_strategy::auto::plan_auto_strategy;
 use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
+use crate::optimizer::plan_node::PlanNodeType;
 use crate::session::SessionImpl;
 use crate::{Binder, PlanRef};
 
 mod auto {
+    use std::collections::HashMap;
+
+    use anyhow::Result;
     use risingwave_common::catalog::ObjectId;
+    use risingwave_pb::common::Uint32Vector;
     use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
+    use tokio::io::ReadHalf;
 
     use crate::PlanRef;
+    use crate::optimizer::PlanNodeType;
+    use crate::optimizer::backfill_order_strategy::plan_backfill_order_strategy;
     use crate::session::SessionImpl;
 
-    pub(super) fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> PbStrategy {
+    enum BackfillTreeNode {
+        Join {
+            lhs: Box<BackfillTreeNode>,
+            rhs: Box<BackfillTreeNode>,
+        },
+        Scan {
+            id: ObjectId,
+        },
+        Union {
+            children: Vec<BackfillTreeNode>,
+        },
+        Ignored,
+    }
+
+    /// TODO: Handle stream share
+    fn plan_graph_to_backfill_tree(
+        session: &SessionImpl,
+        plan: PlanRef,
+    ) -> Option<BackfillTreeNode> {
+        match plan.node_type() {
+            PlanNodeType::StreamHashJoin => {
+                assert_eq!(plan.inputs().len(), 2);
+                let mut inputs = plan.inputs().into_iter();
+                let l = inputs.next().unwrap();
+                let r = inputs.next().unwrap();
+                Some(BackfillTreeNode::Join {
+                    lhs: Box::new(plan_graph_to_backfill_tree(session, l)?),
+                    rhs: Box::new(plan_graph_to_backfill_tree(session, r)?),
+                })
+            }
+            PlanNodeType::StreamTableScan => {
+                let table_scan = plan.as_stream_table_scan().expect("table scan");
+                let relation_id = table_scan.core().table_catalog.id().into();
+                Some(BackfillTreeNode::Scan { id: relation_id })
+            }
+            PlanNodeType::StreamUnion => {
+                let inputs = plan.inputs();
+                let mut children = Vec::with_capacity(inputs.len());
+                for child in inputs {
+                    let subtree = plan_graph_to_backfill_tree(session, child)?;
+                    if matches!(subtree, BackfillTreeNode::Ignored) {
+                        continue;
+                    }
+                    children.push(subtree);
+                }
+                Some(BackfillTreeNode::Union { children })
+            }
+            node_type => {
+                let mut inputs = plan.inputs();
+                match inputs.len() {
+                    0 => Some(BackfillTreeNode::Ignored),
+                    1 => {
+                        let mut inputs = inputs.into_iter();
+                        let child = inputs.next().unwrap();
+                        plan_graph_to_backfill_tree(session, child)
+                    }
+                    _ => {
+                        session.notice_to_user(format!(
+                            "Backfill order strategy is not supported for {:?}",
+                            node_type
+                        ));
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn fold_backfill_tree_to_partial_orders(
+        tree: BackfillTreeNode,
+    ) -> HashMap<ObjectId, Uint32Vector> {
         todo!()
+    }
+
+    pub(super) fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> Option<PbStrategy> {
+        plan_graph_to_backfill_tree(session, plan).map(|t| todo!())
     }
 }
 
@@ -90,7 +172,7 @@ pub fn plan_backfill_order_strategy(
 ) -> Result<PbBackfillOrderStrategy> {
     let pb_strategy = match backfill_order_strategy {
         BackfillOrderStrategy::Default | BackfillOrderStrategy::None => None,
-        BackfillOrderStrategy::Auto => Some(plan_auto_strategy(session, plan)),
+        BackfillOrderStrategy::Auto => plan_auto_strategy(session, plan),
         BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders)?,
     };
     Ok(PbBackfillOrderStrategy {
