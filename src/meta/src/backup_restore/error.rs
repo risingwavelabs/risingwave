@@ -16,17 +16,10 @@ use risingwave_backup::error::BackupError;
 
 use crate::MetaError;
 use crate::model::MetadataModelError;
-use crate::storage::MetaStoreError;
 
 impl From<BackupError> for MetaError {
     fn from(e: BackupError) -> Self {
         anyhow::anyhow!(e).into()
-    }
-}
-
-impl From<MetaStoreError> for BackupError {
-    fn from(e: MetaStoreError) -> Self {
-        BackupError::MetaStorage(e.into())
     }
 }
 

@@ -481,7 +481,11 @@ impl fmt::Display for AlterSinkOperation {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
             AlterSinkOperation::SetSinkProps { changed_props } => {
-                write!(f, "CONNECTOR WITH {:?}", changed_props)
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(changed_props)
+                )
             }
         }
     }
