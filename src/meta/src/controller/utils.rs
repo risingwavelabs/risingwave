@@ -23,15 +23,14 @@ use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, Worker
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, JobStatus, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap, WorkerId,
-    actor, connection, database, fragment, fragment_relation, function, index, object,
+    ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
+    WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
     object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
     user_privilege, view,
 };

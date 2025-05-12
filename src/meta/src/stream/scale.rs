@@ -97,7 +97,7 @@ use futures::future::try_join_all;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
+use risingwave_meta_model::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::SourceChange;
@@ -1793,9 +1793,7 @@ impl ScaleController {
 
             for (fragment_id, downstreams) in fragment_downstreams {
                 for (downstream_fragment_id, dispatcher_type) in downstreams {
-                    if let risingwave_meta_model::actor_dispatcher::DispatcherType::NoShuffle =
-                        dispatcher_type
-                    {
+                    if let risingwave_meta_model::DispatcherType::NoShuffle = dispatcher_type {
                         no_shuffle_source_fragment_ids.insert(fragment_id as FragmentId);
                         no_shuffle_target_fragment_ids.insert(downstream_fragment_id as FragmentId);
                     }
