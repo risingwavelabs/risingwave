@@ -1094,6 +1094,12 @@ pub enum CompactorMode {
 
     #[clap(alias = "shared")]
     Shared,
+
+    #[clap(alias = "dedicated_iceberg")]
+    DedicatedIceberg,
+
+    #[clap(alias = "shared_iceberg")]
+    SharedIceberg,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
