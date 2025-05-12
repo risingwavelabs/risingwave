@@ -30,7 +30,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
-use risingwave_pb::source::ConnectorSplit;
+use risingwave_pb::source::{ConnectorExtraInfo, ConnectorSplit};
 use rw_futures_util::select_all;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -299,6 +299,7 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    pub connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 impl SourceContext {
@@ -313,6 +314,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        connector_extra_info: Option<ConnectorExtraInfo>,
     ) -> Self {
         Self {
             actor_id,
@@ -323,6 +325,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            connector_extra_info,
         }
     }
 
@@ -340,6 +343,7 @@ impl SourceContext {
                 split_txn: false,
             },
             ConnectorProperties::default(),
+            None,
             None,
         )
     }

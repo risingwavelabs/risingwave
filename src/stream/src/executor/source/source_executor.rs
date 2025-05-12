@@ -32,6 +32,7 @@ use risingwave_connector::source::{
     StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::source::ConnectorExtraInfo;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -41,11 +42,10 @@ use tokio::time::Instant;
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
-use crate::executor::source::{AVAILABLE_ULIMIT_NOFILE, check_fd_limit};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{ConnectorExtraInfo, UpdateMutation};
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -74,19 +74,6 @@ pub struct SourceExecutor<S: StateStore> {
     connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
-impl<S: StateStore> Drop for SourceExecutor<S> {
-    fn drop(&mut self) {
-        if let Some(connector_extra_info) = self.connector_extra_info {
-            if let Some(kafka_broker_size) = connector_extra_info.kafka_broker_size {
-                AVAILABLE_ULIMIT_NOFILE.fetch_add(
-                    3 * kafka_broker_size as i64,
-                    std::sync::atomic::Ordering::SeqCst,
-                );
-            }
-        }
-    }
-}
-
 impl<S: StateStore> SourceExecutor<S> {
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -109,7 +96,11 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
-    fn stream_reader_builder(&self, source_desc: SourceDesc) -> StreamReaderBuilder {
+    fn stream_reader_builder(
+        &self,
+        source_desc: SourceDesc,
+        connector_extra_info: Option<ConnectorExtraInfo>,
+    ) -> StreamReaderBuilder {
         StreamReaderBuilder {
             source_desc,
             rate_limit: self.rate_limit_rps,
@@ -123,6 +114,7 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
+            connector_extra_info,
         }
     }
 
@@ -213,6 +205,7 @@ impl<S: StateStore> SourceExecutor<S> {
             },
             source_desc.source.config.clone(),
             schema_change_tx,
+            self.connector_extra_info,
         );
 
         (column_ids, source_ctx)
@@ -399,7 +392,8 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         // Replace the source reader with a new one of the new state.
-        let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
+        let reader_stream_builder =
+            self.stream_reader_builder(source_desc.clone(), self.connector_extra_info);
         let reader_stream =
             reader_stream_builder.into_retry_stream(Some(target_state.clone()), false);
 
@@ -472,11 +466,6 @@ impl<S: StateStore> SourceExecutor<S> {
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
         self.connector_extra_info = first_barrier.get_connector_extra_info();
-        if let Err(e) = check_fd_limit(&first_barrier).await
-            && is_uninitialized
-        {
-            return Err(StreamExecutorError::connector_error(e));
-        }
 
         yield Message::Barrier(first_barrier);
 
@@ -528,7 +517,8 @@ impl<S: StateStore> SourceExecutor<S> {
         tracing::debug!(state = ?recover_state, "start with state");
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut reader_stream_builder = self.stream_reader_builder(source_desc.clone());
+        let mut reader_stream_builder =
+            self.stream_reader_builder(source_desc.clone(), self.connector_extra_info);
         let mut latest_splits = None;
         // Build the source stream reader.
         if is_uninitialized {
