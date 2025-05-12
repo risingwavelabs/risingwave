@@ -14,13 +14,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_common::bail;
 use risingwave_common::catalog::ObjectId;
 use risingwave_pb::common::Uint32Vector;
-use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
-use risingwave_pb::stream_plan::{
-    BackfillOrderFixed, BackfillOrderStrategy as PbBackfillOrderStrategy,
-};
+use risingwave_pb::stream_plan::BackfillOrderStrategy as PbBackfillOrderStrategy;
 use risingwave_sqlparser::ast::{BackfillOrderStrategy, ObjectName};
 
 use crate::catalog::CatalogError;
@@ -29,22 +25,19 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::error::Result;
 use crate::optimizer::backfill_order_strategy::auto::plan_auto_strategy;
 use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
-use crate::optimizer::plan_node::PlanNodeType;
 use crate::session::SessionImpl;
 use crate::{Binder, PlanRef};
 
 mod auto {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
-    use anyhow::Result;
     use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
+    use risingwave_pb::stream_plan::BackfillOrderFixed;
     use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
-    use tokio::io::ReadHalf;
 
     use crate::PlanRef;
     use crate::optimizer::PlanNodeType;
-    use crate::optimizer::backfill_order_strategy::plan_backfill_order_strategy;
     use crate::session::SessionImpl;
 
     enum BackfillTreeNode {
@@ -95,7 +88,7 @@ mod auto {
                 Some(BackfillTreeNode::Union { children })
             }
             node_type => {
-                let mut inputs = plan.inputs();
+                let inputs = plan.inputs();
                 match inputs.len() {
                     0 => Some(BackfillTreeNode::Ignored),
                     1 => {
@@ -115,14 +108,121 @@ mod auto {
         }
     }
 
-    pub(super) fn fold_backfill_tree_to_partial_orders(
+    /// Given a backfill tree, we derive a partial order of the leaf nodes according to the following rules:
+    /// A leaf node is defined as a SCAN node.
+    ///
+    /// For a given subtree, all the leaf nodes in the leftmost leaf-node node
+    /// must come _after_ all other leaf nodes in the subtree.
+    /// For example, for the following tree:
+    ///
+    ///       JOIN (A)
+    ///      /        \
+    ///     JOIN (B)   SCAN (C)
+    ///    /        \
+    ///   /         \
+    /// /           \
+    /// SCAN (D)    SCAN (E)
+    ///
+    /// The partial order is:
+    /// {C, E} -> {D}
+    /// Expanded:
+    /// C -> D
+    /// E -> D
+    ///
+    /// Further, if we consider UNION as well:
+    ///
+    ///         JOIN (A)
+    ///        /        \
+    ///       JOIN (B)   SCAN (C)
+    ///       /       \
+    ///      /         \
+    ///     UNION (D)   SCAN (E)
+    ///    /        \
+    ///   /         \
+    /// SCAN (F)    JOIN (G)
+    ///            /        \
+    ///           /          \
+    ///          SCAN (H)   SCAN (I)
+    ///
+    /// If UNION is the leftmost child,
+    /// then for all subtrees in the UNION,
+    /// their leftmost leaf nodes must come after
+    /// all other leaf nodes in the subtree as well.
+    ///
+    /// Next, we assume that the other leaf nodes have some partial order.
+    /// Given the partial order, we can find the terminal nodes.
+    /// Then, we can just let these leftmost leaf nodes come after the terminal nodes.
+    fn fold_backfill_tree_to_partial_order(
         tree: BackfillTreeNode,
     ) -> HashMap<ObjectId, Uint32Vector> {
-        todo!()
+        let mut order: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
+
+        // Returns terminal nodes of the subtree
+        fn traverse_backfill_tree(
+            tree: BackfillTreeNode,
+            order: &mut HashMap<ObjectId, HashSet<ObjectId>>,
+            is_leftmost_child: bool,
+            mut prior_terminal_nodes: HashSet<ObjectId>,
+        ) -> HashSet<ObjectId> {
+            match tree {
+                BackfillTreeNode::Ignored => HashSet::new(),
+                BackfillTreeNode::Scan { id } => {
+                    if is_leftmost_child {
+                        for prior_terminal_node in prior_terminal_nodes {
+                            order.entry(prior_terminal_node).or_default().insert(id);
+                        }
+                    }
+                    HashSet::from([id])
+                }
+                BackfillTreeNode::Union { children } => {
+                    let mut terminal_nodes = HashSet::new();
+                    for child in children {
+                        let child_terminal_nodes = traverse_backfill_tree(
+                            child,
+                            order,
+                            is_leftmost_child,
+                            prior_terminal_nodes.clone(),
+                        );
+                        terminal_nodes.extend(child_terminal_nodes);
+                    }
+                    terminal_nodes
+                }
+                BackfillTreeNode::Join { lhs, rhs } => {
+                    let rhs_terminal_nodes =
+                        traverse_backfill_tree(*rhs, order, false, HashSet::new());
+                    prior_terminal_nodes.extend(rhs_terminal_nodes.iter().cloned());
+                    let lhs_terminal_nodes =
+                        traverse_backfill_tree(*lhs, order, true, prior_terminal_nodes);
+                    // add ordering from rhs to lhs
+                    for rhs_terminal_node in rhs_terminal_nodes {
+                        for &lhs_terminal_node in &lhs_terminal_nodes {
+                            order
+                                .entry(rhs_terminal_node)
+                                .or_default()
+                                .insert(lhs_terminal_node);
+                        }
+                    }
+                    lhs_terminal_nodes
+                }
+            }
+        }
+
+        traverse_backfill_tree(tree, &mut order, false, HashSet::new());
+
+        order
+            .into_iter()
+            .map(|(k, v)| {
+                let data = v.into_iter().collect();
+                (k, Uint32Vector { data })
+            })
+            .collect()
     }
 
     pub(super) fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> Option<PbStrategy> {
-        plan_graph_to_backfill_tree(session, plan).map(|t| todo!())
+        plan_graph_to_backfill_tree(session, plan).map(|t| {
+            let order = fold_backfill_tree_to_partial_order(t);
+            PbStrategy::Fixed(BackfillOrderFixed { order })
+        })
     }
 }
 
