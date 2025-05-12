@@ -23,6 +23,7 @@ use futures::future::try_join_all;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -85,6 +86,8 @@ pub trait SourceProperties:
         + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
+
+    const SOURCE_ALTER_CONFIG_LIST: Set<&'static str> = phf_set! {};
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
     fn init_from_pb_source(&mut self, _source: &PbSource) {}

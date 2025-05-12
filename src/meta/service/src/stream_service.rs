@@ -500,8 +500,34 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
-        if request.object_type != (AlterConnectorPropsObject::Sink as i32) {
-            unimplemented!()
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.object_id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
+
+        match request.object_type() {
+            AlterConnectorPropsObject::Sink => {}
+            AlterConnectorPropsObject::Source => {
+                if request.connector_conn_ref.is_some() {
+                    return Err(Status::invalid_argument(
+                        "alter connector_conn_ref is not supported",
+                    ));
+                }
+                let x = self
+                    .metadata_manager
+                    .catalog_controller
+                    .update_source_props_by_source_id(
+                        request.object_id as SourceId,
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?;
+            }
+            AlterConnectorPropsObject::Connection => {}
+            AlterConnectorPropsObject::Unspecified => unreachable!(),
         }
 
         let new_config = self
@@ -511,13 +537,6 @@ impl StreamManagerService for StreamServiceImpl {
                 request.changed_props.clone().into_iter().collect(),
             )
             .await?;
-
-        let database_id = self
-            .metadata_manager
-            .catalog_controller
-            .get_object_database_id(request.object_id as ObjectId)
-            .await?;
-        let database_id = DatabaseId::new(database_id as _);
 
         let mut mutation = HashMap::default();
         mutation.insert(request.object_id, new_config.clone());
