@@ -23,7 +23,6 @@ use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
 use crate::hummock::error::Error as HummockError;
 use crate::model::MetadataModelError;
-use crate::storage::MetaStoreError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
@@ -36,13 +35,6 @@ pub type MetaResult<T> = std::result::Result<T, MetaError>;
 )]
 #[thiserror_ext(newtype(name = MetaError, backtrace), macro(path = "crate::error"))]
 pub enum MetaErrorInner {
-    #[error("MetaStore transaction error: {0}")]
-    TransactionError(
-        #[source]
-        #[backtrace]
-        MetaStoreError,
-    ),
-
     #[error("MetadataModel error: {0}")]
     MetadataModelError(
         #[from]
@@ -197,16 +189,6 @@ impl From<MetaError> for tonic::Status {
 impl From<PbFieldNotFound> for MetaError {
     fn from(e: PbFieldNotFound) -> Self {
         MetadataModelError::from(e).into()
-    }
-}
-
-impl From<MetaStoreError> for MetaError {
-    fn from(e: MetaStoreError) -> Self {
-        match e {
-            // `MetaStore::txn` method error.
-            MetaStoreError::TransactionAbort() => MetaErrorInner::TransactionError(e).into(),
-            _ => MetadataModelError::from(e).into(),
-        }
     }
 }
 
