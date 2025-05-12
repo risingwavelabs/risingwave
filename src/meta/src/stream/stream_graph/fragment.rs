@@ -37,9 +37,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    BackfillOrderFixed, BackfillOrderStrategy, DispatchStrategy, DispatcherType, FragmentTypeFlag,
-    PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
-    StreamScanType, backfill_order_strategy,
+    BackfillOrder, DispatchStrategy, DispatcherType, FragmentTypeFlag, PbStreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -377,7 +376,7 @@ pub struct StreamFragmentGraph {
     max_parallelism: usize,
 
     /// The backfill ordering strategy of the graph.
-    backfill_order_strategy: BackfillOrderStrategy,
+    backfill_order: BackfillOrder,
 }
 
 impl StreamFragmentGraph {
@@ -450,9 +449,9 @@ impl StreamFragmentGraph {
         };
 
         let max_parallelism = proto.max_parallelism as usize;
-        let backfill_order_strategy = proto
-            .backfill_order_strategy
-            .unwrap_or(BackfillOrderStrategy { strategy: None });
+        let backfill_order = proto.backfill_order.unwrap_or(BackfillOrder {
+            order: Default::default(),
+        });
 
         Ok(Self {
             fragments,
@@ -461,7 +460,7 @@ impl StreamFragmentGraph {
             dependent_table_ids,
             specified_parallelism,
             max_parallelism,
-            backfill_order_strategy,
+            backfill_order,
         })
     }
 
@@ -726,28 +725,21 @@ impl StreamFragmentGraph {
     /// We should remap it to fragment level, since we track progress by actor, and we can get
     /// a fragment <-> actor mapping
     pub fn create_fragment_backfill_ordering(&self) -> Option<FragmentBackfillOrder> {
-        match self.backfill_order_strategy.strategy.as_ref() {
-            None | Some(backfill_order_strategy::Strategy::Auto(_)) => None,
-            Some(backfill_order_strategy::Strategy::Fixed(BackfillOrderFixed { order })) => {
-                let mapping = self.collect_backfill_mapping();
-                let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
-                for (rel_id, downstream_rel_ids) in order {
-                    let fragment_ids = mapping.get(rel_id).unwrap();
-                    for fragment_id in fragment_ids {
-                        let downstream_fragment_ids = downstream_rel_ids
-                            .data
-                            .iter()
-                            .flat_map(|downstream_rel_id| {
-                                mapping.get(downstream_rel_id).unwrap().iter()
-                            })
-                            .copied()
-                            .collect();
-                        fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
-                    }
-                }
-                Some(fragment_ordering)
+        let mapping = self.collect_backfill_mapping();
+        let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (rel_id, downstream_rel_ids) in &self.backfill_order.order {
+            let fragment_ids = mapping.get(rel_id).unwrap();
+            for fragment_id in fragment_ids {
+                let downstream_fragment_ids = downstream_rel_ids
+                    .data
+                    .iter()
+                    .flat_map(|downstream_rel_id| mapping.get(downstream_rel_id).unwrap().iter())
+                    .copied()
+                    .collect();
+                fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
             }
         }
+        Some(fragment_ordering)
     }
 }
 

@@ -31,7 +31,7 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::optimizer::backfill_order_strategy::plan_backfill_order_strategy;
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
@@ -316,7 +316,7 @@ It only indicates the physical clustering of the data, which may improve the per
         let (plan, table) =
             gen_create_mv_plan_bound(&session, context.clone(), query, name, columns, emit_mode)?;
 
-        let backfill_order_strategy = plan_backfill_order_strategy(
+        let backfill_order = plan_backfill_order(
             context.session_ctx().as_ref(),
             context.with_options().backfill_order_strategy(),
             plan.clone(),
@@ -338,7 +338,7 @@ It only indicates the physical clustering of the data, which may improve the per
         let graph = build_graph_with_strategy(
             plan,
             Some(GraphJobType::MaterializedView),
-            Some(backfill_order_strategy),
+            Some(backfill_order),
         )?;
 
         (table, graph, dependencies, resource_group)
