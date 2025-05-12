@@ -33,14 +33,18 @@ pub fn chunk_to_json(chunk: StreamChunk, encoder: &JsonEncoder) -> Result<Vec<St
 pub(crate) mod dummy {
 
     use std::collections::BTreeMap;
+    use std::fmt::{Debug, Formatter};
     use std::marker::PhantomData;
 
     use anyhow::anyhow;
+    use phf::{Set, phf_set};
     use risingwave_pb::connector_service::SinkMetadata;
     use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
 
     use crate::connector_common::IcebergCompactionStat;
+    use crate::enforce_secret::EnforceSecret;
+    use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
     use crate::sink::{
         LogSinker, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkLogReader,
@@ -54,9 +58,7 @@ pub(crate) mod dummy {
     }
 
     /// Implement this trait will bring a dummy `impl Sink` for the type which always returns an error.
-    pub trait FeatureNotEnabledSinkMarker:
-        Send + 'static + TryFrom<SinkParam, Error = SinkError>
-    {
+    pub trait FeatureNotEnabledSinkMarker: Send + 'static {
         const SINK_NAME: &'static str;
     }
 
@@ -80,7 +82,37 @@ pub(crate) mod dummy {
         }
     }
 
-    impl<S: FeatureNotEnabledSinkMarker> Sink for S {
+    pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
+
+    impl<S: FeatureNotEnabledSinkMarker> Debug for FeatureNotEnabledSink<S> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("FeatureNotEnabledSink")
+                .field("sink_name", &S::SINK_NAME)
+                .finish()
+        }
+    }
+
+    impl<S: FeatureNotEnabledSinkMarker> TryFrom<SinkParam> for FeatureNotEnabledSink<S> {
+        type Error = SinkError;
+
+        fn try_from(_value: SinkParam) -> std::result::Result<Self, Self::Error> {
+            Err(err_feature_not_enabled(S::SINK_NAME))
+        }
+    }
+
+    impl<S: FeatureNotEnabledSinkMarker> EnforceSecret for FeatureNotEnabledSink<S> {
+        const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {};
+
+        fn enforce_secret<'a>(_prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+            Err(err_feature_not_enabled(S::SINK_NAME).into())
+        }
+
+        fn enforce_one(_prop: &str) -> ConnectorResult<()> {
+            Err(err_feature_not_enabled(S::SINK_NAME).into())
+        }
+    }
+
+    impl<S: FeatureNotEnabledSinkMarker> Sink for FeatureNotEnabledSink<S> {
         type Coordinator = FeatureNotEnabledCoordinator<S>;
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
