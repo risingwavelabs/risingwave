@@ -38,7 +38,7 @@ fn compare_distance_on_heap<const MAX_HEAP: bool>(
 
 pub(super) struct HeapNode<I, const MAX_HEAP: bool> {
     distance: VectorDistance,
-    pub(super) item: I,
+    item: I,
 }
 
 impl<I, const MAX_HEAP: bool> PartialEq for HeapNode<I, MAX_HEAP> {
@@ -64,16 +64,13 @@ impl<I, const MAX_HEAP: bool> Ord for HeapNode<I, MAX_HEAP> {
 pub struct DistanceHeap<I, const MAX_HEAP: bool>(BinaryHeap<HeapNode<I, MAX_HEAP>>);
 
 pub type MaxDistanceHeap<I> = DistanceHeap<I, true>;
-#[expect(dead_code)]
 pub type MinDistanceHeap<I> = DistanceHeap<I, false>;
 
 impl<I, const MAX_HEAP: bool> DistanceHeap<I, MAX_HEAP> {
-    #[expect(dead_code)]
     pub fn with_capacity(capacity: usize) -> Self {
         Self(BinaryHeap::with_capacity(capacity))
     }
 
-    #[expect(dead_code)]
     pub fn push(&mut self, distance: VectorDistance, item: I) {
         self.0.push(HeapNode { distance, item });
     }
