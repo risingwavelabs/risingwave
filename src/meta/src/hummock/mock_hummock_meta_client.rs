@@ -267,7 +267,8 @@ impl HummockMetaClient for MockHummockMetaClient {
             .unwrap();
         let _compactor_rx = self
             .hummock_manager
-            .compactor_manager_ref_for_test()
+            .compactor_manager
+            .clone()
             .add_compactor(context_id as _);
 
         let (request_sender, mut request_receiver) =
