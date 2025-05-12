@@ -129,7 +129,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let input_string = self.gen_random_string();
         let is_match = self.flip_coin();
         let pattern = if is_match {
-            self.gen_matched_regexp_pattern(&input_string, 3)
+            let depth = self.rng.random_range(1..=3);
+            self.gen_matched_regexp_pattern(&input_string, depth)
         } else {
             self.gen_noise_regexp_pattern(&input_string)
         };
@@ -165,10 +166,17 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let chars: Vec<char> = input.chars().collect();
         let len = chars.len();
         let (start, end) = self.rand_segment(len);
+        assert!(start < end);
         let (prefix, mid, suffix) = (&input[..start], &input[start..end], &input[end..]);
 
         let mid_transformed = match self.rng.random_range(0..=4) {
-            0 => self.gen_char_class(mid.chars().next().unwrap_or('a')),
+            0 => {
+                if let Some(c) = mid.chars().next() {
+                    self.gen_char_class(c)
+                } else {
+                    ".".to_owned()
+                }
+            }
             1 => self.wrap_group(regex::escape(mid)),
             2 => self.gen_alternation(mid),
             3 => self.add_quantifier(regex::escape(mid)),
@@ -267,8 +275,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_alternation(&mut self, base: &str) -> String {
-        let alt = self.gen_random_string();
-        format!("({}|{})", regex::escape(base), regex::escape(&alt))
+        let alt = regex::escape(&self.gen_random_string());
+        let base = regex::escape(base);
+
+        if self.flip_coin() {
+            format!("({}|{})", base, alt)
+        } else {
+            format!("({}|{})", alt, base)
+        }
     }
 
     fn rand_segment(&mut self, len: usize) -> (usize, usize) {
