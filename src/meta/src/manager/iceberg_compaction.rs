@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use iceberg::table::Table;
 use parking_lot::RwLock;
@@ -43,8 +44,12 @@ type CompactorChangeTx = UnboundedSender<(u32, Streaming<SubscribeIcebergCompact
 type CompactorChangeRx =
     UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
+struct CommitInfo {
+    count: usize,
+    first_commit_time: Instant,
+}
 pub struct IcebergCompactionManager {
-    iceberg_commits: RwLock<HashMap<SinkId, usize>>,
+    iceberg_commits: RwLock<HashMap<SinkId, CommitInfo>>,
     metadata_manager: MetadataManager,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
 
@@ -97,20 +102,47 @@ impl IcebergCompactionManager {
 
     pub fn record_iceberg_commit(&self, sink_id: SinkId) {
         let mut iceberg_commits = self.iceberg_commits.write();
-        let count = iceberg_commits.entry(sink_id).or_insert(0);
-        *count += 1;
+        let commit_info = iceberg_commits.entry(sink_id).or_insert(CommitInfo {
+            count: 0,
+            first_commit_time: Instant::now(),
+        });
+        commit_info.count += 1;
     }
 
-    #[allow(dead_code)]
-    pub fn get_max_iceberg_commit_sink_id(&self) -> Option<SinkId> {
+    // function to get top n iceberg commits sink ids
+    pub fn get_top_n_iceberg_commit_sink_ids(&self, n: usize) -> Vec<SinkId> {
         let iceberg_commits = self.iceberg_commits.read();
-        iceberg_commits
+        let mut sink_ids: Vec<_> = iceberg_commits.iter().collect();
+        sink_ids.sort_by(|a, b| {
+            let a_commit_count = a.1.count;
+            let b_commit_count = b.1.count;
+
+            // Sort by commit count first
+            if a_commit_count != b_commit_count {
+                return b_commit_count.cmp(&a_commit_count);
+            }
+
+            // If commit counts are equal, sort by first commit time
+            b.1.first_commit_time
+                .duration_since(a.1.first_commit_time)
+                .cmp(&std::time::Duration::from_secs(0))
+        });
+
+        // TODO: make this configurable for each sink
+        // For now, we use a fixed interval of 1 hour
+        const MIN_SINK_COMMIT_INTERVAL: u64 = 3600; // 1 hour
+
+        sink_ids
             .iter()
-            .max_by_key(|&(_, count)| count)
-            .map(|(sink_id, _)| *sink_id)
+            .filter(|(_, commit_info)| {
+                Instant::now().duration_since(commit_info.first_commit_time)
+                    > std::time::Duration::from_secs(MIN_SINK_COMMIT_INTERVAL)
+            })
+            .take(n)
+            .map(|(sink_id, _)| **sink_id)
+            .collect()
     }
 
-    #[allow(dead_code)]
     pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
         let mut iceberg_commits = self.iceberg_commits.write();
         iceberg_commits.remove(&sink_id);
@@ -155,9 +187,8 @@ impl IcebergCompactionManager {
     ) -> Vec<(JoinHandle<()>, Sender<()>)> {
         let mut join_handle_vec = Vec::default();
 
-        let iceberg_compaction_event_handler = IcebergCompactionEventHandler::new(
-            iceberg_compaction_manager.iceberg_compactor_manager.clone(),
-        );
+        let iceberg_compaction_event_handler =
+            IcebergCompactionEventHandler::new(iceberg_compaction_manager.clone());
 
         let iceberg_compaction_event_dispatcher =
             IcebergCompactionEventDispatcher::new(iceberg_compaction_event_handler);

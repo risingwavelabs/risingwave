@@ -43,12 +43,14 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
-use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
     Event as IcebergRequestEvent, PullTask as IcebergPullTask,
 };
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
+};
+use risingwave_pb::iceberg_compaction::{
+    IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -59,10 +61,11 @@ use tonic::Streaming;
 use tracing::warn;
 
 use super::init_selectors;
+use crate::hummock::HummockManager;
 use crate::hummock::compaction::CompactionSelector;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::{HummockManager, IcebergCompactorManager};
 use crate::manager::MetaOpts;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::rpc::metrics::MetaMetrics;
 
 const MAX_SKIP_TIMES: usize = 8;
@@ -614,20 +617,53 @@ impl HummockCompactorDedicatedEventLoop {
 }
 
 pub struct IcebergCompactionEventHandler {
-    compactor_manager: Arc<IcebergCompactorManager>,
+    compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl IcebergCompactionEventHandler {
-    pub fn new(compactor_manager: Arc<IcebergCompactorManager>) -> Self {
-        Self { compactor_manager }
+    pub fn new(compaction_manager: IcebergCompactionManagerRef) -> Self {
+        Self { compaction_manager }
     }
 
-    fn handle_pull_task_event(&self, context_id: u32, pull_task_count: usize) -> bool {
+    async fn handle_pull_task_event(&self, context_id: u32, pull_task_count: usize) -> bool {
         assert_ne!(0, pull_task_count);
-        if let Some(compactor) = self.compactor_manager.get_compactor(context_id) {
+        if let Some(compactor) = self
+            .compaction_manager
+            .iceberg_compactor_manager
+            .get_compactor(context_id)
+        {
             let mut compactor_alive = true;
 
             // TODO: Pull Iceberg Task from iceberg compaction manager
+            let top_n_frequency = self
+                .compaction_manager
+                .get_top_n_iceberg_commit_sink_ids(pull_task_count);
+
+            for sink_id in top_n_frequency {
+                let sink_params = self
+                    .compaction_manager
+                    .get_sink_param(&sink_id)
+                    .await
+                    .expect("sink params not found");
+
+                // send iceberg commit task to compactor
+                if let Err(e) =
+                    compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+                        props: sink_params.properties,
+                    }))
+                {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Failed to send iceberg commit task to {}",
+                        context_id,
+                    );
+                    compactor_alive = false;
+                } else {
+                    // clear sink commit info to reset iceberg commit_info
+                    self.compaction_manager
+                        .clear_iceberg_commits_by_sink_id(sink_id);
+                }
+            }
 
             if let Err(e) =
                 compactor.send_event(IcebergResponseEvent::PullTaskAck(IcebergPullTaskAck {}))
@@ -660,7 +696,8 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
             IcebergRequestEvent::PullTask(IcebergPullTask { pull_task_count }) => {
                 return self
                     .compaction_event_handler
-                    .handle_pull_task_event(context_id, pull_task_count as usize);
+                    .handle_pull_task_event(context_id, pull_task_count as usize)
+                    .await;
             }
             _ => unreachable!(),
         }
@@ -676,7 +713,8 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
 
     fn remove_compactor(&self, context_id: u32) {
         self.compaction_event_handler
-            .compactor_manager
+            .compaction_manager
+            .iceberg_compactor_manager
             .remove_compactor(context_id);
     }
 }
