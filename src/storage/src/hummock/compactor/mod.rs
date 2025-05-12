@@ -584,7 +584,7 @@ pub fn start_compactor(
                                     let icebert_runner = IcebergCompactorRunner::new(
                                         iceberg_compaction_task,
                                     ).await?;
-                                    let parallelism = icebert_runner.calculate_task_parallelism( max_task_parallelism).await?;
+                                    let parallelism = icebert_runner.calculate_task_parallelism().await?.min(max_task_parallelism);
                                     Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, icebert_runner))
                                 }.await{
                                     Ok((parallelism, iceberg_runner)) => {

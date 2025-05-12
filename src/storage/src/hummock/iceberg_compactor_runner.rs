@@ -54,7 +54,7 @@ impl IcebergCompactorRunner {
         })
     }
 
-    pub async fn calculate_task_parallelism(&self, max_parallelism: u32) -> HummockResult<u32> {
+    pub async fn calculate_task_parallelism(&self) -> HummockResult<u32> {
         let table = self
             .catalog
             .load_table(&self.table_ident)
@@ -83,9 +83,7 @@ impl IcebergCompactorRunner {
             }
         }
 
-        let parallelism = ((all_data_file_size / MAX_SIZE_PER_PARTITION) + 1).min(max_parallelism);
-
-        Ok(parallelism)
+        Ok((all_data_file_size / MAX_SIZE_PER_PARTITION) + 1)
     }
 
     pub async fn compact_iceberg(self, shutdown_rx: Receiver<()>, parallelism: usize) {
