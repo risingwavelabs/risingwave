@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::BackfillOrderStrategy as PbBackfillOrderStrategy;
+use risingwave_pb::stream_plan::BackfillOrder;
 use risingwave_sqlparser::ast::BackfillOrderStrategy;
 
 use crate::PlanRef;
@@ -26,8 +26,6 @@ mod auto {
 
     use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
-    use risingwave_pb::stream_plan::BackfillOrderFixed;
-    use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
 
     use crate::PlanRef;
     use crate::optimizer::PlanNodeType;
@@ -212,17 +210,20 @@ mod auto {
             .collect()
     }
 
-    pub(super) fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> Option<PbStrategy> {
+    pub(super) fn plan_auto_strategy(
+        session: &SessionImpl,
+        plan: PlanRef,
+    ) -> HashMap<ObjectId, Uint32Vector> {
         if let Some(tree) = plan_graph_to_backfill_tree(session, plan) {
             let order = fold_backfill_tree_to_partial_order(tree);
             if has_cycle(&order) {
                 tracing::warn!(?order, "Backfill order strategy has a cycle");
                 session.notice_to_user("Backfill order strategy has a cycle");
-                return None;
+                return Default::default();
             }
-            return Some(PbStrategy::Fixed(BackfillOrderFixed { order }));
+            return order;
         }
-        None
+        Default::default()
     }
 }
 
@@ -232,8 +233,6 @@ mod fixed {
     use risingwave_common::bail;
     use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
-    use risingwave_pb::stream_plan::BackfillOrderFixed;
-    use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
     use risingwave_sqlparser::ast::ObjectName;
 
     use crate::error::Result;
@@ -245,7 +244,7 @@ mod fixed {
     pub(super) fn plan_fixed_strategy(
         session: &SessionImpl,
         orders: Vec<(ObjectName, ObjectName)>,
-    ) -> Result<Option<PbStrategy>> {
+    ) -> Result<HashMap<ObjectId, Uint32Vector>> {
         let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
         for (start_name, end_name) in orders {
             let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
@@ -259,7 +258,7 @@ mod fixed {
         if has_cycle(&order) {
             bail!("Backfill order strategy has a cycle");
         }
-        Ok(Some(PbStrategy::Fixed(BackfillOrderFixed { order })))
+        Ok(order)
     }
 }
 
@@ -372,17 +371,15 @@ mod common {
 /// For fixed backfill strategy,
 /// for scans on the same relation id, even though they may be in different fragments,
 /// they will all share the same backfill order.
-pub fn plan_backfill_order_strategy(
+pub fn plan_backfill_order(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
     plan: PlanRef,
-) -> Result<PbBackfillOrderStrategy> {
-    let pb_strategy = match backfill_order_strategy {
-        BackfillOrderStrategy::Default | BackfillOrderStrategy::None => None,
+) -> Result<BackfillOrder> {
+    let order = match backfill_order_strategy {
+        BackfillOrderStrategy::Default | BackfillOrderStrategy::None => Default::default(),
         BackfillOrderStrategy::Auto => plan_auto_strategy(session, plan),
         BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders)?,
     };
-    Ok(PbBackfillOrderStrategy {
-        strategy: pb_strategy,
-    })
+    Ok(BackfillOrder { order })
 }

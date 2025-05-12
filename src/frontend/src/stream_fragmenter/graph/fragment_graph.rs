@@ -19,8 +19,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    BackfillOrderStrategy, DispatchStrategy, FragmentTypeFlag,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 use thiserror_ext::AsReport;
 
@@ -110,7 +109,7 @@ impl StreamFragmentGraph {
             table_ids_cnt: 0,
             parallelism: None,
             max_parallelism: 0,
-            backfill_order_strategy: Some(BackfillOrderStrategy { strategy: None }),
+            backfill_order: Default::default(),
         }
     }
 
