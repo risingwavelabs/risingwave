@@ -1275,7 +1275,19 @@ pub async fn rename_relation(
     }
     // TODO: check is there any thing to change for shared source?
     let old_name = match object_type {
-        ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
+        ObjectType::Table => {
+            let associated_source_id: Option<SourceId> = Source::find()
+                .select_only()
+                .column(source::Column::SourceId)
+                .filter(source::Column::OptionalAssociatedTableId.eq(object_id))
+                .into_tuple()
+                .one(txn)
+                .await?;
+            if let Some(source_id) = associated_source_id {
+                rename_relation!(Source, source, source_id, source_id);
+            }
+            rename_relation!(Table, table, table_id, object_id)
+        }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
         ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
         ObjectType::Subscription => {
