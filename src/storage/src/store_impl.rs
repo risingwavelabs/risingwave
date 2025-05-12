@@ -362,7 +362,7 @@ pub mod verify {
             &self,
             vec: Vector,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItem<O>,
+            on_nearest_item_fn: impl OnNearestItemFn<O>,
         ) -> impl StorageFuture<'_, Vec<O>> {
             self.actual.nearest(vec, options, on_nearest_item_fn)
         }
@@ -911,6 +911,7 @@ mod dyn_state_store {
     use crate::hummock::HummockStorage;
     use crate::store::*;
     use crate::store_impl::AsHummock;
+    use crate::vector::VectorDistance;
 
     #[async_trait::async_trait]
     pub trait DynStateStoreIter<T: IterItem>: Send {
@@ -1250,7 +1251,11 @@ mod dyn_state_store {
             options: VectorNearestOptions,
         ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>> {
             self.nearest(vec, options, |vec, distance, info| {
-                (vec.clone(), distance, Bytes::copy_from_slice(info))
+                (
+                    Vector::clone_from_ref(vec),
+                    distance,
+                    Bytes::copy_from_slice(info),
+                )
             })
             .await
         }
@@ -1264,12 +1269,14 @@ mod dyn_state_store {
             &self,
             vec: Vector,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItem<O>,
+            on_nearest_item_fn: impl OnNearestItemFn<O>,
         ) -> StorageResult<Vec<O>> {
             let output = self.as_ref().nearest(vec, options).await?;
             Ok(output
                 .into_iter()
-                .map(|(vec, distance, info)| on_nearest_item_fn(&vec, distance, info.as_ref()))
+                .map(|(vec, distance, info)| {
+                    on_nearest_item_fn(vec.to_ref(), distance, info.as_ref())
+                })
                 .collect())
         }
     }

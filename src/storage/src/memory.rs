@@ -724,7 +724,7 @@ impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
         &self,
         _vec: Vector,
         _options: VectorNearestOptions,
-        _on_nearest_item_fn: impl OnNearestItem<O>,
+        _on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> StorageResult<Vec<O>> {
         unimplemented!()
     }

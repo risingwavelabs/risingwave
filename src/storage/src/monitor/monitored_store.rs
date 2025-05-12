@@ -211,7 +211,7 @@ impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<
         &self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItem<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> impl StorageFuture<'_, Vec<O>> {
         // TODO: monitor
         self.inner.nearest(vec, options, on_nearest_item_fn)
