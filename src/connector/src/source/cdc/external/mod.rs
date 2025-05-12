@@ -368,6 +368,11 @@ impl ExternalTableImpl {
         }
     }
 
+    // pub async fn schema_check(config: ExternalTableConfig) -> ConnectorResult<Self> {
+    //     let a = selfcolumn_descs();
+    // }
+
+
     pub fn column_descs(&self) -> &Vec<ColumnDesc> {
         match self {
             ExternalTableImpl::MySql(mysql) => mysql.column_descs(),

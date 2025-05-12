@@ -192,6 +192,7 @@ fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<Data
         "bigint" => DataType::Int64,
         "real" => DataType::Float32,
         "float" => DataType::Float64,
+        "money" => DataType::Decimal,
         "decimal" | "numeric" => DataType::Decimal,
         "date" => DataType::Date,
         "time" => DataType::Time,

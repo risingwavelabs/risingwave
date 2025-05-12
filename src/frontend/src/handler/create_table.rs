@@ -1139,9 +1139,18 @@ pub(super) async fn handle_create_table_plan(
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
-
+                    let table = ExternalTableImpl::connect(config)
+                    .await
+                    .context("failed to auto derive table schema")?;
+                    let column_descs =  table.column_descs();
+                    for each in column_descs{
+                        println!("上游过来的{:?} name = {:?}", each.data_type, each.name)
+                    }
+                    for each in columns.clone(){
+                        println!("定义的{:?} name = {:?}", each.column_desc.data_type,  each.column_desc.name)
+                    }
                     // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
                 }
