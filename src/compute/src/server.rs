@@ -55,7 +55,8 @@ use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_storage::StateStoreImpl;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::hummock::compactor::{
-    new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext, CompactorType
+    CompactionExecutor, CompactorContext, CompactorType, new_compaction_await_tree_reg_ref,
+    start_compactor,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
@@ -265,7 +266,7 @@ pub async fn compute_node_serve(
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
                 storage.compaction_catalog_manager_ref().clone(),
-                CompactorType::Hummock,
+                CompactorType::Iceberg,
             );
             sub_tasks.push((handle, shutdown_sender));
         }

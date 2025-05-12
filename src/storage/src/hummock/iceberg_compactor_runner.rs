@@ -15,55 +15,107 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use futures::TryFutureExt;
 use ic_core::CompactionConfig;
 use ic_core::compaction::{Compaction, CompactionType};
+use iceberg::{Catalog, TableIdent};
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
+use super::HummockResult;
 use crate::hummock::HummockError;
 
-pub async fn compact_iceberg(
-    iceberg_compaction_task: IcebergCompactionTask,
-    shutdown_rx: Receiver<()>,
-) {
-    let IcebergCompactionTask { task_id, props } = iceberg_compaction_task;
-    let compact = async move {
+const MAX_SIZE_PER_PARTITION: u32 = 1024 * 1024 * 1024; // 1GB
+
+pub struct IcebergCompactorRunner {
+    pub task_id: u64,
+    pub catalog: Arc<dyn Catalog>,
+    pub table_ident: TableIdent,
+}
+
+impl IcebergCompactorRunner {
+    pub async fn new(iceberg_compaction_task: IcebergCompactionTask) -> HummockResult<Self> {
+        let IcebergCompactionTask { task_id, props } = iceberg_compaction_task;
         let config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         let catalog = config
             .create_catalog()
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-        let compaction_config = Arc::new(CompactionConfig {
-            batch_parallelism: Some(1),
-            target_partitions: Some(1),
-            data_file_prefix: None,
-        });
-        let compaction = Compaction::new(compaction_config, catalog);
         let table_ident = config
             .full_table_name()
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-        compaction
-            .compact(CompactionType::Full(table_ident))
+        Ok(Self {
+            task_id,
+            catalog,
+            table_ident,
+        })
+    }
+
+    pub async fn calculate_task_parallelism(&self, max_parallelism: u32) -> HummockResult<u32> {
+        let table = self
+            .catalog
+            .load_table(&self.table_ident)
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-        Ok::<(), HummockError>(())
-    };
-    tokio::select! {
-        _ = shutdown_rx => {
-            tracing::info!("Iceberg compaction task {} cancelled", task_id);
-        }
-        result = compact => {
-            if let Err(e) = result {
-                tracing::warn!(
-                    error = %e.as_report(),
-                    "Compaction task {} failed with error",
-                    task_id,
-                );
+        let manifest_list = table
+            .metadata()
+            .current_snapshot()
+            .unwrap()
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .unwrap();
+
+        let mut all_data_file_size: u32 = 0;
+        for manifest_file in manifest_list.entries() {
+            let a = manifest_file.load_manifest(table.file_io()).await.unwrap();
+            let (entry, _) = a.into_parts();
+            for i in entry {
+                match i.content_type() {
+                    iceberg::spec::DataContentType::Data => {
+                        all_data_file_size += i.data_file().file_size_in_bytes() as u32;
+                    }
+                    iceberg::spec::DataContentType::EqualityDeletes => {}
+                    iceberg::spec::DataContentType::PositionDeletes => {}
+                }
             }
         }
+
+        let parallelism = ((all_data_file_size / MAX_SIZE_PER_PARTITION) + 1).min(max_parallelism);
+
+        Ok(parallelism)
     }
-    tracing::info!("Iceberg compaction task {} finished", task_id);
+
+    pub async fn compact_iceberg(self, shutdown_rx: Receiver<()>, parallelism: usize) {
+        let compact = async move {
+            let compaction_config = Arc::new(CompactionConfig {
+                batch_parallelism: Some(parallelism),
+                target_partitions: Some(parallelism),
+                data_file_prefix: None,
+            });
+            let compaction = Compaction::new(compaction_config, self.catalog);
+            compaction
+                .compact(CompactionType::Full(self.table_ident))
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            Ok::<(), HummockError>(())
+        };
+        tokio::select! {
+            _ = shutdown_rx => {
+                tracing::info!("Iceberg compaction task {} cancelled", self.task_id);
+            }
+            result = compact => {
+                if let Err(e) = result {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Compaction task {} failed with error",
+                        self.task_id,
+                    );
+                }
+            }
+        }
+        tracing::info!("Iceberg compaction task {} finished", self.task_id);
+    }
 }

@@ -22,7 +22,10 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::iceberg_compaction::{subscribe_iceberg_compaction_event_request, SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse};
+use risingwave_pb::iceberg_compaction::{
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+    subscribe_iceberg_compaction_event_request,
+};
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -51,7 +54,7 @@ pub use compaction_filter::{
 pub use context::{
     CompactionAwaitTreeRegRef, CompactorContext, await_tree_key, new_compaction_await_tree_reg_ref,
 };
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
@@ -80,14 +83,15 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder
+    GetObjectId, HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManager,
+    Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
-use crate::hummock::iceberg_compactor_runner::compact_iceberg;
+use crate::hummock::iceberg_compactor_runner::IcebergCompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
@@ -335,7 +339,7 @@ impl CompactionRequestSender {
                         .as_millis() as u64,
                 })
                 .map_err(|e| HummockError::other(e.as_report())),
-            CompactionRequestSender::Iceberg(_unbounded_sender) => unreachable!(),
+            CompactionRequestSender::Iceberg(_unbounded_sender) => Ok(()),
         }
     }
 
@@ -456,45 +460,45 @@ pub fn start_compactor(
             let (request_sender, response_event_stream) = match compactor_type {
                 CompactorType::Hummock => {
                     match hummock_meta_client.subscribe_compaction_event().await {
-                            Ok((request_sender, response_event_stream)) => {
-                                tracing::debug!("Succeeded subscribe_compaction_event.");
-                                (
-                                    CompactionRequestSender::Hummock(request_sender),
-                                    CompactionEventStreams::Hummock(response_event_stream),
-                                )
-                            }
-        
-                            Err(e) => {
-                                tracing::warn!(
-                                    error = %e.as_report(),
-                                    "Subscribing to compaction tasks failed with error. Will retry.",
-                                );
-                                continue 'start_stream;
-                            }
+                        Ok((request_sender, response_event_stream)) => {
+                            tracing::debug!("Succeeded subscribe_compaction_event.");
+                            (
+                                CompactionRequestSender::Hummock(request_sender),
+                                CompactionEventStreams::Hummock(response_event_stream),
+                            )
                         }
-                },
-                CompactorType::Iceberg => {
-                    match hummock_meta_client
-                    .subscribe_iceberg_compaction_event()
-                    .await
-                {
-                    Ok((request_sender, response_event_stream)) => {
-                        tracing::debug!("Succeeded subscribe_iceberg_compaction_event.");
-                        (
-                            CompactionRequestSender::Iceberg(request_sender),
-                            CompactionEventStreams::Iceberg(response_event_stream),
-                        )
-                    }
 
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e.as_report(),
-                            "Subscribing to iceberg compaction tasks failed with error. Will retry.",
-                        );
-                        continue 'start_stream;
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e.as_report(),
+                                "Subscribing to compaction tasks failed with error. Will retry.",
+                            );
+                            continue 'start_stream;
+                        }
                     }
                 }
-                },
+                CompactorType::Iceberg => {
+                    match hummock_meta_client
+                        .subscribe_iceberg_compaction_event()
+                        .await
+                    {
+                        Ok((request_sender, response_event_stream)) => {
+                            tracing::debug!("Succeeded subscribe_iceberg_compaction_event.");
+                            (
+                                CompactionRequestSender::Iceberg(request_sender),
+                                CompactionEventStreams::Iceberg(response_event_stream),
+                            )
+                        }
+
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e.as_report(),
+                                "Subscribing to iceberg compaction tasks failed with error. Will retry.",
+                            );
+                            continue 'start_stream;
+                        }
+                    }
+                }
             };
             pin_mut!(response_event_stream);
 
@@ -562,7 +566,10 @@ pub fn start_compactor(
 
                 match event {
                     Some(Ok(CompactionEventResponses::Iceberg(
-                        SubscribeIcebergCompactionEventResponse { create_at: _create_at, event },
+                        SubscribeIcebergCompactionEventResponse {
+                            create_at: _create_at,
+                            event,
+                        },
                     ))) => {
                         let event = match event {
                             Some(event) => event,
@@ -573,7 +580,22 @@ pub fn start_compactor(
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
-                                let parallelism = 1;
+                                let(parallelism,icebert_runner) = match async move {
+                                    let icebert_runner = IcebergCompactorRunner::new(
+                                        iceberg_compaction_task,
+                                    ).await?;
+                                    let parallelism = icebert_runner.calculate_task_parallelism( max_task_parallelism).await?;
+                                    Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, icebert_runner))
+                                }.await{
+                                    Ok((parallelism, iceberg_runner)) => {
+                                        (parallelism, iceberg_runner)
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(error = %e.as_report(), "Failed to calculate iceberg task parallelism {}", task_id);
+                                        continue 'consume_stream;
+                                    }
+                                };
+
                                 if (max_task_parallelism
                                     - running_task_parallelism.load(Ordering::SeqCst))
                                     < parallelism as u32
@@ -594,9 +616,9 @@ pub fn start_compactor(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    compact_iceberg(
-                                        iceberg_compaction_task,
+                                    icebert_runner.compact_iceberg(
                                         rx,
+                                        parallelism as usize,
                                     )
                                     .await;
 
@@ -610,7 +632,9 @@ pub fn start_compactor(
                             },
                         }
                     }
-                    Some(Ok(CompactionEventResponses::Hummock(SubscribeCompactionEventResponse { event, create_at }))) => {
+                    Some(Ok(CompactionEventResponses::Hummock(
+                        SubscribeCompactionEventResponse { event, create_at },
+                    ))) => {
                         let event = match event {
                             Some(event) => event,
                             None => continue 'consume_stream,
@@ -657,7 +681,11 @@ pub fn start_compactor(
                                             TaskStatus::NoAvailCpuResourceCanceled,
                                         );
 
-                                        request_sender.send_report_task_event(&compact_task, table_stats, object_timestamps);
+                                    request_sender.send_report_task_event(
+                                        &compact_task,
+                                        table_stats,
+                                        object_timestamps,
+                                    );
 
                                     continue 'consume_stream;
                                 }

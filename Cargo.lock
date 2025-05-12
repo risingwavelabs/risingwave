@@ -12155,6 +12155,7 @@ dependencies = [
  "futures-async-stream",
  "hex",
  "ic-core",
+ "iceberg",
  "itertools 0.14.0",
  "libc",
  "lz4",
