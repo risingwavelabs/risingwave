@@ -108,8 +108,9 @@ fi
 
 risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
-risedev slt -p 4566 -d dev './e2e_test/database/prepare.slt'
-risedev slt -p 4566 -d test './e2e_test/database/test.slt'
+
+echo "--- e2e, $mode, misc"
+risedev slt -p 4566 -d dev './e2e_test/misc/**/*.slt'
 
 echo "--- e2e, $mode, python_client"
 python3 ./e2e_test/python_client/main.py
