@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use futures::TryFutureExt;
 use ic_core::CompactionConfig;
 use ic_core::compaction::{Compaction, CompactionType};
 use iceberg::{Catalog, TableIdent};

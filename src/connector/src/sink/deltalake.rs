@@ -688,19 +688,19 @@ mod test {
         // will increase the compile time and output binary size in release build, even though it is a
         // dev dependency.
 
-        // let ctx = deltalake::datafusion::prelude::SessionContext::new();
-        // let table = deltalake::open_table(path).await.unwrap();
-        // ctx.register_table("demo", std::sync::Arc::new(table))
-        //     .unwrap();
+        let ctx = deltalake::datafusion::prelude::SessionContext::new();
+        let table = deltalake::open_table(path).await.unwrap();
+        ctx.register_table("demo", std::sync::Arc::new(table))
+            .unwrap();
 
-        // let batches = ctx
-        //     .sql("SELECT * FROM demo")
-        //     .await
-        //     .unwrap()
-        //     .collect()
-        //     .await
-        //     .unwrap();
-        // assert_eq!(3, batches.get(0).unwrap().column(0).len());
-        // assert_eq!(3, batches.get(0).unwrap().column(1).len());
+        let batches = ctx
+            .sql("SELECT * FROM demo")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        assert_eq!(3, batches.get(0).unwrap().column(0).len());
+        assert_eq!(3, batches.get(0).unwrap().column(1).len());
     }
 }
