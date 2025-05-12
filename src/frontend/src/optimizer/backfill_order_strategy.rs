@@ -31,8 +31,10 @@ mod auto {
 
     use crate::PlanRef;
     use crate::optimizer::PlanNodeType;
+    use crate::optimizer::backfill_order_strategy::common::has_cycle;
     use crate::session::SessionImpl;
 
+    #[derive(Debug)]
     enum BackfillTreeNode {
         Join {
             lhs: Box<BackfillTreeNode>,
@@ -212,10 +214,16 @@ mod auto {
     }
 
     pub(super) fn plan_auto_strategy(session: &SessionImpl, plan: PlanRef) -> Option<PbStrategy> {
-        plan_graph_to_backfill_tree(session, plan).map(|t| {
-            let order = fold_backfill_tree_to_partial_order(t);
-            PbStrategy::Fixed(BackfillOrderFixed { order })
-        })
+        if let Some(tree) = plan_graph_to_backfill_tree(session, plan) {
+            let order = fold_backfill_tree_to_partial_order(tree);
+            if has_cycle(&order) {
+                tracing::warn!(?order, "Backfill order strategy has a cycle");
+                session.notice_to_user("Backfill order strategy has a cycle");
+                return None;
+            }
+            return Some(PbStrategy::Fixed(BackfillOrderFixed { order }));
+        }
+        None
     }
 }
 
@@ -229,6 +237,7 @@ mod fixed {
     use risingwave_pb::stream_plan::backfill_order_strategy::Strategy as PbStrategy;
     use risingwave_sqlparser::ast::ObjectName;
 
+    use crate::error::Result;
     use crate::optimizer::backfill_order_strategy::common::{
         bind_backfill_relation_id_by_name, has_cycle,
     };
@@ -237,7 +246,7 @@ mod fixed {
     pub(super) fn plan_fixed_strategy(
         session: &SessionImpl,
         orders: Vec<(ObjectName, ObjectName)>,
-    ) -> crate::error::Result<Option<PbStrategy>> {
+    ) -> Result<Option<PbStrategy>> {
         let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
         for (start_name, end_name) in orders {
             let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
@@ -266,6 +275,7 @@ mod common {
     use crate::catalog::CatalogError;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::schema_catalog::SchemaCatalog;
+    use crate::error::Result;
     use crate::session::SessionImpl;
 
     /// Check if the backfill order has a cycle.
@@ -308,7 +318,7 @@ mod common {
     pub(super) fn bind_backfill_relation_id_by_name(
         session: &SessionImpl,
         name: ObjectName,
-    ) -> crate::error::Result<ObjectId> {
+    ) -> Result<ObjectId> {
         let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(name)?;
         let db_name = db_name.unwrap_or(session.database());
 
