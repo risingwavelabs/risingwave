@@ -171,6 +171,8 @@ pub enum CreateSourceType {
     NonShared,
     /// create table with connector
     Table,
+    /// The cdc source for an upstream table created after a `SharedCdc`` Source
+    CdcEtl,
 }
 
 impl CreateSourceType {

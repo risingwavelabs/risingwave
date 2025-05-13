@@ -1719,6 +1719,7 @@ pub async fn create_iceberg_engine_table(
         format_encode: CompatibleFormatEncode::V2(FormatEncodeOptions::none()),
         source_watermarks: vec![],
         include_column_options: vec![],
+        from_source: None,
     };
 
     let mut source_handler_args = handler_args.clone();

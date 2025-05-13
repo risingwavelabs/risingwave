@@ -1,0 +1,59 @@
+statement ok
+create secret postgres_pwd with (backend = 'meta') as '123456';
+
+statement ok
+create SOURCE s1 (v1 int,
+  v2 timestamptz,
+  v3 int as v1 + 1,
+  PRIMARY KEY (v1)
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'postgres',
+  port = '5432',
+  username = 'myuser',
+  password = secret postgres_pwd,
+  database.name = 'mydb',
+  schema.name = 'public',
+  table.name = 'test_table',
+  slot.name = 'slot1'
+);
+
+# Create a source that gets data from s1
+statement ok
+create SOURCE s_tt1 (
+  *
+) from s1;
+
+# Create a source that gets data from s1 but with a different table
+statement ok
+create SOURCE s_tt2 (
+  *
+) from s1 TABLE 'other_table';
+
+# Verify source creation with SHOW CREATE SOURCE
+query
+SHOW CREATE SOURCE s_tt1;
+----
+CREATE SOURCE s_tt1 (*) FROM s1
+
+query
+SHOW CREATE SOURCE s_tt2;
+----
+CREATE SOURCE s_tt2 (*) FROM s1 TABLE 'other_table'
+
+# Check that source was properly created with the right properties
+statement ok
+select * from rw_catalog.rw_sources where name = 's_tt1';
+
+statement ok
+select * from rw_catalog.rw_sources where name = 's_tt2';
+
+# Clean up
+statement ok
+DROP SOURCE s_tt1;
+
+statement ok
+DROP SOURCE s_tt2;
+
+statement ok
+DROP SOURCE s1; 

@@ -25,7 +25,7 @@ use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    ColumnDef, ObjectName, SqlOption, TableConstraint, display_comma_separated, display_separated,
+    ColumnDef, CdcTableInfo, ObjectName, SqlOption, TableConstraint, display_comma_separated, display_separated,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IsOptional, Parser};
@@ -93,6 +93,8 @@ pub struct CreateSourceStatement {
     pub format_encode: CompatibleFormatEncode,
     pub source_watermarks: Vec<SourceWatermark>,
     pub include_column_options: IncludeOption,
+    /// `FROM source_name [TABLE table_name]`
+    pub from_source: Option<CdcTableInfo>,
 }
 
 /// FORMAT means how to get the operation(Insert/Delete) from the input.
@@ -476,16 +478,26 @@ impl fmt::Display for CreateSourceStatement {
             v.push(format!("{}", item));
         }
 
-        // skip format_encode for cdc source
-        let is_cdc_source = self.with_properties.0.iter().any(|option| {
-            option.name.real_value().eq_ignore_ascii_case("connector")
-                && option.value.to_string().contains("cdc")
-        });
+        // Add FROM clause if creating source from another source
+        if let Some(from_source) = &self.from_source {
+            let mut from_clause = format!("FROM {}", from_source.source_name);
+            if !from_source.external_table_name.is_empty() {
+                from_clause.push_str(&format!(" TABLE '{}'", from_source.external_table_name));
+            }
+            v.push(from_clause);
+        } else {
+            // skip format_encode for cdc source
+            let is_cdc_source = self.with_properties.0.iter().any(|option| {
+                option.name.real_value().eq_ignore_ascii_case("connector")
+                    && option.value.to_string().contains("cdc")
+            });
 
-        impl_fmt_display!(with_properties, v, self);
-        if !is_cdc_source {
-            impl_fmt_display!(format_encode, v, self);
+            impl_fmt_display!(with_properties, v, self);
+            if !is_cdc_source {
+                impl_fmt_display!(format_encode, v, self);
+            }
         }
+        
         v.iter().join(" ").fmt(f)
     }
 }
