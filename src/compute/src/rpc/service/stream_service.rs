@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use futures::{Stream, StreamExt, TryStreamExt};
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
@@ -58,21 +57,22 @@ impl StreamService for StreamServiceImpl {
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
 
-    async fn get_min_uncommitted_sst_id(
+    async fn get_min_uncommitted_sst_object_id(
         &self,
-        _request: Request<GetMinUncommittedSstIdRequest>,
-    ) -> Result<Response<GetMinUncommittedSstIdResponse>, Status> {
-        let min_uncommitted_sst_id = if let Some(hummock) = self.mgr.env.state_store().as_hummock()
-        {
-            hummock
-                .min_uncommitted_sst_id()
-                .await
-                .unwrap_or(HummockSstableObjectId::MAX)
-        } else {
-            HummockSstableObjectId::MAX
-        };
-        Ok(Response::new(GetMinUncommittedSstIdResponse {
-            min_uncommitted_sst_id,
+        _request: Request<GetMinUncommittedSstObjectIdRequest>,
+    ) -> Result<Response<GetMinUncommittedSstObjectIdResponse>, Status> {
+        let min_uncommitted_sst_object_id =
+            if let Some(hummock) = self.mgr.env.state_store().as_hummock() {
+                hummock
+                    .min_uncommitted_sst_object_id()
+                    .await
+                    .map(|sst_id| sst_id.inner())
+                    .unwrap_or(u64::MAX)
+            } else {
+                u64::MAX
+            };
+        Ok(Response::new(GetMinUncommittedSstObjectIdResponse {
+            min_uncommitted_sst_object_id,
         }))
     }
 }

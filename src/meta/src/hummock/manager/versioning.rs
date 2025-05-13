@@ -104,7 +104,7 @@ impl Versioning {
                 .iter()
                 .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
                 .flat_map(|(_, objects)| objects.id.iter())
-                .cloned(),
+                .map(|id| HummockSstableObjectId::from(*id)),
         );
         tracked_object_ids
     }
@@ -346,7 +346,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     if estimated_total_key_size > sst.uncompressed_file_size {
         estimated_total_key_size = sst.uncompressed_file_size / 2;
         tracing::warn!(
-            sst.sst_id,
+            %sst.sst_id,
             "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.",
             estimated_total_key_size,
             sst.uncompressed_file_size

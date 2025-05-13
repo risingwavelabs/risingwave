@@ -24,7 +24,8 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops::{Add, Sub};
+use std::ops::{Add, AddAssign, Sub};
+use std::str::FromStr;
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
@@ -58,8 +59,99 @@ use risingwave_common::catalog::TableId;
 
 use crate::table_watermark::TableWatermarks;
 
-pub type HummockSstableObjectId = u64;
-pub type HummockSstableId = u64;
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
+pub struct TypedPrimitive<const C: usize, P>(P);
+
+impl<const C: usize, P: PartialEq> PartialEq<P> for TypedPrimitive<C, P> {
+    fn eq(&self, other: &P) -> bool {
+        self.0 == *other
+    }
+}
+
+macro_rules! impl_primitive {
+    ($($t:ty)*) => {$(
+        impl<const C: usize> PartialEq<TypedPrimitive<C, $t>> for $t {
+            fn eq(&self, other: &TypedPrimitive<C, $t>) -> bool {
+                *self == other.0
+            }
+        }
+    )*}
+}
+
+impl_primitive!(u64);
+
+impl<const C: usize, P: FromStr> FromStr for TypedPrimitive<C, P> {
+    type Err = P::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        P::from_str(s).map(TypedPrimitive)
+    }
+}
+
+impl<const C: usize, P> Borrow<P> for TypedPrimitive<C, P> {
+    fn borrow(&self) -> &P {
+        &self.0
+    }
+}
+
+impl<const C: usize, P: Add<Output = P>> Add<P> for TypedPrimitive<C, P> {
+    type Output = Self;
+
+    fn add(self, rhs: P) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl<const C: usize, P: AddAssign> AddAssign<P> for TypedPrimitive<C, P> {
+    fn add_assign(&mut self, rhs: P) {
+        self.0 += rhs;
+    }
+}
+
+impl<const C: usize, P: Display> Display for TypedPrimitive<C, P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<const C: usize, P> From<P> for TypedPrimitive<C, P> {
+    fn from(value: P) -> Self {
+        Self(value)
+    }
+}
+
+impl<const C: usize, P: Serialize> Serialize for TypedPrimitive<C, P> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de, const C: usize, P: Deserialize<'de>> Deserialize<'de> for TypedPrimitive<C, P> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self(<P as Deserialize>::deserialize(deserializer)?))
+    }
+}
+
+impl<const C: usize, P> TypedPrimitive<C, P> {
+    pub const fn new(id: P) -> Self {
+        Self(id)
+    }
+
+    pub fn inner(self) -> P {
+        self.0
+    }
+}
+
+pub type HummockSstableObjectId = TypedPrimitive<0, u64>;
+pub type HummockSstableId = TypedPrimitive<1, u64>;
+
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
@@ -276,8 +368,14 @@ pub struct SstObjectIdRange {
 }
 
 impl SstObjectIdRange {
-    pub fn new(start_id: HummockSstableObjectId, end_id: HummockSstableObjectId) -> Self {
-        Self { start_id, end_id }
+    pub fn new(
+        start_id: impl Into<HummockSstableObjectId>,
+        end_id: impl Into<HummockSstableObjectId>,
+    ) -> Self {
+        Self {
+            start_id: start_id.into(),
+            end_id: end_id.into(),
+        }
     }
 
     pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
@@ -435,8 +533,9 @@ pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
     assert!(split.len() > 2);
     assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
     split[split.len() - 2]
-        .parse::<HummockSstableObjectId>()
+        .parse::<u64>()
         .expect("valid sst id")
+        .into()
 }
 
 #[cfg(test)]
@@ -448,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_object_id_decimal_max_length() {
-        let len = HummockSstableObjectId::MAX.to_string().len();
+        let len = u64::MAX.to_string().len();
         assert_eq!(len, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH)
     }
 
