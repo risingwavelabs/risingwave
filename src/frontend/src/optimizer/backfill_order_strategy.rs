@@ -103,13 +103,11 @@ mod auto {
         }
     }
 
-    /// Given a backfill tree, we derive a partial order of the leaf nodes according to the following rules:
-    /// A leaf node is defined as a SCAN node.
-    ///
     /// For a given subtree, all the leaf nodes in the leftmost leaf-node node
     /// must come _after_ all other leaf nodes in the subtree.
     /// For example, for the following tree:
     ///
+    /// ```text
     ///       JOIN (A)
     ///      /        \
     ///     JOIN (B)   SCAN (C)
@@ -117,15 +115,24 @@ mod auto {
     ///   /         \
     /// /           \
     /// SCAN (D)    SCAN (E)
+    /// ```
     ///
-    /// The partial order is:
+    /// D is the leftmost leaf node.
+    /// {C, E} are the other leaf nodes.
+    ///
+    /// So the partial order is:
     /// {C, E} -> {D}
     /// Expanded:
     /// C -> D
     /// E -> D
     ///
-    /// Further, if we consider UNION as well:
+    /// Next, we have to consider UNION as well.
+    /// If a UNION node is the leftmost child,
+    /// then for all subtrees in the UNION,
+    /// their leftmost leaf nodes must come after
+    /// all other leaf nodes in the subtree.
     ///
+    /// ``` text
     ///         JOIN (A)
     ///        /        \
     ///       JOIN (B)   SCAN (C)
@@ -138,21 +145,24 @@ mod auto {
     ///            /        \
     ///           /          \
     ///          SCAN (H)   SCAN (I)
+    /// ```
     ///
-    /// If UNION is the leftmost child,
-    /// then for all subtrees in the UNION,
-    /// their leftmost leaf nodes must come after
-    /// all other leaf nodes in the subtree as well.
-    ///
-    /// Next, we assume that the other leaf nodes have some partial order.
-    /// Given the partial order, we can find the terminal nodes.
-    /// Then, we can just let these leftmost leaf nodes come after the terminal nodes.
+    /// In this case, {F, H} are the leftmost leaf nodes.
+    /// {C, E} -> {F, H}
+    /// I -> H
+    /// Expanded:
+    /// C -> F
+    /// E -> F
+    /// C -> H
+    /// E -> H
+    /// I -> H
     fn fold_backfill_tree_to_partial_order(
         tree: BackfillTreeNode,
     ) -> HashMap<ObjectId, Uint32Vector> {
         let mut order: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
 
         // Returns terminal nodes of the subtree
+        // This is recursive algorithm we use to traverse the tree and compute partial orders.
         fn traverse_backfill_tree(
             tree: BackfillTreeNode,
             order: &mut HashMap<ObjectId, HashSet<ObjectId>>,
@@ -186,18 +196,7 @@ mod auto {
                     let rhs_terminal_nodes =
                         traverse_backfill_tree(*rhs, order, false, HashSet::new());
                     prior_terminal_nodes.extend(rhs_terminal_nodes.iter().cloned());
-                    let lhs_terminal_nodes =
-                        traverse_backfill_tree(*lhs, order, true, prior_terminal_nodes);
-                    // add ordering from rhs to lhs
-                    for rhs_terminal_node in rhs_terminal_nodes {
-                        for &lhs_terminal_node in &lhs_terminal_nodes {
-                            order
-                                .entry(rhs_terminal_node)
-                                .or_default()
-                                .insert(lhs_terminal_node);
-                        }
-                    }
-                    lhs_terminal_nodes
+                    traverse_backfill_tree(*lhs, order, true, prior_terminal_nodes)
                 }
             }
         }
