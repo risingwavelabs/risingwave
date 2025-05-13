@@ -33,8 +33,7 @@ use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::handle_create_table_plan;
 use crate::optimizer::OptimizerContext;
-use crate::optimizer::backfill_order_strategy::display::pretty_print_backfill_order;
-use crate::optimizer::backfill_order_strategy::plan_backfill_order;
+use crate::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::scheduler::BatchPlanFragmenter;
@@ -252,23 +251,23 @@ pub async fn do_handle_explain(
                     match explain_format {
                         ExplainFormat::Text => {
                             blocks.push(plan.explain_to_string());
-                            // TODO: support other formats
-                            if explain_backfill {
-                                let backfill_order = plan_backfill_order(
-                                    &session,
-                                    context.with_options().backfill_order_strategy(),
-                                    plan.clone(),
-                                )?;
-                                let backfill_order_pretty =
-                                    pretty_print_backfill_order(&session, backfill_order)?;
-                                blocks
-                                    .push(format!("\nBackfill order:\n{}", backfill_order_pretty));
-                            }
                         }
                         ExplainFormat::Json => blocks.push(plan.explain_to_json()),
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
-                        ExplainFormat::Dot => blocks.push(plan.explain_to_dot()),
+                        ExplainFormat::Dot => {
+                            if explain_backfill {
+                                let dot_formatted_backfill_order =
+                                    explain_backfill_order_in_dot_format(
+                                        &session,
+                                        context.with_options().backfill_order_strategy(),
+                                        plan.clone(),
+                                    )?;
+                                blocks.push(dot_formatted_backfill_order);
+                            } else {
+                                blocks.push(plan.explain_to_dot());
+                            }
+                        }
                     }
                 }
             }
