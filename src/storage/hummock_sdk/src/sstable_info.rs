@@ -14,9 +14,9 @@
 
 use std::mem::size_of;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
+use triomphe::Arc as TriompheArc;
 
 use crate::key_range::KeyRange;
 use crate::version::{ObjectIdReader, SstableIdReader};
@@ -234,7 +234,7 @@ impl ObjectIdReader for SstableInfoInner {
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct SstableInfo(Arc<SstableInfoInner>);
+pub struct SstableInfo(TriompheArc<SstableInfoInner>);
 
 impl From<&PbSstableInfo> for SstableInfo {
     fn from(s: &PbSstableInfo) -> Self {
