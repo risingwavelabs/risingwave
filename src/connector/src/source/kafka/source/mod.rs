@@ -14,6 +14,8 @@
 
 mod message;
 mod reader;
+mod mux_reader;
 
 pub use message::*;
 pub use reader::*;
+pub use mux_reader::*;
