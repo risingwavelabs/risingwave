@@ -119,40 +119,56 @@ impl KafkaContextCommon {
         use aws_msk_iam_sasl_signer::generate_auth_token_from_credentials_provider;
         use tokio::time::{Duration, timeout};
 
-        if let Some(IamAuthEnv {
+        let IamAuthEnv {
             credentials_provider,
             region,
             rt,
             signer_timeout_sec,
-        }) = &self.auth
-        {
-            let region = region.clone();
-            let credentials_provider = credentials_provider.clone();
-            let rt = rt.clone();
-            let signer_timeout_sec = *signer_timeout_sec;
-            let (token, expiration_time_ms) = {
-                let handle = thread::spawn(move || {
-                    rt.block_on(async {
-                        timeout(
-                            Duration::from_secs(signer_timeout_sec),
-                            generate_auth_token_from_credentials_provider(
-                                region,
-                                credentials_provider,
-                            ),
-                        )
-                        .await
+        } = self.auth.as_ref().ok_or_else(|| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "AWS IAM credentials not configured for MSK authentication",
+            ))
+        })?;
+
+        let region = region.clone();
+        let credentials_provider = credentials_provider.clone();
+        let rt = rt.clone();
+        let signer_timeout_sec = *signer_timeout_sec;
+
+        let (token, expiration_time_ms) = {
+            let handle = thread::spawn(move || {
+                rt.block_on(async {
+                    timeout(
+                        Duration::from_secs(signer_timeout_sec),
+                        generate_auth_token_from_credentials_provider(region, credentials_provider),
+                    )
+                    .await
+                    .map_err(|_e| {
+                        Box::new(std::io::Error::other(format!(
+                            "Token generation timed out after {} seconds",
+                            signer_timeout_sec
+                        )))
+                    })?
+                    .map_err(|e| {
+                        Box::new(std::io::Error::other(format!(
+                            "Failed to generate MSK IAM token: {}",
+                            e
+                        )))
                     })
-                });
-                handle.join().unwrap()??
-            };
-            Ok(OAuthToken {
-                token,
-                principal_name: "".to_owned(),
-                lifetime_ms: expiration_time_ms,
-            })
-        } else {
-            Err("must provide AWS IAM credential".into())
-        }
+                })
+            });
+
+            handle.join().map_err(|_e| {
+                Box::new(std::io::Error::other("Token generation thread panicked"))
+            })??
+        };
+
+        Ok(OAuthToken {
+            token,
+            principal_name: "".to_owned(),
+            lifetime_ms: expiration_time_ms,
+        })
     }
 
     fn enable_refresh_oauth_token(&self) -> bool {
