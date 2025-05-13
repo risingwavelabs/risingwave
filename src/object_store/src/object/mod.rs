@@ -1018,7 +1018,7 @@ pub async fn build_remote_object_store(
                 )
             }
         }
-        "memory" => {
+        "memory" | "memory-shared" /* backward compatible, memory is always shared now */ => {
             if ident == "Meta Backup" {
                 tracing::warn!(
                     "You're using in-memory remote object store for {}. This is not recommended for production environment.",
@@ -1030,20 +1030,6 @@ pub async fn build_remote_object_store(
                     ident
                 );
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics, config))
-        }
-        "memory-shared" => {
-            if ident == "Meta Backup" {
-                tracing::warn!(
-                    "You're using shared in-memory remote object store for {}. This should never be used in production environment.",
-                    ident
-                );
-            } else {
-                tracing::warn!(
-                    "You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.",
-                    ident
-                );
-            }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
         }
         #[cfg(madsim)]
@@ -1052,7 +1038,7 @@ pub async fn build_remote_object_store(
         }
         other => {
             unimplemented!(
-                "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory, and memory-shared.",
+                "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory.",
                 other
             )
         }

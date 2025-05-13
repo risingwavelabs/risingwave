@@ -119,6 +119,8 @@ pub struct NodeSpecificOpts {
     pub compaction_worker_threads_number: Option<usize>,
 }
 
+const HUMMOCK_IN_MEMORY: &str = "hummock+memory";
+
 pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedStandaloneOpts {
     // Parse from empty strings to get the default values.
     // Note that environment variables will be used if they are set.
@@ -160,7 +162,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     // Set state store for meta (if not set). It could be set by environment variables before this.
     if meta_opts.state_store.is_none() {
         if opts.in_memory {
-            meta_opts.state_store = Some("hummock+memory".to_owned());
+            meta_opts.state_store = Some(HUMMOCK_IN_MEMORY.to_owned());
         } else {
             let state_store_dir = format!("{}/state_store", &store_directory);
             std::fs::create_dir_all(&state_store_dir).unwrap();
@@ -237,11 +239,22 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         compactor_opts.compaction_worker_threads_number = Some(n);
     }
 
+    let in_memory_state_store = meta_opts
+        .state_store
+        .as_ref()
+        .unwrap()
+        .starts_with(HUMMOCK_IN_MEMORY);
+
     ParsedStandaloneOpts {
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
-        compactor_opts: Some(compactor_opts),
+        // If the state store is in-memory, the compute node will start an embedded compactor.
+        compactor_opts: if in_memory_state_store {
+            None
+        } else {
+            Some(compactor_opts)
+        },
     }
 }
 
