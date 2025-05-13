@@ -1012,6 +1012,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::throttle")]
     pub throttle: Throttle,
 
+    #[serde(default = "default::file_cache::fifo_probation_ratio")]
+    pub fifo_probation_ratio: f64,
+
     /// Recover mode.
     ///
     /// Options:
@@ -1960,6 +1963,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn fifo_probation_ratio() -> f64 {
+            0.1
         }
 
         pub fn recover_mode() -> RecoverMode {
