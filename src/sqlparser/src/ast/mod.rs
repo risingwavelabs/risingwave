@@ -1188,6 +1188,8 @@ pub struct ExplainOptions {
     pub verbose: bool,
     // Trace plan transformation of the optimizer step by step
     pub trace: bool,
+    // Display backfill order
+    pub backfill: bool,
     // explain's plan type
     pub explain_type: ExplainType,
     // explain's plan format
@@ -1199,6 +1201,7 @@ impl Default for ExplainOptions {
         Self {
             verbose: false,
             trace: false,
+            backfill: false,
             explain_type: ExplainType::Physical,
             explain_format: ExplainFormat::Text,
         }
@@ -1217,6 +1220,9 @@ impl fmt::Display for ExplainOptions {
             }
             if self.trace {
                 option_strs.push("TRACE".to_owned());
+            }
+            if self.backfill {
+                option_strs.push("BACKFILL".to_owned());
             }
             if self.explain_type == default.explain_type {
                 option_strs.push(self.explain_type.to_string());
