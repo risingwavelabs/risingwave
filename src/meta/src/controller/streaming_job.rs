@@ -25,7 +25,10 @@ use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_str
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::source::{ConnectorProperties, SourceProperties};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str, match_source_name_str,
+};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -40,6 +43,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -1571,6 +1575,99 @@ impl CatalogController {
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")
             .await
+    }
+
+    pub async fn update_source_props_by_source_id(
+        &self,
+        source_id: SourceId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<HashMap<String, String>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (source, _obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        let connector = source.with_properties.0.get_connector().unwrap();
+
+        let check_alter_props_allowed: MetaResult<()> = match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            {
+                for k in alter_props.keys().chain(alter_secret_refs.keys()) {
+                    if !PropType::SOURCE_ALTER_CONFIG_LIST.contains(k) {
+                        return Err(MetaError::invalid_parameter(format!(
+                            "unsupported alter config: {k} for connector {connector}"
+                        )));
+                    }
+                }
+                Ok(())
+            },
+            |other| bail!("connector '{}' is not supported", other)
+        );
+        check_alter_props_allowed?;
+
+        let mut options_with_secret = WithOptionsSecResolved::new(
+            source.with_properties.0.clone(),
+            source
+                .secret_ref
+                .map(|x| x.to_protobuf())
+                .unwrap_or_default(),
+        );
+        options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+        // check if the alter-ed props are valid for each Connector
+        let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
+
+        // todo: validate via source manager
+
+        let rewrirte_sql = {
+            let definition = source.definition.clone();
+            let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?
+                .try_into()
+                .unwrap();
+
+            async fn format_with_option_secret_resolved(
+                txn: &DatabaseTransaction,
+                options_with_secret: &WithOptionsSecResolved,
+            ) -> MetaResult<Vec<SqlOption>> {
+                let mut options = Vec::new();
+                for (k, v) in options_with_secret.as_plaintext() {
+                    let sql_option = SqlOption::try_from((k, v))
+                        .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
+                    options.push(sql_option);
+                }
+                for (k, v) in options_with_secret.as_secret() {
+                    if let Some(secret_model) =
+                        Secret::find_by_id(v.secret_id as i32).one(txn).await?
+                    {
+                        let sql_option =
+                            SqlOption::try_from((k, &format!("secret {}", secret_model.name)))
+                                .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
+                        options.push(sql_option);
+                    } else {
+                        return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
+                    }
+                }
+                Ok(options)
+            }
+
+            if let Statement::CreateSource { stmt } = &mut stmt {
+                stmt.with_properties.0 =
+                    format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+            } else {
+                unreachable!()
+            }
+
+            stmt.to_string()
+        };
+
+        todo!()
     }
 
     pub async fn update_sink_props_by_sink_id(

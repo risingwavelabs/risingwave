@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use risingwave_pb::secret::PbSecretRef;
 
+use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::cdc::external::CdcTableType;
@@ -229,6 +230,46 @@ impl WithOptionsSecResolved {
     /// Create a new [`WithOptions`] from a option [`BTreeMap`] and resolved secret ref.
     pub fn new(inner: BTreeMap<String, String>, secret_ref: BTreeMap<String, PbSecretRef>) -> Self {
         Self { inner, secret_ref }
+    }
+
+    pub fn as_plaintext(&self) -> &BTreeMap<String, String> {
+        &self.inner
+    }
+
+    pub fn as_secret(&self) -> &BTreeMap<String, PbSecretRef> {
+        &self.secret_ref
+    }
+
+    pub fn handle_update(
+        &mut self,
+        update_alter_props: BTreeMap<String, String>,
+        update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> ConnectorResult<()> {
+        // make sure the key in update_alter_props and update_alter_secret_refs not collide
+        for key in update_alter_props.keys() {
+            if update_alter_secret_refs.contains_key(key) {
+                return Err(
+                    anyhow::anyhow!("the key {} is set both in plaintext and secret", key).into(),
+                );
+            }
+        }
+
+        // remove legacy key if it's set in both plaintext and secret
+        for k in update_alter_props.keys() {
+            if self.secret_ref.contains_key(k) {
+                self.secret_ref.remove(k);
+            }
+        }
+        for k in update_alter_secret_refs.keys() {
+            if self.inner.contains_key(k) {
+                self.inner.remove(k);
+            }
+        }
+
+        self.inner.extend(update_alter_props);
+        self.secret_ref.extend(update_alter_secret_refs);
+
+        Ok(())
     }
 
     /// Create a new [`WithOptions`] from a [`BTreeMap`].
