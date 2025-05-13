@@ -351,6 +351,12 @@ pub struct SessionConfig {
     /// Whether the streaming join should be unaligned or not.
     #[parameter(default = false)]
     streaming_enable_unaligned_join: bool,
+
+    /// Whether to disable purifying the definition of the table or source upon retrieval.
+    /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
+    /// This config may be removed in the future.
+    #[parameter(default = false, flags = "NO_ALTER_SYS")]
+    disable_purify_definition: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
