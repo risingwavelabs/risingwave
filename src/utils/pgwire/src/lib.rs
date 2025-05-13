@@ -20,7 +20,8 @@
 #![feature(never_type)]
 #![feature(let_chains)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
-
+#![feature(register_tool)]
+#![register_tool(rw)]
 pub mod error;
 pub mod error_or_notice;
 pub mod memory_manager;
