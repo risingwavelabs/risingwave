@@ -33,6 +33,8 @@ use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::handle_create_table_plan;
 use crate::optimizer::OptimizerContext;
+use crate::optimizer::backfill_order_strategy::display::pretty_print_backfill_order;
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::scheduler::BatchPlanFragmenter;
@@ -201,6 +203,7 @@ pub async fn do_handle_explain(
 
         let explain_trace = context.is_explain_trace();
         let explain_verbose = context.is_explain_verbose();
+        let explain_backfill = context.is_explain_backfill();
         let explain_type = context.explain_type();
         let explain_format = context.explain_format();
 
@@ -247,7 +250,21 @@ pub async fn do_handle_explain(
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
                     match explain_format {
-                        ExplainFormat::Text => blocks.push(plan.explain_to_string()),
+                        ExplainFormat::Text => {
+                            blocks.push(plan.explain_to_string());
+                            // TODO: support other formats
+                            if explain_backfill {
+                                let backfill_order = plan_backfill_order(
+                                    &session,
+                                    context.with_options().backfill_order_strategy(),
+                                    plan.clone(),
+                                )?;
+                                let backfill_order_pretty =
+                                    pretty_print_backfill_order(&session, backfill_order)?;
+                                blocks
+                                    .push(format!("\nBackfill order:\n{}", backfill_order_pretty));
+                            }
+                        }
                         ExplainFormat::Json => blocks.push(plan.explain_to_json()),
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),

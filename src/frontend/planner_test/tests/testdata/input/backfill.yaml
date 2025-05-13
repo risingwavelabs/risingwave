@@ -1,0 +1,77 @@
+- name: "backfill order, no order, empty"
+  sql: |
+    create table t1(v1 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = NONE) as select * from t1;
+  expected_outputs:
+    - explain_output
+- name: "backfill order, auto, empty"
+  sql: |
+    create table t1(v1 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = AUTO) as select * from t1;
+  expected_outputs:
+    - explain_output
+- name: "backfill order, auto, non-empty"
+  sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = AUTO) as select * from t1 join t2 on t1.v1 = t2.v2;
+  expected_outputs:
+    - explain_output
+- name: "backfill order, fixed, non-empty"
+  sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = FIXED(t1->t2)) as select * from t1 join t2 on t1.v1 = t2.v2;
+  expected_outputs:
+    - explain_output
+- name: "backfill order, auto, bushy join"
+  sql: |
+    create table fact1(v1 int);
+    create table fact2(v1 int);
+    create table fact3(v1 int);
+    create table fact4(v1 int);
+    create table dim1(v1 int);
+    create table dim2(v1 int);
+    create table dim3(v1 int);
+    create table dim4(v1 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = AUTO)
+    as with
+         joined1 as (select fact1.v1 from fact1 left join dim1 on fact1.v1 = dim1.v1),
+         joined2 as (select fact2.v1 from fact2 left join dim2 on fact2.v1 = dim2.v1),
+         joined3 as (select fact3.v1 from fact3 left join dim3 on fact3.v1 = dim3.v1),
+         joined4 as (select fact4.v1 from fact4 left join dim4 on fact4.v1 = dim4.v1),
+         joined12 as (select joined1.v1 from joined1 left join joined2 on joined1.v1 = joined2.v1),
+         joined34 as (select joined3.v1 from joined3 left join joined4 on joined3.v1 = joined4.v1),
+         joined1234 as (select joined12.v1 from joined12 left join joined34 on joined12.v1 = joined34.v1)
+    select * from joined1234;
+  expected_outputs:
+    - explain_output
+- name: backfill order, auto, union, empty
+  sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = AUTO) as select * from (select * from t1 union all select * from t2);
+  expected_outputs:
+    - explain_output
+- name: backfill order, auto, union with join, non-empty
+  sql: |
+    create table fact1(v1 int);
+    create table fact2(v1 int);
+    create table fact3(v1 int);
+    create table fact4(v1 int);
+    create table dim1(v1 int);
+    create table dim2(v1 int);
+    create table dim3(v1 int);
+    create table dim4(v1 int);
+    explain(verbose, backfill) create materialized view m1 with (backfill_order = AUTO)
+    as with
+         joined1 as (select fact1.v1 from fact1 left join dim1 on fact1.v1 = dim1.v1),
+         joined2 as (select fact2.v1 from fact2 left join dim2 on fact2.v1 = dim2.v1),
+         joined3 as (select fact3.v1 from fact3 left join dim3 on fact3.v1 = dim3.v1),
+         joined4 as (select fact4.v1 from fact4 left join dim4 on fact4.v1 = dim4.v1),
+         union12 as (select joined1.v1 from joined1 union all select joined2.v1 from joined2),
+         union34 as (select joined3.v1 from joined3 union all select joined4.v1 from joined4),
+         joined1234 as (select union12.v1 from union12 left join union34 on union12.v1 = union34.v1)
+    select * from joined1234;
+  expected_outputs:
+    - explain_output
