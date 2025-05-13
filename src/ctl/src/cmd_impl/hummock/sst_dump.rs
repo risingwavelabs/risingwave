@@ -204,7 +204,18 @@ pub async fn sst_dump_via_sstable_store(
         object_id,
         file_size,
         meta_offset,
-        ..Default::default()
+        // below are default unused value
+        sst_id: 0,
+        key_range: Default::default(),
+        table_ids: vec![],
+        stale_key_count: 0,
+        total_key_count: 0,
+        min_epoch: 0,
+        max_epoch: 0,
+        uncompressed_file_size: 0,
+        range_tombstone_count: 0,
+        bloom_filter_kind: Default::default(),
+        sst_size: 0,
     }
     .into();
     let sstable_cache = sstable_store

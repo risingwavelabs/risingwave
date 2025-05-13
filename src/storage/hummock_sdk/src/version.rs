@@ -1083,9 +1083,17 @@ where
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct GroupDeltasCommon<T> {
     pub group_deltas: Vec<GroupDeltaCommon<T>>,
+}
+
+impl<T> Default for GroupDeltasCommon<T> {
+    fn default() -> Self {
+        Self {
+            group_deltas: vec![],
+        }
+    }
 }
 
 pub type GroupDeltas = GroupDeltasCommon<SstableInfo>;
