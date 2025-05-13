@@ -381,6 +381,7 @@ where
             // Note: all messages will be processed through this code path, making it the
             //       only necessary place to log errors.
             if let Err(error) = &result {
+                #[expect(rw::format_error)]
                 if cfg!(debug_assertions) {
                     // In debug mode,
                     // print the Debug repr of the error, guaranteeing backtrace.
@@ -391,7 +392,6 @@ where
                     // - no additional context is added to the error
                     // - backtrace is captured in the error
                     // - backtrace is not printed in the middle
-                    #[expect(rw::format_error)]
                     tracing::error!(error = ?error, "error when process message");
                 } else {
                     tracing::error!(error = %error.as_report(), "error when process message");
