@@ -440,7 +440,7 @@ mod tests {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
 
-        let store = InMemObjectStore::new();
+        let store = InMemObjectStore::for_test();
         store.upload("/abc", block1).await.unwrap();
         store.upload("/klm", block2).await.unwrap();
 
