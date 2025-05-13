@@ -43,14 +43,12 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
     Event as IcebergRequestEvent, PullTask as IcebergPullTask,
 };
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
-};
-use risingwave_pb::iceberg_compaction::{
-    IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -634,34 +632,19 @@ impl IcebergCompactionEventHandler {
         {
             let mut compactor_alive = true;
 
-            // TODO: Pull Iceberg Task from iceberg compaction manager
-            let top_n_frequency = self
+            let iceberg_compaction_handles = self
                 .compaction_manager
                 .get_top_n_iceberg_commit_sink_ids(pull_task_count);
 
-            for sink_id in top_n_frequency {
-                let sink_params = self
-                    .compaction_manager
-                    .get_sink_param(&sink_id)
-                    .await
-                    .expect("sink params not found");
-
+            for handle in iceberg_compaction_handles {
                 // send iceberg commit task to compactor
-                if let Err(e) =
-                    compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-                        props: sink_params.properties,
-                    }))
-                {
+                if let Err(e) = handle.send_compact_task(compactor.clone()).await {
                     tracing::warn!(
                         error = %e.as_report(),
                         "Failed to send iceberg commit task to {}",
                         context_id,
                     );
                     compactor_alive = false;
-                } else {
-                    // clear sink commit info to reset iceberg commit_info
-                    self.compaction_manager
-                        .clear_iceberg_commits_by_sink_id(sink_id);
                 }
             }
 
