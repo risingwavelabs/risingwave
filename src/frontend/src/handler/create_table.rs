@@ -1098,23 +1098,23 @@ pub(super) async fn handle_create_table_plan(
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
             // cdc table cannot be append-only
-            let (format_encode, source_name) =
+            let (shared_source_schema_name, shared_source_name) =
                 Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
 
-            let source = {
+            let shared_source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let schema_path =
-                    SchemaPath::new(format_encode.as_deref(), &search_path, user_name);
+                    SchemaPath::new(shared_source_schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
                     schema_path,
-                    source_name.as_str(),
+                    shared_source_name.as_str(),
                 )?;
                 source.clone()
             };
             let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                &source.with_properties,
+                &shared_source.with_properties,
                 cdc_table.external_table_name.clone(),
             )?;
 
@@ -1151,7 +1151,7 @@ pub(super) async fn handle_create_table_plan(
                 OptimizerContext::new(handler_args, explain_options).into();
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
-                source,
+                shared_source,
                 cdc_table.external_table_name.clone(),
                 column_defs,
                 columns,
@@ -1182,6 +1182,8 @@ pub(super) async fn handle_create_table_plan(
     };
     Ok((plan, source, table, job_type))
 }
+
+
 
 // For both table from cdc source and table with cdc connector
 fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
