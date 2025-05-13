@@ -20,9 +20,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{
-    DataType, Date, Decimal, F64, ScalarImpl, Time, Timestamp, Timestamptz,
-};
+use risingwave_common::types::{DataType, Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 use tiberius::Row;
@@ -73,7 +71,6 @@ pub fn convert_money_i64_to_type(value: i64, data_type: &DataType) -> ScalarImpl
         DataType::Decimal => {
             ScalarImpl::Decimal(Decimal::from(value) / Decimal::from_str("10000").unwrap())
         }
-        DataType::Float64 => ScalarImpl::Float64(F64::from(value as f64 / 10000.0)),
         _ => {
             panic!(
                 "Conversion of Money type to {:?} is not supported",
