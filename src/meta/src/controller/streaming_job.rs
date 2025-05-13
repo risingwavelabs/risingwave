@@ -20,6 +20,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
@@ -1595,6 +1596,7 @@ impl CatalogController {
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
 
+        // todo: make this a config, instead of builtin
         let check_alter_props_allowed: MetaResult<()> = match_source_name_str!(
             connector.as_str(),
             PropType,
@@ -1622,7 +1624,6 @@ impl CatalogController {
         options_with_secret.handle_update(alter_props, alter_secret_refs)?;
         // check if the alter-ed props are valid for each Connector
         let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
-
         // todo: validate via source manager
 
         let rewrirte_sql = {
@@ -1667,7 +1668,60 @@ impl CatalogController {
             stmt.to_string()
         };
 
-        todo!()
+        let active_source_model = source::ActiveModel {
+            source_id: Set(source_id),
+            definition: Set(rewrirte_sql),
+            with_properties: Set(options_with_secret.as_plaintext().clone().into()),
+            secret_ref: Set((!options_with_secret.as_secret().is_empty())
+                .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
+            ..Default::default()
+        };
+        active_source_model.update(&txn).await?;
+
+        // update fragments
+        update_connector_props_fragaments(
+            &txn,
+            source_id,
+            FragmentTypeFlag::Source,
+            |node, found| {
+                if let PbNodeBody::Source(node) = node
+                    && let Some(source_inner) = &mut node.source_inner
+                {
+                    source_inner.with_properties = options_with_secret.as_plaintext().clone();
+                    source_inner.secret_refs = options_with_secret.as_secret().clone();
+                    *found = true;
+                }
+            },
+        )
+        .await?;
+
+        let (source, obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+
+        txn.commit().await?;
+
+        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        self.notify_frontend(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(relation_info),
+                }],
+            }),
+        )
+        .await;
+
+        let (options, secret_refs) = options_with_secret.into_parts();
+        let new_options = LocalSecretManager::global()
+            .fill_secrets(options, secret_refs)?
+            .into_iter()
+            .collect();
+        Ok(new_options)
     }
 
     pub async fn update_sink_props_by_sink_id(
@@ -2147,4 +2201,56 @@ pub struct SinkIntoTableContext {
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,
+}
+
+async fn update_connector_props_fragaments<F>(
+    txn: &DatabaseTransaction,
+    job_id: i32,
+    expect_flag: FragmentTypeFlag,
+    mut alter_stream_node_fn: F,
+) -> MetaResult<()>
+where
+    F: FnMut(&mut PbNodeBody, &mut bool),
+{
+    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+            fragment::Column::StreamNode,
+        ])
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(txn)
+        .await?;
+    let fragments = fragments
+        .into_iter()
+        .filter(|(_, fragment_type_mask, _)| *fragment_type_mask & expect_flag as i32 != 0)
+        .filter_map(|(id, _, stream_node)| {
+            let mut stream_node = stream_node.to_protobuf();
+            let mut found = false;
+            visit_stream_node_mut(&mut stream_node, |node| {
+                alter_stream_node_fn(node, &mut found);
+            });
+            if found { Some((id, stream_node)) } else { None }
+        })
+        .collect_vec();
+    assert!(
+        !fragments.is_empty(),
+        "job {} (type: {:?}) should be used by at least one fragment",
+        job_id,
+        expect_flag
+    );
+
+    for (id, stream_node) in fragments {
+        fragment::ActiveModel {
+            fragment_id: Set(id),
+            stream_node: Set(StreamNode::from(&stream_node)),
+            ..Default::default()
+        }
+        .update(txn)
+        .await?;
+    }
+
+    Ok(())
 }
