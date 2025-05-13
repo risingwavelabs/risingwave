@@ -21,7 +21,7 @@ use crate::optimizer::backfill_order_strategy::auto::plan_auto_strategy;
 use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
 use crate::session::SessionImpl;
 
-mod auto {
+pub mod auto {
     use std::collections::{HashMap, HashSet};
 
     use risingwave_common::catalog::ObjectId;
@@ -33,7 +33,7 @@ mod auto {
     use crate::session::SessionImpl;
 
     #[derive(Debug)]
-    enum BackfillTreeNode {
+    pub enum BackfillTreeNode {
         Join {
             lhs: Box<BackfillTreeNode>,
             rhs: Box<BackfillTreeNode>,
@@ -364,45 +364,37 @@ mod common {
 }
 
 pub mod display {
-    use itertools::Itertools;
     use risingwave_common::catalog::ObjectId;
     use risingwave_pb::stream_plan::BackfillOrder;
 
     use crate::session::SessionImpl;
 
-    pub fn pretty_print_backfill_order(
+    fn get_table_name(session: &SessionImpl, id: ObjectId) -> crate::error::Result<String> {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let table_catalog = catalog_reader.get_any_table_by_id(&(id.into()))?;
+        let table_name = table_catalog.name();
+        let db_id = table_catalog.database_id;
+        let schema_id = table_catalog.schema_id;
+        let schema_catalog = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let schema_name = schema_catalog.name();
+        let name = format!("{}.{}", schema_name, table_name);
+        Ok(name)
+    }
+
+    pub(super) fn print_backfill_order_in_dot_format(
         session: &SessionImpl,
         order: BackfillOrder,
     ) -> crate::error::Result<String> {
-        fn get_table_name(session: &SessionImpl, id: ObjectId) -> crate::error::Result<String> {
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let table_catalog = catalog_reader.get_any_table_by_id(&(id.into()))?;
-            let table_name = table_catalog.name();
-            let db_id = table_catalog.database_id;
-            let schema_id = table_catalog.schema_id;
-            let schema_catalog = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
-            let schema_name = schema_catalog.name();
-            let name = format!("{}.{}", schema_name, table_name);
-            Ok(name)
-        }
-
         let mut result = String::new();
+        result.push_str("digraph G {\n");
         for (start, end) in order.order {
             let start_name = get_table_name(session, start)?;
-            let mut end_names = Vec::new();
             for end in end.data {
                 let end_name = get_table_name(session, end)?;
-                end_names.push(end_name);
+                result.push_str(&format!("  \"{}\" -> \"{}\";\n", start_name, end_name));
             }
-            result.push_str(&format!(
-                "{} -> {}\n",
-                start_name,
-                end_names.into_iter().join(", ")
-            ));
         }
-        if result.is_empty() {
-            result.push_str("No Orders");
-        }
+        result.push_str("}\n");
         Ok(result)
     }
 }
@@ -426,4 +418,16 @@ pub fn plan_backfill_order(
         BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders)?,
     };
     Ok(BackfillOrder { order })
+}
+
+/// Plan the backfill order, and also output the backfill tree.
+pub fn explain_backfill_order_in_dot_format(
+    session: &SessionImpl,
+    backfill_order_strategy: BackfillOrderStrategy,
+    plan: PlanRef,
+) -> Result<String> {
+    let order = plan_backfill_order(session, backfill_order_strategy, plan)?;
+    let dot_formatted_backfill_order =
+        display::print_backfill_order_in_dot_format(session, order.clone())?;
+    Ok(dot_formatted_backfill_order)
 }
