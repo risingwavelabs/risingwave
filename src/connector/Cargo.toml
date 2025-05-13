@@ -194,6 +194,9 @@ yup-oauth2 = "8.3"
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
+[build-dependencies]
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
