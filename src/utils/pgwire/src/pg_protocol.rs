@@ -381,7 +381,21 @@ where
             // Note: all messages will be processed through this code path, making it the
             //       only necessary place to log errors.
             if let Err(error) = &result {
-                tracing::error!(error = %error.as_report(), "error when process message");
+                if cfg!(debug_assertions) {
+                    // In debug mode,
+                    // print the Debug repr of the error, guaranteeing backtrace.
+                    // FIXME: in theory, ?error.as_report() should be enough, but not sure why backtrace is missing.
+
+                    // Print backtrace here is the last resort.
+                    // It's useful only when:
+                    // - no additional context is added to the error
+                    // - backtrace is captured in the error
+                    // - backtrace is not printed in the middle
+                    #[expect(rw::format_error)]
+                    tracing::error!(error = ?error, "error when process message");
+                } else {
+                    tracing::error!(error = %error.as_report(), "error when process message");
+                }
             }
 
             // Log to optionally-enabled target `PGWIRE_QUERY_LOG`.
