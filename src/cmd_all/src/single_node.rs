@@ -273,3 +273,28 @@ fn memory_for_compactor(total_memory_bytes: usize) -> usize {
         (total_memory_bytes - (16 << 30)) / 16 + (16 << 30) / 8
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_playground_in_memory_state_store() {
+        let opts = SingleNodeOpts::new_for_playground();
+        let standalone_opts = map_single_node_opts_to_standalone_opts(opts);
+
+        // Should not start a compactor.
+        assert!(standalone_opts.compactor_opts.is_none());
+
+        assert_eq(
+            standalone_opts
+                .meta_opts
+                .as_ref()
+                .unwrap()
+                .state_store
+                .as_ref()
+                .unwrap(),
+            HUMMOCK_IN_MEMORY,
+        );
+    }
+}
