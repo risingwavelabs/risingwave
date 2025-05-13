@@ -213,7 +213,6 @@ services:
 
   clickhouse-server:
     image: clickhouse/clickhouse-server:23.3.8.21-alpine
-    hostname: clickhouse-server-1
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -253,7 +252,6 @@ services:
 
   sqlserver-server:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    hostname: sqlserver-server
     ports:
       - 1433:1433
     environment:
@@ -263,7 +261,6 @@ services:
 
   starrocks-fe-server:
     image: starrocks/fe-ubuntu:3.1.7
-    hostname: starrocks-fe-server
     command: /opt/starrocks/fe/bin/start_fe.sh
     ports:
       - 28030:8030
@@ -286,7 +283,6 @@ services:
     ports:
       - 28040:8040
       - 29050:9050
-    hostname: starrocks-be-server
     depends_on:
       - starrocks-fe-server
 
