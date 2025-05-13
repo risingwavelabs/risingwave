@@ -94,9 +94,14 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
 fn default_commit_retry_num() -> u32 {
     8
+}
+
+fn default_iceberg_compaction_interval() -> u64 {
+    DEFAULT_ICEBERG_COMPACTION_INTERVAL // 1 hour
 }
 
 #[serde_as]
@@ -142,6 +147,15 @@ pub struct IcebergConfig {
     // We should try to find and use that as default commit retry num first.
     #[serde(default = "default_commit_retry_num")]
     pub commit_retry_num: u32,
+
+    /// Whether to enable iceberg compaction.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub enable_compaction: bool,
+
+    /// The interval of iceberg compaction, default is 1 hour.
+    #[serde(default = "default_iceberg_compaction_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub compaction_interval: u64,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -1819,16 +1833,17 @@ impl IcebergSinkCommitter {
 
             delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
         }
-        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender {
-            if iceberg_compact_stat_sender
+        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
+            && self.config.enable_compaction
+            && iceberg_compact_stat_sender
                 .send(IcebergCompactionStat {
                     sink_id: SinkId::new(self.sink_id),
                 })
                 .is_err()
-            {
-                warn!("failed to send iceberg compaction stats");
-            }
+        {
+            warn!("failed to send iceberg compaction stats");
         }
+
         Ok(())
     }
 
@@ -1991,7 +2006,7 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::IcebergConfig;
+    use crate::sink::iceberg::{DEFAULT_ICEBERG_COMPACTION_INTERVAL, IcebergConfig};
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -2180,6 +2195,8 @@ mod test {
             ("catalog.jdbc.password", "123456"),
             ("database.name", "demo_db"),
             ("table.name", "demo_table"),
+            ("enable_compaction", "true"),
+            ("compaction_interval", "1800"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2227,6 +2244,8 @@ mod test {
             create_table_if_not_exists: false,
             is_exactly_once: None,
             commit_retry_num: 8,
+            enable_compaction: true,
+            compaction_interval: DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
