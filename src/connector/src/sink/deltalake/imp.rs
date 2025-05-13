@@ -23,8 +23,8 @@ use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
+use deltalake::kernel::transaction::CommitBuilder;
 use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
-use deltalake::operations::transaction::CommitBuilder;
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use phf::{Set, phf_set};
@@ -270,7 +270,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         DataType::Decimal => {
             matches!(
                 dl_data_type,
-                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_, _))
+                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_))
             )
         }
         DataType::Date => {
