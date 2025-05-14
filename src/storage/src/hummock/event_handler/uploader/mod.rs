@@ -1241,7 +1241,7 @@ impl UploaderData {
         self.check_upload_task_consistency();
     }
 
-    fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+    fn min_uncommitted_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         self.unsync_data
             .spilled_data
             .values()
@@ -1251,7 +1251,7 @@ impl UploaderData {
                 s.sstable_infos()
                     .iter()
                     .chain(s.old_value_sstable_infos())
-                    .map(|s| s.sst_info.sst_id)
+                    .map(|s| s.sst_info.object_id)
                     .min()
             })
             .min()
@@ -1481,9 +1481,9 @@ impl HummockUploader {
         data.unsync_data.may_destroy_instance(instance_id);
     }
 
-    pub(crate) fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+    pub(crate) fn min_uncommitted_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         if let UploaderState::Working(ref u) = self.state {
-            u.min_uncommitted_sst_id()
+            u.min_uncommitted_sst_object_id()
         } else {
             None
         }

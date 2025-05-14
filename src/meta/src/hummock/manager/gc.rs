@@ -31,7 +31,7 @@ use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
 use risingwave_meta_model_migration::OnConflict;
 use risingwave_object_store::object::{ObjectMetadataIter, ObjectStoreRef};
-use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
+use risingwave_pb::stream_service::GetMinUncommittedSstObjectIdRequest;
 use risingwave_rpc_client::StreamClientPool;
 use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
@@ -72,7 +72,7 @@ impl GcManager {
         for object_id in object_id_list {
             let obj_prefix = self
                 .store
-                .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
+                .get_object_prefix(object_id.inner(), self.use_new_object_prefix_strategy);
             paths.push(get_sst_data_path(&obj_prefix, &self.path_prefix, object_id));
         }
         self.store.delete_objects(&paths).await?;
@@ -208,15 +208,17 @@ impl HummockManager {
     /// Filters by Hummock version and Writes GC history.
     pub async fn finalize_objects_to_delete(
         &self,
-        object_ids: impl Iterator<Item = HummockSstableObjectId> + Clone,
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
     ) -> Result<Vec<HummockSstableObjectId>> {
         // This lock ensures `commit_epoch` and `report_compat_task` can see the latest GC history during sanity check.
         let versioning = self.versioning.read().await;
         let tracked_object_ids: HashSet<HummockSstableObjectId> = versioning
             .get_tracked_object_ids(self.context_info.read().await.min_pinned_version_id());
-        let to_delete = object_ids.filter(|object_id| !tracked_object_ids.contains(object_id));
-        self.write_gc_history(to_delete.clone()).await?;
-        Ok(to_delete.collect())
+        let to_delete = object_ids
+            .filter(|object_id| !tracked_object_ids.contains(object_id))
+            .collect_vec();
+        self.write_gc_history(to_delete.iter().copied()).await?;
+        Ok(to_delete)
     }
 
     /// LIST object store and DELETE stale objects, in batches.
@@ -314,12 +316,14 @@ impl HummockManager {
             .as_ref()
             .map(|b| b.list_pinned_object_ids())
             .unwrap_or_default();
-        // It's crucial to collect_min_uncommitted_sst_id (i.e. `min_sst_id`) only after LIST object store (i.e. `object_ids`).
+        // It's crucial to collect_min_uncommitted_sst_object_id (i.e. `min_sst_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_sst_id`, new compute nodes may join and generate new uncommitted SSTs that are not covered by `min_sst_id`.
         // By getting `min_sst_id` after `object_ids`, it's ensured `object_ids` won't include any SSTs from those new compute nodes.
-        let min_sst_id =
-            collect_min_uncommitted_sst_id(&self.metadata_manager, self.env.stream_client_pool())
-                .await?;
+        let min_sst_id = collect_min_uncommitted_sst_object_id(
+            &self.metadata_manager,
+            self.env.stream_client_pool(),
+        )
+        .await?;
         let metrics = &self.metrics;
         let candidate_object_number = object_ids.len();
         metrics
@@ -416,7 +420,7 @@ impl HummockManager {
         let now = self.now().await?;
         let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
         let mut models = object_ids.map(|o| hummock_gc_history::ActiveModel {
-            object_id: Set(o.try_into().unwrap()),
+            object_id: Set(o.inner().try_into().unwrap()),
             mark_delete_at: Set(dt.naive_utc()),
         });
         let db = &self.meta_store_ref().conn;
@@ -533,7 +537,7 @@ impl HummockManager {
     }
 }
 
-async fn collect_min_uncommitted_sst_id(
+async fn collect_min_uncommitted_sst_object_id(
     metadata_manager: &MetadataManager,
     client_pool: &StreamClientPool,
 ) -> Result<HummockSstableObjectId> {
@@ -544,17 +548,17 @@ async fn collect_min_uncommitted_sst_id(
         .into_iter()
         .map(|worker_node| async move {
             let client = client_pool.get(&worker_node).await?;
-            let request = GetMinUncommittedSstIdRequest {};
-            client.get_min_uncommitted_sst_id(request).await
+            let request = GetMinUncommittedSstObjectIdRequest {};
+            client.get_min_uncommitted_sst_object_id(request).await
         });
     let min_watermark = try_join_all(futures)
         .await
         .map_err(|err| Error::Internal(err.into()))?
         .into_iter()
-        .map(|resp| resp.min_uncommitted_sst_id)
+        .map(|resp| resp.min_uncommitted_sst_object_id)
         .min()
-        .unwrap_or(HummockSstableObjectId::MAX);
-    Ok(min_watermark)
+        .unwrap_or(u64::MAX);
+    Ok(min_watermark.into())
 }
 
 pub struct FullGcState {
@@ -620,8 +624,9 @@ mod tests {
             3,
             hummock_manager
                 .complete_gc_batch(
-                    vec![i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64]
+                    [i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64]
                         .into_iter()
+                        .map(Into::into)
                         .collect(),
                     None,
                 )

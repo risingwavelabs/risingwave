@@ -778,9 +778,9 @@ impl HummockEventHandler {
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
             }
-            HummockEvent::GetMinUncommittedSstId { result_tx } => {
+            HummockEvent::GetMinUncommittedSstObjectId { result_tx } => {
                 let _ = result_tx
-                    .send(self.uploader.min_uncommitted_sst_id())
+                    .send(self.uploader.min_uncommitted_sst_object_id())
                     .inspect_err(|e| {
                         error!("unable to send get_min_uncommitted_sst_id result: {:?}", e);
                     });

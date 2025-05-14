@@ -205,7 +205,7 @@ pub async fn sst_dump_via_sstable_store(
         file_size,
         meta_offset,
         // below are default unused value
-        sst_id: 0,
+        sst_id: 0.into(),
         key_range: Default::default(),
         table_ids: vec![],
         stale_key_count: 0,

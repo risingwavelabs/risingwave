@@ -146,15 +146,15 @@ pub async fn add_test_tables(
 pub fn generate_test_sstables_with_table_id(
     epoch: u64,
     table_id: u32,
-    sst_ids: Vec<HummockSstableObjectId>,
+    sst_ids: Vec<u64>,
 ) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
         sst_info.push(
             SstableInfoInner {
-                object_id: sst_id,
-                sst_id,
+                object_id: sst_id.into(),
+                sst_id: sst_id.into(),
                 key_range: KeyRange {
                     left: Bytes::from(key_with_epoch(
                         format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
@@ -183,14 +183,14 @@ pub fn generate_test_sstables_with_table_id(
     sst_info
 }
 
-pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
+pub fn generate_test_tables(epoch: u64, sst_ids: Vec<u64>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
         sst_info.push(
             SstableInfoInner {
-                object_id: sst_id,
-                sst_id,
+                object_id: sst_id.into(),
+                sst_id: sst_id.into(),
                 key_range: KeyRange {
                     left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
                     right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
@@ -256,11 +256,7 @@ pub async fn unregister_table_ids_from_compaction_group(
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
-pub fn iterator_test_key_of_epoch(
-    table: HummockSstableObjectId,
-    idx: usize,
-    ts: HummockEpoch,
-) -> Vec<u8> {
+pub fn iterator_test_key_of_epoch(table: u64, idx: usize, ts: HummockEpoch) -> Vec<u8> {
     // key format: {prefix_index}_version
     key_with_epoch(
         format!("{:03}\0\0_key_test_{:05}", table, idx)
@@ -381,12 +377,9 @@ pub async fn setup_compute_env(
     setup_compute_env_with_config(port, config).await
 }
 
-pub async fn get_sst_ids(
-    hummock_manager: &HummockManager,
-    number: u32,
-) -> Vec<HummockSstableObjectId> {
+pub async fn get_sst_ids(hummock_manager: &HummockManager, number: u32) -> Vec<u64> {
     let range = hummock_manager.get_new_sst_ids(number).await.unwrap();
-    (range.start_id..range.end_id).collect_vec()
+    (range.start_id.inner()..range.end_id.inner()).collect_vec()
 }
 
 pub async fn add_ssts(
