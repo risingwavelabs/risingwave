@@ -10759,7 +10759,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.63",
  "thiserror-ext",
- "tower 0.5.0",
+ "tower 0.5.2",
  "tower-http",
  "tracing",
  "workspace-hack",
@@ -10853,7 +10853,7 @@ dependencies = [
  "tikv-jemalloc-ctl",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "tower 0.5.0",
+ "tower 0.5.2",
  "tracing",
  "workspace-hack",
 ]
@@ -11301,7 +11301,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "tower 0.5.0",
+ "tower 0.5.2",
  "tower-http",
  "tracing",
  "url",
@@ -11528,7 +11528,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "tower 0.5.0",
+ "tower 0.5.2",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -11753,7 +11753,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "tower 0.5.0",
+ "tower 0.5.2",
  "tracing",
  "workspace-hack",
 ]
@@ -14724,14 +14724,14 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.5.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36b837f86b25d7c0d7988f00a54e74739be6477f2aac6201b8f429a7569991b7"
+checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
 dependencies = [
  "futures-core",
  "futures-util",
  "pin-project-lite",
- "sync_wrapper 0.1.2",
+ "sync_wrapper 1.0.2",
  "tower-layer",
  "tower-service",
 ]
