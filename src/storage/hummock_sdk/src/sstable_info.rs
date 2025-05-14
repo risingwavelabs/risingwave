@@ -22,7 +22,8 @@ use crate::key_range::KeyRange;
 use crate::version::{ObjectIdReader, SstableIdReader};
 use crate::{HummockSstableId, HummockSstableObjectId};
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct SstableInfoInner {
     pub object_id: u64,
     pub sst_id: u64,
@@ -233,7 +234,8 @@ impl ObjectIdReader for SstableInfoInner {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct SstableInfo(Arc<SstableInfoInner>);
 
 impl From<&PbSstableInfo> for SstableInfo {

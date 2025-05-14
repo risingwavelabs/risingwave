@@ -90,7 +90,7 @@ impl TrivialMovePicker {
 
                 continue;
             }
-            overlap_info.update(sst);
+            overlap_info.update(&sst.key_range);
             let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
 
             if overlap_files_range.is_empty() {
