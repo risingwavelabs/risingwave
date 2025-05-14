@@ -6000,7 +6000,7 @@ dependencies = [
  "http-body 1.0.0",
  "hyper 1.6.0",
  "pin-project-lite",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tokio",
  "tower 0.4.13",
  "tower-service",
@@ -6322,7 +6322,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f"
 dependencies = [
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "widestring",
  "windows-sys 0.48.0",
  "winreg",
@@ -7435,7 +7435,7 @@ dependencies = [
  "serde_with",
  "sha-1",
  "sha2",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "stringprep",
  "strsim 0.11.1",
  "take_mut",
@@ -7530,7 +7530,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "thiserror 1.0.63",
  "tokio",
  "tokio-native-tls",
@@ -8752,7 +8752,7 @@ dependencies = [
  "risingwave_sqlparser",
  "serde",
  "serde_json",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tempfile",
  "thiserror 1.0.63",
  "thiserror-ext",
@@ -9718,7 +9718,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.0",
  "rustls 0.23.5",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "thiserror 2.0.3",
  "tokio",
  "tracing",
@@ -9754,7 +9754,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tracing",
  "windows-sys 0.59.0",
 ]
@@ -9929,7 +9929,7 @@ dependencies = [
  "rand 0.8.5",
  "ryu",
  "sha1_smol",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tokio",
  "tokio-util",
  "url",
@@ -13425,9 +13425,9 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.6"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05ffd9c0a93b7543e062e759284fcf5f5e3b098501104bfbdde4d404db792871"
+checksum = "4f5fd57c80058a56cf5c777ab8a126398ece8e442983605d280a44ce79d0edef"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
@@ -14415,7 +14415,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tokio-macros",
  "tracing",
  "windows-sys 0.52.0",
@@ -14486,7 +14486,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.8.5",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tokio-util",
  "whoami",
 ]
@@ -14678,7 +14678,7 @@ dependencies = [
  "pin-project",
  "prost 0.13.4",
  "rustls-pemfile 2.2.0",
- "socket2 0.5.6",
+ "socket2 0.5.9",
  "tokio",
  "tokio-rustls 0.26.0",
  "tokio-stream 0.1.16",
