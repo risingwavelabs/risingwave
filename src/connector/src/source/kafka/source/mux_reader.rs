@@ -1,189 +1,246 @@
 // kafka_mux_split_reader.rs
-// Unified KafkaMux model without dashmap: multiplex Kafka consumers + demux to per-source readers
+// Unified KafkaMux model with automatic global lazy initialization (OnceLock + get_or_init)
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::for_await;
+use itertools::Itertools;
+use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use tokio::sync::{RwLock, mpsc};
 
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
-use crate::source::kafka::{KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext};
-use crate::source::{
-    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl, SplitReader,
-    into_chunk_stream,
+use crate::source::kafka::{
+    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
+use crate::source::{
+    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, into_chunk_stream,
+};
+
+const DEFAULT_MAX_PARTS: usize = 512;
+
+static GLOBAL_MUX_CTRL: OnceLock<mpsc::Sender<MuxControl>> = OnceLock::new();
+
+/// Ensure the global KafkaMux is initialized, spawning it if needed, and return the control sender.
+fn ensure_global_mux() -> mpsc::Sender<MuxControl> {
+    GLOBAL_MUX_CTRL
+        .get_or_init(|| {
+            let (ctrl_tx, ctrl_rx) = mpsc::channel(1024);
+            // spawn the manager
+            tokio::spawn(async move {
+                let mut mux = KafkaMuxReader::new(ctrl_rx).await;
+                mux.run().await;
+            });
+            ctrl_tx
+        })
+        .clone()
+}
 
 // -----------------------------------------------------------------------------
 // Control messages for KafkaMux
 // -----------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum MuxControl {
-    AddSplits {
-        epoch: u64,
-        source: u64,
-        splits: Vec<KafkaSplit>,
-    },
-    ActivateSplits {
-        epoch: u64,
-    },
-    RemoveSplits {
-        epoch: u64,
-        splits: Vec<KafkaSplit>,
-    },
-    StopSource {
-        source: u64,
-    },
+    AddSplits(AddSplitsMessage),
+}
+
+#[derive(Debug)]
+pub struct AddSplitsMessage {
+    source: u64,
+
+    properties: KafkaProperties,
+    splits: Vec<KafkaSplit>,
+
+    sender: mpsc::Sender<SourceMessage>,
+}
+
+pub type SourceId = u64;
+
+pub type ConsumerRef = Arc<StreamConsumer<RwConsumerContext>>;
+
+pub struct ConsumerInfo {
+    consumer: ConsumerRef,
+    assigned_splits: HashSet<SplitId>,
 }
 
 // -----------------------------------------------------------------------------
 // KafkaMux: multiplex few consumers, demux messages to per-source channels
 // -----------------------------------------------------------------------------
 
-pub struct KafkaMux {
-    consumers: Vec<Arc<StreamConsumer<RwConsumerContext>>>,
-    /// (topic, partition) -> channel sender
-    routes: Arc<RwLock<HashMap<(String, i32), mpsc::Sender<Arc<dyn Message>>>>>,
+pub struct KafkaMuxReader<'a> {
+    /// dynamic pool of consumers, initially empty
+    consumers: HashMap<SourceId, ConsumerInfo>,
+
+    /// routes: (topic, partition) -> channel sender
+    routes: Arc<RwLock<HashMap<(SourceId, String, i32), mpsc::Sender<SourceMessage>>>>,
+    /// control commands
     control_rx: mpsc::Receiver<MuxControl>,
-    max_parts_per_consumer: usize,
+    /// channel for demultiplexed messages
+    message_rx: mpsc::Receiver<(SourceId, BorrowedMessage<'a>)>,
+    message_tx: mpsc::Sender<(SourceId, BorrowedMessage<'a>)>,
 }
 
-impl KafkaMux {
-    pub async fn new(control_rx: mpsc::Receiver<MuxControl>, max_parts: usize) -> Self {
-        let initial = Arc::new(Self::create_consumer()?);
-        KafkaMux {
-            consumers: vec![initial],
-            routes: Arc::new(RwLock::new(HashMap::new())),
+impl<'a> KafkaMuxReader<'a> {
+    /// Create new manager: no initial consumers, but setup message channel
+    pub async fn new(control_rx: mpsc::Receiver<MuxControl>) -> Self {
+        let (message_tx, message_rx) = mpsc::channel(1024);
+        KafkaMuxReader {
+            consumers: Default::default(),
+            routes: Arc::new(Default::default()),
             control_rx,
-            max_parts_per_consumer: max_parts,
+            message_rx,
+            message_tx,
         }
     }
 
-    pub async fn run(mut self) {
-        // Spawn polling tasks for each consumer
-        for consumer in &self.consumers {
-            let c = consumer.clone();
-            let routes = Arc::clone(&self.routes);
-            tokio::spawn(async move {
-                while let Ok(msg) = c.recv().await {
-                    let key = (msg.topic().to_string(), msg.partition());
-                    let guard = routes.read().await;
-                    if let Some(tx) = guard.get(&key) {
-                        let _ = tx.send(msg.detach()).await;
-                    }
-                }
-            });
-        }
-
-        // Control-plane loop
-        while let Some(ctrl) = self.control_rx.recv().await {
-            match ctrl {
-                MuxControl::AddSplits {
-                    epoch: _,
-                    source: _,
-                    splits,
-                } => {
-                    // choose or create consumer
-                    let mut chosen = None;
-                    for c in &self.consumers {
-                        let assigned = c.assignment().map(|l| l.count()).unwrap_or(0) as usize;
-                        if assigned + splits.len() <= self.max_parts_per_consumer {
-                            chosen = Some(c.clone());
-                            break;
-                        }
-                    }
-                    let consumer = chosen.unwrap_or_else(|| {
-                        let nc = Arc::new(Self::create_consumer().unwrap());
-                        self.consumers.push(nc.clone());
-                        nc
-                    });
-                    let tpl = Self::to_topic_partition_list(&splits);
-                    consumer.incremental_assign(&tpl).unwrap();
-                    consumer.pause(&tpl).unwrap();
-
-                    // register routes
-                    let mut guard = self.routes.write().await;
-                    for split in splits {
-                        let (t, p) = (split.topic.clone(), split.partition);
-                        let (tx, _) = mpsc::channel(1024);
-                        guard.insert((t, p), tx.clone());
-                    }
-                }
-                MuxControl::ActivateSplits { epoch: _ } => {
+    /// Single select! loop to handle incoming Kafka messages & control commands
+    pub async fn run(&mut self) {
+        loop {
+            tokio::select! {
+                // demultiplexed message arrives
+                Some((source_id, msg)) = self.message_rx.recv() => {
+                    let key = (source_id, msg.topic().to_string(), msg.partition());
                     let guard = self.routes.read().await;
-                    let keys: Vec<_> = guard.keys().cloned().collect();
-                    drop(guard);
-                    let splits: Vec<KafkaSplit> = keys
-                        .into_iter()
-                        .map(|(t, p)| KafkaSplit {
-                            topic: t,
-                            partition: p,
-                            start_offset: None,
-                            stop_offset: None,
-                        })
-                        .collect();
-                    let tpl = Self::to_topic_partition_list(&splits);
-                    if let Some(c) = self.consumers.first() {
-                        c.resume(&tpl).unwrap();
+                    if let Some(tx) = guard.get(&key) {
+                        let msg = SourceMessage::from_kafka_message(&msg,false);
+                        let _ = tx.send(msg).await;
                     }
                 }
-                MuxControl::RemoveSplits { epoch: _, splits } => {
-                    let tpl = Self::to_topic_partition_list(&splits);
-                    if let Some(c) = self.consumers.first() {
-                        c.incremental_unassign(&tpl).unwrap();
+                // control command arrives
+                Some(ctrl) = self.control_rx.recv() => match ctrl {
+                    MuxControl::AddSplits(msg) => {
+                        self.handle_add(msg).await.unwrap();
                     }
-                    let mut guard = self.routes.write().await;
-                    for split in splits {
-                        guard.remove(&(split.topic, split.partition));
-                    }
-                }
-                MuxControl::StopSource { source: _ } => {
-                    // handle graceful source stop if needed
-                }
+                },
+                else => break,
             }
         }
     }
 
-    fn create_consumer() -> Result<StreamConsumer<RwConsumerContext>> {
-        let mut cfg = ClientConfig::new();
-        // ... set common Kafka configs
-        cfg.create_with_context(RwConsumerContext::new(KafkaContextCommon::default())?)
-            .context("failed to create consumer")
+    /// Handle new splits: create or reuse consumer, assign+pause, spawn its poll
+    async fn handle_add(&mut self, msg: AddSplitsMessage) -> Result<()> {
+        let AddSplitsMessage {
+            source,
+            properties,
+            splits,
+            sender,
+        } = msg;
+
+        if !self.consumers.contains_key(&source) {
+            let consumer = Self::create_source(properties).await?;
+
+            self.consumers.insert(
+                source,
+                ConsumerInfo {
+                    consumer,
+                    assigned_splits: splits.iter().map(|split| split.id()).collect(),
+                },
+            );
+
+            return Ok(());
+        }
+
+        let consumer = self.consumers.get(&source).expect("123");
+
+        for split in &splits {
+            assert!(!consumer.assigned_splits.contains(&split.id()))
+        }
+
+        let new_splits = splits
+            .into_iter()
+            .filter(|split| !consumer.assigned_splits.contains(&split.id()))
+            .collect_vec();
+
+        let mut tpl = TopicPartitionList::new();
+
+        for split in &new_splits {
+            if let Some(offset) = split.start_offset {
+                tpl.add_partition_offset(
+                    split.topic.as_str(),
+                    split.partition,
+                    Offset::Offset(offset + 1),
+                )?;
+            } else {
+                tpl.add_partition(split.topic.as_str(), split.partition);
+            }
+        }
+
+        consumer.consumer.incremental_assign(&tpl)?;
+
+        let mut guard = self.routes.write().await;
+        for split in new_splits {
+            guard.insert((source, split.topic, split.partition), sender.clone());
+        }
+
+        Ok(())
     }
 
-    fn to_topic_partition_list(splits: &[KafkaSplit]) -> TopicPartitionList {
-        let mut tpl = TopicPartitionList::new();
-        for s in splits {
-            let offset = s
-                .start_offset
-                .map_or(Offset::Beginning, |o| Offset::Offset(o + 1));
-            tpl.add_partition_offset(&s.topic, s.partition, offset)
-                .unwrap();
-        }
-        tpl
+    async fn create_source(properties: KafkaProperties) -> Result<ConsumerRef> {
+        let mut config = ClientConfig::new();
+
+        let bootstrap_servers = &properties.connection.brokers;
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
+
+        // disable partition eof
+        config.set("enable.partition.eof", "false");
+        config.set("auto.offset.reset", "smallest");
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+        config.set("bootstrap.servers", bootstrap_servers);
+
+        properties.connection.set_security_properties(&mut config);
+        properties.set_client(&mut config);
+
+        //        config.set("group.id", properties.group_id(source_ctx.fragment_id));
+
+        let ctx_common = KafkaContextCommon::new(
+            broker_rewrite_map,
+            Some(format!(
+                "fragment-{}-source-{}-actor-{}",
+                // source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
+                1,
+                2,
+                3
+            )),
+            // thread consumer will keep polling in the background, we don't need to call `poll`
+            // explicitly
+            // Some(source_ctx.metrics.rdkafka_native_metric.clone()),
+            None,
+            properties.aws_auth_props,
+            properties.connection.is_aws_msk_iam(),
+        )
+        .await?;
+
+        let client_ctx = RwConsumerContext::new(ctx_common);
+        let consumer: StreamConsumer<RwConsumerContext> = config
+            .set_log_level(RDKafkaLogLevel::Info)
+            .create_with_context(client_ctx)
+            .await
+            .context("failed to create kafka consumer")?;
+
+        Ok(Arc::new(consumer))
     }
 }
 
 // -----------------------------------------------------------------------------
-// SplitReader using KafkaMux
+// SplitReader using automatic global KafkaMux
 // -----------------------------------------------------------------------------
-
 pub struct KafkaMuxSplitReader {
-    splits: Vec<KafkaSplit>,
-    offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
-    backfill: HashMap<SplitId, BackfillInfo>,
-    data_rx: mpsc::Receiver<Arc<dyn Message>>,
+    data_rx: mpsc::Receiver<SourceMessage>,
     parser: ParserConfig,
     ctx: SourceContextRef,
+    //backfill_info: HashMap<SplitId, BackfillInfo>,
+    splits: Vec<KafkaSplit>,
 }
 
 #[async_trait]
@@ -192,59 +249,50 @@ impl SplitReader for KafkaMuxSplitReader {
     type Split = KafkaSplit;
 
     async fn new(
-        props: KafkaProperties,
+        properties: KafkaProperties,
         splits: Vec<KafkaSplit>,
         parser_cfg: ParserConfig,
-        ctx: SourceContextRef,
+        source_ctx: SourceContextRef,
         _cols: Option<Vec<Column>>,
     ) -> Result<Self> {
-        // compute offsets/backfill as before
-        let mut offsets = HashMap::new();
-        let mut backfill = HashMap::new();
-        for split in &splits {
-            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
-            // fetch watermarks...
-        }
         // register with global mux
-        let ctrl_tx = ctx.global_mux_control.clone();
+        let ctrl = ensure_global_mux();
         let (tx, data_rx) = mpsc::channel(1024);
-        ctrl_tx
-            .send(MuxControl::AddSplits {
-                epoch: ctx.checkpoint_epoch,
-                source: ctx.source_id,
-                splits: splits.clone(),
-            })
-            .await
-            .unwrap();
-        // ctx should store (topic,partition)->tx mapping for KafkaMux
+        let msg = AddSplitsMessage {
+            source: source_ctx.source_id.table_id as u64,
+            properties: properties.clone(),
+            splits: splits.clone(),
+            sender: tx,
+        };
+        ctrl.send(MuxControl::AddSplits(msg)).await.unwrap();
         Ok(KafkaMuxSplitReader {
-            splits,
-            offsets,
-            backfill,
             data_rx,
             parser: parser_cfg,
-            ctx,
+            ctx: source_ctx,
+            //backfill_info,
+            splits,
         })
     }
 
     fn into_stream(self) -> BoxSourceChunkStream {
-        into_chunk_stream(self.into_data_stream(), self.parser, self.ctx)
+        //into_chunk_stream(self.into_data_stream(), self.parser, self.ctx)
+        todo!()
     }
 
-    #[for_await]
-    async fn into_data_stream(self) {
-        while let Some(msg) = self.data_rx.recv().await {
-            let sm = SourceMessage::from_kafka_message(&*msg, false);
-            yield vec![sm];
-        }
-    }
+    // #[for_await]
+    // async fn into_data_stream(self) {
+    //     let mut rx = self.data_rx;
+    //     while let Some(msg) = rx.recv().await {
+    //         yield vec![msg];
+    //     }
+    // }
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
-        self.backfill.clone()
+        //self.backfill_info.clone()
+        todo!()
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
-        // optionally send RemoveSplits then AddSplits with new offsets
-        Ok(Vec::new())
+        todo!()
     }
 }
