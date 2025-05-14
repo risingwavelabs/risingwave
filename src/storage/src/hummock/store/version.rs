@@ -35,7 +35,8 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::vector_index::VectorIndexImpl;
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockObjectId, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::warn;
@@ -53,6 +54,7 @@ use crate::hummock::utils::{
     filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
     search_sst_idx,
 };
+use crate::hummock::vector::block::VectorBlock;
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
@@ -65,7 +67,10 @@ use crate::mem_table::{
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{ReadLogOptions, ReadOptions, gen_min_epoch};
+use crate::store::{
+    OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
+};
+use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -1120,5 +1125,43 @@ impl HummockVersionReader {
             ),
         )
         .await
+    }
+
+    pub async fn nearest<M: MeasureDistanceBuilder, O>(
+        &self,
+        version: PinnedVersion,
+        epoch: u64,
+        table_id: TableId,
+        target: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> HummockResult<Vec<O>> {
+        let Some(index) = version.vector_indexes.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        if target.dimension() != index.dimension {
+            return Err(HummockError::other(format!(
+                "target dimension {} not match index dimension {}",
+                target.dimension(),
+                index.dimension
+            )));
+        }
+        let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
+        match &index.inner {
+            VectorIndexImpl::Flat(flat) => {
+                for vector_file in &flat.vector_files {
+                    if vector_file.min_epoch > epoch {
+                        continue;
+                    }
+                    let path = self
+                        .sstable_store
+                        .get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
+                    let encoded = self.sstable_store.store().read(&path, ..).await?;
+                    let block = VectorBlock::decode(encoded.as_ref());
+                    builder.add(&block, &on_nearest_item_fn);
+                }
+            }
+        }
+        Ok(builder.finish())
     }
 }
