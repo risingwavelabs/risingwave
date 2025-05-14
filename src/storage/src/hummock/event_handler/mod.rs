@@ -33,6 +33,7 @@ pub mod refiller;
 pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;
+use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
@@ -106,6 +107,21 @@ pub enum HummockEvent {
         instance_id: LocalInstanceId,
     },
 
+    RegisterVectorWriter {
+        table_id: TableId,
+        init_epoch: HummockEpoch,
+    },
+
+    VectorWriterSealEpoch {
+        table_id: TableId,
+        next_epoch: HummockEpoch,
+        add: Option<VectorIndexAdd>,
+    },
+
+    DropVectorWriter {
+        table_id: TableId,
+    },
+
     GetMinUncommittedObjectId {
         result_tx: oneshot::Sender<Option<HummockRawObjectId>>,
     },
@@ -176,6 +192,9 @@ impl HummockEvent {
             HummockEvent::GetMinUncommittedObjectId { .. } => {
                 "GetMinUncommittedObjectId".to_owned()
             }
+            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter".to_owned(),
+            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch".to_owned(),
+            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
         }
     }
 }
