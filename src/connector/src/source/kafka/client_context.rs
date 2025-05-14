@@ -130,21 +130,18 @@ impl KafkaContextCommon {
             let credentials_provider = credentials_provider.clone();
             let rt = rt.clone();
             let signer_timeout_sec = *signer_timeout_sec;
-            let (token, expiration_time_ms) = {
-                let handle = thread::spawn(move || {
-                    rt.block_on(async {
-                        timeout(
-                            Duration::from_secs(signer_timeout_sec),
-                            generate_auth_token_from_credentials_provider(
-                                region,
-                                credentials_provider,
-                            ),
-                        )
-                        .await
-                    })
-                });
-                handle.join().unwrap()??
-            };
+            let join_result = tokio::task::spawn_blocking(move || {
+                rt.block_on(async {
+                    timeout(
+                        Duration::from_secs(signer_timeout_sec),
+                        generate_auth_token_from_credentials_provider(region, credentials_provider),
+                    )
+                    .await
+                })
+            });
+            let timeout_result = join_result.await?;
+            let inner_result = timeout_result?;
+            let (token, expiration_time_ms) = inner_result?;
             Ok(OAuthToken {
                 token,
                 principal_name: "".to_owned(),
