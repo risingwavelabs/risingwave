@@ -195,6 +195,8 @@ yup-oauth2 = "8.3"
 workspace-hack = { path = "../workspace-hack" }
 
 [build-dependencies]
+# Workaround for datafusion. Feel free to remove it if you can.
+# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 
 [dev-dependencies]
