@@ -28,6 +28,7 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
@@ -381,8 +382,8 @@ where
             // Note: all messages will be processed through this code path, making it the
             //       only necessary place to log errors.
             if let Err(error) = &result {
-                if cfg!(debug_assertions) {
-                    // In debug mode, we print the error with backtrace.
+                if cfg!(debug_assertions) && !Deployment::current().is_ci() {
+                    // For local debugging, we print the error with backtrace.
                     // It's useful only when:
                     // - no additional context is added to the error
                     // - backtrace is captured in the error
