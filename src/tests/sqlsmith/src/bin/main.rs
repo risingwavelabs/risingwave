@@ -69,6 +69,10 @@ struct TestOptions {
     /// Whether to run differential testing mode.
     #[clap(long)]
     differential_testing: bool,
+
+    /// Configuration to control weight.
+    #[clap(flatten)]
+    config: SqlWeightOptions,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -79,6 +83,33 @@ enum Commands {
 
     /// Run testing.
     Test(TestOptions),
+}
+
+#[derive(clap::Args, Clone, Debug, Default)]
+pub struct SqlWeightOptions {
+    /// Probability (0-100) of generating a WHERE clause.
+    #[clap(long, default_value = "50")]
+    pub where_clause_prob: u8,
+
+    /// Probability (0-100) of generating a GROUP BY clause.
+    #[clap(long, default_value = "50")]
+    pub group_by_prob: u8,
+
+    /// Probability (0-100) of using GROUPING SETS (only if GROUP BY is enabled).
+    #[clap(long, default_value = "10")]
+    pub grouping_sets_prob: u8,
+
+    /// Probability (0-100) of generating a HAVING clause (requires GROUP BY).
+    #[clap(long, default_value = "30")]
+    pub having_clause_prob: u8,
+
+    /// Probability (0-100) of generating SELECT DISTINCT instead of SELECT ALL.
+    #[clap(long, default_value = "10")]
+    pub distinct_prob: u8,
+
+    /// Probability (0-100) of using aggregate expressions (e.g., SUM, COUNT).
+    #[clap(long, default_value = "30")]
+    pub agg_func_prob: u8,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
