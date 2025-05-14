@@ -36,7 +36,7 @@ use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
 use crate::connector_common::{
     AwsAuthProps, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
-    RdKafkaPropertiesCommon,
+    RdKafkaPropertiesCommon, read_kafka_log_level,
 };
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -436,7 +436,9 @@ impl KafkaSinkWriter {
             .await?;
             let producer_ctx = RwProducerContext::new(ctx_common);
             // Generate the producer
-            c.create_with_context(producer_ctx).await?
+            c.set_log_level(read_kafka_log_level())
+                .create_with_context(producer_ctx)
+                .await?
         };
 
         Ok(KafkaSinkWriter {

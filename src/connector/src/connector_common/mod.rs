@@ -26,7 +26,7 @@ pub use common::{
 mod connection;
 pub use connection::{
     validate_connection, ConfluentSchemaRegistryConnection, Connection, IcebergConnection,
-    KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE,
+    KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level,
 };
 
 mod iceberg;
