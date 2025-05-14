@@ -1379,7 +1379,7 @@ pub async fn handle_create_table(
             // prevent user specified rate limit
             return Err(ErrorCode::NotSupported(
                 "source_rate_limit for iceberg table engine during table creation".to_owned(),
-                "Please remove source_rate_limit from WITH options. After table creation, you can ALTER TABLE SET source_rate_limit = ...".to_owned(),
+                "Please remove source_rate_limit from WITH options.".to_owned(),
             )
             .into());
         }

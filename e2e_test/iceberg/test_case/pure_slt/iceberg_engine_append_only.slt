@@ -117,7 +117,7 @@ db error: ERROR: Failed to run the query
 
 Caused by:
   Not supported: source_rate_limit for iceberg table engine during table creation
-HINT: Please remove source_rate_limit from WITH options. After table creation, you can ALTER TABLE SET source_rate_limit = ...
+HINT: Please remove source_rate_limit from WITH options.
 
 
 
@@ -143,8 +143,14 @@ with (
 
 sleep 2s
 
-statement ok
+statement error
 alter table datagen_t set source_rate_limit to 114514;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: public.datagen_t
+
 
 statement ok
 FLUSH;
