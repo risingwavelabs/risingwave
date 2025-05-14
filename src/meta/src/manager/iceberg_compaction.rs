@@ -87,7 +87,7 @@ pub struct IcebergCompactionHandle {
     handle_success: bool,
 
     /// The commit info of the iceberg compaction handle for recovery.
-    commit_info: Option<CommitInfo>,
+    commit_info: CommitInfo,
 }
 
 impl IcebergCompactionHandle {
@@ -95,7 +95,7 @@ impl IcebergCompactionHandle {
         sink_id: SinkId,
         inner: Arc<RwLock<IcebergCompactionManagerInner>>,
         metadata_manager: MetadataManager,
-        commit_info: Option<CommitInfo>,
+        commit_info: CommitInfo,
     ) -> Self {
         Self {
             sink_id,
@@ -147,11 +147,7 @@ impl Drop for IcebergCompactionHandle {
             // compaction task is sent.
             let mut guard = self.inner.write();
             if let Some(commit_info) = guard.iceberg_commits.get_mut(&self.sink_id) {
-                commit_info.set(self.commit_info.take().unwrap_or(CommitInfo {
-                    count: 0,
-                    next_compaction_time: Instant::now()
-                        + std::time::Duration::from_secs(MIN_COMPACTION_INTERVAL),
-                }));
+                commit_info.set(self.commit_info.clone());
             }
         }
     }
@@ -251,7 +247,7 @@ impl IcebergCompactionManager {
                     *sink_id,
                     self.inner.clone(),
                     self.metadata_manager.clone(),
-                    Some(commit_info.clone()),
+                    commit_info.clone(),
                 );
 
                 commit_info.set_processing();
