@@ -153,6 +153,7 @@ impl<const C: usize, P> TypedPrimitive<C, P> {
 
 pub type HummockSstableObjectId = TypedPrimitive<0, u64>;
 pub type HummockSstableId = TypedPrimitive<1, u64>;
+pub type HummockVectorFileId = TypedPrimitive<2, u64>;
 
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;

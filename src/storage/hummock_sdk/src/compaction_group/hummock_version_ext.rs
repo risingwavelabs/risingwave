@@ -700,7 +700,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         // apply to vector index
         apply_vector_index_delta(
             &mut self.vector_indexes,
-            version_delta.vector_index_delta.clone(),
+            &version_delta.vector_index_delta,
             &version_delta.removed_table_ids,
         );
     }
