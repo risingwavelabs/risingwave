@@ -20,6 +20,7 @@ use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
+use risingwave_sqlsmith::config::SqlWeightOptions;
 use risingwave_sqlsmith::print_function_table;
 use risingwave_sqlsmith::test_runners::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
@@ -85,33 +86,6 @@ enum Commands {
     Test(TestOptions),
 }
 
-#[derive(clap::Args, Clone, Debug, Default)]
-pub struct SqlWeightOptions {
-    /// Probability (0-100) of generating a WHERE clause.
-    #[clap(long, default_value = "50")]
-    pub where_clause_prob: u8,
-
-    /// Probability (0-100) of generating a GROUP BY clause.
-    #[clap(long, default_value = "50")]
-    pub group_by_prob: u8,
-
-    /// Probability (0-100) of using GROUPING SETS (only if GROUP BY is enabled).
-    #[clap(long, default_value = "10")]
-    pub grouping_sets_prob: u8,
-
-    /// Probability (0-100) of generating a HAVING clause (requires GROUP BY).
-    #[clap(long, default_value = "30")]
-    pub having_clause_prob: u8,
-
-    /// Probability (0-100) of generating SELECT DISTINCT instead of SELECT ALL.
-    #[clap(long, default_value = "10")]
-    pub distinct_prob: u8,
-
-    /// Probability (0-100) of using aggregate expressions (e.g., SUM, COUNT).
-    #[clap(long, default_value = "30")]
-    pub agg_func_prob: u8,
-}
-
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -146,7 +120,7 @@ async fn main() {
             .unwrap();
     }
     if let Some(outdir) = opt.generate {
-        generate(&client, &opt.testdata, opt.count, &outdir, None).await;
+        generate(&client, &opt.testdata, opt.count, &outdir, &opt.config, None).await;
     } else {
         run(&client, &opt.testdata, opt.count, None).await;
     }

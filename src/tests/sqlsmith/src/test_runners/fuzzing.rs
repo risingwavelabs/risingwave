@@ -16,6 +16,7 @@
 
 use tokio_postgres::Client;
 
+use crate::config::SqlWeightOptions;
 use crate::test_runners::utils::{
     create_base_tables, create_mviews, drop_mview_table, drop_tables, format_drop_mview,
     generate_rng, populate_tables, run_query, set_variable, test_batch_queries,
@@ -48,6 +49,7 @@ pub async fn generate(
     testdata: &str,
     count: usize,
     _outdir: &str,
+    config: &SqlWeightOptions,
     seed: Option<u64>,
 ) {
     let timeout_duration = 5;
