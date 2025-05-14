@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -401,7 +401,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_id: self.table_id,
             read_version_from_backup: read_backup,
             read_committed,
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+            cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
         if let Some((full_key, value)) = self
@@ -648,8 +648,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         let cache_policy = match &encoded_key_range {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheHint::Low),
-            _ => CachePolicy::Fill(CacheHint::Normal),
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(Hint::Low),
+            _ => CachePolicy::Fill(Hint::Normal),
         };
 
         let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
