@@ -78,7 +78,7 @@ impl MeasureDistanceBuilder for L1Distance {
     }
 }
 
-impl<'a> MeasureDistance<'a> for L1DistanceMeasure<'a> {
+impl<'a> MeasureDistance for L1DistanceMeasure<'a> {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
         // TODO: use some library with simd support
         let len = self.0.0.len();
@@ -106,7 +106,7 @@ impl MeasureDistanceBuilder for L2Distance {
     }
 }
 
-impl<'a> MeasureDistance<'a> for L2DistanceMeasure<'a> {
+impl<'a> MeasureDistance for L2DistanceMeasure<'a> {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
         // TODO: use some library with simd support
         let len = self.0.0.len();
@@ -132,7 +132,7 @@ impl MeasureDistanceBuilder for CosineDistance {
     }
 }
 
-impl<'a> MeasureDistance<'a> for CosineDistanceMeasure<'a> {
+impl<'a> MeasureDistance for CosineDistanceMeasure<'a> {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
         // TODO: use some library with simd support
         let len = self.target.0.len();
@@ -155,7 +155,7 @@ impl MeasureDistanceBuilder for InnerProductDistance {
     }
 }
 
-impl<'a> MeasureDistance<'a> for InnerProductDistanceMeasure<'a> {
+impl<'a> MeasureDistance for InnerProductDistanceMeasure<'a> {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
         // TODO: use some library with simd support
         let len = self.0.0.len();

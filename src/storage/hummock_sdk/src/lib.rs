@@ -62,6 +62,7 @@ use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 
 use crate::table_watermark::TableWatermarks;
+use crate::vector_index::VectorIndexAdd;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
 #[cfg_attr(any(test, feature = "test"), derive(Default))]
@@ -383,6 +384,7 @@ pub struct SyncResult {
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
     /// Sstable that holds the uncommitted old value
     pub old_value_ssts: Vec<LocalSstableInfo>,
+    pub vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
 }
 
 #[derive(Debug, Clone)]
