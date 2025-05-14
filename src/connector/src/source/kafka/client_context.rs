@@ -127,7 +127,7 @@ impl KafkaContextCommon {
         {
             let region = region.clone();
             let credentials_provider = credentials_provider.clone();
-            let rt = rt.clone();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let signer_timeout_sec = *signer_timeout_sec;
             let timeout_result = rt.block_on(async {
                 timeout(
