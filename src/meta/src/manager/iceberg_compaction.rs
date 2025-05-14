@@ -74,6 +74,10 @@ impl CommitInfo {
         self.count = commit_info.count;
         self.next_compaction_time = commit_info.next_compaction_time;
     }
+
+    fn increase_count(&mut self) {
+        self.count += 1;
+    }
 }
 
 pub struct IcebergCompactionHandle {
@@ -221,7 +225,7 @@ impl IcebergCompactionManager {
                 + std::time::Duration::from_secs(MIN_COMPACTION_INTERVAL),
         });
 
-        commit_info.count += 1;
+        commit_info.increase_count();
     }
 
     /// Get the top N iceberg commit sink ids
