@@ -198,7 +198,7 @@ impl HummockManager {
             .iter()
             .map(|t| {
                 object_sizes.get(t).copied().unwrap_or_else(|| {
-                    warn!(object_id = t, "unable to get size of removed object id");
+                    warn!(object_id = %t, "unable to get size of removed object id");
                     0
                 })
             })
@@ -206,7 +206,10 @@ impl HummockManager {
         stale_objects.insert(
             current_version.id,
             StaleObjects {
-                id: removed_object_ids.into_iter().collect(),
+                id: removed_object_ids
+                    .into_iter()
+                    .map(|object_id| object_id.inner())
+                    .collect(),
                 total_file_size,
             },
         );
@@ -229,7 +232,8 @@ impl HummockManager {
                 }
                 Some(object_ids.id.clone())
             })
-            .flatten();
+            .flatten()
+            .map(Into::into);
         self.gc_manager.add_may_delete_object_ids(may_delete_object);
         stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint {

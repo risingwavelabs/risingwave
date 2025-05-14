@@ -23,8 +23,7 @@ use risingwave_common::hash::{
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
-use risingwave_meta_model::{SourceId, StreamingParallelism, WorkerId};
+use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;

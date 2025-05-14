@@ -4720,9 +4720,9 @@ checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "fixedbitset"
-version = "0.5.0"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b51ee430d5ff16df7998870eb0b4775383ac5bc450f5a2ed547394fe2d617131"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flagset"
@@ -4829,8 +4829,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.16.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb25c56c00380bdfa22d7244500f4a622e112ff36b9cf8a9664d361e001ed80e"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -4849,8 +4850,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.16.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dcf6da77c0ebca8e9e12617053701418c1eb13f545f95ef92a88bc253e18aff"
 dependencies = [
  "ahash 0.8.11",
  "bincode 1.3.3",
@@ -4878,8 +4880,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.16.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5aebb1cb9c17f96fef00e6531e44bfa71766db89c9102703c46e52a0d821c19f"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -4903,8 +4906,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.16.1"
-source = "git+https://github.com/foyer-rs/foyer?rev=82168c1beb68c0835e82fe956ab6fcea73eef18b#82168c1beb68c0835e82fe956ab6fcea73eef18b"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7198d530656e979be993775019e40edc7adbefe00afce575c684b9ee48a9299"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -6044,7 +6048,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9c210b9#9c210b918619219b7a592ee5c65e0eae318e934e"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ddef529#ddef529728cbb4b4c4c12a1efd25612f72ad79fa"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6096,7 +6100,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9c210b9#9c210b918619219b7a592ee5c65e0eae318e934e"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ddef529#ddef529728cbb4b4c4c12a1efd25612f72ad79fa"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6113,7 +6117,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9c210b9#9c210b918619219b7a592ee5c65e0eae318e934e"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=ddef529#ddef529728cbb4b4c4c12a1efd25612f72ad79fa"
 dependencies = [
  "async-trait",
  "chrono",
@@ -10495,6 +10499,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
+ "risingwave_connector",
  "risingwave_ctl",
  "risingwave_expr_impl",
  "risingwave_frontend",
@@ -10548,7 +10553,7 @@ dependencies = [
  "enumflags2",
  "ethnum",
  "expect-test",
- "fixedbitset 0.5.0",
+ "fixedbitset 0.5.7",
  "foyer",
  "futures",
  "governor",
@@ -10637,7 +10642,7 @@ dependencies = [
  "bytes",
  "educe",
  "ethnum",
- "fixedbitset 0.5.0",
+ "fixedbitset 0.5.7",
  "jsonbb",
  "risingwave_common_proc_macro",
  "rust_decimal",
@@ -10882,6 +10887,7 @@ dependencies = [
  "base64 0.22.1",
  "byteorder",
  "bytes",
+ "cfg-if",
  "cfg-or-panic",
  "chrono",
  "clickhouse",
@@ -11241,7 +11247,7 @@ dependencies = [
  "enum-as-inner",
  "expect-test",
  "fancy-regex",
- "fixedbitset 0.5.0",
+ "fixedbitset 0.5.7",
  "futures",
  "futures-async-stream",
  "iana-time-zone",

@@ -239,6 +239,15 @@ impl stream_plan::MaterializeNode {
     }
 }
 
+impl stream_plan::SourceBackfillNode {
+    pub fn column_ids(&self) -> Vec<i32> {
+        self.columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+            .collect()
+    }
+}
+
 // Encapsulating the use of parallelism.
 impl common::WorkerNode {
     pub fn compute_node_parallelism(&self) -> usize {

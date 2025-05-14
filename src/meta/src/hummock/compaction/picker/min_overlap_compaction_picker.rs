@@ -60,7 +60,7 @@ impl MinOverlappingPicker {
                 continue;
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
-            overlap_info.update(sst);
+            overlap_info.update(&sst.key_range);
             let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
 
             if overlap_files_range.is_empty() {
@@ -274,7 +274,7 @@ impl NonOverlapSubLevelPicker {
 
             // reset the `basic_overlap_info` with basic sst
             let mut basic_overlap_info = self.overlap_strategy.create_overlap_info();
-            basic_overlap_info.update(sst);
+            basic_overlap_info.update(&sst.key_range);
 
             let mut overlap_files_range =
                 basic_overlap_info.check_multiple_include(&target_level.table_infos);
@@ -313,7 +313,7 @@ impl NonOverlapSubLevelPicker {
                     if level_handler.is_pending_compact(&other.sst_id) {
                         break 'expand_new_level;
                     }
-                    basic_overlap_info.update(other);
+                    basic_overlap_info.update(&other.key_range);
 
                     add_files_size += other.sst_size;
                     add_files_count += 1;
@@ -569,7 +569,7 @@ impl NonOverlapSubLevelPicker {
             }
 
             for sst in ssts {
-                overlap_info.as_mut().unwrap().update(sst);
+                overlap_info.as_mut().unwrap().update(&sst.key_range);
             }
         }
     }
@@ -1025,7 +1025,7 @@ pub mod tests {
         let overlap_strategy = Arc::new(RangeOverlapStrategy::default());
         let mut overlap_info = overlap_strategy.create_overlap_info();
         for sst in &select_files {
-            overlap_info.update(sst);
+            overlap_info.update(&sst.key_range);
         }
         let range = overlap_info.check_multiple_overlap(&levels[0].table_infos);
         assert!(range.is_empty());
