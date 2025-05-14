@@ -34,7 +34,7 @@ use itertools::Itertools;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVectorFileId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,8 @@ pub struct MetaSnapshotMetadata {
     /// It actually stores object id.
     /// Bad naming, which won't be changed due to compatibility issue.
     pub ssts: HashSet<HummockSstableObjectId>,
+    #[serde(default)]
+    pub vector_files: HashSet<HummockVectorFileId>,
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
@@ -70,6 +72,7 @@ impl MetaSnapshotMetadata {
             id,
             hummock_version_id: v.id,
             ssts: v.get_sst_object_ids(false),
+            vector_files: v.get_vector_file_ids().collect(),
             format_version,
             remarks,
             state_table_info: v

@@ -158,10 +158,19 @@ impl HummockManager {
             // the compiler will warn us if we forget to handle it here.
             match HummockObjectId::Sstable(0.into()) {
                 HummockObjectId::Sstable(_) => {}
+                HummockObjectId::VectorFile(_) => {}
             };
-            for sst in version_delta.newly_added_sst_infos(false) {
-                let object_id = HummockObjectId::Sstable(sst.object_id);
-                object_sizes.insert(object_id, sst.file_size);
+            for (object_id, file_size) in version_delta
+                .newly_added_sst_infos(false)
+                .map(|sst| (HummockObjectId::Sstable(sst.object_id), sst.file_size))
+                .chain(
+                    version_delta
+                        .vector_index_delta
+                        .values()
+                        .flat_map(|delta| delta.newly_added_objects()),
+                )
+            {
+                object_sizes.insert(object_id, file_size);
                 versions_object_ids.insert(object_id);
             }
         }
@@ -177,19 +186,23 @@ impl HummockManager {
                 })
             })
             .sum::<u64>();
-        stale_objects.insert(
-            current_version.id,
+        stale_objects.insert(current_version.id, {
+            let mut sst_ids = vec![];
+            let mut vector_file_ids = vec![];
+            for object_id in removed_object_ids {
+                match object_id {
+                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id.inner()),
+                    HummockObjectId::VectorFile(vector_file_id) => {
+                        vector_file_ids.push(vector_file_id.inner())
+                    }
+                }
+            }
             StaleObjects {
-                id: removed_object_ids
-                    .into_iter()
-                    .map(|object_id| {
-                        let HummockObjectId::Sstable(sst_id) = object_id;
-                        sst_id.inner()
-                    })
-                    .collect(),
+                id: sst_ids,
                 total_file_size,
-            },
-        );
+                vector_file_ids,
+            }
+        });
         if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
                 version: Some(PbHummockVersion::from(&old_checkpoint.version)),
