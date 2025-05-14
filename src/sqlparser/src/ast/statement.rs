@@ -25,7 +25,8 @@ use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    ColumnDef, CdcTableInfo, ObjectName, SqlOption, TableConstraint, display_comma_separated, display_separated,
+    CdcTableInfo, ColumnDef, ObjectName, SqlOption, TableConstraint, display_comma_separated,
+    display_separated,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IsOptional, Parser};
@@ -497,7 +498,7 @@ impl fmt::Display for CreateSourceStatement {
                 impl_fmt_display!(format_encode, v, self);
             }
         }
-        
+
         v.iter().join(" ").fmt(f)
     }
 }

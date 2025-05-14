@@ -2202,7 +2202,7 @@ impl Parser<'_> {
         // row format for nexmark source must be native
         // default row format for datagen source is native
         let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
-        
+
         // Check if source is created FROM another source
         let from_source = if self.parse_keyword(Keyword::FROM) {
             let source_name = self.parse_object_name()?;
@@ -2211,7 +2211,7 @@ impl Parser<'_> {
             } else {
                 None
             };
-            
+
             // Create a CdcTableInfo here instead of a tuple
             Some(CdcTableInfo {
                 source_name,
@@ -2221,8 +2221,6 @@ impl Parser<'_> {
             None
         };
 
-        
-       
         Ok(Statement::CreateSource {
             stmt: CreateSourceStatement {
                 temporary,

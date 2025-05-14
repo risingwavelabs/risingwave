@@ -1090,33 +1090,13 @@ pub(super) async fn handle_create_table_plan(
 
             let session = &handler_args.session;
             let db_name = &session.database();
-            let user_name = &session.user_name();
-            let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
             // cdc table cannot be append-only
-            let (shared_source_schema_name, shared_source_name) =
-                Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
-
-            let shared_source = {
-                let catalog_reader = session.env().catalog_reader().read_guard();
-                let schema_path =
-                    SchemaPath::new(shared_source_schema_name.as_deref(), &search_path, user_name);
-
-                let (source, _) = catalog_reader.get_source_by_name(
-                    db_name,
-                    schema_path,
-                    shared_source_name.as_str(),
-                )?;
-                source.clone()
-            };
-            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                &shared_source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (shared_source, cdc_with_options) = get_shared_source_info(&session, cdc_table)?;
 
             let (columns, pk_names) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
@@ -1183,7 +1163,34 @@ pub(super) async fn handle_create_table_plan(
     Ok((plan, source, table, job_type))
 }
 
+// Get (shared source catalog, cdc WITH option) from the source in `cdc_table`
+fn get_shared_source_info(
+    session: &SessionImpl,
+    cdc_table: &CdcTableInfo,
+) -> Result<(Arc<SourceCatalog>, WithOptionsSecResolved)> {
+    let db_name = &session.database();
+    let search_path = &session.config().search_path();
+    let user_name = &session.user_name();
 
+    let (shared_source_schema_name, shared_source_name) =
+        Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+
+    let shared_source = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path =
+            SchemaPath::new(shared_source_schema_name.as_deref(), search_path, user_name);
+
+        let (source, _) =
+            catalog_reader.get_source_by_name(db_name, schema_path, shared_source_name.as_str())?;
+        source.clone()
+    };
+    let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
+        &shared_source.with_properties,
+        cdc_table.external_table_name.clone(),
+    )?;
+
+    Ok((shared_source, cdc_with_options))
+}
 
 // For both table from cdc source and table with cdc connector
 fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
