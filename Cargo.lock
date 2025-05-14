@@ -780,7 +780,7 @@ version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06575e6a9673580f52661c92107baabffbf41e2141373441cbcdc47cb733003c"
 dependencies = [
- "bzip2 0.5.0",
+ "bzip2 0.5.2",
  "flate2",
  "futures-core",
  "memchr",
@@ -2141,12 +2141,11 @@ dependencies = [
 
 [[package]]
 name = "bzip2"
-version = "0.5.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bafdbf26611df8c14810e268ddceda071c297570a5fb360ceddf617fe417ef58"
+checksum = "49ecfb22d906f800d4fe833b6282cf4dc1c298f5057ca0b5445e5c209735ca47"
 dependencies = [
  "bzip2-sys",
- "libc",
 ]
 
 [[package]]
@@ -3234,7 +3233,7 @@ dependencies = [
  "async-compression",
  "async-trait",
  "bytes",
- "bzip2 0.5.0",
+ "bzip2 0.5.2",
  "chrono",
  "dashmap",
  "datafusion-catalog",
