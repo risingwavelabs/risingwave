@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use rdkafka::admin::{AdminClient, AdminOptions};
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
@@ -36,7 +36,7 @@ use crate::source::kafka::{
     RwConsumerContext,
 };
 
-type KafkaConsumer = BaseConsumer<RwConsumerContext>;
+type KafkaConsumer = StreamConsumer<RwConsumerContext>;
 type KafkaAdmin = AdminClient<RwConsumerContext>;
 
 /// Consumer client is shared, and the cache doesn't manage the lifecycle, so we store `Weak` and no eviction.
@@ -227,17 +227,6 @@ async fn build_kafka_client(
     let client_ctx = RwConsumerContext::new(ctx_common);
     let client: KafkaConsumer = config.create_with_context(client_ctx).await?;
 
-    // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
-    // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
-    // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
-    // of an initial token to occur.
-    // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
-    if properties.connection.is_aws_msk_iam() {
-        #[cfg(not(madsim))]
-        client.poll(Duration::from_secs(10)); // note: this is a blocking call
-        #[cfg(madsim)]
-        client.poll(Duration::from_secs(10)).await;
-    }
     Ok(Arc::new(client))
 }
 async fn build_kafka_admin(
