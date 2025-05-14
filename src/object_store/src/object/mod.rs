@@ -1032,6 +1032,10 @@ pub async fn build_remote_object_store(
             }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
         }
+        #[cfg(debug_assertions)]
+        "memory-isolated-for-test" /* isolated memory is only available for tests */ => {
+            ObjectStoreImpl::InMem(InMemObjectStore::for_test().monitored(metrics, config))
+        }
         #[cfg(madsim)]
         sim if sim.starts_with("sim://") => {
             ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics, config))
