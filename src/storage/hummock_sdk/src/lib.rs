@@ -17,6 +17,7 @@
 #![feature(let_chains)]
 #![feature(btree_cursors)]
 #![feature(strict_overflow_ops)]
+#![feature(map_try_insert)]
 
 mod key_cmp;
 
@@ -53,6 +54,7 @@ pub mod time_travel;
 pub mod version;
 pub use frontend_version::{FrontendHummockVersion, FrontendHummockVersionDelta};
 mod frontend_version;
+pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
