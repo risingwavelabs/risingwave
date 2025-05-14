@@ -37,9 +37,10 @@ use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_pb::hummock::{
-    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
-    compact_task,
+    PbHummockVersion, PbVectorIndexDelta, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, compact_task, vector_index_delta,
 };
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -216,7 +217,20 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sst_to_context,
                 new_table_fragment_infos,
                 change_log_delta: table_change_log,
-                vector_index_delta: Default::default(),
+                vector_index_delta: sync_result
+                    .vector_index_adds
+                    .into_iter()
+                    .map(|(table_id, adds)| {
+                        (
+                            table_id,
+                            PbVectorIndexDelta {
+                                delta: Some(vector_index_delta::Delta::Adds(PbVectorIndexAdds {
+                                    adds,
+                                })),
+                            },
+                        )
+                    })
+                    .collect(),
                 tables_to_commit: commit_table_ids
                     .iter()
                     .cloned()

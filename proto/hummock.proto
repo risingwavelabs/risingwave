@@ -187,6 +187,10 @@ enum DistanceType {
 
 message VectorFileInfo {
   uint64 object_id = 1;
+  uint64 min_epoch = 2;
+  uint64 max_epoch = 3;
+  uint32 vector_count = 4;
+  uint32 file_size = 5;
 }
 
 message FlatIndexConfig {}
