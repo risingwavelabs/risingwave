@@ -119,6 +119,10 @@ pub struct Args {
     #[clap(long)]
     generate_sqlsmith_queries: Option<String>,
 
+    /// Configuration to control weight.
+    #[clap(flatten)]
+    config: risingwave_sqlsmith::config::Configuration,
+
     /// Run sqlsmith for differential testing
     #[clap(long)]
     run_differential_tests: bool,
@@ -203,6 +207,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
+                        &args.config,
                         Some(seed),
                     )
                     .await;
@@ -213,6 +218,7 @@ async fn main() {
                         rw.pg_client(),
                         &args.files,
                         count,
+                        &args.config,
                         Some(seed),
                     )
                     .await
@@ -224,6 +230,7 @@ async fn main() {
                     rw.pg_client(),
                     &args.files,
                     count,
+                    &args.config,
                     Some(seed),
                 )
                 .await;

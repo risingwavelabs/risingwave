@@ -28,6 +28,8 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
+use crate::config::Configuration;
+
 mod dml;
 mod functions;
 mod query;
@@ -158,11 +160,13 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     // /// Count number of subquery.
     // /// We don't want too many per query otherwise it is hard to debug.
     // with_statements: u64,
+
+    config: Configuration,
 }
 
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
+    pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>, config: Configuration) -> Self {
         SqlGenerator {
             tables,
             rng,
@@ -171,10 +175,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_columns: vec![],
             is_mview: false,
             recursion_weight: 0.3,
+            config,
         }
     }
 
-    pub(crate) fn new_for_mview(rng: &'a mut R, tables: Vec<Table>) -> Self {
+    pub(crate) fn new_for_mview(rng: &'a mut R, tables: Vec<Table>, config: Configuration) -> Self {
         // distinct aggregate is not allowed for MV
         SqlGenerator {
             tables,
@@ -184,6 +189,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_columns: vec![],
             is_mview: true,
             recursion_weight: 0.3,
+            config,
         }
     }
 

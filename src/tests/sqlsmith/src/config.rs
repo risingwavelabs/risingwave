@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #[derive(clap::Args, Clone, Debug, Default)]
-pub struct SqlWeightOptions {
+pub struct Configuration {
     /// Probability (0-100) of generating a WHERE clause.
     #[clap(long, default_value = "50")]
     pub where_clause_prob: u8,
@@ -39,7 +39,7 @@ pub struct SqlWeightOptions {
     pub agg_func_prob: u8,
 }
 
-impl SqlWeightOptions {
+impl Configuration {
     /// Decide whether to generate something based on a probability (0-100).
     pub fn should_generate<R: rand::Rng>(rng: &mut R, prob: u8) -> bool {
         rng.random_range(0..100) < prob

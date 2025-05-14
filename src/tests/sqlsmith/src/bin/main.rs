@@ -20,7 +20,7 @@ use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
-use risingwave_sqlsmith::config::SqlWeightOptions;
+use risingwave_sqlsmith::config::Configuration;
 use risingwave_sqlsmith::print_function_table;
 use risingwave_sqlsmith::test_runners::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
@@ -73,7 +73,7 @@ struct TestOptions {
 
     /// Configuration to control weight.
     #[clap(flatten)]
-    config: SqlWeightOptions,
+    config: Configuration,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -115,13 +115,13 @@ async fn main() {
         }
     });
     if opt.differential_testing {
-        return run_differential_testing(&client, &opt.testdata, opt.count, None)
+        return run_differential_testing(&client, &opt.testdata, opt.count, &opt.config, None)
             .await
             .unwrap();
     }
     if let Some(outdir) = opt.generate {
         generate(&client, &opt.testdata, opt.count, &outdir, &opt.config, None).await;
     } else {
-        run(&client, &opt.testdata, opt.count, None).await;
+        run(&client, &opt.testdata, opt.count, &opt.config, None).await;
     }
 }

@@ -23,6 +23,7 @@ use tokio::time::{Duration, sleep, timeout};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::{Client, SimpleQueryMessage};
 
+use crate::config::Configuration;
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
@@ -38,8 +39,9 @@ pub(super) async fn update_base_tables<R: Rng>(
     rng: &mut R,
     base_tables: &[Table],
     inserts: &[Statement],
+    config: &Configuration
 ) {
-    let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
+    let update_statements = generate_update_statements(rng, base_tables, inserts, config).unwrap();
     for update_statement in update_statements {
         let sql = update_statement.to_string();
         tracing::info!("[EXECUTING UPDATES]: {}", &sql);
@@ -52,8 +54,9 @@ pub(super) async fn populate_tables<R: Rng>(
     rng: &mut R,
     base_tables: Vec<Table>,
     row_count: usize,
+    config: &Configuration
 ) -> Vec<Statement> {
-    let inserts = insert_sql_gen(rng, base_tables, row_count);
+    let inserts = insert_sql_gen(rng, base_tables, row_count, config);
     for insert in &inserts {
         tracing::info!("[EXECUTING INSERT]: {}", insert);
         client.simple_query(insert).await.unwrap();
@@ -78,6 +81,7 @@ pub(super) async fn test_sqlsmith<R: Rng>(
     tables: Vec<Table>,
     base_tables: Vec<Table>,
     row_count: usize,
+    config: &Configuration
 ) {
     // Test inserted rows should be at least 50% population count,
     // otherwise we don't have sufficient data in our system.
@@ -88,7 +92,7 @@ pub(super) async fn test_sqlsmith<R: Rng>(
     let threshold = 0.50; // permit at most 50% of queries to be skipped.
     let sample_size = 20;
 
-    let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
+    let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size, config)
         .await
         .unwrap();
     tracing::info!(
@@ -100,7 +104,7 @@ pub(super) async fn test_sqlsmith<R: Rng>(
         panic!("skipped batch queries exceeded threshold.");
     }
 
-    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size)
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size, config)
         .await
         .unwrap();
     tracing::info!(
@@ -149,11 +153,12 @@ pub(super) async fn test_batch_queries<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     sample_size: usize,
+    config: &Configuration
 ) -> Result<f64> {
     let mut skipped = 0;
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
-        let sql = sql_gen(rng, tables.clone());
+        let sql = sql_gen(rng, tables.clone(), config);
         tracing::info!("[TEST BATCH]: {}", sql);
         skipped += run_query(30, client, &sql).await?;
     }
@@ -166,12 +171,13 @@ pub(super) async fn test_stream_queries<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     sample_size: usize,
+    config: &Configuration,
 ) -> Result<f64> {
     let mut skipped = 0;
 
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
-        let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
+        let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query", config);
         tracing::info!("[TEST STREAM]: {}", sql);
         skipped += run_query(12, client, &sql).await?;
         tracing::info!("[TEST DROP MVIEW]: {}", &format_drop_mview(&table));
@@ -213,13 +219,14 @@ pub(super) async fn create_mviews(
     rng: &mut impl Rng,
     mvs_and_base_tables: Vec<Table>,
     client: &Client,
+    config: &Configuration,
 ) -> Result<(Vec<Table>, Vec<Table>)> {
     let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
     for i in 0..20 {
         let (create_sql, table) =
-            mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
+            mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i), config);
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
         let skip_count = run_query(6, client, &create_sql).await?;
         if skip_count == 0 {
