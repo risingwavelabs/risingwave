@@ -64,6 +64,7 @@ use super::init_selectors;
 use crate::hummock::HummockManager;
 use crate::hummock::compaction::CompactionSelector;
 use crate::hummock::error::{Error, Result};
+use crate::hummock::sequence::next_compaction_task_id;
 use crate::manager::MetaOpts;
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::rpc::metrics::MetaMetrics;
@@ -649,6 +650,9 @@ impl IcebergCompactionEventHandler {
                 // send iceberg commit task to compactor
                 if let Err(e) =
                     compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+                        task_id: next_compaction_task_id(&self.compaction_manager.env)
+                            .await
+                            .expect("get next compaction task id fail"),
                         props: sink_params.properties,
                     }))
                 {

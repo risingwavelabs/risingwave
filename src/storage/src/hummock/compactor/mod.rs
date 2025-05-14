@@ -598,7 +598,7 @@ pub fn start_compactor(
 
                                 if (max_task_parallelism
                                     - running_task_parallelism.load(Ordering::SeqCst))
-                                    < parallelism as u32
+                                    < parallelism
                                 {
                                     tracing::warn!(
                                         "Not enough core parallelism to serve the iceberg compaction task{} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
@@ -611,7 +611,7 @@ pub fn start_compactor(
                                 }
 
                                 running_task_parallelism
-                                    .fetch_add(parallelism as u32, Ordering::SeqCst);
+                                    .fetch_add(parallelism, Ordering::SeqCst);
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -623,7 +623,7 @@ pub fn start_compactor(
                                     .await;
 
                                     shutdown.lock().unwrap().remove(&task_id);
-                                    running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
+                                    running_task_parallelism.fetch_sub(parallelism, Ordering::SeqCst);
                                 });
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {

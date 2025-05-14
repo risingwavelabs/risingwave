@@ -22,7 +22,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
-ic-core = { git = "https://github.com/nimtable/IC.git", rev = "76fe2cf" }
+ic-core = { git = "https://github.com/nimtable/IC.git", rev = "5413259891919f631c81c2336b0b04c2da9d27b5" }
 iceberg = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"

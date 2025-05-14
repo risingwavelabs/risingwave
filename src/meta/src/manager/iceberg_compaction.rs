@@ -29,6 +29,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 
+use super::MetaSrvEnv;
 use crate::MetaResult;
 use crate::hummock::{
     IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
@@ -49,6 +50,7 @@ struct CommitInfo {
     first_commit_time: Instant,
 }
 pub struct IcebergCompactionManager {
+    pub env: MetaSrvEnv,
     iceberg_commits: RwLock<HashMap<SinkId, CommitInfo>>,
     metadata_manager: MetadataManager,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
@@ -60,6 +62,7 @@ pub struct IcebergCompactionManager {
 
 impl IcebergCompactionManager {
     pub fn build(
+        env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
@@ -68,6 +71,7 @@ impl IcebergCompactionManager {
             tokio::sync::mpsc::unbounded_channel();
         (
             Arc::new(Self {
+                env,
                 iceberg_commits: RwLock::new(HashMap::new()),
                 metadata_manager,
                 iceberg_compactor_manager,

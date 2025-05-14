@@ -274,7 +274,7 @@ pub async fn compactor_serve(
             hummock_meta_client.clone(),
             sstable_object_id_manager.clone(),
             compaction_catalog_manager_ref,
-            CompactorType::Iceberg,
+            CompactorType::Hummock,
         ),
     ];
 
