@@ -329,10 +329,16 @@ impl BackupManager {
                 // the compiler will warn us if we forget to handle it here.
                 match HummockObjectId::Sstable(0.into()) {
                     HummockObjectId::Sstable(_) => {}
+                    HummockObjectId::VectorFile(_) => {}
                 };
                 s.ssts
                     .iter()
                     .map(|sst_id| HummockObjectId::Sstable(*sst_id))
+                    .chain(
+                        s.vector_files
+                            .iter()
+                            .map(|vector_file_id| HummockObjectId::VectorFile(*vector_file_id)),
+                    )
             })
             .collect()
     }

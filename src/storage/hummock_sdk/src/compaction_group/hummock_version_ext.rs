@@ -37,12 +37,14 @@ use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
+use crate::vector_index::apply_vector_index_delta;
 use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
 use crate::{
-    CompactionGroupId, HummockObjectId, HummockSstableId, HummockSstableObjectId, can_concat,
+    CompactionGroupId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
+    HummockVectorFileId, can_concat,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -697,6 +699,13 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             &version_delta.state_table_info_delta,
             &changed_table_info,
         );
+
+        // apply to vector index
+        apply_vector_index_delta(
+            &mut self.vector_indexes,
+            &version_delta.vector_index_delta,
+            &version_delta.removed_table_ids,
+        );
     }
 
     pub fn apply_change_log_delta<T: Clone>(
@@ -964,15 +973,23 @@ where
             .collect()
     }
 
+    pub fn get_vector_file_ids(&self) -> impl Iterator<Item = HummockVectorFileId> + '_ {
+        self.vector_indexes
+            .values()
+            .flat_map(|index| index.get_objects().map(|(object_id, _)| object_id))
+    }
+
     pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockObjectId> {
         // DO NOT REMOVE THIS LINE
         // This is to ensure that when adding new variant to `HummockObjectId`,
         // the compiler will warn us if we forget to handle it here.
         match HummockObjectId::Sstable(0.into()) {
             HummockObjectId::Sstable(_) => {}
+            HummockObjectId::VectorFile(_) => {}
         };
         self.get_sst_infos(exclude_change_log)
             .map(|s| HummockObjectId::Sstable(s.object_id()))
+            .chain(self.get_vector_file_ids().map(HummockObjectId::VectorFile))
             .collect()
     }
 
@@ -1448,6 +1465,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
     // the compiler will warn us if we forget to handle it here.
     match HummockObjectId::Sstable(0.into()) {
         HummockObjectId::Sstable(_) => {}
+        HummockObjectId::VectorFile(_) => {}
     };
     version
         .levels
@@ -1468,6 +1486,11 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
             })
         }))
         .map(|(object_id, size)| (HummockObjectId::Sstable(object_id), size))
+        .chain(version.vector_indexes.values().flat_map(|index| {
+            index
+                .get_objects()
+                .map(|(vector_file_id, size)| (HummockObjectId::VectorFile(vector_file_id), size))
+        }))
         .collect()
 }
 
