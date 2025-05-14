@@ -2,7 +2,7 @@
 
 Read [Stream Engine][stream-engine] for more details about architecture.
 
-[stream-engine]: https://github.com/risingwavelabs/risingwave/blob/main/docs/streaming-overview.md
+[stream-engine]: https://github.com/risingwavelabs/risingwave/blob/main/docs/dev/src/design/streaming-overview.md
 
 ## Writing executor tests
 
