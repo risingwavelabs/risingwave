@@ -57,7 +57,7 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub async fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::new().monitored(
+        InMemObjectStore::for_test().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
             Arc::new(ObjectStoreConfig::default()),
         ),
