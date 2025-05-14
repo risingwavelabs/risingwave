@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
-use risingwave_pb::stream_plan::PbStreamNode;
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode};
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 pub mod prelude;
 
 pub mod actor;
-pub mod actor_dispatcher;
 pub mod catalog_version;
 pub mod cluster;
 pub mod compaction_config;
@@ -425,3 +424,41 @@ pub enum StreamingParallelism {
 }
 
 impl Eq for StreamingParallelism {}
+
+#[derive(
+    Hash, Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum DispatcherType {
+    #[sea_orm(string_value = "HASH")]
+    Hash,
+    #[sea_orm(string_value = "BROADCAST")]
+    Broadcast,
+    #[sea_orm(string_value = "SIMPLE")]
+    Simple,
+    #[sea_orm(string_value = "NO_SHUFFLE")]
+    NoShuffle,
+}
+
+impl From<PbDispatcherType> for DispatcherType {
+    fn from(val: PbDispatcherType) -> Self {
+        match val {
+            PbDispatcherType::Unspecified => unreachable!(),
+            PbDispatcherType::Hash => DispatcherType::Hash,
+            PbDispatcherType::Broadcast => DispatcherType::Broadcast,
+            PbDispatcherType::Simple => DispatcherType::Simple,
+            PbDispatcherType::NoShuffle => DispatcherType::NoShuffle,
+        }
+    }
+}
+
+impl From<DispatcherType> for PbDispatcherType {
+    fn from(val: DispatcherType) -> Self {
+        match val {
+            DispatcherType::Hash => PbDispatcherType::Hash,
+            DispatcherType::Broadcast => PbDispatcherType::Broadcast,
+            DispatcherType::Simple => PbDispatcherType::Simple,
+            DispatcherType::NoShuffle => PbDispatcherType::NoShuffle,
+        }
+    }
+}

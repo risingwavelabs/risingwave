@@ -94,19 +94,14 @@ ignored = [
     "serde_json",
     "linkme",
     "tempfile",
+    "cfg-if",
 ]
 [workspace.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
 
 [workspace.dependencies]
-# Switch to a crate-io version after new foyer version is released.
-# foyer = { version = "0.16.1", features = ["serde", "tracing", "nightly"] }
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "82168c1beb68c0835e82fe956ab6fcea73eef18b", features = [
-    "serde",
-    "tracing",
-    "nightly",
-] }
+foyer = { version = "0.17.1", features = ["serde", "tracing", "nightly"] }
 mixtrics = { version = "0.1", features = ["prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",

@@ -18,7 +18,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{DirectFsDeviceOptions, Engine, FifoPicker, HybridCacheBuilder, LargeEngineOptions};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -355,6 +355,19 @@ pub mod verify {
         }
     }
 
+    impl<A: StateStoreReadVector, E: StateStoreReadVector> StateStoreReadVector
+        for VerifyStateStore<A, E>
+    {
+        fn nearest<O: Send + 'static>(
+            &self,
+            vec: Vector,
+            options: VectorNearestOptions,
+            on_nearest_item_fn: impl OnNearestItemFn<O>,
+        ) -> impl StorageFuture<'_, Vec<O>> {
+            self.actual.nearest(vec, options, on_nearest_item_fn)
+        }
+    }
+
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
@@ -598,6 +611,7 @@ pub mod verify {
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
         type ReadSnapshot = VerifyStateStore<A::ReadSnapshot, E::ReadSnapshot>;
+        type VectorWriter = A::VectorWriter;
 
         fn try_wait_epoch(
             &self,
@@ -635,6 +649,13 @@ pub mod verify {
                 expected,
                 _phantom: PhantomData::<()>,
             })
+        }
+
+        fn new_vector_writer(
+            &self,
+            options: NewVectorWriterOptions,
+        ) -> impl Future<Output = Self::VectorWriter> + Send + '_ {
+            self.actual.new_vector_writer(options)
         }
     }
 
@@ -704,7 +725,10 @@ impl StateStoreImpl {
                                         + opts.meta_file_cache_reclaimers / 2,
                                 )
                                 .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB),
+                                .with_blob_index_size(16 * KB)
+                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                                    opts.meta_file_cache_fifo_probation_ratio,
+                                ))]),
                         );
                 }
             }
@@ -755,7 +779,10 @@ impl StateStoreImpl {
                                         + opts.data_file_cache_reclaimers / 2,
                                 )
                                 .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB),
+                                .with_blob_index_size(16 * KB)
+                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                                    opts.data_file_cache_fifo_probation_ratio,
+                                ))]),
                         );
                 }
             }
@@ -890,6 +917,7 @@ mod dyn_state_store {
     use crate::hummock::HummockStorage;
     use crate::store::*;
     use crate::store_impl::AsHummock;
+    use crate::vector::VectorDistance;
 
     #[async_trait::async_trait]
     pub trait DynStateStoreIter<T: IterItem>: Send {
@@ -1190,8 +1218,86 @@ mod dyn_state_store {
         }
     }
 
+    #[async_trait::async_trait]
+    pub trait DynStateStoreWriteVector: DynStateStoreWriteEpochControl + StaticSendSync {
+        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreWriteVector> DynStateStoreWriteVector for S {
+        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+            self.insert(vec, info)
+        }
+    }
+
+    pub type BoxDynStateStoreWriteVector = StateStorePointer<Box<dyn DynStateStoreWriteVector>>;
+
+    impl StateStoreWriteVector for BoxDynStateStoreWriteVector {
+        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+            self.0.insert(vec, info)
+        }
+    }
+
     // For global StateStore
 
+    #[async_trait::async_trait]
+    pub trait DynStateStoreReadVector: StaticSendSync {
+        async fn nearest(
+            &self,
+            vec: Vector,
+            options: VectorNearestOptions,
+        ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>>;
+    }
+
+    #[async_trait::async_trait]
+    impl<S: StateStoreReadVector> DynStateStoreReadVector for S {
+        async fn nearest(
+            &self,
+            vec: Vector,
+            options: VectorNearestOptions,
+        ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>> {
+            self.nearest(vec, options, |vec, distance, info| {
+                (
+                    Vector::clone_from_ref(vec),
+                    distance,
+                    Bytes::copy_from_slice(info),
+                )
+            })
+            .await
+        }
+    }
+
+    impl<P> StateStoreReadVector for StateStorePointer<P>
+    where
+        StateStorePointer<P>: AsRef<dyn DynStateStoreReadVector> + StaticSendSync,
+    {
+        async fn nearest<O: Send + 'static>(
+            &self,
+            vec: Vector,
+            options: VectorNearestOptions,
+            on_nearest_item_fn: impl OnNearestItemFn<O>,
+        ) -> StorageResult<Vec<O>> {
+            let output = self.as_ref().nearest(vec, options).await?;
+            Ok(output
+                .into_iter()
+                .map(|(vec, distance, info)| {
+                    on_nearest_item_fn(vec.to_ref(), distance, info.as_ref())
+                })
+                .collect())
+        }
+    }
+
+    pub trait DynStateStoreReadSnapshot:
+        DynStateStoreRead + DynStateStoreReadVector + StaticSendSync
+    {
+    }
+
+    impl<S: DynStateStoreRead + DynStateStoreReadVector + StaticSendSync> DynStateStoreReadSnapshot
+        for S
+    {
+    }
+
+    pub type StateStoreReadSnapshotDynRef = StateStorePointer<Arc<dyn DynStateStoreReadSnapshot>>;
     #[async_trait::async_trait]
     pub trait DynStateStoreExt: StaticSendSync {
         async fn try_wait_epoch(
@@ -1205,7 +1311,11 @@ mod dyn_state_store {
             &self,
             epoch: HummockReadEpoch,
             options: NewReadSnapshotOptions,
-        ) -> StorageResult<StateStoreReadDynRef>;
+        ) -> StorageResult<StateStoreReadSnapshotDynRef>;
+        async fn new_vector_writer(
+            &self,
+            options: NewVectorWriterOptions,
+        ) -> BoxDynStateStoreWriteVector;
     }
 
     #[async_trait::async_trait]
@@ -1226,10 +1336,17 @@ mod dyn_state_store {
             &self,
             epoch: HummockReadEpoch,
             options: NewReadSnapshotOptions,
-        ) -> StorageResult<StateStoreReadDynRef> {
+        ) -> StorageResult<StateStoreReadSnapshotDynRef> {
             Ok(StateStorePointer(Arc::new(
                 self.new_read_snapshot(epoch, options).await?,
             )))
+        }
+
+        async fn new_vector_writer(
+            &self,
+            options: NewVectorWriterOptions,
+        ) -> BoxDynStateStoreWriteVector {
+            StateStorePointer(Box::new(self.new_vector_writer(options).await))
         }
     }
 
@@ -1247,6 +1364,9 @@ mod dyn_state_store {
         };
     }
 
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreReadSnapshot>, DynStateStoreRead);
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreReadSnapshot>, DynStateStoreGet);
+    state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreReadSnapshot>, DynStateStoreReadVector);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
     state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynStateStoreGet);
@@ -1264,6 +1384,10 @@ mod dyn_state_store {
     }
 
     state_store_pointer_dyn_as_mut!(Box<dyn DynLocalStateStore>, DynStateStoreWriteEpochControl);
+    state_store_pointer_dyn_as_mut!(
+        Box<dyn DynStateStoreWriteVector>,
+        DynStateStoreWriteEpochControl
+    );
 
     #[derive(Clone)]
     pub struct StateStorePointer<P>(pub(crate) P);
@@ -1340,7 +1464,8 @@ mod dyn_state_store {
 
     impl StateStore for StateStoreDynRef {
         type Local = BoxDynLocalStateStore;
-        type ReadSnapshot = StateStoreReadDynRef;
+        type ReadSnapshot = StateStoreReadSnapshotDynRef;
+        type VectorWriter = BoxDynStateStoreWriteVector;
 
         fn try_wait_epoch(
             &self,
@@ -1363,6 +1488,13 @@ mod dyn_state_store {
             options: NewReadSnapshotOptions,
         ) -> StorageResult<Self::ReadSnapshot> {
             (*self.0).new_read_snapshot(epoch, options).await
+        }
+
+        fn new_vector_writer(
+            &self,
+            options: NewVectorWriterOptions,
+        ) -> impl Future<Output = Self::VectorWriter> + Send + '_ {
+            (*self.0).new_vector_writer(options)
         }
     }
 }

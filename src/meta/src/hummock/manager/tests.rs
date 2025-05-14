@@ -860,7 +860,7 @@ async fn test_trigger_manual_compaction() {
     }
 
     // No compaction task available.
-    let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
+    let compactor_manager_ref = hummock_manager.compactor_manager.clone();
     let receiver = compactor_manager_ref.add_compactor(context_id);
     {
         let option = ManualCompactionOption::default();
@@ -937,7 +937,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let context_id = worker_id as _;
     let sst_num = 2;
 
-    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    let compactor_manager = hummock_manager.compactor_manager.clone();
     let _tx = compactor_manager.add_compactor(context_id);
 
     let (join_handle, shutdown_tx) =
@@ -1072,7 +1072,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .unwrap()
         .unwrap();
 
-    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    let compactor_manager = hummock_manager.compactor_manager.clone();
     let _tx = compactor_manager.add_compactor(context_id);
 
     let (join_handle, shutdown_tx) =
