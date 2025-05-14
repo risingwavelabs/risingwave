@@ -27,6 +27,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
@@ -119,6 +120,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+        config.set_log_level(read_kafka_log_level());
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
         let mut scan_start_offset = match properties
