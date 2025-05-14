@@ -46,6 +46,7 @@ use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
@@ -63,7 +64,7 @@ use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, create_sink, create_source};
+use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -1340,7 +1341,7 @@ fn bind_cdc_table_schema(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1368,6 +1369,21 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
+    if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
+        // HACK: since we don't have atomic DDL, table with connector may lose data.
+        // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
+        if let Some(rate_limit) = handler_args.with_options.insert(
+            OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
+            "0".to_owned(),
+        ) {
+            // prevent user specified rate limit
+            return Err(ErrorCode::NotSupported(
+                "source_rate_limit for iceberg table engine during table creation".to_owned(),
+                "Please remove source_rate_limit from WITH options. After table creation, you can ALTER TABLE SET source_rate_limit = ...".to_owned(),
+            )
+            .into());
+        }
+    }
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
@@ -1709,11 +1725,21 @@ pub async fn create_iceberg_engine_table(
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic
+    let has_connector = source.is_some();
     catalog_writer
         .create_table(source, table, graph, TableJobType::General)
         .await?;
     create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await?;
     create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
+    if has_connector {
+        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+            handler_args,
+            PbThrottleTarget::TableWithSource,
+            table_name,
+            -1,
+        )
+        .await?;
+    }
 
     Ok(())
 }

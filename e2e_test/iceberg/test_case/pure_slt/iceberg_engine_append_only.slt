@@ -90,7 +90,37 @@ statement ok
 DROP TABLE full_type_t;
 
 
-# test connector with commit_checkpoint_interval
+# test connector
+
+statement error
+create table datagen_t (
+  id BIGINT,
+  item_name VARCHAR,
+  description VARCHAR,
+  initial_bid BIGINT,
+  reserve BIGINT,
+  date_time TIMESTAMP,
+  expires TIMESTAMP,
+  seller BIGINT,
+  category BIGINT,
+  extra VARCHAR)
+APPEND ONLY
+with (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = '1',
+  commit_checkpoint_interval = 1,
+  source_rate_limit = 1000
+) engine = iceberg;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: source_rate_limit for iceberg table engine during table creation
+HINT: Please remove source_rate_limit from WITH options. After table creation, you can ALTER TABLE SET source_rate_limit = ...
+
+
+
 statement ok
 create table datagen_t (
   id BIGINT,
@@ -114,12 +144,15 @@ with (
 sleep 2s
 
 statement ok
+alter table datagen_t set source_rate_limit to 114514;
+
+statement ok
 FLUSH;
 
 # Test that no data is missing:
 # For append only table, data is not written to hummock, but sink to iceberg table directly.
 # So atomic DDL should be used to avoid data loss.
-query ok
+query ??
 select min(id) from datagen_t;
 ----
 1
