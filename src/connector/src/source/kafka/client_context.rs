@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::thread;
 
 use anyhow::anyhow;
 use aws_config::Region;
@@ -130,7 +129,7 @@ impl KafkaContextCommon {
             let credentials_provider = credentials_provider.clone();
             let rt = rt.clone();
             let signer_timeout_sec = *signer_timeout_sec;
-            let join_result = tokio::task::spawn_blocking(move || {
+            let join_result = rt.clone().block_on(tokio::task::spawn_blocking(move || {
                 rt.block_on(async {
                     timeout(
                         Duration::from_secs(signer_timeout_sec),
@@ -138,8 +137,8 @@ impl KafkaContextCommon {
                     )
                     .await
                 })
-            });
-            let timeout_result = join_result.await?;
+            }));
+            let timeout_result = join_result?;
             let inner_result = timeout_result?;
             let (token, expiration_time_ms) = inner_result?;
             Ok(OAuthToken {
