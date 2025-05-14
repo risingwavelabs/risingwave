@@ -286,11 +286,8 @@ mod tests {
         // Should not start a compactor.
         assert!(standalone_opts.compactor_opts.is_none());
 
-        assert_eq(
-            standalone_opts
-                .meta_opts
-                .as_ref()
-                .unwrap()
+        assert_eq!(
+            (standalone_opts.meta_opts.as_ref().unwrap())
                 .state_store
                 .as_ref()
                 .unwrap(),
