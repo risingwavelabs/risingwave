@@ -268,6 +268,7 @@ impl LocalBarrierWorker {
         }
         self.reset_state(term_id);
         self.actor_manager.env.dml_manager_ref().clear();
+        self.actor_manager.env.client_pool().invalidate_all();
     }
 }
 
