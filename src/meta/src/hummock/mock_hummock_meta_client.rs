@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, ObjectIdRange, SyncResult,
@@ -215,7 +216,11 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sst_to_context,
                 new_table_fragment_infos,
                 change_log_delta: table_change_log,
-                vector_index_delta: Default::default(),
+                vector_index_delta: sync_result
+                    .vector_index_adds
+                    .into_iter()
+                    .map(|(table_id, adds)| (table_id, VectorIndexDelta::Adds(adds)))
+                    .collect(),
                 tables_to_commit: commit_table_ids
                     .iter()
                     .cloned()

@@ -31,6 +31,9 @@ use crate::{HummockObjectId, HummockVectorFileId};
 pub struct VectorFileInfo {
     pub object_id: HummockVectorFileId,
     pub file_size: u64,
+    pub min_epoch: u64,
+    pub max_epoch: u64,
+    pub vector_count: usize,
 }
 
 impl From<PbVectorFileInfo> for VectorFileInfo {
@@ -38,6 +41,9 @@ impl From<PbVectorFileInfo> for VectorFileInfo {
         Self {
             object_id: pb.object_id.into(),
             file_size: pb.file_size,
+            min_epoch: pb.min_epoch,
+            max_epoch: pb.max_epoch,
+            vector_count: pb.vector_count.try_into().unwrap(),
         }
     }
 }
@@ -47,6 +53,9 @@ impl From<VectorFileInfo> for PbVectorFileInfo {
         Self {
             object_id: info.object_id.inner(),
             file_size: info.file_size,
+            min_epoch: info.min_epoch,
+            max_epoch: info.max_epoch,
+            vector_count: info.vector_count.try_into().unwrap(),
         }
     }
 }

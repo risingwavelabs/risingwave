@@ -62,6 +62,7 @@ use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 
 use crate::table_watermark::TableWatermarks;
+use crate::vector_index::VectorIndexAdd;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
 #[cfg_attr(any(test, feature = "test"), derive(Default))]
@@ -158,23 +159,24 @@ pub type HummockSstableObjectId = TypedPrimitive<1, u64>;
 pub type HummockSstableId = TypedPrimitive<2, u64>;
 pub type HummockVectorFileId = TypedPrimitive<3, u64>;
 
-impl HummockSstableObjectId {
-    pub fn as_raw(&self) -> HummockRawObjectId {
-        HummockRawObjectId::new(self.0)
-    }
+macro_rules! impl_object_id {
+    ($type_name:ty) => {
+        impl $type_name {
+            pub fn as_raw(&self) -> HummockRawObjectId {
+                HummockRawObjectId::new(self.0)
+            }
+        }
+
+        impl From<HummockRawObjectId> for $type_name {
+            fn from(id: HummockRawObjectId) -> Self {
+                Self(id.0)
+            }
+        }
+    };
 }
 
-impl HummockVectorFileId {
-    pub fn as_raw(&self) -> HummockRawObjectId {
-        HummockRawObjectId::new(self.0)
-    }
-}
-
-impl From<HummockRawObjectId> for HummockSstableObjectId {
-    fn from(id: HummockRawObjectId) -> Self {
-        Self(id.0)
-    }
-}
+impl_object_id!(HummockSstableObjectId);
+impl_object_id!(HummockVectorFileId);
 
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;
@@ -382,6 +384,7 @@ pub struct SyncResult {
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
     /// Sstable that holds the uncommitted old value
     pub old_value_ssts: Vec<LocalSstableInfo>,
+    pub vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
 }
 
 #[derive(Debug, Clone)]
