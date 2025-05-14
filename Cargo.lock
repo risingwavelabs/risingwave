@@ -345,7 +345,7 @@ dependencies = [
  "arrow-data 53.4.1",
  "arrow-schema 53.4.1",
  "chrono",
- "half 2.3.1",
+ "half 2.6.0",
  "num",
 ]
 
@@ -375,7 +375,7 @@ dependencies = [
  "arrow-schema 53.4.1",
  "chrono",
  "chrono-tz",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.15.2",
  "num",
 ]
@@ -391,7 +391,7 @@ dependencies = [
  "arrow-data 54.2.1",
  "arrow-schema 54.2.1",
  "chrono",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.15.2",
  "num",
 ]
@@ -403,7 +403,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b5c681a99606f3316f2a99d9c8b6fa3aad0b1d34d8f6d7a1b471893940219d8"
 dependencies = [
  "bytes",
- "half 2.3.1",
+ "half 2.6.0",
  "num",
 ]
 
@@ -414,7 +414,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e899dade2c3b7f5642eb8366cfd898958bcca099cde6dfea543c7e8d3ad88d4"
 dependencies = [
  "bytes",
- "half 2.3.1",
+ "half 2.6.0",
  "num",
 ]
 
@@ -433,7 +433,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "comfy-table",
- "half 2.3.1",
+ "half 2.6.0",
  "lexical-core",
  "num",
  "ryu",
@@ -453,7 +453,7 @@ dependencies = [
  "atoi",
  "base64 0.22.1",
  "chrono",
- "half 2.3.1",
+ "half 2.6.0",
  "lexical-core",
  "num",
  "ryu",
@@ -486,7 +486,7 @@ checksum = "cd962fc3bf7f60705b25bcaa8eb3318b2545aa1d528656525ebdd6a17a6cd6fb"
 dependencies = [
  "arrow-buffer 53.4.1",
  "arrow-schema 53.4.1",
- "half 2.3.1",
+ "half 2.6.0",
  "num",
 ]
 
@@ -498,7 +498,7 @@ checksum = "0a329fb064477c9ec5f0870d2f5130966f91055c7c5bce2b3a084f116bc28c3b"
 dependencies = [
  "arrow-buffer 54.2.1",
  "arrow-schema 54.2.1",
- "half 2.3.1",
+ "half 2.6.0",
  "num",
 ]
 
@@ -561,7 +561,7 @@ dependencies = [
  "arrow-data 53.4.1",
  "arrow-schema 53.4.1",
  "chrono",
- "half 2.3.1",
+ "half 2.6.0",
  "indexmap 2.9.0",
  "lexical-core",
  "num",
@@ -580,7 +580,7 @@ dependencies = [
  "arrow-data 53.4.1",
  "arrow-schema 53.4.1",
  "arrow-select 53.4.1",
- "half 2.3.1",
+ "half 2.6.0",
  "num",
 ]
 
@@ -608,7 +608,7 @@ dependencies = [
  "arrow-buffer 53.4.1",
  "arrow-data 53.4.1",
  "arrow-schema 53.4.1",
- "half 2.3.1",
+ "half 2.6.0",
 ]
 
 [[package]]
@@ -621,7 +621,7 @@ dependencies = [
  "arrow-buffer 54.2.1",
  "arrow-data 54.2.1",
  "arrow-schema 54.2.1",
- "half 2.3.1",
+ "half 2.6.0",
 ]
 
 [[package]]
@@ -3299,7 +3299,7 @@ dependencies = [
  "arrow-array 53.4.1",
  "arrow-buffer 53.4.1",
  "arrow-schema 53.4.1",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.14.5",
  "indexmap 2.9.0",
  "libc",
@@ -3427,7 +3427,7 @@ dependencies = [
  "datafusion-macros",
  "datafusion-physical-expr",
  "datafusion-physical-expr-common",
- "half 2.3.1",
+ "half 2.6.0",
  "log",
  "paste",
 ]
@@ -3555,7 +3555,7 @@ dependencies = [
  "datafusion-expr-common",
  "datafusion-functions-aggregate-common",
  "datafusion-physical-expr-common",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.14.5",
  "indexmap 2.9.0",
  "itertools 0.13.0",
@@ -3617,7 +3617,7 @@ dependencies = [
  "datafusion-physical-expr",
  "datafusion-physical-expr-common",
  "futures",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.14.5",
  "indexmap 2.9.0",
  "itertools 0.13.0",
@@ -5581,9 +5581,9 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
 name = "half"
-version = "2.3.1"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc52e53916c08643f1b56ec082790d1e86a32e58dc5268f897f313fbae7b4872"
+checksum = "459196ed295495a68f7d7fe1d84f6c4b7ff0e21fe3017b2f283c6fac3ad803c9"
 dependencies = [
  "cfg-if",
  "crunchy",
@@ -8508,7 +8508,7 @@ dependencies = [
  "chrono",
  "flate2",
  "futures",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.15.2",
  "lz4_flex",
  "num",
@@ -8544,7 +8544,7 @@ dependencies = [
  "chrono",
  "flate2",
  "futures",
- "half 2.3.1",
+ "half 2.6.0",
  "hashbrown 0.15.2",
  "lz4_flex",
  "num",
