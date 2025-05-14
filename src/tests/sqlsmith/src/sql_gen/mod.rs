@@ -235,4 +235,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
         can_recurse
     }
+
+    fn should_generate(&mut self, prob: u8) -> bool {
+        self.rng.random_range(0..100) < prob
+    }
 }
