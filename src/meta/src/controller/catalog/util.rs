@@ -389,7 +389,7 @@ impl CatalogController {
             tracing::info!("cleaning dirty table sink downstream table {}", table_id);
             Table::update(table::ActiveModel {
                 table_id: Set(table_id as _),
-                incoming_sinks: Set(new_incoming_sinks.into()),
+                incoming_sinks: Set(new_incoming_sinks),
                 ..Default::default()
             })
             .exec(txn)
