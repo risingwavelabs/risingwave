@@ -45,6 +45,7 @@ pub enum LocalNotification {
     WorkerNodeDeleted(WorkerNode),
     WorkerNodeActivated(WorkerNode),
     SystemParamsChange(SystemParamsReader),
+    BatchParallelismChange,
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
     AdhocRecovery,

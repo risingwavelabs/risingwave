@@ -27,7 +27,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::controller::SqlMetaStore;
-use crate::manager::NotificationManagerRef;
+use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type SessionParamsControllerRef = Arc<SessionParamsController>;
@@ -110,6 +110,7 @@ impl SessionParamsController {
                 name
             )));
         };
+        let old_batch_parallelism = params_guard.batch_parallelism();
         // FIXME: use a real reporter
         let reporter = &mut ();
         let new_param = if let Some(value) = value {
@@ -122,7 +123,13 @@ impl SessionParamsController {
         param.value = Set(new_param.clone());
         param.update(&self.db).await?;
 
-        self.notify_workers(name.to_string(), new_param.clone());
+        let new_batch_parallelism = params_guard.batch_parallelism();
+        self.notify_workers(name.clone(), new_param.clone());
+        if old_batch_parallelism != new_batch_parallelism {
+            self.notification_manager
+                .notify_local_subscribers(LocalNotification::BatchParallelismChange)
+                .await;
+        }
 
         Ok(new_param)
     }
