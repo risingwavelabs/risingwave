@@ -566,10 +566,10 @@ impl CatalogController {
 
         // Check if the job is creating sink into table.
         if table_obj.is_none()
-            && let Some(target_table_id) = Sink::find_by_id(job_id)
+            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id)
                 .select_only()
                 .column(sink::Column::TargetTable)
-                .into_tuple::<TableId>()
+                .into_tuple::<Option<TableId>>()
                 .one(&txn)
                 .await?
         {
