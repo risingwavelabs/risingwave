@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
-chrono = { version = "0.4", default-features = false }
+chrono = { workspace = true }
 fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 jni = { version = "0.21.1", features = ["invocation"] }

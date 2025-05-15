@@ -23,7 +23,7 @@ async-trait = "0.1"
 auto_enums = { workspace = true }
 bytes = "1"
 # The feature setting is also used in src/expr/impl/src/udf/wasm.rs
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
@@ -44,8 +44,8 @@ linkme = { workspace = true }
 md5 = "0.7"
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
-openssl = "0.10"
-regex = "1"
+openssl = "0.10.72"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -57,13 +57,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
-smallvec = "1"
+smallvec = { workspace = true }
 sql-json-path = { version = "0.1", features = ["jsonbb"] }
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-runtime/remote
-tonic = { version = "0.12", optional = true }
+tonic = { version = "0.12.3", optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 
