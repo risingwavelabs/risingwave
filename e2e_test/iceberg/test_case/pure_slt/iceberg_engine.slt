@@ -101,7 +101,6 @@ create table datagen_t (
   seller BIGINT,
   category BIGINT,
   extra VARCHAR)
-APPEND ONLY
 with (
   connector = 'datagen',
   fields.id.kind = 'sequence',
