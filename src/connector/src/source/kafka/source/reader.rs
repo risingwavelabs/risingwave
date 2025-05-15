@@ -33,6 +33,7 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
+    build_kafka_client,
 };
 use crate::source::{
     BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
@@ -88,7 +89,7 @@ impl SplitReader for KafkaSplitReader {
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-            properties.aws_auth_props,
+            properties.aws_auth_props.clone(),
             properties.connection.is_aws_msk_iam(),
         )
         .await?;
@@ -99,6 +100,9 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+
+        // Use a `BaseConsumer` so it can poll to set up oauth token
+        let meta_data_consumer = build_kafka_client(&config, &properties).await?;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -117,7 +121,7 @@ impl SplitReader for KafkaSplitReader {
                 tpl.add_partition(split.topic.as_str(), split.partition);
             }
 
-            let (low, high) = consumer
+            let (low, high) = meta_data_consumer
                 .fetch_watermarks(
                     split.topic.as_str(),
                     split.partition,

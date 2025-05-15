@@ -212,7 +212,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 }
 
-async fn build_kafka_client(
+pub async fn build_kafka_client(
     config: &ClientConfig,
     properties: &KafkaProperties,
 ) -> ConnectorResult<Arc<KafkaConsumer>> {
