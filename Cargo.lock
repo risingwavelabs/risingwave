@@ -1826,7 +1826,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -4426,15 +4426,16 @@ dependencies = [
 
 [[package]]
 name = "elasticsearch"
-version = "8.17.0-alpha.1"
+version = "9.0.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52be486463ef0b89e45191803db146387d5f594c26a0c8790807bb3e988ec5f6"
+checksum = "ac56c5020df7eb14e32b0ffd300b510a99684ccd539a9fb8847abf2739cbac7b"
 dependencies = [
  "base64 0.22.1",
  "bytes",
  "dyn-clone",
  "flate2",
  "lazy_static",
+ "parking_lot 0.12.1",
  "percent-encoding",
  "reqwest 0.12.15",
  "rustc_version",
@@ -6200,7 +6201,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.61.0",
 ]
 
 [[package]]
