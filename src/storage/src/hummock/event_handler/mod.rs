@@ -33,6 +33,7 @@ pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdd;
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
@@ -105,6 +106,21 @@ pub enum HummockEvent {
         instance_id: LocalInstanceId,
     },
 
+    RegisterVectorWriter {
+        table_id: TableId,
+        init_epoch: HummockEpoch,
+    },
+
+    VectorWriterSealEpoch {
+        table_id: TableId,
+        next_epoch: HummockEpoch,
+        add: PbVectorIndexAdd,
+    },
+
+    DropVectorWriter {
+        table_id: TableId,
+    },
+
     GetMinUncommittedSstObjectId {
         result_tx: oneshot::Sender<Option<HummockSstableObjectId>>,
     },
@@ -168,9 +184,10 @@ impl HummockEvent {
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_owned(),
-            HummockEvent::GetMinUncommittedSstObjectId { .. } => {
-                "GetMinUncommittedSstObjectId".to_owned()
-            }
+            HummockEvent::GetMinUncommittedSstObjectId { .. } => "GetMinUncommittedSstObjectId".to_owned(),
+            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter".to_owned(),
+            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch".to_owned(),
+            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
         }
     }
 }

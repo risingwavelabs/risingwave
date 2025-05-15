@@ -58,6 +58,7 @@ pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdd;
 
 use crate::table_watermark::TableWatermarks;
 
@@ -263,6 +264,7 @@ pub struct SyncResult {
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
     /// Sstable that holds the uncommitted old value
     pub old_value_ssts: Vec<LocalSstableInfo>,
+    pub vector_index_adds: HashMap<TableId, Vec<PbVectorIndexAdd>>,
 }
 
 #[derive(Debug, Clone)]
