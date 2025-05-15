@@ -92,7 +92,7 @@ serde_default = "0.2"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-smallvec = "1"
+smallvec = { workspace = true }
 speedate = "0.15.0"
 stacker = "0.1"
 static_assertions = "1"

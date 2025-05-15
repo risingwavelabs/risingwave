@@ -203,6 +203,7 @@ sea-orm = { version = "~1.1", features = [
     "with-uuid",
 ] }
 sea-orm-migration = "~1.1"
+smallvec = "1.15"
 sqlx = { version = "0.8.2", default-features = false, features = [
     "bigdecimal",
     "chrono",
