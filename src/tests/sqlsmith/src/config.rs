@@ -40,11 +40,12 @@ impl Configuration {
     }
 
     /// Returns true if the feature is enabled and passes the random check.
+    /// If the feature is not configured, defaults to 50% chance.
     pub fn should_generate<R: Rng>(&self, feature: &str, rng: &mut R) -> bool {
-        if let Some(status) = self.config.get(feature) {
-            status.enabled && rng.random_range(0..100) < status.weight
-        } else {
-            true
+        match self.config.get(feature) {
+            Some(status) if status.enabled => rng.random_range(0..100) < status.weight,
+            Some(_) => false,
+            None => rng.random_bool(0.5),
         }
     }
 

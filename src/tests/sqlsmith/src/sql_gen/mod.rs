@@ -236,4 +236,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
         can_recurse
     }
+
+    /// Decide whether to generate on config.
+    pub(crate) fn should_generate(&mut self, feature: &str) -> bool {
+        self.config.should_generate(feature, self.rng)
+    }
 }

@@ -1,0 +1,9 @@
+where:
+  weight: 50
+  enabled: true
+agg:
+  weight: 50
+  enabled: true
+join:
+  weight: 75
+  enabled: true
