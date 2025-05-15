@@ -32,6 +32,12 @@ fn default_enabled() -> bool {
     true
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        Self::new("config.yml")
+    }
+}
+
 impl Configuration {
     pub fn new(path: &str) -> Configuration {
         let data = std::fs::read_to_string(path).unwrap();

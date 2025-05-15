@@ -120,7 +120,7 @@ pub struct Args {
     generate_sqlsmith_queries: Option<String>,
 
     /// Path to weight configuration file.
-    #[clap(long, default_value = "../../config.yml")]
+    #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
     weight_config_path: String,
 
     /// Run sqlsmith for differential testing
