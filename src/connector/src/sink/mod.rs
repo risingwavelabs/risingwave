@@ -100,7 +100,7 @@ pub use tracing;
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::WithPropertiesExt;
-use crate::connector_common::IcebergCompactionStat;
+use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -687,7 +687,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
-        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }

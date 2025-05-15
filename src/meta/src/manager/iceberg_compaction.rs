@@ -19,7 +19,7 @@ use std::time::Instant;
 use iceberg::table::Table;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_connector::connector_common::IcebergCompactionStat;
+use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -47,14 +47,11 @@ type CompactorChangeTx = UnboundedSender<(u32, Streaming<SubscribeIcebergCompact
 type CompactorChangeRx =
     UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-/// The minimum interval between two iceberg commits to be considered as a new commit.
-// TODO: remove this constant and use the config per sink
-const MIN_COMPACTION_INTERVAL: u64 = 3600;
-
 #[derive(Debug, Clone)]
 struct CommitInfo {
     count: usize,
     next_compaction_time: Instant,
+    compaction_interval: u64,
 }
 
 impl CommitInfo {
@@ -65,18 +62,26 @@ impl CommitInfo {
 
     fn initialize(&mut self) {
         self.count = 0;
-        // Reset next compaction time to 1 hour later
         self.next_compaction_time =
-            Instant::now() + std::time::Duration::from_secs(MIN_COMPACTION_INTERVAL);
+            Instant::now() + std::time::Duration::from_secs(self.compaction_interval);
     }
 
-    fn set(&mut self, commit_info: CommitInfo) {
+    fn replace(&mut self, commit_info: CommitInfo) {
         self.count = commit_info.count;
         self.next_compaction_time = commit_info.next_compaction_time;
+        self.compaction_interval = commit_info.compaction_interval;
     }
 
     fn increase_count(&mut self) {
         self.count += 1;
+    }
+
+    fn update_compaction_interval(&mut self, compaction_interval: u64) {
+        self.compaction_interval = compaction_interval;
+
+        // reset the next compaction time
+        self.next_compaction_time =
+            Instant::now() + std::time::Duration::from_secs(compaction_interval);
     }
 }
 
@@ -147,7 +152,7 @@ impl Drop for IcebergCompactionHandle {
             // compaction task is sent.
             let mut guard = self.inner.write();
             if let Some(commit_info) = guard.iceberg_commits.get_mut(&self.sink_id) {
-                commit_info.set(self.commit_info.clone());
+                commit_info.replace(self.commit_info.clone());
             }
         }
     }
@@ -192,14 +197,14 @@ impl IcebergCompactionManager {
 
     pub fn compaction_stat_loop(
         manager: Arc<Self>,
-        mut rx: UnboundedReceiver<IcebergCompactionStat>,
+        mut rx: UnboundedReceiver<IcebergSinkCompactionUpdate>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
                     Some(stat) = rx.recv() => {
-                        manager.record_iceberg_commit(stat.sink_id);
+                        manager.update_iceberg_commit_info(stat);
                     },
                     _ = &mut shutdown_rx => {
                         tracing::info!("Iceberg compaction manager is stopped");
@@ -212,16 +217,26 @@ impl IcebergCompactionManager {
         (join_handle, shutdown_tx)
     }
 
-    pub fn record_iceberg_commit(&self, sink_id: SinkId) {
+    pub fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
         let mut guard = self.inner.write();
 
+        let IcebergSinkCompactionUpdate {
+            sink_id,
+            compaction_interval,
+        } = msg;
+
+        // if the compaction interval is changed, we need to reset the commit info when the compaction task is sent of initialized
         let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
             count: 0,
             next_compaction_time: Instant::now()
-                + std::time::Duration::from_secs(MIN_COMPACTION_INTERVAL),
+                + std::time::Duration::from_secs(compaction_interval),
+            compaction_interval,
         });
 
         commit_info.increase_count();
+        if commit_info.compaction_interval != compaction_interval {
+            commit_info.update_compaction_interval(compaction_interval);
+        }
     }
 
     /// Get the top N iceberg commit sink ids

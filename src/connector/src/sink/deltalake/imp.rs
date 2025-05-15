@@ -43,7 +43,7 @@ use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
 
-use crate::connector_common::{AwsAuthProps, IcebergCompactionStat};
+use crate::connector_common::{AwsAuthProps, IcebergSinkCompactionUpdate};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
@@ -414,7 +414,7 @@ impl Sink for DeltaLakeSink {
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
-        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
