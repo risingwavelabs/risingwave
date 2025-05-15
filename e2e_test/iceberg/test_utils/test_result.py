@@ -22,11 +22,7 @@ def print_test_summary(results: List[TestResult]):
 
     # Print individual test results
     for result in results:
-        status = (
-            Color.GREEN + "PASSED" + Color.ENDC
-            if result.success
-            else Color.RED + "FAILED" + Color.ENDC
-        )
+        status = "PASSED" if result.success else "FAILED"
         duration_str = f"{result.duration.total_seconds():.2f}s"
         log(
             f"{result.name}: {status} ({duration_str})",

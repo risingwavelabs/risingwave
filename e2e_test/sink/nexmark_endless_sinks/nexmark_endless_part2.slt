@@ -2,6 +2,7 @@ include ../../nexmark/create_sources.slt.part
 
 include ../../streaming/nexmark/sinks/q4.slt.part
 include ../../streaming/nexmark/sinks/q5.slt.part
+include ../../streaming/nexmark/sinks/q6_group_top1.slt.part
 include ../../streaming/nexmark/sinks/q7.slt.part
 include ../../streaming/nexmark/sinks/q8.slt.part
 
@@ -12,6 +13,9 @@ drop sink nexmark_q4;
 
 statement ok
 drop sink nexmark_q5;
+
+statement ok
+drop sink nexmark_q6_group_top1;
 
 statement ok
 drop sink nexmark_q7;

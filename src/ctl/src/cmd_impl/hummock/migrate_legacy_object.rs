@@ -75,7 +75,7 @@ pub async fn migrate_legacy_object(
             from_to.push((legacy_path, new_path));
         } else {
             let object_id = get_object_id_from_path(&object.key);
-            let legacy_prefix = get_object_prefix(object_id, false);
+            let legacy_prefix = get_object_prefix(object_id.inner(), false);
             let legacy_path = get_sst_data_path(&legacy_prefix, source_dir, object_id);
             if object.key != legacy_path {
                 return Err(anyhow!(format!(
@@ -83,8 +83,11 @@ pub async fn migrate_legacy_object(
                     object.key, legacy_path
                 )));
             }
-            let new_path =
-                get_sst_data_path(&get_object_prefix(object_id, true), target_dir, object_id);
+            let new_path = get_sst_data_path(
+                &get_object_prefix(object_id.inner(), true),
+                target_dir,
+                object_id,
+            );
             from_to.push((legacy_path, new_path));
         }
         count += 1;

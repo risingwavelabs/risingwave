@@ -187,7 +187,7 @@ impl CompactTask {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .any(|sst| sst.sst_id != sst.object_id)
+            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
     }
 
     pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
@@ -457,7 +457,7 @@ impl From<&CompactTask> for PbCompactTask {
 #[derive(Clone, PartialEq, Default)]
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
-    pub sst_id_to_worker_id: HashMap<u64, u32>,
+    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, u32>,
 }
 
 impl From<PbValidationTask> for ValidationTask {
@@ -468,7 +468,11 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.clone(),
+            sst_id_to_worker_id: pb_validation_task
+                .sst_id_to_worker_id
+                .into_iter()
+                .map(|(object_id, worker_id)| (object_id.into(), worker_id))
+                .collect(),
         }
     }
 }
@@ -481,7 +485,11 @@ impl From<ValidationTask> for PbValidationTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            sst_id_to_worker_id: validation_task.sst_id_to_worker_id.clone(),
+            sst_id_to_worker_id: validation_task
+                .sst_id_to_worker_id
+                .into_iter()
+                .map(|(object_id, worker_id)| (object_id.inner(), worker_id))
+                .collect(),
         }
     }
 }
@@ -517,7 +525,11 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value.object_timestamps,
+            object_timestamps: value
+                .object_timestamps
+                .into_iter()
+                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
+                .collect(),
         }
     }
 }
@@ -533,7 +545,11 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value.object_timestamps,
+            object_timestamps: value
+                .object_timestamps
+                .into_iter()
+                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                .collect(),
         }
     }
 }

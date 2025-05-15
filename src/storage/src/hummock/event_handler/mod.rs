@@ -105,7 +105,7 @@ pub enum HummockEvent {
         instance_id: LocalInstanceId,
     },
 
-    GetMinUncommittedSstId {
+    GetMinUncommittedSstObjectId {
         result_tx: oneshot::Sender<Option<HummockSstableObjectId>>,
     },
 }
@@ -168,7 +168,9 @@ impl HummockEvent {
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_owned(),
-            HummockEvent::GetMinUncommittedSstId { .. } => "GetMinSpilledSstId".to_owned(),
+            HummockEvent::GetMinUncommittedSstObjectId { .. } => {
+                "GetMinUncommittedSstObjectId".to_owned()
+            }
         }
     }
 }

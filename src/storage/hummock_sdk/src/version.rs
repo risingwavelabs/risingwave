@@ -583,10 +583,7 @@ where
             .collect()
     }
 
-    pub fn newly_added_sst_ids(
-        &self,
-        exclude_table_change_log: bool,
-    ) -> HashSet<HummockSstableObjectId> {
+    pub fn newly_added_sst_ids(&self, exclude_table_change_log: bool) -> HashSet<HummockSstableId> {
         self.newly_added_sst_infos(exclude_table_change_log)
             .map(|sst| sst.sst_id())
             .collect()
@@ -827,7 +824,7 @@ where
 pub struct IntraLevelDeltaCommon<T> {
     pub level_idx: u32,
     pub l0_sub_level_id: u64,
-    pub removed_table_ids: HashSet<u64>,
+    pub removed_table_ids: HashSet<HummockSstableId>,
     pub inserted_table_infos: Vec<T>,
     pub vnode_partition_count: u32,
     pub compaction_group_version_id: u64,
@@ -857,7 +854,12 @@ where
         Self {
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
-            removed_table_ids: HashSet::from_iter(pb_intra_level_delta.removed_table_ids),
+            removed_table_ids: HashSet::from_iter(
+                pb_intra_level_delta
+                    .removed_table_ids
+                    .iter()
+                    .map(|sst_id| (*sst_id).into()),
+            ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .into_iter()
@@ -877,7 +879,11 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta.removed_table_ids.into_iter().collect(),
+            removed_table_ids: intra_level_delta
+                .removed_table_ids
+                .into_iter()
+                .map(|sst_id| sst_id.inner())
+                .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .into_iter()
@@ -900,7 +906,7 @@ where
             removed_table_ids: intra_level_delta
                 .removed_table_ids
                 .iter()
-                .cloned()
+                .map(|sst_id| sst_id.inner())
                 .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
@@ -922,7 +928,10 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: HashSet::from_iter(
-                pb_intra_level_delta.removed_table_ids.iter().cloned(),
+                pb_intra_level_delta
+                    .removed_table_ids
+                    .iter()
+                    .map(|sst_id| (*sst_id).into()),
             ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
@@ -939,7 +948,7 @@ impl IntraLevelDelta {
     pub fn new(
         level_idx: u32,
         l0_sub_level_id: u64,
-        removed_table_ids: HashSet<u64>,
+        removed_table_ids: HashSet<HummockSstableId>,
         inserted_table_infos: Vec<SstableInfo>,
         vnode_partition_count: u32,
         compaction_group_version_id: u64,
@@ -1083,9 +1092,17 @@ where
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct GroupDeltasCommon<T> {
     pub group_deltas: Vec<GroupDeltaCommon<T>>,
+}
+
+impl<T> Default for GroupDeltasCommon<T> {
+    fn default() -> Self {
+        Self {
+            group_deltas: vec![],
+        }
+    }
 }
 
 pub type GroupDeltas = GroupDeltasCommon<SstableInfo>;
