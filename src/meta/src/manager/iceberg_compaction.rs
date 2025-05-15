@@ -34,6 +34,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{
     IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
     IcebergCompactor, IcebergCompactorManagerRef,
@@ -107,7 +108,11 @@ impl IcebergCompactionHandle {
         }
     }
 
-    pub async fn send_compact_task(mut self, compactor: Arc<IcebergCompactor>) -> MetaResult<()> {
+    pub async fn send_compact_task(
+        mut self,
+        compactor: Arc<IcebergCompactor>,
+        env: &MetaSrvEnv,
+    ) -> MetaResult<()> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
         let prost_sink_catalog: PbSink = self
             .metadata_manager
@@ -119,6 +124,7 @@ impl IcebergCompactionHandle {
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+                task_id: next_compaction_task_id(env).await?,
                 props: param.properties,
             }));
 
@@ -159,6 +165,7 @@ struct IcebergCompactionManagerInner {
 }
 
 pub struct IcebergCompactionManager {
+    pub env: MetaSrvEnv,
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
 
     metadata_manager: MetadataManager,
@@ -181,7 +188,9 @@ impl IcebergCompactionManager {
         (
             Arc::new(Self {
                 env,
-                iceberg_commits: RwLock::new(HashMap::new()),
+                inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
+                    iceberg_commits: HashMap::default(),
+                })),
                 metadata_manager,
                 iceberg_compactor_manager,
                 compactor_streams_change_tx,

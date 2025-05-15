@@ -43,14 +43,12 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
     Event as IcebergRequestEvent, PullTask as IcebergPullTask,
 };
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
-};
-use risingwave_pb::iceberg_compaction::{
-    IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
 };
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
@@ -640,7 +638,10 @@ impl IcebergCompactionEventHandler {
 
             for handle in iceberg_compaction_handles {
                 // send iceberg commit task to compactor
-                if let Err(e) = handle.send_compact_task(compactor.clone()).await {
+                if let Err(e) = handle
+                    .send_compact_task(compactor.clone(), &self.compaction_manager.env)
+                    .await
+                {
                     tracing::warn!(
                         error = %e.as_report(),
                         "Failed to send iceberg commit task to {}",

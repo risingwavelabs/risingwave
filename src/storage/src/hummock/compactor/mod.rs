@@ -386,7 +386,10 @@ impl CompactionRequestSender {
                             .map(|sst| sst.into())
                             .collect(),
                         table_stats_change: to_prost_table_stats_map(table_stats),
-                        object_timestamps,
+                        object_timestamps: object_timestamps
+                            .iter()
+                            .map(|(object_id, timestamp)| (object_id.inner(), *timestamp))
+                            .collect(),
                     })),
                     create_at: SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
