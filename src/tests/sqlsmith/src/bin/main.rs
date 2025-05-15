@@ -71,9 +71,9 @@ struct TestOptions {
     #[clap(long)]
     differential_testing: bool,
 
-    /// Configuration to control weight.
+    /// Path to weight configuration file.
     #[clap(long, default_value = "../../config.yml")]
-    config_path: String,
+    weight_config_path: String,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -114,7 +114,7 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    let config = Configuration::new(&opt.config_path);
+    let config = Configuration::new(&opt.weight_config_path);
     if opt.differential_testing {
         return run_differential_testing(&client, &opt.testdata, opt.count, &config, None)
             .await

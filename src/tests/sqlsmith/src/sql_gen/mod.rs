@@ -160,6 +160,8 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     // /// Count number of subquery.
     // /// We don't want too many per query otherwise it is hard to debug.
     // with_statements: u64,
+
+    /// Configuration to control weight.
     config: Configuration,
 }
 
@@ -233,9 +235,5 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             }
         }
         can_recurse
-    }
-
-    fn should_generate(&mut self, prob: u8) -> bool {
-        self.rng.random_range(0..100) < prob
     }
 }
