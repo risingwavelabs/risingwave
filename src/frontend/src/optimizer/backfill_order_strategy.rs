@@ -364,11 +364,14 @@ mod common {
     }
 }
 
-// FIXME(kwannoel): we can flatten the strategy earlier
-/// We don't use query binder directly because its binding rules are different from a query.
-/// We only bind tables, materialized views and sources.
-/// Queries won't bind duplicate relations in the same query context.
-/// But backfill order strategy can have duplicate relations.
+/// We only bind tables and materialized views.
+/// We need to bind sources and indices in the future as well.
+/// For auto backfill strategy,
+/// if a cycle forms due to the same relation being scanned twice in the derived order,
+/// we won't generate any backfill order strategy.
+/// For fixed backfill strategy,
+/// for scans on the same relation id, even though they may be in different fragments,
+/// they will all share the same backfill order.
 pub fn plan_backfill_order_strategy(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
