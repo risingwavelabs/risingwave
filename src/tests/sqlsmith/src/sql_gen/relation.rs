@@ -37,7 +37,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
         if !self.should_generate("join") {
-            return self.gen_no_join()
+            return self.gen_no_join();
         }
         match self.rng.random_range(1..=3) {
             1..=2 => self

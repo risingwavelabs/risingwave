@@ -51,7 +51,7 @@ impl Configuration {
 
     pub fn set_weight(&mut self, feature: &str, weight: u8) {
         self.config
-            .entry(feature.to_string())
+            .entry(feature.to_owned())
             .or_insert_with(|| Status {
                 weight: 0,
                 enabled: true,
@@ -61,7 +61,7 @@ impl Configuration {
 
     pub fn set_enabled(&mut self, feature: &str, enabled: bool) {
         self.config
-            .entry(feature.to_string())
+            .entry(feature.to_owned())
             .or_insert_with(|| Status {
                 weight: 0,
                 enabled: true,

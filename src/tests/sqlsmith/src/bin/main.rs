@@ -72,7 +72,7 @@ struct TestOptions {
     differential_testing: bool,
 
     /// Path to weight configuration file.
-    #[clap(long, default_value = "../../config.yml")]
+    #[clap(long, default_value = "./config.yml")]
     weight_config_path: String,
 }
 
