@@ -328,14 +328,14 @@ impl CatalogController {
 
     pub(crate) async fn clean_dirty_sink_downstreams(
         txn: &DatabaseTransaction,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<Vec<TableId>> {
         // clean incoming sink from (table)
         // clean upstream fragment ids from (fragment)
         // clean stream node from (fragment)
         // clean upstream actor ids from (actor)
         let all_fragment_ids: Vec<FragmentId> = Fragment::find()
             .select_only()
-            .columns(vec![fragment::Column::FragmentId])
+            .column(fragment::Column::FragmentId)
             .into_tuple()
             .all(txn)
             .await?;
@@ -381,16 +381,20 @@ impl CatalogController {
 
         // no need to update, returning
         if new_table_incoming_sinks.is_empty() {
-            return Ok(false);
+            return Ok(vec![]);
         }
 
+        let mut updated_table_ids = vec![];
         for (table_id, new_incoming_sinks) in new_table_incoming_sinks {
             tracing::info!("cleaning dirty table sink downstream table {}", table_id);
-            Table::update_many()
-                .col_expr(table::Column::IncomingSinks, new_incoming_sinks.into())
-                .filter(table::Column::TableId.eq(table_id))
-                .exec(txn)
-                .await?;
+            Table::update(table::ActiveModel {
+                table_id: Set(table_id as _),
+                incoming_sinks: Set(new_incoming_sinks.into()),
+                ..Default::default()
+            })
+            .exec(txn)
+            .await?;
+            updated_table_ids.push(table_id);
 
             let fragments: Vec<(FragmentId, StreamNode, i32)> = Fragment::find()
                 .select_only()
@@ -417,8 +421,12 @@ impl CatalogController {
 
                     visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
                         if let Some(NodeBody::Union(_)) = node.node_body {
-                            node.input.retain_mut(|input| {
-                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body {
+                            node.input.retain_mut(|input| match &mut input.node_body {
+                                Some(NodeBody::Project(_)) => {
+                                    let body = input.input.iter().exactly_one().unwrap();
+                                    let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
+                                        unreachable!("expect merge node");
+                                    };
                                     if all_fragment_ids
                                         .contains(&(merge_node.upstream_fragment_id as i32))
                                     {
@@ -428,9 +436,19 @@ impl CatalogController {
                                             .insert(merge_node.upstream_fragment_id);
                                         false
                                     }
-                                } else {
-                                    false
                                 }
+                                Some(NodeBody::Merge(merge_node)) => {
+                                    if all_fragment_ids
+                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    {
+                                        true
+                                    } else {
+                                        dirty_upstream_fragment_ids
+                                            .insert(merge_node.upstream_fragment_id);
+                                        false
+                                    }
+                                }
+                                _ => false,
                             });
                         }
                         true
@@ -460,7 +478,7 @@ impl CatalogController {
             }
         }
 
-        Ok(true)
+        Ok(updated_table_ids)
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {
