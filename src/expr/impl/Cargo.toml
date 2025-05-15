@@ -44,7 +44,7 @@ linkme = { workspace = true }
 md5 = "0.7"
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
-openssl = "0.10"
+openssl = "0.10.72"
 regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }

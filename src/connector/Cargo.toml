@@ -91,7 +91,7 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
 ] }
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
-openssl = "0.10"
+openssl = "0.10.72"
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"

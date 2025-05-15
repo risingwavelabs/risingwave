@@ -43,7 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 workspace-hack = { path = "../workspace-hack" }
-yaml-rust = "0.4"
+yaml-rust = "0.4.5"
 
 [lints]
 workspace = true
