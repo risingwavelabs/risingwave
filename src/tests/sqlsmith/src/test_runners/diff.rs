@@ -44,7 +44,14 @@ pub async fn run_differential_testing(
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 50;
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table, config).await;
+    let inserts = populate_tables(
+        client,
+        &mut rng,
+        base_tables.clone(),
+        rows_per_table,
+        config,
+    )
+    .await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
@@ -78,7 +85,8 @@ async fn diff_stream_and_batch(
 ) -> Result<()> {
     // Generate some mviews
     let mview_name = format!("stream_{}", i);
-    let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name, config)?;
+    let (batch, stream, table) =
+        differential_sql_gen(rng, mvs_and_base_tables, &mview_name, config)?;
     diff_stream_and_batch_with_sqls(client, i, &batch, &stream, &mview_name, &table).await
 }
 

@@ -63,7 +63,14 @@ pub async fn generate(
 
     let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table, config).await;
+    let inserts = populate_tables(
+        client,
+        &mut rng,
+        base_tables.clone(),
+        rows_per_table,
+        config,
+    )
+    .await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
@@ -134,7 +141,13 @@ pub async fn generate(
 }
 
 /// e2e test runner for sqlsmith
-pub async fn run(client: &Client, testdata: &str, count: usize, config: &Configuration, seed: Option<u64>) {
+pub async fn run(
+    client: &Client,
+    testdata: &str,
+    count: usize,
+    config: &Configuration,
+    seed: Option<u64>,
+) {
     let mut rng = generate_rng(seed);
 
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
@@ -144,7 +157,14 @@ pub async fn run(client: &Client, testdata: &str, count: usize, config: &Configu
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 50;
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table, config).await;
+    let inserts = populate_tables(
+        client,
+        &mut rng,
+        base_tables.clone(),
+        rows_per_table,
+        config,
+    )
+    .await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)

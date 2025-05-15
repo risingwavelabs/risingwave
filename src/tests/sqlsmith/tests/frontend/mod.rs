@@ -25,8 +25,9 @@ use risingwave_frontend::{
     Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, handler,
 };
 use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlsmith::config::Configuration;
 use risingwave_sqlsmith::{
-    Table, is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen, config::Configuration,
+    Table, is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen,
 };
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
@@ -104,7 +105,12 @@ async fn create_tables(
 
     // Generate some mviews
     for i in 0..20 {
-        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i), &Configuration::default());
+        let (sql, table) = mview_sql_gen(
+            rng,
+            tables.clone(),
+            &format!("m{}", i),
+            &Configuration::default(),
+        );
         let sql: Arc<str> = Arc::from(sql);
         reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&format!("{};", &sql));
@@ -159,7 +165,12 @@ async fn test_stream_query(
         rng = SmallRng::seed_from_u64(seed);
     }
 
-    let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query", &Configuration::default());
+    let (sql, table) = mview_sql_gen(
+        &mut rng,
+        tables.clone(),
+        "stream_query",
+        &Configuration::default(),
+    );
     let sql: Arc<str> = Arc::from(sql);
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.

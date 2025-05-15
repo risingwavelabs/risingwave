@@ -39,7 +39,7 @@ pub(super) async fn update_base_tables<R: Rng>(
     rng: &mut R,
     base_tables: &[Table],
     inserts: &[Statement],
-    config: &Configuration
+    config: &Configuration,
 ) {
     let update_statements = generate_update_statements(rng, base_tables, inserts, config).unwrap();
     for update_statement in update_statements {
@@ -54,7 +54,7 @@ pub(super) async fn populate_tables<R: Rng>(
     rng: &mut R,
     base_tables: Vec<Table>,
     row_count: usize,
-    config: &Configuration
+    config: &Configuration,
 ) -> Vec<Statement> {
     let inserts = insert_sql_gen(rng, base_tables, row_count, config);
     for insert in &inserts {
@@ -81,7 +81,7 @@ pub(super) async fn test_sqlsmith<R: Rng>(
     tables: Vec<Table>,
     base_tables: Vec<Table>,
     row_count: usize,
-    config: &Configuration
+    config: &Configuration,
 ) {
     // Test inserted rows should be at least 50% population count,
     // otherwise we don't have sufficient data in our system.
@@ -153,7 +153,7 @@ pub(super) async fn test_batch_queries<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     sample_size: usize,
-    config: &Configuration
+    config: &Configuration,
 ) -> Result<f64> {
     let mut skipped = 0;
     for _ in 0..sample_size {

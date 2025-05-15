@@ -120,7 +120,15 @@ async fn main() {
             .unwrap();
     }
     if let Some(outdir) = opt.generate {
-        generate(&client, &opt.testdata, opt.count, &outdir, &opt.config, None).await;
+        generate(
+            &client,
+            &opt.testdata,
+            opt.count,
+            &outdir,
+            &opt.config,
+            None,
+        )
+        .await;
     } else {
         run(&client, &opt.testdata, opt.count, &opt.config, None).await;
     }

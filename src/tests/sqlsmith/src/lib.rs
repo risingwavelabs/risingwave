@@ -53,7 +53,12 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>, config: &Configuration) -
 }
 
 /// Generate `INSERT`
-pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize, config: &Configuration) -> Vec<String> {
+pub fn insert_sql_gen(
+    rng: &mut impl Rng,
+    tables: Vec<Table>,
+    count: usize,
+    config: &Configuration,
+) -> Vec<String> {
     let mut r#gen = SqlGenerator::new(rng, vec![], config.clone());
     tables
         .into_iter()
@@ -63,7 +68,12 @@ pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize, conf
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
-pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str, config: &Configuration) -> (String, Table) {
+pub fn mview_sql_gen<R: Rng>(
+    rng: &mut R,
+    tables: Vec<Table>,
+    name: &str,
+    config: &Configuration,
+) -> (String, Table) {
     let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
     let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
@@ -106,7 +116,7 @@ pub fn generate_update_statements<R: Rng>(
     rng: &mut R,
     tables: &[Table],
     inserts: &[Statement],
-    config: &Configuration
+    config: &Configuration,
 ) -> Result<Vec<Statement>> {
     let mut r#gen = SqlGenerator::new(rng, vec![], config.clone());
     r#gen.generate_update_statements(tables, inserts)
