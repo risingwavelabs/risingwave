@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
-use futures_async_stream::for_await;
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
@@ -20,14 +20,13 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
-    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
+    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, KafkaSplitReader,
+    RwConsumerContext,
 };
 use crate::source::{
     BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
     SplitMetaData, SplitReader, into_chunk_stream,
 };
-
-const DEFAULT_MAX_PARTS: usize = 512;
 
 static GLOBAL_MUX_CTRL: OnceLock<mpsc::Sender<MuxControl>> = OnceLock::new();
 
@@ -71,16 +70,21 @@ pub type ConsumerRef = Arc<StreamConsumer<RwConsumerContext>>;
 
 pub struct ConsumerInfo {
     consumer: ConsumerRef,
+
     assigned_splits: HashSet<SplitId>,
+    // unique cluster
 }
 
 // -----------------------------------------------------------------------------
 // KafkaMux: multiplex few consumers, demux messages to per-source channels
 // -----------------------------------------------------------------------------
 
+pub type InternalClusterId = u64;
 pub struct KafkaMuxReader<'a> {
     /// dynamic pool of consumers, initially empty
-    consumers: HashMap<SourceId, ConsumerInfo>,
+    consumers: HashMap<InternalClusterId, ConsumerInfo>,
+
+    cluster_mapping: HashMap<SourceId, InternalClusterId>,
 
     /// routes: (topic, partition) -> channel sender
     routes: Arc<RwLock<HashMap<(SourceId, String, i32), mpsc::Sender<SourceMessage>>>>,
@@ -97,6 +101,7 @@ impl<'a> KafkaMuxReader<'a> {
         let (message_tx, message_rx) = mpsc::channel(1024);
         KafkaMuxReader {
             consumers: Default::default(),
+            cluster_mapping: Default::default(),
             routes: Arc::new(Default::default()),
             control_rx,
             message_rx,
@@ -239,7 +244,7 @@ pub struct KafkaMuxSplitReader {
     data_rx: mpsc::Receiver<SourceMessage>,
     parser: ParserConfig,
     ctx: SourceContextRef,
-    //backfill_info: HashMap<SplitId, BackfillInfo>,
+    // backfill_info: HashMap<SplitId, BackfillInfo>,
     splits: Vec<KafkaSplit>,
 }
 
@@ -264,35 +269,31 @@ impl SplitReader for KafkaMuxSplitReader {
             splits: splits.clone(),
             sender: tx,
         };
+
         ctrl.send(MuxControl::AddSplits(msg)).await.unwrap();
         Ok(KafkaMuxSplitReader {
             data_rx,
             parser: parser_cfg,
             ctx: source_ctx,
-            //backfill_info,
+            // backfill_info,
             splits,
         })
     }
 
     fn into_stream(self) -> BoxSourceChunkStream {
-        //into_chunk_stream(self.into_data_stream(), self.parser, self.ctx)
-        todo!()
+        let parser_config = self.parser.clone();
+        let source_context = self.ctx.clone();
+
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
+}
 
-    // #[for_await]
-    // async fn into_data_stream(self) {
-    //     let mut rx = self.data_rx;
-    //     while let Some(msg) = rx.recv().await {
-    //         yield vec![msg];
-    //     }
-    // }
-
-    fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
-        //self.backfill_info.clone()
-        todo!()
-    }
-
-    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
-        todo!()
+impl KafkaMuxSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
+    async fn into_data_stream(self) {
+        let mut rx = self.data_rx;
+        while let Some(msg) = rx.recv().await {
+            yield vec![msg];
+        }
     }
 }
