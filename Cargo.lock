@@ -847,9 +847,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.40.0"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e23419d455dc57d3ae60a2f4278cf561fc74fe866e548e14d2b0ad3e1b8ca0b2"
+checksum = "2cf0ae68ffe9ef362127a2223b42f57104edb20a50429f8c6e058912212884f7"
 dependencies = [
  "base64 0.22.1",
  "bytes",
