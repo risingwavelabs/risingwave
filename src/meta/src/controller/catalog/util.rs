@@ -326,6 +326,7 @@ impl CatalogController {
         Ok(())
     }
 
+    /// Returns the IDs of tables whose catalogs have been updated.
     pub(crate) async fn clean_dirty_sink_downstreams(
         txn: &DatabaseTransaction,
     ) -> MetaResult<Vec<TableId>> {
