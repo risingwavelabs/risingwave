@@ -315,6 +315,16 @@ macro_rules! impl_connector_properties {
             )*
         }
 
+        impl ConnectorProperties {
+            pub fn kind(&self) -> &'static str {
+                match self {
+                    $(
+                        ConnectorProperties::$variant_name(_) => stringify!($variant_name),
+                    )*
+                }
+            }
+        }
+
         $(
             impl From<$prop_name> for ConnectorProperties {
                 fn from(prop: $prop_name) -> ConnectorProperties {
