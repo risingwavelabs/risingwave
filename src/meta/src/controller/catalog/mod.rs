@@ -248,8 +248,8 @@ impl CatalogController {
 
         let version = self
             .notify_frontend(
-                Operation::Add,
-                Info::ObjectGroup(PbObjectGroup {
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: vec![PbObject {
                         object_info: PbObjectInfo::Subscription(
                             ObjectModel(subscription, obj.unwrap()).into(),
@@ -426,11 +426,37 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let changed = Self::clean_dirty_sink_downstreams(&txn).await?;
+        let updated_table_ids = Self::clean_dirty_sink_downstreams(&txn).await?;
+        let updated_table_objs = if !updated_table_ids.is_empty() {
+            Table::find()
+                .find_also_related(Object)
+                .filter(table::Column::TableId.is_in(updated_table_ids))
+                .all(&txn)
+                .await?
+        } else {
+            vec![]
+        };
 
         if dirty_job_objs.is_empty() {
-            if changed {
+            if !updated_table_objs.is_empty() {
                 txn.commit().await?;
+
+                // Notify the frontend to update the table info.
+                self.notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects: updated_table_objs
+                            .into_iter()
+                            .map(|(t, obj)| PbObject {
+                                object_info: PbObjectInfo::Table(
+                                    ObjectModel(t, obj.unwrap()).into(),
+                                )
+                                .into(),
+                            })
+                            .collect(),
+                    }),
+                )
+                .await;
             }
 
             return Ok(vec![]);
@@ -530,6 +556,23 @@ impl CatalogController {
         let _version = self
             .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
+
+        // Notify the frontend to update the table info.
+        if !updated_table_objs.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_table_objs
+                        .into_iter()
+                        .map(|(t, obj)| PbObject {
+                            object_info: PbObjectInfo::Table(ObjectModel(t, obj.unwrap()).into())
+                                .into(),
+                        })
+                        .collect(),
+                }),
+            )
+            .await;
+        }
 
         Ok(dirty_associated_source_ids)
     }
