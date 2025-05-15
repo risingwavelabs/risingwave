@@ -148,7 +148,7 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub enable_compaction: bool,
 
-    /// The interval of iceberg compaction, default is 1 hour.
+    /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub compaction_interval: Option<u64>,
