@@ -122,7 +122,7 @@ redis = { workspace = true, features = [
     "cluster-async",
     "geospatial",
 ] }
-regex = "1.4"
+regex = { workspace = true }
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
