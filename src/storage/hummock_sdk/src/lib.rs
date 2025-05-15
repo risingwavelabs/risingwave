@@ -17,6 +17,7 @@
 #![feature(let_chains)]
 #![feature(btree_cursors)]
 #![feature(strict_overflow_ops)]
+#![feature(map_try_insert)]
 
 mod key_cmp;
 
@@ -53,6 +54,7 @@ pub mod time_travel;
 pub mod version;
 pub use frontend_version::{FrontendHummockVersion, FrontendHummockVersionDelta};
 mod frontend_version;
+pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
@@ -151,6 +153,7 @@ impl<const C: usize, P> TypedPrimitive<C, P> {
 
 pub type HummockSstableObjectId = TypedPrimitive<0, u64>;
 pub type HummockSstableId = TypedPrimitive<1, u64>;
+pub type HummockVectorFileId = TypedPrimitive<2, u64>;
 
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;

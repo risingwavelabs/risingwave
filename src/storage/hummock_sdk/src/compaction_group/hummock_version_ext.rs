@@ -37,6 +37,7 @@ use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
+use crate::vector_index::apply_vector_index_delta;
 use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
@@ -694,6 +695,13 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             &version_delta.removed_table_ids,
             &version_delta.state_table_info_delta,
             &changed_table_info,
+        );
+
+        // apply to vector index
+        apply_vector_index_delta(
+            &mut self.vector_indexes,
+            &version_delta.vector_index_delta,
+            &version_delta.removed_table_ids,
         );
     }
 

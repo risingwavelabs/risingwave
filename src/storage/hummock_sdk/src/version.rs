@@ -23,11 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::group_delta::{DeltaType, PbDeltaType};
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
-use risingwave_pb::hummock::{
-    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
-    PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta, PbNewL0SubLevel, PbSstableInfo,
-    PbStateTableInfo, StateTableInfo, StateTableInfoDelta,
-};
+use risingwave_pb::hummock::*;
 use tracing::warn;
 
 use crate::change_log::{
@@ -38,6 +34,7 @@ use crate::compaction_group::hummock_version_ext::build_initial_compaction_group
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
+use crate::vector_index::{VectorIndex, VectorIndexDelta};
 use crate::{
     CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockSstableId, HummockSstableObjectId,
     HummockVersionId,
@@ -232,6 +229,7 @@ pub struct HummockVersionCommon<T, L = T> {
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
+    pub vector_indexes: HashMap<TableId, VectorIndex>,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
@@ -337,6 +335,11 @@ where
             state_table_info: HummockVersionStateTableInfo::from_protobuf(
                 &pb_version.state_table_info,
             ),
+            vector_indexes: pb_version
+                .vector_indexes
+                .iter()
+                .map(|(table_id, index)| (table_id.into(), index.clone().into()))
+                .collect(),
         }
     }
 }
@@ -366,6 +369,11 @@ where
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
+            vector_indexes: version
+                .vector_indexes
+                .iter()
+                .map(|(table_id, index)| (table_id.table_id, index.clone().into()))
+                .collect(),
         }
     }
 }
@@ -396,6 +404,11 @@ where
                 .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
+            vector_indexes: version
+                .vector_indexes
+                .into_iter()
+                .map(|(table_id, index)| (table_id.table_id, index.into()))
+                .collect(),
         }
     }
 }
@@ -451,6 +464,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
+            vector_indexes: Default::default(),
         };
         for group_id in [
             StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -476,6 +490,7 @@ impl HummockVersion {
             removed_table_ids: HashSet::new(),
             change_log_delta: HashMap::new(),
             state_table_info_delta: Default::default(),
+            vector_index_delta: Default::default(),
         }
     }
 
@@ -524,6 +539,7 @@ pub struct HummockVersionDeltaCommon<T, L = T> {
     pub removed_table_ids: HashSet<TableId>,
     pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<L>>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
+    pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
 }
 
 pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
@@ -688,6 +704,11 @@ where
                 .iter()
                 .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
                 .collect(),
+            vector_index_delta: pb_version_delta
+                .vector_index_delta
+                .iter()
+                .map(|(table_id, delta)| (TableId::new(*table_id), delta.clone().into()))
+                .collect(),
         }
     }
 }
@@ -728,6 +749,11 @@ where
                 .iter()
                 .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
+            vector_index_delta: version_delta
+                .vector_index_delta
+                .iter()
+                .map(|(table_id, delta)| (table_id.table_id, delta.clone().into()))
+                .collect(),
         }
     }
 }
@@ -767,6 +793,11 @@ where
                 .state_table_info_delta
                 .into_iter()
                 .map(|(table_id, delta)| (table_id.table_id, delta))
+                .collect(),
+            vector_index_delta: version_delta
+                .vector_index_delta
+                .into_iter()
+                .map(|(table_id, delta)| (table_id.table_id, delta.into()))
                 .collect(),
         }
     }
@@ -815,6 +846,11 @@ where
                 .state_table_info_delta
                 .iter()
                 .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
+                .collect(),
+            vector_index_delta: pb_version_delta
+                .vector_index_delta
+                .into_iter()
+                .map(|(table_id, delta)| (TableId::new(table_id), delta.into()))
                 .collect(),
         }
     }
@@ -1206,6 +1242,7 @@ impl From<HummockVersionDelta> for LocalHummockVersionDelta {
                 })
                 .collect(),
             state_table_info_delta: delta.state_table_info_delta,
+            vector_index_delta: delta.vector_index_delta,
         }
     }
 }
@@ -1235,6 +1272,7 @@ impl From<HummockVersion> for LocalHummockVersion {
                 })
                 .collect(),
             state_table_info: version.state_table_info,
+            vector_indexes: version.vector_indexes,
         }
     }
 }

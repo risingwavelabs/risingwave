@@ -88,6 +88,7 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
             // time travel metadata doesn't include table change log
             table_change_log: HashMap::default(),
             state_table_info: version.state_table_info.clone(),
+            vector_indexes: version.vector_indexes.clone(),
         }
     }
 }
@@ -164,6 +165,7 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
                 })
                 .collect(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
+            vector_index_delta: delta.vector_index_delta.clone(),
         }
     }
 }
