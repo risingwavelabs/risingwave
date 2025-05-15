@@ -120,8 +120,8 @@ pub struct Args {
     generate_sqlsmith_queries: Option<String>,
 
     /// Configuration to control weight.
-    #[clap(flatten)]
-    config: risingwave_sqlsmith::config::Configuration,
+    #[clap(long, default_value = "../../config.yml")]
+    weight_config_path: String,
 
     /// Run sqlsmith for differential testing
     #[clap(long)]
@@ -195,6 +195,7 @@ async fn main() {
     }
 
     let seed = sqlsmith_seed();
+    let weight_config = risingwave_sqlsmith::config::Configuration::new(&args.weight_config_path);
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -207,7 +208,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
-                        &args.config,
+                        &weight_config,
                         Some(seed),
                     )
                     .await;
@@ -218,7 +219,7 @@ async fn main() {
                         rw.pg_client(),
                         &args.files,
                         count,
-                        &args.config,
+                        &weight_config,
                         Some(seed),
                     )
                     .await
@@ -230,7 +231,7 @@ async fn main() {
                     rw.pg_client(),
                     &args.files,
                     count,
-                    &args.config,
+                    &weight_config,
                     Some(seed),
                 )
                 .await;

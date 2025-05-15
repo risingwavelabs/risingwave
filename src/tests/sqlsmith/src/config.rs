@@ -12,21 +12,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[derive(clap::Args, Clone, Debug, Default)]
+use std::collections::BTreeMap;
+
+use rand::Rng;
+use serde::Deserialize;
+#[derive(Clone, Debug, Deserialize)]
 pub struct Configuration {
-    /// Probability (0-100) of generating a WHERE clause.
-    #[clap(long, default_value = "50")]
-    pub where_clause_prob: u8,
+    pub config: BTreeMap<String, Status>,
+}
 
-    /// Probability (0-100) of using GROUPING SETS (only if GROUP BY is enabled).
-    #[clap(long, default_value = "10")]
-    pub grouping_sets_prob: u8,
+#[derive(Clone, Debug, Deserialize)]
+pub struct Status {
+    pub weight: u8,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
 
-    /// Probability (0-100) of generating a HAVING clause (requires GROUP BY).
-    #[clap(long, default_value = "50")]
-    pub having_clause_prob: u8,
+fn default_enabled() -> bool {
+    true
+}
 
-    /// Probability (0-100) of using aggregate expressions (e.g., SUM, COUNT).
-    #[clap(long, default_value = "50")]
-    pub agg_func_prob: u8,
+impl Configuration {
+    pub fn new(path: &str) -> Configuration {
+        let data = std::fs::read_to_string(path).unwrap();
+        let config: Configuration = serde_yaml::from_str(&data).unwrap();
+        config
+    }
+
+    /// Returns true if the feature is enabled and passes the random check.
+    pub fn should_generate<R: Rng>(&self, feature: &str, rng: &mut R) -> bool {
+        if let Some(status) = self.config.get(feature) {
+            status.enabled && rng.random_range(0..100) < status.weight
+        } else {
+            true
+        }
+    }
+
+    pub fn set_weight(&mut self, feature: &str, weight: u8) {
+        self.config
+            .entry(feature.to_string())
+            .or_insert_with(|| Status {
+                weight: 0,
+                enabled: true,
+            })
+            .weight = weight;
+    }
+
+    pub fn set_enabled(&mut self, feature: &str, enabled: bool) {
+        self.config
+            .entry(feature.to_string())
+            .or_insert_with(|| Status {
+                weight: 0,
+                enabled: true,
+            })
+            .enabled = enabled;
+    }
 }

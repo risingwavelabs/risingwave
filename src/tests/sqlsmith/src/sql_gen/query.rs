@@ -195,7 +195,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
-        let can_agg = self.should_generate(self.config.agg_func_prob);
+        let can_agg = self.flip_coin();
         let context = SqlGeneratorContext::new_with_can_agg(can_agg);
         (0..num_select_items)
             .map(|i| self.gen_select_item(i, context))
@@ -249,7 +249,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
-        if self.should_generate(self.config.where_clause_prob) {
+        if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {
@@ -261,15 +261,17 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_group_by(&mut self) -> Vec<Expr> {
         // 90% generate simple group by.
         // 10% generate grouping sets.
-        if self.should_generate(self.config.grouping_sets_prob) {
-            self.gen_grouping_sets()
-        } else {
-            let group_by_cols = self.gen_random_bound_columns();
-            self.bound_columns.clone_from(&group_by_cols);
-            group_by_cols
-                .into_iter()
-                .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
-                .collect_vec()
+        match self.rng.random_range(0..=9) {
+            0..=8 => {
+                let group_by_cols = self.gen_random_bound_columns();
+                self.bound_columns.clone_from(&group_by_cols);
+                group_by_cols
+                    .into_iter()
+                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
+                    .collect_vec()
+            }
+            9 => self.gen_grouping_sets(),
+            _ => unreachable!(),
         }
     }
 
@@ -318,7 +320,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
-        if have_group_by & self.should_generate(self.config.having_clause_prob) {
+        if have_group_by & self.flip_coin() {
             let context = SqlGeneratorContext::new();
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {
