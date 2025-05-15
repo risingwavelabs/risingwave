@@ -8902,6 +8902,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
+dependencies = [
+ "fixedbitset 0.5.7",
+ "hashbrown 0.15.2",
+ "indexmap 2.9.0",
+ "serde",
+]
+
+[[package]]
 name = "pg_bigdecimal"
 version = "0.1.5"
 source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=0b7893d88894ca082b4525f94f812da034486f7c#0b7893d88894ca082b4525f94f812da034486f7c"
@@ -11450,7 +11462,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
- "petgraph 0.7.1",
+ "petgraph 0.8.1",
  "pgwire",
  "pin-project-lite",
  "postgres-types",
