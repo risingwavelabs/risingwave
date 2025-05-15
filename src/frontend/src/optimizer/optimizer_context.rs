@@ -199,6 +199,10 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn is_explain_backfill(&self) -> bool {
+        self.explain_options.backfill
+    }
+
     pub fn explain_type(&self) -> ExplainType {
         self.explain_options.explain_type.clone()
     }
