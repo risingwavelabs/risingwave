@@ -66,7 +66,7 @@ echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'pg-native'
 sleep 1
 
 echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
@@ -105,7 +105,7 @@ echo "--- testing remote sinks"
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'jdbc'
 sleep 1
 
 # check sink destination mysql using shell
