@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 itertools = { workspace = true }
 rand = { version = "0.9", features = ["small_rng"] }

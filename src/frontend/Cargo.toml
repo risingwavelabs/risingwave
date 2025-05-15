@@ -19,7 +19,7 @@ axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
-chrono = { version = "0.4", default-features = false }
+chrono = { workspace = true }
 clap = { workspace = true }
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"

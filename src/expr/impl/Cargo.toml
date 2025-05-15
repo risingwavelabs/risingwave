@@ -23,7 +23,7 @@ async-trait = "0.1"
 auto_enums = { workspace = true }
 bytes = "1"
 # The feature setting is also used in src/expr/impl/src/udf/wasm.rs
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
