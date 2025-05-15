@@ -29,7 +29,7 @@ bytes = { version = "1", features = ["serde"] }
 crc32fast = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = { version = "0.14", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
+hyper = { version = "0.14.27", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 itertools = { workspace = true }
 madsim = "0.2.31"
