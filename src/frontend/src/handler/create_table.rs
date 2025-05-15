@@ -1372,7 +1372,7 @@ pub async fn handle_create_table(
     if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
         // HACK: since we don't have atomic DDL, table with connector may lose data.
         // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
-        if let Some(rate_limit) = handler_args.with_options.insert(
+        if let Some(_rate_limit) = handler_args.with_options.insert(
             OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
             "0".to_owned(),
         ) {
@@ -1655,7 +1655,6 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("primary_key".to_owned(), pks.join(","));
     sink_with.insert("type".to_owned(), "upsert".to_owned());
-    // FIXME: need atomic DDL when using snapshot=false. Otherwise data is not sinked.
     sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
 
     let commit_checkpoint_interval = handler_args

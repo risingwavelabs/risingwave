@@ -87,10 +87,39 @@ select * from full_type_t
 statement ok
 DROP TABLE full_type_t;
 
+# test connector
 
-# test connector with commit_checkpoint_interval
+statement error
+create table datagen_t (
+  id BIGINT,
+  item_name VARCHAR,
+  description VARCHAR,
+  initial_bid BIGINT,
+  reserve BIGINT,
+  date_time TIMESTAMP,
+  expires TIMESTAMP,
+  seller BIGINT,
+  category BIGINT,
+  extra VARCHAR)
+APPEND ONLY
+with (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = '1',
+  commit_checkpoint_interval = 1,
+  source_rate_limit = 1000
+) engine = iceberg;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: source_rate_limit for iceberg table engine during table creation
+HINT: Please remove source_rate_limit from WITH options.
+
+
+
 statement ok
-create table nexmark_t (
+create table datagen_t (
   id BIGINT,
   item_name VARCHAR,
   description VARCHAR,
@@ -102,15 +131,38 @@ create table nexmark_t (
   category BIGINT,
   extra VARCHAR)
 with (
-  connector = 'nexmark',
-  nexmark.table.type = 'Auction',
-  nexmark.split.num = '2',
-  nexmark.min.event.gap.in.ns = '500000',
+  connector = 'datagen',
+  datagen.rows.per.second = '1000',
+  fields.id.kind = 'sequence',
+  fields.id.start = '1',
+  fields.id.end  = '1000',
   commit_checkpoint_interval = 1
 ) engine = iceberg;
 
+sleep 2s
+
+statement error
+alter table datagen_t set source_rate_limit to 114514;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: public.datagen_t
+
+
 statement ok
-DROP TABLE nexmark_t
+FLUSH;
+
+# Test that no data is missing:
+# We set snapshot=false for the iceberg sink,
+# So atomic DDL should be used to avoid data loss.
+query ??
+select min(id), count(id) from datagen_t;
+----
+1	1000
+
+statement ok
+DROP TABLE datagen_t
 
 # test hidden _row_id column for iceberg engine table
 statement ok

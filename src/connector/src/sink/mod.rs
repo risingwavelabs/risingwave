@@ -194,7 +194,7 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
-/// `snapshot = false`
+/// `snapshot = false` corresponds to [`risingwave_pb::stream_plan::StreamScanType::UpstreamOnly`]
 pub const SINK_SNAPSHOT_OPTION: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";

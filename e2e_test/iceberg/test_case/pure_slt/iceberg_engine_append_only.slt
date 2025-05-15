@@ -136,8 +136,10 @@ create table datagen_t (
 APPEND ONLY
 with (
   connector = 'datagen',
+  datagen.rows.per.second = '1000',
   fields.id.kind = 'sequence',
   fields.id.start = '1',
+  fields.id.end  = '1000',
   commit_checkpoint_interval = 1
 ) engine = iceberg;
 
@@ -159,9 +161,9 @@ FLUSH;
 # For append only table, data is not written to hummock, but sink to iceberg table directly.
 # So atomic DDL should be used to avoid data loss.
 query ??
-select min(id) from datagen_t;
+select min(id), count(id) from datagen_t;
 ----
-1
+1	1000
 
 statement ok
 DROP TABLE datagen_t
