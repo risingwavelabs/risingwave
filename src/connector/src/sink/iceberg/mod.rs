@@ -510,7 +510,7 @@ impl Sink for IcebergSink {
     const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
         "commit_checkpoint_interval",
         "enable_compaction",
-        "compaction_interval",
+        "compaction_interval_sec",
     ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -2215,7 +2215,7 @@ mod test {
             ("database.name", "demo_db"),
             ("table.name", "demo_table"),
             ("enable_compaction", "true"),
-            ("compaction_interval", "1800"),
+            ("compaction_interval_sec", "1800"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
