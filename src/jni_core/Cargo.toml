@@ -15,7 +15,7 @@ paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
