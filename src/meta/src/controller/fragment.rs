@@ -50,8 +50,8 @@ use risingwave_pb::meta::{FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, PbDispatcherType, PbFragmentTypeFlag, PbStreamContext, PbStreamNode,
-    PbStreamScanType, StreamScanType,
+    PbDispatcherType, PbFragmentTypeFlag, PbStreamContext, PbStreamNode, PbStreamScanType,
+    StreamScanType,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
@@ -1559,7 +1559,7 @@ impl CatalogController {
     pub async fn get_downstream_fragments(
         &self,
         job_id: ObjectId,
-    ) -> MetaResult<(Vec<(DispatchStrategy, Fragment)>, Vec<(ActorId, WorkerId)>)> {
+    ) -> MetaResult<(Vec<(PbDispatcherType, Fragment)>, Vec<(ActorId, WorkerId)>)> {
         let (root_fragment, actors) = self.get_root_fragment(job_id).await?;
 
         let inner = self.inner.read().await;
@@ -1578,8 +1578,6 @@ impl CatalogController {
         for fragment_relation::Model {
             target_fragment_id: fragment_id,
             dispatcher_type,
-            dist_key_indices,
-            output_indices,
             ..
         } in downstream_fragment_relations
         {
@@ -1592,13 +1590,9 @@ impl CatalogController {
             }
             assert_eq!(fragment_actors.len(), 1);
             let (fragment, actors) = fragment_actors.pop().unwrap();
-            let dispatch_strategy = DispatchStrategy {
-                r#type: PbDispatcherType::from(dispatcher_type) as _,
-                dist_key_indices: dist_key_indices.into_u32_array(),
-                output_indices: output_indices.into_u32_array(),
-            };
+            let dispatch_type = PbDispatcherType::from(dispatcher_type);
             let fragment = Self::compose_fragment(fragment, actors, job_definition.clone())?.0;
-            downstream_fragments.push((dispatch_strategy, fragment));
+            downstream_fragments.push((dispatch_type, fragment));
         }
 
         Ok((downstream_fragments, actors))

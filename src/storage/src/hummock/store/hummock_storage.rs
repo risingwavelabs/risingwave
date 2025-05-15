@@ -591,10 +591,10 @@ impl HummockStorage {
         self.compact_await_tree_reg.as_ref()
     }
 
-    pub async fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+    pub async fn min_uncommitted_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::GetMinUncommittedSstId { result_tx: tx })
+            .send(HummockEvent::GetMinUncommittedSstObjectId { result_tx: tx })
             .expect("should send success");
         rx.await.expect("should await success")
     }

@@ -92,14 +92,14 @@ fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Sstabl
         FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch).encode();
 
     SstableInfoInner {
-        sst_id,
+        sst_id: sst_id.into(),
         key_range: KeyRange {
             left: full_key_l.into(),
             right: full_key_r.into(),
             right_exclusive: false,
         },
         table_ids,
-        object_id: sst_id,
+        object_id: sst_id.into(),
         min_epoch: 20,
         max_epoch: 20,
         file_size: 100,
@@ -1170,8 +1170,8 @@ async fn test_extend_objects_to_delete() {
         .iter()
         .map(|ssts| {
             ssts.iter()
-                .max_by_key(|s| s.object_id)
-                .map(|s| s.object_id)
+                .max_by_key(|s| s.object_id.inner())
+                .map(|s| s.object_id.inner())
                 .unwrap()
         })
         .max()
@@ -1181,7 +1181,10 @@ async fn test_extend_objects_to_delete() {
         .iter()
         .flatten()
         .map(|s| s.object_id)
-        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
+        .chain(
+            (max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
+                .map(Into::into),
+        )
         .collect_vec();
     assert_eq!(
         hummock_manager
@@ -1283,8 +1286,8 @@ async fn test_version_stats() {
         .enumerate()
         .map(|(idx, table_ids)| LocalSstableInfo {
             sst_info: SstableInfoInner {
-                object_id: sst_ids[idx],
-                sst_id: sst_ids[idx],
+                object_id: sst_ids[idx].into(),
+                sst_id: sst_ids[idx].into(),
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 1, 1).into(),
                     right: iterator_test_key_of_epoch(1, 1, 1).into(),
@@ -1667,8 +1670,8 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
     };
     let sst_3 = LocalSstableInfo {
         sst_info: SstableInfoInner {
-            sst_id: 8,
-            object_id: 8,
+            sst_id: 8.into(),
+            object_id: 8.into(),
             ..sst_2.sst_info.get_inner()
         }
         .into(),
@@ -1676,8 +1679,8 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
     };
     let sst_4 = LocalSstableInfo {
         sst_info: SstableInfoInner {
-            sst_id: 9,
-            object_id: 9,
+            sst_id: 9.into(),
+            object_id: 9.into(),
             ..sst_1.sst_info.get_inner()
         }
         .into(),
@@ -1750,8 +1753,8 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             TaskStatus::Success,
             vec![
                 SstableInfoInner {
-                    object_id: 12,
-                    sst_id: 12,
+                    object_id: 12.into(),
+                    sst_id: 12.into(),
                     key_range: KeyRange::default(),
                     table_ids: vec![100],
                     min_epoch: 20,
@@ -2073,8 +2076,8 @@ async fn test_move_tables_between_compaction_group() {
         .get_sst_ids_by_group_id(compaction_group_id)
         .collect_vec();
     assert_eq!(2, sst_ids.len());
-    assert!(sst_ids.contains(&10));
-    assert!(sst_ids.contains(&14));
+    assert!(sst_ids.contains(&10.into()));
+    assert!(sst_ids.contains(&14.into()));
 
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
@@ -2087,7 +2090,7 @@ async fn test_move_tables_between_compaction_group() {
         .get_sst_ids_by_group_id(compaction_group_id)
         .collect_vec();
     assert_eq!(2, sst_ids.len());
-    assert!(!sst_ids.contains(&10));
+    assert!(!sst_ids.contains(&10.into()));
 
     let compaction_group_id =
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
@@ -2095,7 +2098,7 @@ async fn test_move_tables_between_compaction_group() {
         .get_sst_ids_by_group_id(compaction_group_id)
         .collect_vec();
     assert_eq!(1, sst_ids.len());
-    assert!(!sst_ids.contains(&10));
+    assert!(!sst_ids.contains(&10.into()));
 }
 
 #[tokio::test]
@@ -2434,8 +2437,8 @@ async fn test_merge_compaction_group_task_expired() {
     };
     let sst_3 = LocalSstableInfo {
         sst_info: SstableInfoInner {
-            sst_id: 3,
-            object_id: 3,
+            sst_id: 3.into(),
+            object_id: 3.into(),
             ..sst_2.sst_info.get_inner()
         }
         .into(),
@@ -2443,8 +2446,8 @@ async fn test_merge_compaction_group_task_expired() {
     };
     let sst_4 = LocalSstableInfo {
         sst_info: SstableInfoInner {
-            sst_id: 4,
-            object_id: 4,
+            sst_id: 4.into(),
+            object_id: 4.into(),
             ..sst_1.sst_info.get_inner()
         }
         .into(),
@@ -2540,8 +2543,8 @@ async fn test_merge_compaction_group_task_expired() {
             TaskStatus::Success,
             vec![
                 SstableInfoInner {
-                    object_id: report_sst_id,
-                    sst_id: report_sst_id,
+                    object_id: report_sst_id.into(),
+                    sst_id: report_sst_id.into(),
                     key_range: KeyRange::default(),
                     table_ids: vec![100],
                     min_epoch: 20,

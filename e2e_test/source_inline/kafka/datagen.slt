@@ -192,3 +192,22 @@ create table s1 (v1 int) with (,) FORMAT PLAIN ENCODE JSON;
 # Do NOT allow an empty With clause.
 statement error expected identifier.*
 create table s1 (v1 int) with () FORMAT PLAIN ENCODE JSON;
+
+# Allow batch scan on datagen source.
+statement ok
+create source s1 (v1 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end = '100',
+    datagen.rows.per.second = '1000000000',
+    datagen.split.num = '5'
+) format plain encode json;
+
+query I
+select count(*), sum(v1) from s1;
+----
+100 5050
+
+statement ok
+drop source s1;

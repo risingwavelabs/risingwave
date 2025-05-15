@@ -29,9 +29,9 @@ jobs:
         run: |
           cp e2e_test/check_slt_coverage.py /tmp/check_slt_coverage.py
 
-      - name: Check out base branch for comparison
+      - name: Check out PR base commit for comparison
         run: |
-          git fetch origin ${{ steps.base-branch.outputs.base_ref }}
+          git fetch origin ${{ github.event.pull_request.base.sha }}
           git checkout FETCH_HEAD
 
       - name: Run SLT coverage check on base branch

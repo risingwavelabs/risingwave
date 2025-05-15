@@ -491,10 +491,11 @@ impl SstableStore {
         }
     }
 
-    pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
+    pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
+        let object_id = object_id.into();
         let obj_prefix = self
             .store
-            .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
+            .get_object_prefix(object_id.inner(), self.use_new_object_prefix_strategy);
         risingwave_hummock_sdk::get_sst_data_path(&obj_prefix, &self.path, object_id)
     }
 
@@ -583,7 +584,7 @@ impl SstableStore {
 
     pub fn create_sst_writer(
         self: Arc<Self>,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId>,
         options: SstableWriterOptions,
     ) -> BatchUploadWriter {
         BatchUploadWriter::new(object_id, self, options)
@@ -673,7 +674,6 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
@@ -687,7 +687,7 @@ mod tests {
     use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
-    const SST_ID: HummockSstableObjectId = 1;
+    const SST_ID: u64 = 1;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())

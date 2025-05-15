@@ -30,7 +30,7 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use chrono::{DateTime, Datelike, Timelike};
 use futures::TryStreamExt;
 use futures::stream::BoxStream;
 use jni::JNIEnv;
@@ -823,7 +823,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
 ) -> JObject<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let value = pointer.as_ref().datum_at(idx as usize).unwrap().into_date();
-        let epoch_days = (value.0 - NaiveDateTime::UNIX_EPOCH.date()).num_days();
+        let epoch_days = (value.0 - DateTime::UNIX_EPOCH.date_naive()).num_days();
 
         let sig = gen_jni_sig!(java.time.LocalDate ofEpochDay(long));
 

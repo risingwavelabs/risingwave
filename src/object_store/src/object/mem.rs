@@ -245,13 +245,18 @@ static SHARED: LazyLock<spin::Mutex<InMemObjectStore>> =
     LazyLock::new(|| spin::Mutex::new(InMemObjectStore::new()));
 
 impl InMemObjectStore {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             objects: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Create a shared reference to the in-memory object store in this process.
+    /// Create a new in-memory object store for testing, isolated with others.
+    pub fn for_test() -> Self {
+        Self::new()
+    }
+
+    /// Get a reference to the in-memory object store shared in this process.
     ///
     /// Note: Should only be used for `risedev playground`, when there're multiple compute-nodes or
     /// compactors in the same process.
@@ -327,7 +332,7 @@ mod tests {
     async fn test_upload() {
         let block = Bytes::from("123456");
 
-        let s3 = InMemObjectStore::new();
+        let s3 = InMemObjectStore::for_test();
         s3.upload("/abc", block).await.unwrap();
 
         // No such object.
@@ -351,7 +356,7 @@ mod tests {
         let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
         let obj = Bytes::from("123456789");
 
-        let store = InMemObjectStore::new();
+        let store = InMemObjectStore::for_test();
         let mut uploader = store.streaming_upload("/abc").await.unwrap();
 
         for block in blocks {
@@ -375,7 +380,7 @@ mod tests {
     async fn test_metadata() {
         let block = Bytes::from("123456");
 
-        let obj_store = InMemObjectStore::new();
+        let obj_store = InMemObjectStore::for_test();
         obj_store.upload("/abc", block).await.unwrap();
 
         let err = obj_store.metadata("/not_exist").await.unwrap_err();
@@ -398,7 +403,7 @@ mod tests {
     #[tokio::test]
     async fn test_list() {
         let payload = Bytes::from("123456");
-        let store = InMemObjectStore::new();
+        let store = InMemObjectStore::for_test();
         assert!(list_all("", &store).await.is_empty());
 
         let paths = vec!["001/002/test.obj", "001/003/test.obj"];
@@ -435,7 +440,7 @@ mod tests {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
 
-        let store = InMemObjectStore::new();
+        let store = InMemObjectStore::for_test();
         store.upload("/abc", block1).await.unwrap();
         store.upload("/klm", block2).await.unwrap();
 
