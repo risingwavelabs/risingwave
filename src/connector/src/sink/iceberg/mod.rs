@@ -151,7 +151,7 @@ pub struct IcebergConfig {
     /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    pub compaction_interval: Option<u64>,
+    pub compaction_interval_sec: Option<u64>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -524,7 +524,7 @@ impl Sink for IcebergSink {
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
 
-        if self.config.enable_compaction && self.config.compaction_interval.is_none() {
+        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
             bail!("`compaction_interval` must be set when `enable_compaction` is true");
         }
 
@@ -533,19 +533,17 @@ impl Sink for IcebergSink {
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        IcebergConfig::from_btreemap(config.clone())?;
+        let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
 
-        if let Some(compaction_interval) = config.get("compaction_interval") {
-            if let Some(enable_compaction) = config.get("enable_compaction") {
-                if enable_compaction != "true" {
-                    bail!("`compaction_interval` can only be set when `enable_compaction` is true");
+        if let Some(compaction_interval) = iceberg_config.compaction_interval_sec {
+            if iceberg_config.enable_compaction {
+                if compaction_interval == 0 {
+                    bail!(
+                        "`compaction_interval` must be greater than 0 when `enable_compaction` is true"
+                    );
                 }
             } else {
                 bail!("`compaction_interval` can only be set when `enable_compaction` is true");
-            }
-
-            if compaction_interval.parse::<u64>().is_err() {
-                bail!("`compaction_interval` must be a number");
             }
         }
 
@@ -1858,7 +1856,7 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
-                    compaction_interval: self.config.compaction_interval.unwrap(),
+                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
                 })
                 .is_err()
         {
@@ -2266,7 +2264,7 @@ mod test {
             is_exactly_once: None,
             commit_retry_num: 8,
             enable_compaction: true,
-            compaction_interval: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
+            compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
