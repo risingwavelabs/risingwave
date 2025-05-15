@@ -64,7 +64,6 @@ use super::init_selectors;
 use crate::hummock::HummockManager;
 use crate::hummock::compaction::CompactionSelector;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::sequence::next_compaction_task_id;
 use crate::manager::MetaOpts;
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::rpc::metrics::MetaMetrics;
@@ -635,37 +634,19 @@ impl IcebergCompactionEventHandler {
         {
             let mut compactor_alive = true;
 
-            // TODO: Pull Iceberg Task from iceberg compaction manager
-            let top_n_frequency = self
+            let iceberg_compaction_handles = self
                 .compaction_manager
                 .get_top_n_iceberg_commit_sink_ids(pull_task_count);
 
-            for sink_id in top_n_frequency {
-                let sink_params = self
-                    .compaction_manager
-                    .get_sink_param(&sink_id)
-                    .await
-                    .expect("sink params not found");
-
+            for handle in iceberg_compaction_handles {
                 // send iceberg commit task to compactor
-                if let Err(e) =
-                    compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-                        task_id: next_compaction_task_id(&self.compaction_manager.env)
-                            .await
-                            .expect("get next compaction task id fail"),
-                        props: sink_params.properties,
-                    }))
-                {
+                if let Err(e) = handle.send_compact_task(compactor.clone()).await {
                     tracing::warn!(
                         error = %e.as_report(),
                         "Failed to send iceberg commit task to {}",
                         context_id,
                     );
                     compactor_alive = false;
-                } else {
-                    // clear sink commit info to reset iceberg commit_info
-                    self.compaction_manager
-                        .clear_iceberg_commits_by_sink_id(sink_id);
                 }
             }
 

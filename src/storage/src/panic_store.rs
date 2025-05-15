@@ -145,9 +145,27 @@ impl StateStoreWriteEpochControl for PanicStateStore {
     }
 }
 
+impl StateStoreWriteVector for PanicStateStore {
+    fn insert(&mut self, _vec: Vector, _info: Bytes) -> StorageResult<()> {
+        panic!()
+    }
+}
+
+impl StateStoreReadVector for PanicStateStore {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        _vec: Vector,
+        _options: VectorNearestOptions,
+        _on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> StorageResult<Vec<O>> {
+        panic!()
+    }
+}
+
 impl StateStore for PanicStateStore {
     type Local = Self;
     type ReadSnapshot = Self;
+    type VectorWriter = PanicStateStore;
 
     async fn try_wait_epoch(
         &self,
@@ -166,6 +184,10 @@ impl StateStore for PanicStateStore {
         _epoch: HummockReadEpoch,
         _options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
+        panic!()
+    }
+
+    async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
         panic!()
     }
 }

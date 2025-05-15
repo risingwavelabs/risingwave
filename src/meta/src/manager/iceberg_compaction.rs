@@ -17,13 +17,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iceberg::table::Table;
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_connector::connector_common::IcebergCompactionStat;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::catalog::PbSink;
-use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::iceberg_compaction::{
+    IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
+};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -33,7 +36,7 @@ use super::MetaSrvEnv;
 use crate::MetaResult;
 use crate::hummock::{
     IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
-    IcebergCompactorManagerRef,
+    IcebergCompactor, IcebergCompactorManagerRef,
 };
 use crate::manager::MetadataManager;
 use crate::rpc::metrics::MetaMetrics;
@@ -45,13 +48,119 @@ type CompactorChangeTx = UnboundedSender<(u32, Streaming<SubscribeIcebergCompact
 type CompactorChangeRx =
     UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
+/// The minimum interval between two iceberg commits to be considered as a new commit.
+// TODO: remove this constant and use the config per sink
+const MIN_COMPACTION_INTERVAL: u64 = 3600;
+
+#[derive(Debug, Clone)]
 struct CommitInfo {
     count: usize,
-    first_commit_time: Instant,
+    next_compaction_time: Instant,
 }
+
+impl CommitInfo {
+    fn set_processing(&mut self) {
+        self.count = 0;
+        self.next_compaction_time = Instant::now() + std::time::Duration::from_secs(u64::MAX);
+    }
+
+    fn initialize(&mut self) {
+        self.count = 0;
+        // Reset next compaction time to 1 hour later
+        self.next_compaction_time =
+            Instant::now() + std::time::Duration::from_secs(MIN_COMPACTION_INTERVAL);
+    }
+
+    fn set(&mut self, commit_info: CommitInfo) {
+        self.count = commit_info.count;
+        self.next_compaction_time = commit_info.next_compaction_time;
+    }
+
+    fn increase_count(&mut self) {
+        self.count += 1;
+    }
+}
+
+pub struct IcebergCompactionHandle {
+    sink_id: SinkId,
+    inner: Arc<RwLock<IcebergCompactionManagerInner>>,
+    metadata_manager: MetadataManager,
+    handle_success: bool,
+
+    /// The commit info of the iceberg compaction handle for recovery.
+    commit_info: CommitInfo,
+}
+
+impl IcebergCompactionHandle {
+    fn new(
+        sink_id: SinkId,
+        inner: Arc<RwLock<IcebergCompactionManagerInner>>,
+        metadata_manager: MetadataManager,
+        commit_info: CommitInfo,
+    ) -> Self {
+        Self {
+            sink_id,
+            inner,
+            metadata_manager,
+            handle_success: false,
+            commit_info,
+        }
+    }
+
+    pub async fn send_compact_task(mut self, compactor: Arc<IcebergCompactor>) -> MetaResult<()> {
+        use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
+        let prost_sink_catalog: PbSink = self
+            .metadata_manager
+            .catalog_controller
+            .get_sink_by_ids(vec![self.sink_id.sink_id as i32])
+            .await?
+            .remove(0);
+        let sink_catalog = SinkCatalog::from(prost_sink_catalog);
+        let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
+        let result =
+            compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+                props: param.properties,
+            }));
+
+        if result.is_ok() {
+            self.handle_success = true;
+        }
+
+        result
+    }
+
+    pub fn sink_id(&self) -> SinkId {
+        self.sink_id
+    }
+}
+
+impl Drop for IcebergCompactionHandle {
+    fn drop(&mut self) {
+        if self.handle_success {
+            let mut guard = self.inner.write();
+            if let Some(commit_info) = guard.iceberg_commits.get_mut(&self.sink_id) {
+                commit_info.initialize();
+            }
+        } else {
+            // If the handle is not successful, we need to reset the commit info
+            // to the original state.
+            // This is to avoid the case where the handle is dropped before the
+            // compaction task is sent.
+            let mut guard = self.inner.write();
+            if let Some(commit_info) = guard.iceberg_commits.get_mut(&self.sink_id) {
+                commit_info.set(self.commit_info.clone());
+            }
+        }
+    }
+}
+
+struct IcebergCompactionManagerInner {
+    pub iceberg_commits: HashMap<SinkId, CommitInfo>,
+}
+
 pub struct IcebergCompactionManager {
-    pub env: MetaSrvEnv,
-    iceberg_commits: RwLock<HashMap<SinkId, CommitInfo>>,
+    inner: Arc<RwLock<IcebergCompactionManagerInner>>,
+
     metadata_manager: MetadataManager,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
 
@@ -105,51 +214,53 @@ impl IcebergCompactionManager {
     }
 
     pub fn record_iceberg_commit(&self, sink_id: SinkId) {
-        let mut iceberg_commits = self.iceberg_commits.write();
-        let commit_info = iceberg_commits.entry(sink_id).or_insert(CommitInfo {
+        let mut guard = self.inner.write();
+
+        let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
             count: 0,
-            first_commit_time: Instant::now(),
+            next_compaction_time: Instant::now()
+                + std::time::Duration::from_secs(MIN_COMPACTION_INTERVAL),
         });
-        commit_info.count += 1;
+
+        commit_info.increase_count();
     }
 
-    // function to get top n iceberg commits sink ids
-    pub fn get_top_n_iceberg_commit_sink_ids(&self, n: usize) -> Vec<SinkId> {
-        let iceberg_commits = self.iceberg_commits.read();
-        let mut sink_ids: Vec<_> = iceberg_commits.iter().collect();
-        sink_ids.sort_by(|a, b| {
-            let a_commit_count = a.1.count;
-            let b_commit_count = b.1.count;
-
-            // Sort by commit count first
-            if a_commit_count != b_commit_count {
-                return b_commit_count.cmp(&a_commit_count);
-            }
-
-            // If commit counts are equal, sort by first commit time
-            b.1.first_commit_time
-                .duration_since(a.1.first_commit_time)
-                .cmp(&std::time::Duration::from_secs(0))
-        });
-
-        // TODO: make this configurable for each sink
-        // For now, we use a fixed interval of 1 hour
-        const MIN_SINK_COMMIT_INTERVAL: u64 = 3600; // 1 hour
-
-        sink_ids
-            .iter()
+    /// Get the top N iceberg commit sink ids
+    /// Sorted by commit count and next compaction time
+    pub fn get_top_n_iceberg_commit_sink_ids(&self, n: usize) -> Vec<IcebergCompactionHandle> {
+        let now = Instant::now();
+        let mut guard = self.inner.write();
+        guard
+            .iceberg_commits
+            .iter_mut()
             .filter(|(_, commit_info)| {
-                Instant::now().duration_since(commit_info.first_commit_time)
-                    > std::time::Duration::from_secs(MIN_SINK_COMMIT_INTERVAL)
+                commit_info.count > 0 && now > commit_info.next_compaction_time
+            })
+            .sorted_by(|a, b| {
+                b.1.count
+                    .cmp(&a.1.count)
+                    .then_with(|| b.1.next_compaction_time.cmp(&a.1.next_compaction_time))
             })
             .take(n)
-            .map(|(sink_id, _)| **sink_id)
-            .collect()
+            .map(|(sink_id, commit_info)| {
+                // reset the commit count and next compaction time and avoid double call
+                let handle = IcebergCompactionHandle::new(
+                    *sink_id,
+                    self.inner.clone(),
+                    self.metadata_manager.clone(),
+                    commit_info.clone(),
+                );
+
+                commit_info.set_processing();
+
+                handle
+            })
+            .collect::<Vec<_>>()
     }
 
     pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
-        let mut iceberg_commits = self.iceberg_commits.write();
-        iceberg_commits.remove(&sink_id);
+        let mut guard = self.inner.write();
+        guard.iceberg_commits.remove(&sink_id);
     }
 
     pub async fn get_sink_param(&self, sink_id: &SinkId) -> MetaResult<SinkParam> {

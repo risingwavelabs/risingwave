@@ -41,7 +41,6 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::session::SessionImpl;
-use crate::session::current::notice_to_user;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
@@ -117,8 +116,14 @@ pub async fn get_replace_table_plan(
     .await?;
 
     // Calculate the mapping from the original columns to the new columns.
-    // This will be used to map the output of the table in the dispatcher to make
-    // existing downstream jobs work correctly.
+    //
+    // Note: Previously, this will be used to map the output of the table in the dispatcher to make
+    // existing downstream jobs work correctly. This is no longer the case. We will generate mapping
+    // directly in the meta service by checking the new schema of this table and all downstream jobs,
+    // which simplifies handling `ALTER TABLE ALTER COLUMN TYPE`.
+    //
+    // TODO: However, we still generate this mapping and use it for rewriting downstream indexes'
+    // `index_item`. We should consider completely removing this in future works.
     let col_index_mapping = ColIndexMapping::new(
         old_catalog
             .columns()
@@ -128,26 +133,17 @@ pub async fn get_replace_table_plan(
                     let new_c = new_c.get_column_desc().unwrap();
 
                     // We consider both the column ID and the data type.
-                    // If either of them does not match, we will treat it as a new column.
+                    // If either of them does not match, we will treat it as a different column.
                     //
-                    // TODO: Since we've succeeded in assigning column IDs in the step above,
-                    //       the new data type is actually _compatible_ with the old one.
-                    //       Theoretically, it's also possible to do some sort of mapping for
-                    //       the downstream job to work correctly. However, the current impl
-                    //       only supports simple column projection, which we may improve in
-                    //       future works.
-                    //       However, by treating it as a new column, we can at least reject
-                    //       the case where the column with type change is referenced by any
-                    //       downstream jobs (because the original column is considered dropped).
+                    // Note that this does not hurt the ability for `ALTER TABLE ALTER COLUMN TYPE`,
+                    // because we don't rely on this mapping in dispatcher. However, if there's an
+                    // index on the column, currently it will fail to rewrite as the column is
+                    // considered as if it's dropped.
                     let id_matches = || new_c.column_id == old_c.column_id().get_id();
                     let type_matches = || {
                         let original_data_type = old_c.data_type();
                         let new_data_type = DataType::from(new_c.column_type.as_ref().unwrap());
-                        let matches = original_data_type == &new_data_type;
-                        if !matches {
-                            notice_to_user(format!("the data type of column \"{}\" has changed, treating as a new column", old_c.name()));
-                        }
-                        matches
+                        original_data_type == &new_data_type
                     };
 
                     id_matches() && type_matches()

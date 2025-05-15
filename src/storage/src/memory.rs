@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::mem::take;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -34,6 +35,7 @@ use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
 
+use crate::dispatch_measurement;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{
@@ -43,6 +45,7 @@ use crate::hummock::utils::{
 use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;
+use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
@@ -256,6 +259,7 @@ pub mod sled {
             RangeKvStateStore {
                 inner: SledRangeKv::new(path),
                 tables: Default::default(),
+                vectors: Default::default(),
             }
         }
 
@@ -263,6 +267,7 @@ pub mod sled {
             RangeKvStateStore {
                 inner: SledRangeKv::new_temp(),
                 tables: Default::default(),
+                vectors: Default::default(),
             }
         }
     }
@@ -562,6 +567,8 @@ impl TableState {
     }
 }
 
+type InMemVectorStore = Arc<RwLock<HashMap<TableId, Vec<(Vector, Bytes, u64)>>>>;
+
 /// An in-memory state store
 ///
 /// The in-memory state store is a [`BTreeMap`], which maps [`FullKey`] to value. It
@@ -573,6 +580,8 @@ pub struct RangeKvStateStore<R: RangeKv> {
     inner: R,
     /// `table_id` -> `prev_epoch` -> `curr_epoch`
     tables: Arc<parking_lot::Mutex<HashMap<TableId, TableState>>>,
+
+    vectors: InMemVectorStore,
 }
 
 fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
@@ -715,6 +724,48 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     ) -> StorageResult<Self::RevIter> {
         self.inner
             .rev_iter_impl(key_range, self.epoch, self.table_id)
+    }
+}
+
+impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> StorageResult<Vec<O>> {
+        fn nearest_impl<M: MeasureDistanceBuilder, O>(
+            store: &InMemVectorStore,
+            epoch: u64,
+            table_id: TableId,
+            vec: Vector,
+            options: VectorNearestOptions,
+            on_nearest_item_fn: impl OnNearestItemFn<O>,
+        ) -> Vec<O> {
+            let mut builder = NearestBuilder::<'_, O, M>::new(vec.to_ref(), options.top_n);
+            builder.add(
+                store
+                    .read()
+                    .get(&table_id)
+                    .map(|vec| vec.iter())
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, _, vector_epoch)| epoch >= *vector_epoch)
+                    .map(|(vec, info, _)| (vec.to_ref(), info.as_ref())),
+                on_nearest_item_fn,
+            );
+            builder.finish()
+        }
+        dispatch_measurement!(options.measure, MeasurementType, {
+            Ok(nearest_impl::<MeasurementType, O>(
+                &self.inner.vectors,
+                self.epoch,
+                self.table_id,
+                vec,
+                options,
+                on_nearest_item_fn,
+            ))
+        })
     }
 }
 
@@ -872,11 +923,20 @@ impl<R: RangeKv> RangeKvStateStore<R> {
             }))?;
         Ok(size)
     }
+
+    fn ingest_vectors(&self, table_id: TableId, epoch: u64, vecs: Vec<(Vector, Bytes)>) {
+        self.vectors
+            .write()
+            .entry(table_id)
+            .or_default()
+            .extend(vecs.into_iter().map(|(vec, info)| (vec, info, epoch)));
+    }
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = RangeKvLocalStateStore<R>;
     type ReadSnapshot = RangeKvStateStoreReadSnapshot<R>;
+    type VectorWriter = RangeKvLocalStateStore<R>;
 
     async fn try_wait_epoch(
         &self,
@@ -898,10 +958,24 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     ) -> StorageResult<Self::ReadSnapshot> {
         Ok(self.new_read_snapshot_impl(epoch.get_epoch(), options.table_id))
     }
+
+    async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        RangeKvLocalStateStore::new(
+            self.clone(),
+            NewLocalOptions {
+                table_id: options.table_id,
+                op_consistency_level: Default::default(),
+                table_option: Default::default(),
+                is_replicated: false,
+                vnodes: Arc::new(Bitmap::from_bool_slice(&[true])),
+            },
+        )
+    }
 }
 
 pub struct RangeKvLocalStateStore<R: RangeKv> {
     mem_table: MemTable,
+    vectors: Vec<(Vector, Bytes)>,
     inner: RangeKvStateStore<R>,
 
     epoch: Option<EpochPair>,
@@ -922,6 +996,7 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
             op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
             vnodes: option.vnodes,
+            vectors: vec![],
         }
     }
 
@@ -1091,8 +1166,11 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                 }
             }
         }
+        let epoch = self.epoch();
         self.inner
-            .ingest_batch(kv_pairs, vec![], self.epoch(), self.table_id)
+            .ingest_vectors(self.table_id, epoch, take(&mut self.vectors));
+        self.inner
+            .ingest_batch(kv_pairs, vec![], epoch, self.table_id)
     }
 
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
@@ -1198,6 +1276,13 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
+        Ok(())
+    }
+}
+
+impl<R: RangeKv> StateStoreWriteVector for RangeKvLocalStateStore<R> {
+    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        self.vectors.push((vec, info));
         Ok(())
     }
 }

@@ -563,7 +563,6 @@ pub fn start_compactor(
                         return
                     }
                 };
-
                 match event {
                     Some(Ok(CompactionEventResponses::Iceberg(
                         SubscribeIcebergCompactionEventResponse {
@@ -859,7 +858,7 @@ pub fn start_shared_compactor(
                         });
 
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
-                        output_object_ids_deque.extend(output_object_ids);
+                        output_object_ids_deque.extend(output_object_ids.into_iter().map(Into::<HummockSstableObjectId>::into));
                         let shared_compactor_object_id_manager =
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
@@ -883,7 +882,10 @@ pub fn start_shared_compactor(
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
-                                            object_timestamps,
+                                            object_timestamps: object_timestamps
+                                                .into_iter()
+                                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                                .collect(),
                                         })),
                                     };
 

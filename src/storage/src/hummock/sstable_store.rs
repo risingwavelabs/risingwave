@@ -21,7 +21,8 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    Engine, EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    HybridCacheProperties,
 };
 use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -83,14 +84,14 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CacheHint),
+    Fill(Hint),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CacheHint::Normal)
+        CachePolicy::Fill(Hint::Normal)
     }
 }
 
@@ -349,19 +350,15 @@ impl SstableStore {
                 sst.meta.block_metas[idx].uncompressed_size as usize,
                 true,
             )?;
-            let holder = if let CachePolicy::Fill(priority) = policy {
-                let cache_priority = if idx == block_index {
-                    priority
-                } else {
-                    CacheHint::Low
-                };
-                let entry = self.block_cache.insert_with_hint(
+            let holder = if let CachePolicy::Fill(hint) = policy {
+                let hint = if idx == block_index { hint } else { Hint::Low };
+                let entry = self.block_cache.insert_with_properties(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
                     },
                     Box::new(block),
-                    cache_priority,
+                    HybridCacheProperties::default().with_hint(hint),
                 );
                 BlockHolder::from_hybrid_cache_entry(entry)
             } else {
@@ -438,13 +435,13 @@ impl SstableStore {
         }
 
         match policy {
-            CachePolicy::Fill(context) => {
-                let entry = self.block_cache.fetch_with_hint(
+            CachePolicy::Fill(hint) => {
+                let entry = self.block_cache.fetch_with_properties(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
                     },
-                    context,
+                    HybridCacheProperties::default().with_hint(hint),
                     fetch_block,
                 );
                 if matches!(entry.state(), FetchState::Miss) {
@@ -494,10 +491,11 @@ impl SstableStore {
         }
     }
 
-    pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
+    pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
+        let object_id = object_id.into();
         let obj_prefix = self
             .store
-            .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
+            .get_object_prefix(object_id.inner(), self.use_new_object_prefix_strategy);
         risingwave_hummock_sdk::get_sst_data_path(&obj_prefix, &self.path, object_id)
     }
 
@@ -586,7 +584,7 @@ impl SstableStore {
 
     pub fn create_sst_writer(
         self: Arc<Self>,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId>,
         options: SstableWriterOptions,
     ) -> BatchUploadWriter {
         BatchUploadWriter::new(object_id, self, options)
@@ -676,7 +674,6 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
@@ -690,7 +687,7 @@ mod tests {
     use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
-    const SST_ID: HummockSstableObjectId = 1;
+    const SST_ID: u64 = 1;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
