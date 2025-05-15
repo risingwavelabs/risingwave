@@ -141,17 +141,20 @@ impl KafkaContextCommon {
         if let Some(IamAuthEnv {
             credentials_provider,
             region,
-            rt,
             signer_timeout_sec,
+            ..
         }) = &self.auth
         {
             let region = region.clone();
             let credentials_provider = credentials_provider.clone();
-            let rt = rt.clone();
+            let iam_rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
             let signer_timeout_sec = *signer_timeout_sec;
             let (token, expiration_time_ms) = {
                 let handle = thread::spawn(move || {
-                    rt.block_on(async {
+                    iam_rt.block_on(async {
                         timeout(
                             Duration::from_secs(signer_timeout_sec),
                             generate_auth_token_from_credentials_provider(
