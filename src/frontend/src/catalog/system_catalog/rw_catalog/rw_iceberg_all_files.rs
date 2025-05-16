@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::ops::Deref;
 
 use anyhow::anyhow;
@@ -83,34 +84,36 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
             let table: Table = iceberg_properties.load_table().await?;
             let metadata = table.metadata();
             let snapshots = metadata.snapshots();
+            let mut reachable_manifests = HashSet::new();
             for snapshot in snapshots {
                 let manifest_list: ManifestList = snapshot
                     .load_manifest_list(table.file_io(), table.metadata())
                     .await
                     .map_err(|e| anyhow!(e))?;
-                for entry in manifest_list.entries() {
-                    let manifest = entry
-                        .load_manifest(table.file_io())
-                        .await
-                        .map_err(|e| anyhow!(e))?;
-                    let mut manifest_entries_stream =
-                        futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+                reachable_manifests.extend(manifest_list.consume_entries());
+            }
+            for entry in reachable_manifests {
+                let manifest = entry
+                    .load_manifest(table.file_io())
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                let mut manifest_entries_stream =
+                    futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
 
-                    while let Some(manifest_entry) = manifest_entries_stream.next().await {
-                        let file = manifest_entry.data_file();
-                        result.push(RwIcebergFiles {
-                            source_id: source.id as i32,
-                            schema_name: schema_name.clone(),
-                            source_name: source.name.clone(),
-                            content: file.content_type() as i32,
-                            file_path: file.file_path().to_owned(),
-                            file_format: file.file_format().to_string(),
-                            record_count: file.record_count() as i64,
-                            file_size_in_bytes: file.file_size_in_bytes() as i64,
-                            equality_ids: file.equality_ids().to_vec(),
-                            sort_order_id: file.sort_order_id(),
-                        });
-                    }
+                while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                    let file = manifest_entry.data_file();
+                    result.push(RwIcebergFiles {
+                        source_id: source.id as i32,
+                        schema_name: schema_name.clone(),
+                        source_name: source.name.clone(),
+                        content: file.content_type() as i32,
+                        file_path: file.file_path().to_owned(),
+                        file_format: file.file_format().to_string(),
+                        record_count: file.record_count() as i64,
+                        file_size_in_bytes: file.file_size_in_bytes() as i64,
+                        equality_ids: file.equality_ids().to_vec(),
+                        sort_order_id: file.sort_order_id(),
+                    });
                 }
             }
         } else {
