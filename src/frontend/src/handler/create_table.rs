@@ -1744,9 +1744,10 @@ pub async fn create_iceberg_engine_table(
                 )
             };
 
-            column_defs
+            table_catalog
+                .columns()
                 .iter()
-                .find(|col| col.name.real_value().eq_ignore_ascii_case(column))
+                .find(|col| col.name().eq_ignore_ascii_case(column))
                 .ok_or_else(|| {
                     ErrorCode::InvalidInputSyntax(format!(
                         "Partition source column does not exist in schema: {}",
@@ -1817,7 +1818,7 @@ pub async fn create_iceberg_engine_table(
     let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
     if res.is_err() {
         // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name, true, true).await?;
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
         res?;
     }
 
@@ -1830,7 +1831,6 @@ pub async fn create_iceberg_engine_table(
         )
         .await?;
     }
-
 
     Ok(())
 }
