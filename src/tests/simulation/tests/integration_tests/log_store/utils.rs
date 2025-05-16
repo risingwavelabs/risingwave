@@ -104,6 +104,14 @@ pub(crate) async fn run_amplification_workload(
     Ok(())
 }
 
+pub(crate) async fn delete_amplification_workload(cluster: &mut Cluster) -> Result<()> {
+    let mut session = cluster.start_session();
+    let dim_workload = format!("DELETE FROM dimension");
+    session.run(dim_workload).await?;
+    session.flush().await?;
+    Ok(())
+}
+
 pub(crate) async fn get_mv_count(cluster: &mut Cluster, name: &str) -> Result<usize> {
     let mut session = cluster.start_session();
     let query = format!("SELECT COUNT(*) FROM {name}");
