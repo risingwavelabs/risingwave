@@ -31,7 +31,7 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
         })
     },
     build_fn: |opts| {
-        let mut runtime = Runtime::builder().sandboxed(true).build()?;
+        let mut runtime = Runtime::builder().build()?;
         if opts.kind.is_aggregate() {
             runtime.add_aggregate(
                 opts.name_in_runtime,

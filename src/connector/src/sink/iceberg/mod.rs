@@ -71,6 +71,7 @@ use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
@@ -83,8 +84,9 @@ use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
-use crate::connector_common::IcebergCommon;
+use crate::connector_common::{IcebergCommon, IcebergSinkCompactionUpdate};
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::iceberg::exactly_once_util::*;
 use crate::sink::writer::SinkWriter;
@@ -92,6 +94,7 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -140,6 +143,15 @@ pub struct IcebergConfig {
     // We should try to find and use that as default commit retry num first.
     #[serde(default = "default_commit_retry_num")]
     pub commit_retry_num: u32,
+
+    /// Whether to enable iceberg compaction.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub enable_compaction: bool,
+
+    /// The interval of iceberg compaction
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub compaction_interval_sec: Option<u64>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -495,7 +507,11 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
+        "commit_checkpoint_interval",
+        "enable_compaction",
+        "compaction_interval_sec",
+    ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -507,12 +523,30 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
+
+        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
+            bail!("`compaction_interval` must be set when `enable_compaction` is true");
+        }
+
         let _ = self.create_and_validate_table().await?;
         Ok(())
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        IcebergConfig::from_btreemap(config.clone())?;
+        let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
+
+        if let Some(compaction_interval) = iceberg_config.compaction_interval_sec {
+            if iceberg_config.enable_compaction {
+                if compaction_interval == 0 {
+                    bail!(
+                        "`compaction_interval` must be greater than 0 when `enable_compaction` is true"
+                    );
+                }
+            } else {
+                bail!("`compaction_interval` can only be set when `enable_compaction` is true");
+            }
+        }
+
         Ok(())
     }
 
@@ -543,7 +577,11 @@ impl Sink for IcebergSink {
         true
     }
 
-    async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        db: DatabaseConnection,
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         Ok(IcebergSinkCommitter {
@@ -557,6 +595,7 @@ impl Sink for IcebergSink {
             db,
             commit_retry_num: self.config.commit_retry_num,
             committed_epoch_subscriber: None,
+            iceberg_compact_stat_sender,
         })
     }
 }
@@ -1479,6 +1518,7 @@ pub struct IcebergSinkCommitter {
     pub(crate) db: DatabaseConnection,
     pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
     commit_retry_num: u32,
+    pub(crate) iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
 }
 
 impl IcebergSinkCommitter {
@@ -1811,6 +1851,18 @@ impl IcebergSinkCommitter {
 
             delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
         }
+        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
+            && self.config.enable_compaction
+            && iceberg_compact_stat_sender
+                .send(IcebergSinkCompactionUpdate {
+                    sink_id: SinkId::new(self.sink_id),
+                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
+                })
+                .is_err()
+        {
+            warn!("failed to send iceberg compaction stats");
+        }
+
         Ok(())
     }
 
@@ -1973,7 +2025,7 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::IcebergConfig;
+    use crate::sink::iceberg::{DEFAULT_ICEBERG_COMPACTION_INTERVAL, IcebergConfig};
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -2162,6 +2214,8 @@ mod test {
             ("catalog.jdbc.password", "123456"),
             ("database.name", "demo_db"),
             ("table.name", "demo_table"),
+            ("enable_compaction", "true"),
+            ("compaction_interval_sec", "1800"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2209,6 +2263,8 @@ mod test {
             create_table_if_not_exists: false,
             is_exactly_once: None,
             commit_retry_num: 8,
+            enable_compaction: true,
+            compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

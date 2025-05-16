@@ -12,28 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod transaction;
+pub const DELTALAKE_SINK: &str = "deltalake";
 
-pub type ColumnFamily = String;
-pub type Key = Vec<u8>;
-pub type Value = Vec<u8>;
-
-use thiserror::Error;
-pub use transaction::*;
-
-// Error of metastore
-#[derive(Debug, Error)]
-pub enum MetaStoreError {
-    #[error("item not found: {0}")]
-    ItemNotFound(String),
-    #[error("transaction abort")]
-    TransactionAbort(),
-    #[error("internal error: {0}")]
-    Internal(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+cfg_if::cfg_if! {
+    if #[cfg(feature = "sink-deltalake")] {
+        mod imp;
+        pub use imp::DeltaLakeSink;
+    } else {
+        use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
+        pub struct DeltalakeNotEnabled;
+        impl FeatureNotEnabledSinkMarker for DeltalakeNotEnabled {
+            const SINK_NAME: &'static str = super::DELTALAKE_SINK;
+        }
+        pub type DeltaLakeSink = FeatureNotEnabledSink<DeltalakeNotEnabled>;
+    }
 }
-
-pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;

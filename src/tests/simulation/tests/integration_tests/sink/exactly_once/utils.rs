@@ -683,7 +683,7 @@ impl SimulationTestIcebergExactlyOnceSink {
                     let err_rate = err_rate_for_coordinator.clone();
                     let store = store.clone();
                     let staging_store = staging_store.clone();
-                    move |db, sink_param| {
+                    move |db, sink_param, _| {
                         Box::new(SimulationTestIcebergCommitter {
                             err_rate_vec: err_rate_vec.clone(),
                             store: store.clone(),
