@@ -280,7 +280,9 @@ pub async fn handle(
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
-        Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateSink { stmt } => {
+            create_sink::handle_create_sink(handler_args, stmt, false).await
+        }
         Statement::CreateSubscription { stmt } => {
             create_subscription::handle_create_subscription(handler_args, stmt).await
         }
@@ -463,6 +465,9 @@ pub async fn handle(
             }
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },
+        Statement::DescribeFragment { fragment_id } => {
+            describe::handle_describe_fragment(handler_args, fragment_id).await
+        }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,

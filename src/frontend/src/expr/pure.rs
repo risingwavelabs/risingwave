@@ -64,6 +64,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SecToTimestamptz
             | Type::AtTimeZone
             | Type::DateTrunc
+            | Type::DateBin
             | Type::MakeDate
             | Type::MakeTime
             | Type::MakeTimestamp
@@ -183,6 +184,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayPosition
             | Type::ArrayContains
             | Type::ArrayContained
+            | Type::ArrayFlatten
             | Type::HexToInt256
             | Type::JsonbConcat
             | Type::JsonbAccess

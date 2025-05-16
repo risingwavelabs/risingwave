@@ -16,9 +16,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
 use either::Either;
+use iceberg::arrow::type_to_arrow_type;
+use iceberg::spec::Transform;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
@@ -32,8 +36,8 @@ use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_WITHOUT_BACKFILL, enforce_secret_sink,
+    CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    enforce_secret_sink,
 };
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
@@ -59,7 +63,9 @@ use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
-use crate::optimizer::plan_node::{LogicalSource, PartitionComputeInfo, StreamProject, generic};
+use crate::optimizer::plan_node::{
+    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject, generic,
+};
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -99,6 +105,7 @@ pub async fn gen_sink_plan(
     handler_args: HandlerArgs,
     stmt: CreateSinkStatement,
     explain_options: Option<ExplainOptions>,
+    is_iceberg_engine_internal: bool,
 ) -> Result<SinkPlanContext> {
     let session = handler_args.session.clone();
     let session = session.as_ref();
@@ -131,7 +138,12 @@ pub async fn gen_sink_plan(
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = resolved_with_options.get_connector().unwrap();
+        let Some(connector) = resolved_with_options.get_connector() else {
+            return Err(RwError::from(ErrorCode::ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                CONNECTOR_TYPE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
@@ -224,14 +236,18 @@ pub async fn gen_sink_plan(
     };
 
     let definition = context.normalized_sql().to_owned();
-    let mut plan_root = Planner::new_for_stream(context.into()).plan_query(bound)?;
+    let mut plan_root = if is_iceberg_engine_internal {
+        Planner::new_for_iceberg_table_engine_sink(context.into()).plan_query(bound)?
+    } else {
+        Planner::new_for_stream(context.into()).plan_query(bound)?
+    };
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match resolved_with_options.remove(SINK_WITHOUT_BACKFILL) {
+    let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
         Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink {
+            if direct_sink || is_iceberg_engine_internal {
                 true
             } else {
                 return Err(ErrorCode::BindError(
@@ -302,6 +318,7 @@ pub async fn gen_sink_plan(
         ctx.trace("Create Sink:");
         ctx.trace(sink_plan.explain_to_string());
     }
+    tracing::trace!("sink_plan: {:?}", sink_plan.explain_to_string());
 
     // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
     // during binding instead of visiting the optimized plan.
@@ -388,15 +405,74 @@ pub async fn get_partition_compute_info(
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
-    // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
-    Ok(None)
+    // TODO: check table if exists
+    if _iceberg_config.create_table_if_not_exists {
+        return Ok(None);
+    }
+    let table = _iceberg_config.load_table().await?;
+    let partition_spec = table.metadata().default_partition_spec();
+    if partition_spec.is_unpartitioned() {
+        return Ok(None);
+    }
 
-    // TODO: migrate to iceberg-rust later
+    // Separate the partition spec into two parts: sparse partition and range partition.
+    // Sparse partition means that the data distribution is more sparse at a given time.
+    // Range partition means that the data distribution is likely same at a given time.
+    // Only compute the partition and shuffle by them for the sparse partition.
+    let has_sparse_partition = partition_spec.fields().iter().any(|f| match f.transform {
+        // Sparse partition
+        Transform::Identity | Transform::Truncate(_) | Transform::Bucket(_) => true,
+        // Range partition
+        Transform::Year
+        | Transform::Month
+        | Transform::Day
+        | Transform::Hour
+        | Transform::Void
+        | Transform::Unknown => false,
+    });
+    if !has_sparse_partition {
+        return Ok(None);
+    }
+
+    let arrow_type = type_to_arrow_type(&iceberg::spec::Type::Struct(
+        table.metadata().default_partition_type().clone(),
+    ))
+    .map_err(|_| {
+        RwError::from(ErrorCode::SinkError(
+            "Fail to convert iceberg partition type to arrow type".into(),
+        ))
+    })?;
+    let ArrowDataType::Struct(struct_fields) = arrow_type else {
+        return Err(RwError::from(ErrorCode::SinkError(
+            "Partition type of iceberg should be a struct type".into(),
+        )));
+    };
+
+    let schema = table.metadata().current_schema();
+    let partition_fields = partition_spec
+        .fields()
+        .iter()
+        .map(|f| {
+            let source_f =
+                schema
+                    .field_by_id(f.source_id)
+                    .ok_or(RwError::from(ErrorCode::SinkError(
+                        "Fail to look up iceberg partition field".into(),
+                    )))?;
+            Ok((source_f.name.clone(), f.transform))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
+        partition_type: IcebergArrowConvert.struct_from_fields(&struct_fields)?,
+        partition_fields,
+    })))
 }
 
 pub async fn handle_create_sink(
     handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
+    is_iceberg_engine_internal: bool,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
@@ -417,7 +493,7 @@ pub async fn handle_create_sink(
             sink_catalog: sink,
             target_table_catalog,
             dependencies,
-        } = gen_sink_plan(handle_args, stmt, None).await?;
+        } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {

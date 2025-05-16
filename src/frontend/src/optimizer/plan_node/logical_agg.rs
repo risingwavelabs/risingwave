@@ -1353,7 +1353,8 @@ impl ToStream for LogicalAgg {
         let stream_input = self.input().to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
-        if stream_input.append_only() && self.agg_calls().is_empty() {
+        if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
+        {
             let input = if self.group_key().len() != self.input().schema().len() {
                 let cols = &self.group_key().to_vec();
                 LogicalProject::with_mapping(
@@ -1367,6 +1368,23 @@ impl ToStream for LogicalAgg {
             let input_schema_len = input.schema().len();
             let logical_dedup = LogicalDedup::new(input, (0..input_schema_len).collect());
             return logical_dedup.to_stream(ctx);
+        }
+
+        if self.agg_calls().iter().any(|call| {
+            matches!(
+                call.agg_type,
+                AggType::Builtin(PbAggKind::ApproxCountDistinct)
+            )
+        }) {
+            if stream_input.append_only() {
+                self.core.ctx().session_ctx().notice_to_user(
+                    "Streaming `APPROX_COUNT_DISTINCT` is still a preview feature and subject to change. Please do not use it in production environment.",
+                );
+            } else {
+                bail_not_implemented!(
+                    "Streaming `APPROX_COUNT_DISTINCT` is only supported in append-only stream"
+                );
+            }
         }
 
         let plan = self.gen_dist_stream_agg_plan(stream_input)?;

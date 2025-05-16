@@ -78,7 +78,6 @@ services:
       # Don't use Redpanda's schema registry, use the separated service instead
       # - "8081:8081"
     environment: {}
-    container_name: message_queue
     healthcheck:
       test: curl -f localhost:9644/v1/status/ready
       interval: 1s
@@ -86,7 +85,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - mysql-meta
@@ -94,6 +93,7 @@ services:
       - db
       - message_queue
       - schemaregistry
+      - pulsar-server
       - mongodb
       - mongodb-setup
       - mongo_data_generator
@@ -103,7 +103,7 @@ services:
     stop_grace_period: 30s
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - mysql-meta
@@ -127,7 +127,7 @@ services:
     stop_grace_period: 30s
 
   iceberg-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql
       - db
@@ -138,14 +138,14 @@ services:
     stop_grace_period: 30s
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql-meta
       - db
@@ -154,7 +154,7 @@ services:
     stop_grace_period: 30s
 
   iceberg-engine-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - db
     volumes:
@@ -162,7 +162,7 @@ services:
     stop_grace_period: 30s
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -173,7 +173,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20250418
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       db:
         condition: service_healthy
@@ -203,7 +203,6 @@ services:
       - ..:/mnt
 
   elasticsearch:
-    container_name: elasticsearch
     image: docker.elastic.co/elasticsearch/elasticsearch:7.11.0
     environment:
       - xpack.security.enabled=true
@@ -214,8 +213,6 @@ services:
 
   clickhouse-server:
     image: clickhouse/clickhouse-server:23.3.8.21-alpine
-    container_name: clickhouse-server-1
-    hostname: clickhouse-server-1
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -224,7 +221,6 @@ services:
       - 9009
 
   redis-server:
-    container_name: redis-server
     image: "redis:latest"
     expose:
       - 6379
@@ -237,7 +233,6 @@ services:
       retries: 50
 
   cassandra-server:
-    container_name: cassandra-server
     image: cassandra:4.0
     ports:
       - 9042:9042
@@ -245,7 +240,6 @@ services:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
 
   doris-server:
-    container_name: doris-server
     image: apache/doris:doris-all-in-one-2.1.0
     ports:
       - 8030:8030
@@ -257,9 +251,7 @@ services:
       retries: 30
 
   sqlserver-server:
-    container_name: sqlserver-server
     image: mcr.microsoft.com/mssql/server:2022-latest
-    hostname: sqlserver-server
     ports:
       - 1433:1433
     environment:
@@ -268,9 +260,7 @@ services:
       MSSQL_AGENT_ENABLED: "true"
 
   starrocks-fe-server:
-    container_name: starrocks-fe-server
     image: starrocks/fe-ubuntu:3.1.7
-    hostname: starrocks-fe-server
     command: /opt/starrocks/fe/bin/start_fe.sh
     ports:
       - 28030:8030
@@ -293,8 +283,6 @@ services:
     ports:
       - 28040:8040
       - 29050:9050
-    hostname: starrocks-be-server
-    container_name: starrocks-be-server
     depends_on:
       - starrocks-fe-server
 
@@ -303,8 +291,6 @@ services:
   # # Related tracking issue:
   # # https://github.com/redpanda-data/redpanda/issues/1878
   schemaregistry:
-    container_name: schemaregistry
-    hostname: schemaregistry
     image: confluentinc/cp-schema-registry:latest
     depends_on:
       - message_queue
@@ -316,7 +302,6 @@ services:
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: message_queue:29092
 
   pulsar-server:
-    container_name: pulsar-server
     image: apachepulsar/pulsar:latest
     command: bin/pulsar standalone
     ports:
@@ -345,7 +330,6 @@ services:
 
   mongodb-setup:
     image: mongo:4.4
-    container_name: mongodb-setup
     depends_on:
       - mongodb
     entrypoint:
@@ -362,7 +346,6 @@ services:
     build:
       context: .
       dockerfile: ./mongodb/Dockerfile.generator
-    container_name: mongo_data_generator
     depends_on:
       - mongodb
     environment:

@@ -112,6 +112,9 @@ pub mod health;
 #[rustfmt::skip]
 #[path = "sim/telemetry.rs"]
 pub mod telemetry;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/iceberg_compaction.rs")]
+pub mod iceberg_compaction;
 
 #[rustfmt::skip]
 #[path = "sim/secret.rs"]
@@ -232,6 +235,15 @@ impl stream_plan::MaterializeNode {
             .columns
             .iter()
             .map(|c| c.get_column_desc().unwrap().column_id)
+            .collect()
+    }
+}
+
+impl stream_plan::SourceBackfillNode {
+    pub fn column_ids(&self) -> Vec<i32> {
+        self.columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().column_id)
             .collect()
     }
 }

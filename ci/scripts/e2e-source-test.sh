@@ -33,7 +33,6 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Install dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
-apt-get -y install jq
 
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \

@@ -15,8 +15,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::actor_dispatcher::DispatcherType;
-use crate::{FragmentId, I32Array};
+use crate::{DispatcherType, FragmentId, I32Array};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "fragment_relation")]

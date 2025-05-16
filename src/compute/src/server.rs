@@ -227,8 +227,13 @@ pub async fn compute_node_serve(
     );
 
     // Initialize observer manager.
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+        config.batch.developer.compute_client_config.clone(),
+    ));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
-    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let compute_observer_node =
+        ComputeObserverNode::new(system_params_manager.clone(), batch_client_pool.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
     observer_manager.start().await;
@@ -349,10 +354,6 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let batch_client_pool = Arc::new(ComputeClientPool::new(
-        config.batch_exchange_connection_pool_size(),
-        config.batch.developer.compute_client_config.clone(),
-    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -533,9 +534,8 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
 
 /// Checks whether an embedded compactor starts with a compute node.
 fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: bool) -> bool {
-    // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-    // along with the compute node.
-    state_store_url == "hummock+memory"
+    // Always start an embedded compactor if the state store is in-memory.
+    state_store_url.starts_with("hummock+memory")
         || state_store_url.starts_with("hummock+disk")
         || disable_remote_compactor
 }

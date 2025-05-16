@@ -70,6 +70,11 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::Register as IcebergRegister;
+use risingwave_pb::iceberg_compaction::{
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+    subscribe_iceberg_compaction_event_request,
+};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -78,7 +83,6 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
-use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -92,7 +96,7 @@ use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClie
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::meta::*;
+use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -113,6 +117,7 @@ use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    IcebergCompactionEventItem,
 };
 use crate::meta_rpc_client_method_impl;
 
@@ -1017,6 +1022,17 @@ impl MetaClient {
         Ok(resp.distributions)
     }
 
+    pub async fn get_fragment_by_id(
+        &self,
+        fragment_id: u32,
+    ) -> Result<Option<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .get_fragment_by_id(GetFragmentByIdRequest { fragment_id })
+            .await?;
+        Ok(resp.distribution)
+    }
+
     pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         let resp = self
             .inner
@@ -1702,6 +1718,38 @@ impl HummockMetaClient for MetaClient {
     ) -> Result<PbHummockVersion> {
         self.get_version_by_epoch(epoch, table_id).await
     }
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+        BoxStream<'static, IcebergCompactionEventItem>,
+    )> {
+        let (request_sender, request_receiver) =
+            unbounded_channel::<SubscribeIcebergCompactionEventRequest>();
+        request_sender
+            .send(SubscribeIcebergCompactionEventRequest {
+                event: Some(subscribe_iceberg_compaction_event_request::Event::Register(
+                    IcebergRegister {
+                        context_id: self.worker_id(),
+                    },
+                )),
+                create_at: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
+            })
+            .context("Failed to subscribe compaction event")?;
+
+        let stream = self
+            .inner
+            .subscribe_iceberg_compaction_event(Request::new(UnboundedReceiverStream::new(
+                request_receiver,
+            )))
+            .await?;
+
+        Ok((request_sender, Box::pin(stream)))
+    }
 }
 
 #[async_trait]
@@ -2141,6 +2189,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
+            ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -2203,6 +2252,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_compaction_score, GetCompactionScoreRequest, GetCompactionScoreResponse }
             ,{ hummock_client, rise_ctl_rebuild_table_stats, RiseCtlRebuildTableStatsRequest, RiseCtlRebuildTableStatsResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
+            ,{ hummock_client, subscribe_iceberg_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeIcebergCompactionEventRequest>, Streaming<SubscribeIcebergCompactionEventResponse> }
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }

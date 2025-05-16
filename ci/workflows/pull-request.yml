@@ -58,6 +58,10 @@ steps:
       - monorepo-diff#v1.2.0:
           diff: "git diff --name-only origin/main"
           watch:
+            - path: "ci/.env"
+              config:
+                command: "ci/build-ci-image.sh"
+                label: "ci build images"
             - path: "ci/build-ci-image.sh"
               config:
                 command: "ci/build-ci-image.sh"
@@ -109,7 +113,7 @@ steps:
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test"
+      || build.pull_request.labels includes "ci/run-e2e-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
     depends_on:
       - "build"
@@ -320,7 +324,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-deltalake-sink-rust-tests?(,|$$)/
     command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -334,7 +338,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end redis sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-redis-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-redis-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-redis-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -348,7 +352,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end doris sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-doris-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-doris-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -362,7 +366,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-starrocks-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-starrocks-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-starrocks-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -376,7 +380,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end cassandra sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-cassandra-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -390,7 +394,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end mongodb sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-mongodb-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-dev"
     depends_on:
       - "build"

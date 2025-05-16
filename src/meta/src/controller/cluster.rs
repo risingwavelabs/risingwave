@@ -428,9 +428,9 @@ pub struct StreamingClusterInfo {
 
 // Encapsulating the use of parallelism
 impl StreamingClusterInfo {
-    pub fn parallelism(&self, resource_group: String) -> usize {
+    pub fn parallelism(&self, resource_group: &str) -> usize {
         let available_worker_ids =
-            filter_workers_by_resource_group(&self.worker_nodes, resource_group.as_str());
+            filter_workers_by_resource_group(&self.worker_nodes, resource_group);
 
         self.worker_nodes
             .values()

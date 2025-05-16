@@ -33,6 +33,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
+#![feature(get_mut_unchecked)]
 
 pub mod hummock;
 pub mod memory;
@@ -52,6 +53,7 @@ pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
+pub mod vector;
 
 pub use store::{StateStore, StateStoreIter, StateStoreReadIter};
 pub use store_impl::StateStoreImpl;

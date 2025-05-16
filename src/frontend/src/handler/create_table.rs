@@ -37,6 +37,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::jvm_runtime::JVM;
+use risingwave_connector::sink::SINK_SNAPSHOT_OPTION;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
@@ -48,6 +49,7 @@ use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
@@ -65,7 +67,7 @@ use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, create_sink, create_source};
+use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -87,7 +89,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
@@ -1344,7 +1346,7 @@ fn bind_cdc_table_schema(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1372,6 +1374,21 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
+    if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
+        // HACK: since we don't have atomic DDL, table with connector may lose data.
+        // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
+        if let Some(_rate_limit) = handler_args.with_options.insert(
+            OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
+            "0".to_owned(),
+        ) {
+            // prevent user specified rate limit
+            return Err(ErrorCode::NotSupported(
+                "source_rate_limit for iceberg table engine during table creation".to_owned(),
+                "Please remove source_rate_limit from WITH options.".to_owned(),
+            )
+            .into());
+        }
+    }
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
@@ -1381,7 +1398,7 @@ pub async fn handle_create_table(
         return Ok(resp);
     }
 
-    let (graph, source, table, job_type) = {
+    let (graph, source, hummock_table, job_type) = {
         let (plan, source, table, job_type) = handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
@@ -1400,6 +1417,7 @@ pub async fn handle_create_table(
             engine,
         )
         .await?;
+        tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
         let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
@@ -1417,19 +1435,17 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, table, graph, job_type)
+                .create_table(source, hummock_table, graph, job_type)
                 .await?;
         }
         Engine::Iceberg => {
+            assert_eq!(job_type, TableJobType::General);
             create_iceberg_engine_table(
                 session,
                 handler_args,
                 source,
-                table,
+                hummock_table,
                 graph,
-                job_type,
-                column_defs,
-                constraints,
                 table_name,
             )
             .await?;
@@ -1439,6 +1455,14 @@ pub async fn handle_create_table(
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
+/// Iceberg table engine is composed of hummock table, iceberg sink and iceberg source.
+///
+/// 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
+/// 2. create a hummock table
+/// 3. create an iceberg sink
+/// 4. create an iceberg source
+///
+/// See <https://github.com/risingwavelabs/risingwave/issues/21586> for an architecture diagram.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_iceberg_engine_table(
     session: Arc<SessionImpl>,
@@ -1446,16 +1470,8 @@ pub async fn create_iceberg_engine_table(
     mut source: Option<PbSource>,
     table: PbTable,
     graph: StreamFragmentGraph,
-    job_type: TableJobType,
-    column_defs: Vec<ColumnDef>,
-    constraints: Vec<TableConstraint>,
     table_name: ObjectName,
 ) -> Result<()> {
-    // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
-    // 2. create a hummock table
-    // 3. create an iceberg sink
-    // 4. create an iceberg source
-
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
@@ -1594,43 +1610,18 @@ pub async fn create_iceberg_engine_table(
         }
     };
 
+    let table_catalog = TableCatalog::from(table.clone());
+
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
-    let mut pks = column_defs
+    let mut pks = table_catalog
+        .pk_column_names()
         .iter()
-        .filter(|c| {
-            c.options
-                .iter()
-                .any(|o| matches!(o.option, ColumnOption::Unique { is_primary: true }))
-        })
-        .map(|c| c.name.to_string())
+        .map(|c| c.to_string())
         .collect::<Vec<String>>();
 
-    // Fetch primary key from constraints
-    if pks.is_empty() {
-        pks = constraints
-            .into_iter()
-            .filter(|c| {
-                matches!(
-                    c,
-                    TableConstraint::Unique {
-                        is_primary: true,
-                        ..
-                    }
-                )
-            })
-            .flat_map(|c| match c {
-                TableConstraint::Unique { columns, .. } => columns
-                    .into_iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>(),
-                _ => vec![],
-            })
-            .collect::<Vec<String>>();
-    }
-
     // For the table without primary key. We will use `_row_id` as primary key
-    let sink_from = if pks.is_empty() {
+    let sink_from = if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
         let [stmt]: [_; 1] = Parser::parse_sql(&format!(
             "select {} as {}, * from {}",
@@ -1669,6 +1660,7 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("primary_key".to_owned(), pks.join(","));
     sink_with.insert("type".to_owned(), "upsert".to_owned());
+    sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
 
     let commit_checkpoint_interval = handler_args
         .with_options
@@ -1812,11 +1804,11 @@ pub async fn create_iceberg_engine_table(
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic
+    let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, job_type)
+        .create_table(source, table, graph, TableJobType::General)
         .await?;
-
-    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt).await;
+    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
     if res.is_err() {
         // Since we don't support ddl atomicity, we need to drop the partial created table.
         handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
@@ -1828,6 +1820,18 @@ pub async fn create_iceberg_engine_table(
         handle_drop_table(handler_args.clone(), table_name, true, true).await?;
         res?;
     }
+
+    if has_connector {
+        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+            handler_args,
+            PbThrottleTarget::TableWithSource,
+            table_name,
+            -1,
+        )
+        .await?;
+    }
+
+
     Ok(())
 }
 

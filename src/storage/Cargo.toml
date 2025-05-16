@@ -51,7 +51,7 @@ sled = "0.34.7"
 spin = "0.10"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -73,7 +73,7 @@ zstd = { version = "0.13", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.17", default-features = false }
 libc = "0.2"
-nix = { version = "0.29", features = ["fs", "mman"] }
+nix = { version = "0.30", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }

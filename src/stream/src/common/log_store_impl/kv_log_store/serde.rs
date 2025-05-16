@@ -775,6 +775,7 @@ mod stream_de {
                 let size = key.user_key.table_key.len() + value.len();
                 let (epoch, op) = serde.deserialize(value)?;
                 let row_meta = RowMeta { vnode, epoch, size };
+                tracing::trace!(?row_meta, ?op, "read_row");
                 Ok(RawLogStoreRow { op, row_meta })
             })
             .map_err(Into::into),

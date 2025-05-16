@@ -94,7 +94,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
                 // infer as the element type of "anyarray" argument
-                return Ok(quote! { |args| Ok(args[#i].as_list().clone()) });
+                return Ok(quote! { |args| Ok(args[#i].as_list_element_type().clone()) });
             }
         } else if self.ret == "anyarray" {
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {

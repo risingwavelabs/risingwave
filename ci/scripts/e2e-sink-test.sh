@@ -45,9 +45,6 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
-echo "--- download pg dependencies"
-apt-get -y install postgresql-client jq
-
 echo "--- prepare mysql"
 # prepare environment mysql sink
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
@@ -66,7 +63,7 @@ echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
 risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'pg-native'
 sleep 1
 
 echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
@@ -105,7 +102,7 @@ echo "--- testing remote sinks"
 # check sink destination postgres
 risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'jdbc'
 sleep 1
 
 # check sink destination mysql using shell
