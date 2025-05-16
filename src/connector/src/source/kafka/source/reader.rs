@@ -107,6 +107,8 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+        // poll consumer to trigger callback functions
+        let _ = tokio::time::timeout(Duration::from_millis(100), consumer.recv()).await;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -157,9 +159,6 @@ impl SplitReader for KafkaSplitReader {
         );
 
         consumer.assign(&tpl)?;
-
-        // poll consumer to trigger callback functions
-        let _ = tokio::time::timeout(Duration::from_millis(1000), consumer.recv()).await;
 
         // The two parameters below are only used by developers for performance testing purposes,
         // so we panic here on purpose if the input is not correctly recognized.
