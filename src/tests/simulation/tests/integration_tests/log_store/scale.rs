@@ -19,7 +19,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use madsim::runtime::init_logger;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts};
+use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, KillOpts, Session};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
 
@@ -27,12 +27,12 @@ use crate::log_store::utils::*;
 
 // NOTE(kwannoel): To troubleshoot, recommend running with the following logging configuration:
 // ```sh
+// RUST_MIN_STACK=21470000
 // RUST_LOG='\
 //   risingwave_stream::executor::sync_kv_log_store=trace,\
 //   integration_tests::log_store::scale=info,\
 //   risingwave_stream::common::log_store_impl::kv_log_store=trace\
-// '\
-// ./risedev sit-test test_recover_synced_log_store >out.log 2>&1
+// ' ./risedev sit-test test_scale_in_synced_log_store >out.log 2>&1
 // ```
 #[tokio::test]
 async fn test_scale_in_synced_log_store() -> Result<()> {
@@ -58,14 +58,43 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         tracing::info!("setup tables and mv");
         run_amplification_workload(&mut cluster, dimension_count).await?;
         tracing::info!("ran amplification workload");
+        assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+
+        async fn assert_parallelism_eq(session: &mut Session, parallelism: usize) {
+            let parallelism_sql = format!(
+                "select count(parallelism) filter (where parallelism != {parallelism})\
+                from (select count(*) parallelism from rw_actors group by fragment_id);"
+            );
+            let result = session.run(parallelism_sql).await.unwrap();
+            let parallelism_count: usize = result.parse().unwrap();
+            if parallelism_count != 0 {
+                let result = session.run("select fragment_id, count(*) as parallelism from rw_actors group by fragment_id;").await.unwrap();
+                panic!("parallelism is not equal to {parallelism}: {result}");
+            }
+        }
 
         /// Trigger a number of scale operations, with different combinations of nodes
-        for (a, b) in (1..=5).tuple_combinations() {
-            cluster
-                .kill_nodes(vec![format!("compute-{a}"), format!("compute-{b}")], 6)
-                .await;
-            tracing::info!("killed compute nodes: {a}, {b}");
+        for (a, b) in (1..=2).tuple_combinations() {
+            let node_name_a = format!("compute-{a}");
+            let node_name_b = format!("compute-{b}");
+            let nodes = vec![node_name_a.clone(), node_name_b.clone()];
+            // First check the number of work nodes should be 10.
+            let mut session = cluster.start_session();
+            assert_parallelism_eq(&mut session, 10).await;
+            cluster.simple_kill_nodes(&nodes).await;
+            tracing::info!("killed compute nodes: {node_name_a}, {node_name_b}");
             cluster.wait_for_recovery().await?;
+            assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+            assert_parallelism_eq(&mut session, 6).await;
+            cluster.simple_restart_nodes(&nodes).await;
+            tracing::info!("restarted compute nodes: {node_name_a}, {node_name_b}");
+            assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+            cluster.wait_for_recovery().await?;
+            tracing::info!("recovered");
+
+            cluster.wait_for_scale(10).await?;
+            assert_parallelism_eq(&mut session, 10).await;
+            assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
         }
 
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
