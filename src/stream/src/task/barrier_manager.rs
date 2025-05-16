@@ -679,7 +679,7 @@ mod await_epoch_completed_future {
         if let Some(reg) = barrier_await_tree_reg {
             reg.register(
                 await_tree_key::BarrierAwait { prev_epoch },
-                format!("SyncEpoch({})", prev_epoch),
+                await_tree::span!("SyncEpoch({})", prev_epoch),
             )
             .instrument(future)
             .left_future()

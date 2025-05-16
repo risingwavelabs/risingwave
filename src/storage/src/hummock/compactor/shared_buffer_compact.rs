@@ -210,7 +210,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
                 let id = NEXT_SHARED_BUFFER_COMPACT_ID.fetch_add(1, Relaxed);
                 reg.register(
                     await_tree_key::CompactSharedBuffer { id },
-                    format!(
+                    await_tree::span!(
                         "Compact Shared Buffer: {:?}",
                         payload
                             .iter()

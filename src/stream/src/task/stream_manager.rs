@@ -647,7 +647,7 @@ impl StreamActorManager {
             let actor_id = stream_actor_ref.actor_id;
             let handle = {
                 let trace_span =
-                    format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
+                    await_tree::span!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
                 let barrier_manager = local_barrier_manager.clone();
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
                 let actor = self

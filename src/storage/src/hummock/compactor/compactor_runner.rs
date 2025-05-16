@@ -501,7 +501,7 @@ pub async fn compact_with_agent(
                         task_id: compact_task.task_id,
                         split_index,
                     },
-                    format!(
+                    await_tree::span!(
                         "Compaction Task {} Split {} ",
                         compact_task.task_id, split_index
                     ),

@@ -266,7 +266,7 @@ impl HummockEventHandler {
                     let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
                     reg.register(
                         await_tree_key::SpawnUploadTask { id: upload_task_id },
-                        format!("Spawn Upload Task: {}", task_info),
+                        await_tree::span!("Spawn Upload Task: {}", task_info),
                     )
                 });
                 let upload_task_latency = upload_task_latency.clone();
