@@ -50,20 +50,21 @@ type CompactorChangeRx =
 #[derive(Debug, Clone)]
 struct CommitInfo {
     count: usize,
-    next_compaction_time: Instant,
+    next_compaction_time: Option<Instant>,
     compaction_interval: u64,
 }
 
 impl CommitInfo {
     fn set_processing(&mut self) {
         self.count = 0;
-        self.next_compaction_time = Instant::now() + std::time::Duration::from_secs(u64::MAX);
+        // `set next_compaction_time` to `None` value that means is processing
+        self.next_compaction_time.take();
     }
 
     fn initialize(&mut self) {
         self.count = 0;
         self.next_compaction_time =
-            Instant::now() + std::time::Duration::from_secs(self.compaction_interval);
+            Some(Instant::now() + std::time::Duration::from_secs(self.compaction_interval));
     }
 
     fn replace(&mut self, commit_info: CommitInfo) {
@@ -81,7 +82,7 @@ impl CommitInfo {
 
         // reset the next compaction time
         self.next_compaction_time =
-            Instant::now() + std::time::Duration::from_secs(compaction_interval);
+            Some(Instant::now() + std::time::Duration::from_secs(compaction_interval));
     }
 }
 
@@ -228,8 +229,9 @@ impl IcebergCompactionManager {
         // if the compaction interval is changed, we need to reset the commit info when the compaction task is sent of initialized
         let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
             count: 0,
-            next_compaction_time: Instant::now()
-                + std::time::Duration::from_secs(compaction_interval),
+            next_compaction_time: Some(
+                Instant::now() + std::time::Duration::from_secs(compaction_interval),
+            ),
             compaction_interval,
         });
 
@@ -248,7 +250,12 @@ impl IcebergCompactionManager {
             .iceberg_commits
             .iter_mut()
             .filter(|(_, commit_info)| {
-                commit_info.count > 0 && now > commit_info.next_compaction_time
+                commit_info.count > 0
+                    && if let Some(next_compaction_time) = commit_info.next_compaction_time {
+                        next_compaction_time <= now
+                    } else {
+                        false
+                    }
             })
             .sorted_by(|a, b| {
                 b.1.count
