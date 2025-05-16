@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::time_travel::{
 };
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
+    CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId, HummockSstableObjectId,
 };
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
@@ -163,7 +163,7 @@ impl HummockManager {
                                 .iter()
                                 .skip(start_idx * delete_sst_batch_size)
                                 .take(delete_sst_batch_size)
-                                .copied(),
+                                .map(|sst_id| sst_id.inner()),
                         ),
                     )
                     .exec(txn)
@@ -272,15 +272,23 @@ impl HummockManager {
 
     pub(crate) async fn filter_out_objects_by_time_travel(
         &self,
-        objects: impl Iterator<Item = HummockSstableObjectId>,
+        objects: impl Iterator<Item = HummockObjectId>,
         batch_size: usize,
-    ) -> Result<HashSet<HummockSstableObjectId>> {
+    ) -> Result<HashSet<HummockObjectId>> {
         // The input object count is much smaller than time travel pinned object count in meta store.
         // So search input object in meta store.
         let mut result: HashSet<_> = objects.collect();
-        let mut remain: VecDeque<_> = result.iter().copied().collect();
-        while !remain.is_empty() {
-            let batch = remain.drain(..std::cmp::min(remain.len(), batch_size));
+        let mut remain_sst: VecDeque<_> = result
+            .iter()
+            .map(|object_id| {
+                let HummockObjectId::Sstable(sst_id) = object_id;
+                *sst_id
+            })
+            .collect();
+        while !remain_sst.is_empty() {
+            let batch = remain_sst
+                .drain(..std::cmp::min(remain_sst.len(), batch_size))
+                .map(|object_id| object_id.as_raw().inner());
             let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
                 hummock_sstable_info::Entity::find()
                     .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))
@@ -290,7 +298,14 @@ impl HummockManager {
                     .all(&self.env.meta_store_ref().conn)
                     .await?;
             for reject in reject_object_ids {
-                let object_id = HummockSstableObjectId::try_from(reject).unwrap();
+                // DO NOT REMOVE THIS LINE
+                // This is to ensure that when adding new variant to `HummockObjectId`,
+                // the compiler will warn us if we forget to handle it here.
+                match HummockObjectId::Sstable(0.into()) {
+                    HummockObjectId::Sstable(_) => {}
+                };
+                let reject: u64 = reject.try_into().unwrap();
+                let object_id = HummockObjectId::Sstable(HummockSstableObjectId::from(reject));
                 result.remove(&object_id);
             }
         }
@@ -387,9 +402,13 @@ impl HummockManager {
         let sst_info_fetch_batch_size = self.env.opts.hummock_time_travel_sst_info_fetch_batch_size;
         while !sst_ids.is_empty() {
             let sst_infos = hummock_sstable_info::Entity::find()
-                .filter(hummock_sstable_info::Column::SstId.is_in(
-                    sst_ids.drain(..std::cmp::min(sst_info_fetch_batch_size, sst_ids.len())),
-                ))
+                .filter(
+                    hummock_sstable_info::Column::SstId.is_in(
+                        sst_ids
+                            .drain(..std::cmp::min(sst_info_fetch_batch_size, sst_ids.len()))
+                            .map(|sst_id| sst_id.inner()),
+                    ),
+                )
                 .all(&sql_store.conn)
                 .await?;
             for sst_info in sst_infos {
@@ -442,8 +461,8 @@ impl HummockManager {
                         break;
                     };
                     batch.push(hummock_sstable_info::ActiveModel {
-                        sst_id: Set(sst_info.sst_id.try_into().unwrap()),
-                        object_id: Set(sst_info.object_id.try_into().unwrap()),
+                        sst_id: Set(sst_info.sst_id.inner().try_into().unwrap()),
+                        object_id: Set(sst_info.object_id.inner().try_into().unwrap()),
                         sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                     });
                     remain -= 1;

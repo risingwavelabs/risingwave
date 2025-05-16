@@ -23,7 +23,8 @@ use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX, version_checkpoint_path};
+use risingwave_hummock_sdk::{HummockSstableObjectId, version_checkpoint_path};
+use risingwave_meta_model::hummock_sequence::SSTABLE_OBJECT_ID;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;
@@ -246,7 +247,7 @@ async fn validate_integrity(
         if split.len() <= 2 {
             return None;
         }
-        if split[split.len() - 1] != OBJECT_SUFFIX {
+        if split[split.len() - 1] != SSTABLE_OBJECT_ID {
             return None;
         }
         let id = split[split.len() - 2]

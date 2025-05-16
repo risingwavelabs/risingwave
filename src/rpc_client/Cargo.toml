@@ -24,7 +24,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 rw_futures_util = { workspace = true }
 static_assertions = "1"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
