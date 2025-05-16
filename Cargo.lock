@@ -14258,7 +14258,7 @@ dependencies = [
 [[package]]
 name = "tiberius"
 version = "0.12.2"
-source = "git+https://github.com/risingwavelabs/tiberius.git?rev=22ca2a787bbcbb44f1668f164319f4d31989e8ce#22ca2a787bbcbb44f1668f164319f4d31989e8ce"
+source = "git+https://github.com/risingwavelabs/tiberius.git?rev=59350b92775a61611cf1fc3a5d0ff38bf264e6ac#59350b92775a61611cf1fc3a5d0ff38bf264e6ac"
 dependencies = [
  "async-trait",
  "asynchronous-codec",
