@@ -2235,3 +2235,44 @@
 
     Caused by:
       relative_error=1 does not satisfy 0.0 < relative_error < 1.0
+- name: test empty agg
+  sql: |
+    WITH with_0 AS (
+        WITH with_1 AS (
+            SELECT
+                TIMESTAMP '2025-05-05 16:18:55' AS col_0,
+                avg((INT '813')) AS col_1, ((BIGINT '371') / (INT '-2147483648')) AS col_2,
+                (SMALLINT '460') AS col_3
+            FROM generate_series(TIMESTAMP '2020-01-01 00:07:42', TIMESTAMP '2020-01-01 00:46:33', INTERVAL '2706 seconds') AS generate_series_2
+            WHERE true
+        )
+        SELECT
+            true AS col_0,
+            (REAL '-2147483648') AS col_1,
+            (SMALLINT '-10773') AS col_2
+        FROM with_1
+    )
+    SELECT
+        CAST(NULL AS STRUCT<a SMALLINT, b DOUBLE, c TIME>) AS col_0,
+        (INT '995') AS col_1,
+        (INTERVAL '-604800') AS col_2,
+        (FLOAT '294') AS col_3
+    FROM with_0
+    WHERE false;
+  logical_plan: |-
+    LogicalProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64] }
+    └─LogicalFilter { predicate: false:Boolean }
+      └─LogicalShare { id: 7 }
+        └─LogicalProject { exprs: [true:Boolean, -2147483600:Float32, -10773:Int16] }
+          └─LogicalShare { id: 5 }
+            └─LogicalProject { exprs: ['2025-05-05 16:18:55':Timestamp, (sum(813:Int32)::Decimal / count(813:Int32)::Decimal) as $expr1, (371:Int64 / -2147483648:Int32) as $expr2, 460:Int16] }
+              └─LogicalAgg { aggs: [sum(813:Int32), count(813:Int32)] }
+                └─LogicalProject { exprs: [813:Int32] }
+                  └─LogicalFilter { predicate: true }
+                    └─LogicalTableFunction { table_function: GenerateSeries('2020-01-01 00:07:42':Timestamp, '2020-01-01 00:46:33':Timestamp, '00:45:06':Interval) }
+  batch_plan: 'BatchValues { rows: [] }'
+  stream_plan: |-
+    StreamMaterialize { columns: [col_0, col_1, col_2, col_3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64, _row_id] }
+      └─StreamFilter { predicate: false:Boolean }
+        └─StreamValues { rows: [[0:Int64]] }
