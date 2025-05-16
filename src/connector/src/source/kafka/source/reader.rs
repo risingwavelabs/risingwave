@@ -21,13 +21,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -95,7 +95,7 @@ impl SplitReader for KafkaSplitReader {
 
         let client_ctx = RwConsumerContext::new(ctx_common);
         let consumer: StreamConsumer<RwConsumerContext> = config
-            .set_log_level(RDKafkaLogLevel::Info)
+            .set_log_level(read_kafka_log_level())
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
