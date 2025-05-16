@@ -43,7 +43,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         .await?;
 
     let amplification_factor = 80000;
-    let dimension_count = 5;
+    let dimension_count = 10;
     let result_count = amplification_factor * dimension_count;
 
     tracing::info!("setup cluster");
@@ -95,6 +95,9 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             cluster.wait_for_scale(10).await?;
             assert_parallelism_eq(&mut session, 10).await;
             assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+
+            delete_amplification_workload(&mut cluster).await?;
+            run_amplification_workload(&mut cluster, dimension_count).await?;
         }
 
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
