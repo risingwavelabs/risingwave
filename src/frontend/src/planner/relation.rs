@@ -243,6 +243,36 @@ impl Planner {
                     bail_not_implemented!("As Of Version is not supported yet.")
                 }
             }
+
+            // validate the source has pk. We raise an error here to avoid panic in expect_stream_key later
+            // for a nicer error message.
+            if matches!(self.plan_for(), PlanFor::Stream) {
+                let has_pk =
+                    source.catalog.row_id_index.is_some() || !source.catalog.pk_col_ids.is_empty();
+                if !has_pk {
+                    // in older version, iceberg source doesn't have row_id, thus may hit this
+                    let is_iceberg = source.catalog.is_iceberg_connector();
+                    // only iceberg should hit this.
+                    debug_assert!(is_iceberg);
+                    if is_iceberg {
+                        return Err(ErrorCode::BindError(format!(
+                        "Cannot create a stream job from an iceberg source without a primary key.\nThe iceberg source might be created in an older version of RisingWave. Please try recreating the source.\nSource: {:?}",
+                        source.catalog
+                    ))
+                    .into());
+                    } else {
+                        return Err(ErrorCode::BindError(format!(
+                            "Cannot create a stream job from a source without a primary key.
+This is a bug. We would appreciate a bug report at:
+https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml
+
+source: {:?}",
+                            source.catalog
+                        ))
+                        .into());
+                    }
+                }
+            }
             Ok(LogicalSource::with_catalog(
                 Rc::new(source.catalog),
                 SourceNodeKind::CreateMViewOrBatch,
