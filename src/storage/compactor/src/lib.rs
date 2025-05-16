@@ -147,7 +147,14 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
+            compactor_serve(
+                listen_addr,
+                advertise_addr,
+                opts,
+                shutdown,
+                CompactorMode::Dedicated,
+            )
+            .await;
         }),
 
         Some(CompactorMode::DedicatedIceberg) => {

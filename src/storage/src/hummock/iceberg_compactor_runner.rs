@@ -82,10 +82,11 @@ impl IcebergCompactorRunner {
             }
         }
 
-        Ok((all_data_file_size / MAX_SIZE_PER_PARTITION) + 1)
+        Ok(all_data_file_size.div_ceil(MAX_SIZE_PER_PARTITION))
     }
 
     pub async fn compact_iceberg(self, shutdown_rx: Receiver<()>, parallelism: usize) {
+        // Todo:  consider target_file_size
         let compact = async move {
             let compaction_config = Arc::new(CompactionConfig {
                 batch_parallelism: Some(parallelism),

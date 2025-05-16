@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
+    AsyncStackTraceOption, CompactorMode, MetricLevel, RwConfig, extract_storage_memory_config,
+    load_config,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -40,7 +41,7 @@ use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, RemoteTableAccessor,
 };
 use risingwave_storage::hummock::compactor::{
-    CompactionAwaitTreeRegRef, CompactionExecutor, CompactorContext, CompactorType,
+    CompactionAwaitTreeRegRef, CompactionExecutor, CompactorContext,
     new_compaction_await_tree_reg_ref,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -186,6 +187,7 @@ pub async fn compactor_serve(
     advertise_addr: HostAddr,
     opts: CompactorOpts,
     shutdown: CancellationToken,
+    compactor_mode: CompactorMode,
 ) {
     let config = load_config(&opts.config_path, &opts);
     info!("Starting compactor node",);
@@ -274,7 +276,7 @@ pub async fn compactor_serve(
             hummock_meta_client.clone(),
             sstable_object_id_manager.clone(),
             compaction_catalog_manager_ref,
-            CompactorType::Hummock,
+            compactor_mode,
         ),
     ];
 

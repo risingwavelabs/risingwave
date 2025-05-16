@@ -15,6 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use risingwave_common::config::CompactorMode;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
@@ -405,11 +406,6 @@ impl CompactionRequestSender {
     }
 }
 
-pub enum CompactorType {
-    Hummock,
-    Iceberg,
-}
-
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
@@ -419,7 +415,7 @@ pub fn start_compactor(
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-    compactor_type: CompactorType,
+    compactor_mode: CompactorMode,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -460,8 +456,10 @@ pub fn start_compactor(
                 }
             }
 
-            let (request_sender, response_event_stream) = match compactor_type {
-                CompactorType::Hummock => {
+            let (request_sender, response_event_stream) = match compactor_mode {
+                CompactorMode::Shared => unreachable!(),
+                CompactorMode::SharedIceberg => unreachable!(),
+                CompactorMode::Dedicated => {
                     match hummock_meta_client.subscribe_compaction_event().await {
                         Ok((request_sender, response_event_stream)) => {
                             tracing::debug!("Succeeded subscribe_compaction_event.");
@@ -480,7 +478,7 @@ pub fn start_compactor(
                         }
                     }
                 }
-                CompactorType::Iceberg => {
+                CompactorMode::DedicatedIceberg => {
                     match hummock_meta_client
                         .subscribe_iceberg_compaction_event()
                         .await

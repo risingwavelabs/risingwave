@@ -23,8 +23,8 @@ use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
-    StorageMemoryConfig, load_config,
+    AsyncStackTraceOption, CompactorMode, MAX_CONNECTION_WINDOW_SIZE, MetricLevel,
+    STREAM_WINDOW_SIZE, StorageMemoryConfig, load_config,
 };
 use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
@@ -55,8 +55,7 @@ use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_storage::StateStoreImpl;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, CompactorContext, CompactorType, new_compaction_await_tree_reg_ref,
-    start_compactor,
+    CompactionExecutor, CompactorContext, new_compaction_await_tree_reg_ref, start_compactor,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
@@ -266,7 +265,7 @@ pub async fn compute_node_serve(
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
                 storage.compaction_catalog_manager_ref().clone(),
-                CompactorType::Hummock,
+                CompactorMode::Dedicated,
             );
             sub_tasks.push((handle, shutdown_sender));
         }
