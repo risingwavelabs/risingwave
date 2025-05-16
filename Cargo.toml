@@ -182,7 +182,7 @@ parquet = { version = "54", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
-thiserror-ext = { version = "0.2.1", features = ["backtrace"] }
+thiserror-ext = { version = "0.3", features = ["backtrace"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
