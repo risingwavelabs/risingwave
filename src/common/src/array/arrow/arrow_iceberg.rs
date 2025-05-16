@@ -104,7 +104,7 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Time => self.time_type_to_arrow(),
             DataType::Timestamp => self.timestamp_type_to_arrow(),
             DataType::Timestamptz => self.timestamptz_type_to_arrow(),
-            DataType::Interval => self.varchar_type_to_arrow(),
+            DataType::Interval => self.interval_type_to_arrow(),
             DataType::Varchar => self.varchar_type_to_arrow(),
             DataType::Bytea => self.bytea_type_to_arrow(),
             DataType::Serial => self.serial_type_to_arrow(),
@@ -115,6 +115,11 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
+    }
+
+    #[inline]
+    fn interval_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Utf8
     }
 
     #[inline]
@@ -230,6 +235,11 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         arrow_field
     }
 
+    #[inline]
+    fn interval_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Utf8
+    }
+
     fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
         let data_type = arrow_schema::DataType::Utf8;
 
@@ -260,7 +270,7 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Time => self.time_type_to_arrow(),
             DataType::Timestamp => self.timestamp_type_to_arrow(),
             DataType::Timestamptz => self.timestamptz_type_to_arrow(),
-            DataType::Interval => self.varchar_type_to_arrow(),
+            DataType::Interval => self.interval_type_to_arrow(),
             DataType::Varchar => self.varchar_type_to_arrow(),
             DataType::Bytea => self.bytea_type_to_arrow(),
             DataType::Serial => self.serial_type_to_arrow(),
