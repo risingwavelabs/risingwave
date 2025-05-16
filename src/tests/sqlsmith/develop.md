@@ -8,7 +8,7 @@ See [Running with Madsim](./README.md#running-with-madsim).
 ### Focused property testing
 
 When introducing a new feature, you can customize [config.yml](./config.yml) to
-set its generation weight and toggle its availability for targeted testing.
+set its weight to specify the generation probability (0-100%) and toggle its availability for targeted testing.
 
 To see how to control feature generation programmatically, refer to `config.rs` and
 the usage of the should_generate() function.
