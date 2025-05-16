@@ -43,7 +43,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         .await?;
 
     let amplification_factor = 80000;
-    let dimension_count = 10;
+    let dimension_count = 20;
     let result_count = amplification_factor * dimension_count;
 
     tracing::info!("setup cluster");
@@ -75,6 +75,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
 
         /// Trigger a number of scale operations, with different combinations of nodes
         for (a, b) in (1..=2).tuple_combinations() {
+            delete_amplification_workload(&mut cluster).await?;
             let node_name_a = format!("compute-{a}");
             let node_name_b = format!("compute-{b}");
             let nodes = vec![node_name_a.clone(), node_name_b.clone()];
@@ -96,7 +97,6 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             assert_parallelism_eq(&mut session, 10).await;
             assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
 
-            delete_amplification_workload(&mut cluster).await?;
             run_amplification_workload(&mut cluster, dimension_count).await?;
         }
 
