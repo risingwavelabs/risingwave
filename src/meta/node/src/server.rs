@@ -29,6 +29,7 @@ use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
+use risingwave_meta::hummock::IcebergCompactorManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManager;
 use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
@@ -44,7 +45,7 @@ use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::health_service::HealthServiceImpl;
 use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
-use risingwave_meta_service::hosted_iceberg_catalog_service_impl::HostedIcebergCatalogServiceImpl;
+use risingwave_meta_service::hosted_iceberg_catalog_service::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
@@ -474,9 +475,19 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
-    let iceberg_compaction_mgr =
-        IcebergCompactionManager::new(metadata_manager.clone(), iceberg_compaction_stat_rx);
-    sub_tasks.push(iceberg_compaction_mgr.start());
+    let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
+    // TODO: introduce compactor event stream handler to handle iceberg compaction events.
+    let (iceberg_compaction_mgr, iceberg_compactor_event_rx) = IcebergCompactionManager::build(
+        metadata_manager.clone(),
+        iceberg_compactor_manager.clone(),
+        meta_metrics.clone(),
+    );
+
+    sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_rx,
+    ));
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -554,6 +565,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         metadata_manager.clone(),
         backup_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
@@ -600,9 +612,15 @@ pub async fn start_service_as_election_leader(
         Some(backup_manager),
     ));
     sub_tasks.extend(HummockManager::compaction_event_loop(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_streams_change_rx,
     ));
+
+    sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compactor_event_rx,
+    ));
+
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),

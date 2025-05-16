@@ -149,6 +149,14 @@ pub fn start(
 
             compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
         }),
+
+        Some(CompactorMode::DedicatedIceberg) => {
+            unimplemented!("Dedicated iceberg compactor is not supported yet");
+        }
+
+        Some(CompactorMode::SharedIceberg) => {
+            unimplemented!("Shared iceberg compactor is not supported yet");
+        }
     }
 }
 

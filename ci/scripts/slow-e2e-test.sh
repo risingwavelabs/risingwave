@@ -28,7 +28,7 @@ download_and_prepare_rw "$profile" common
 
 
 echo "--- e2e, $mode, slow tests"
-python3 -m pip install --break-system-packages arrow-udf==0.3.0
+python3 -m pip install --break-system-packages -r e2e_test/udf/remote_python/requirements.txt
 RUST_LOG="info" \
 risedev ci-start "$mode"
 risedev slt -p 4566 -d dev './e2e_test/slow_tests/**/*.slt'

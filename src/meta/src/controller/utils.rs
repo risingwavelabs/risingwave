@@ -23,15 +23,14 @@ use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, Worker
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, JobStatus, ObjectId, PrivilegeId,
-    SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap, WorkerId,
-    actor, connection, database, fragment, fragment_relation, function, index, object,
+    ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
+    WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
     object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
     user_privilege, view,
 };
@@ -1616,7 +1615,19 @@ pub async fn rename_relation(
     }
     // TODO: check is there any thing to change for shared source?
     let old_name = match object_type {
-        ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
+        ObjectType::Table => {
+            let associated_source_id: Option<SourceId> = Source::find()
+                .select_only()
+                .column(source::Column::SourceId)
+                .filter(source::Column::OptionalAssociatedTableId.eq(object_id))
+                .into_tuple()
+                .one(txn)
+                .await?;
+            if let Some(source_id) = associated_source_id {
+                rename_relation!(Source, source, source_id, source_id);
+            }
+            rename_relation!(Table, table, table_id, object_id)
+        }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
         ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
         ObjectType::Subscription => {

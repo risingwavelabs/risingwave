@@ -262,7 +262,7 @@ fn bench_table_scan(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let store = InMemObjectStore::new().monitored(
+    let store = InMemObjectStore::for_test().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );

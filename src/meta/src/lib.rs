@@ -40,7 +40,6 @@ pub mod manager;
 pub mod model;
 pub mod rpc;
 pub mod serving;
-pub mod storage;
 pub mod stream;
 pub mod telemetry;
 

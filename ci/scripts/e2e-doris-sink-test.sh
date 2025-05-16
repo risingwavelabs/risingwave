@@ -25,11 +25,9 @@ download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
 risedev ci-start ci-sink-test
-sleep 1
 
 echo "--- create doris table"
-apt-get update -y && apt-get install -y mysql-client
-sleep 2
+sleep 10 # Wait for doris to start. TODO: shall we use `service_healthy` condition in docker-compose.yml?
 mysql -uroot -P 9030 -h doris-server -e "CREATE database demo;use demo;
 CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 datev2,v8 datetime,v9 boolean,v10 json) UNIQUE KEY(\`v1\`)
 DISTRIBUTED BY HASH(\`v1\`) BUCKETS 1
