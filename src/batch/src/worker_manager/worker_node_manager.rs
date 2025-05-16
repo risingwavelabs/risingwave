@@ -372,6 +372,7 @@ impl WorkerNodeSelector {
                 let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
                 // If it's a singleton, set max_parallelism=1 for place_vnode.
                 let max_parallelism = mapping.to_single().map(|_| 1);
+                // TODO: use runtime parameter batch_parallelism
                 let masked_mapping =
                     place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
                         .ok_or_else(|| BatchError::EmptyWorkerNodes)?;

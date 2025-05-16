@@ -348,10 +348,17 @@ pub async fn start_service_as_election_leader(
     let metadata_manager = MetadataManager::new(cluster_controller, catalog_controller);
 
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    let max_serving_parallelism = env
+        .session_params_manager_impl_ref()
+        .get_params()
+        .await
+        .batch_parallelism()
+        .map(|p| p.get());
     serving::on_meta_start(
         env.notification_manager_ref(),
         &metadata_manager,
         serving_vnode_mapping.clone(),
+        max_serving_parallelism,
     )
     .await;
 
@@ -626,6 +633,7 @@ pub async fn start_service_as_election_leader(
             env.notification_manager_ref(),
             metadata_manager.clone(),
             serving_vnode_mapping,
+            env.session_params_manager_impl_ref(),
         )
         .await,
     );
