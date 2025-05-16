@@ -39,8 +39,8 @@ use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
 use crate::{
-    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockSstableId, HummockSstableObjectId,
-    HummockVersionId,
+    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableId,
+    HummockSstableObjectId, HummockVersionId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -577,9 +577,15 @@ where
     pub fn newly_added_object_ids(
         &self,
         exclude_table_change_log: bool,
-    ) -> HashSet<HummockSstableObjectId> {
+    ) -> HashSet<HummockObjectId> {
+        // DO NOT REMOVE THIS LINE
+        // This is to ensure that when adding new variant to `HummockObjectId`,
+        // the compiler will warn us if we forget to handle it here.
+        match HummockObjectId::Sstable(0.into()) {
+            HummockObjectId::Sstable(_) => {}
+        };
         self.newly_added_sst_infos(exclude_table_change_log)
-            .map(|sst| sst.object_id())
+            .map(|sst| HummockObjectId::Sstable(sst.object_id()))
             .collect()
     }
 

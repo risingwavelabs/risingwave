@@ -721,7 +721,7 @@ dependencies = [
  "rquickjs",
  "serde_json",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tonic",
  "tracing",
@@ -1826,7 +1826,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -3905,7 +3905,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.27.1",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "url",
@@ -3955,7 +3955,7 @@ dependencies = [
  "maplit",
  "object_store",
  "regex",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "url",
@@ -4016,7 +4016,7 @@ dependencies = [
  "serde_json",
  "sqlparser 0.56.0",
  "strum 0.27.1",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "url",
@@ -4050,7 +4050,7 @@ dependencies = [
  "futures",
  "object_store",
  "regex",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "url",
@@ -4335,7 +4335,7 @@ dependencies = [
  "chrono",
  "rust_decimal",
  "serde",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "time",
  "winnow 0.7.4",
 ]
@@ -5032,7 +5032,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
@@ -5066,7 +5066,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
 ]
@@ -5102,7 +5102,7 @@ dependencies = [
  "pin-project",
  "rand 0.9.0",
  "serde",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "twox-hash 2.1.0",
@@ -6200,7 +6200,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.61.0",
 ]
 
 [[package]]
@@ -7036,18 +7036,18 @@ dependencies = [
 
 [[package]]
 name = "logos"
-version = "0.14.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff1ceb190eb9bdeecdd8f1ad6a71d6d632a50905948771718741b5461fb01e13"
+checksum = "ab6f536c1af4c7cc81edf73da1f8029896e7e1e16a219ef09b184e76a296f3db"
 dependencies = [
  "logos-derive",
 ]
 
 [[package]]
 name = "logos-codegen"
-version = "0.14.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90be66cb7bd40cb5cc2e9cfaf2d1133b04a3d93b72344267715010a466e0915a"
+checksum = "189bbfd0b61330abea797e5e9276408f2edbe4f822d7ad08685d67419aafb34e"
 dependencies = [
  "beef",
  "fnv",
@@ -7055,14 +7055,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex-syntax 0.8.5",
+ "rustc_version",
  "syn 2.0.101",
 ]
 
 [[package]]
 name = "logos-derive"
-version = "0.14.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45154231e8e96586b39494029e58f12f8ffcb5ecf80333a603a13aa205ea8cbd"
+checksum = "ebfe8e1a19049ddbfccbd14ac834b215e11b85b90bab0c2dba7c7b92fb5d5cba"
 dependencies = [
  "logos-codegen",
 ]
@@ -8182,7 +8183,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "url",
@@ -8380,7 +8381,7 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tracing",
 ]
 
@@ -8412,7 +8413,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost 0.13.4",
  "reqwest 0.12.15",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tonic",
  "tracing",
@@ -8450,7 +8451,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.9.0",
  "serde_json",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream 0.1.16",
 ]
@@ -8948,7 +8949,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.9",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
@@ -9502,7 +9503,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "procfs",
  "protobuf",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -9618,24 +9619,13 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.14.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5edd582b62f5cde844716e66d92565d7faf7ab1445c8cebce6e00fba83ddb2"
-dependencies = [
- "logos",
- "miette",
- "once_cell",
- "prost 0.13.4",
- "prost-types 0.13.4",
-]
-
-[[package]]
-name = "prost-reflect"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
 dependencies = [
  "base64 0.22.1",
+ "logos",
+ "miette",
  "prost 0.13.4",
  "prost-types 0.13.4",
  "serde",
@@ -9682,29 +9672,29 @@ dependencies = [
 
 [[package]]
 name = "protox"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f352af331bf637b8ecc720f7c87bf903d2571fa2e14a66e9b2558846864b54a"
+checksum = "424c2bd294b69c49b949f3619362bc3c5d28298cd1163b6d1a62df37c16461aa"
 dependencies = [
  "bytes",
  "miette",
  "prost 0.13.4",
- "prost-reflect 0.14.7",
+ "prost-reflect",
  "prost-types 0.13.4",
  "protox-parse",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "protox-parse"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a462d115462c080ae000c29a47f0b3985737e5d3a995fcdbcaa5c782068dde"
+checksum = "57927f9dbeeffcce7192404deee6157a640cbb3fe8ac11eabbe571565949ab75"
 dependencies = [
  "logos",
  "miette",
  "prost-types 0.13.4",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -9913,7 +9903,7 @@ dependencies = [
  "rustc-hash 2.1.0",
  "rustls 0.23.5",
  "socket2 0.5.9",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "web-time",
@@ -9933,7 +9923,7 @@ dependencies = [
  "rustls 0.23.5",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tinyvec",
  "tracing",
  "web-time",
@@ -10543,7 +10533,7 @@ dependencies = [
  "risingwave_pb",
  "serde",
  "serde_json",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "twox-hash 2.1.0",
 ]
 
@@ -10583,7 +10573,7 @@ dependencies = [
  "scopeguard",
  "serde_json",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -10811,7 +10801,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "sysinfo",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tinyvec",
  "tokio-retry",
@@ -10851,7 +10841,7 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "risingwave_common",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
@@ -10932,7 +10922,7 @@ dependencies = [
  "prost 0.13.4",
  "risingwave_pb",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -10953,7 +10943,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tower 0.5.2",
  "tower-http",
@@ -11133,7 +11123,7 @@ dependencies = [
  "proc-macro2",
  "prometheus",
  "prost 0.13.4",
- "prost-reflect 0.15.1",
+ "prost-reflect",
  "prost-types 0.13.4",
  "pulsar",
  "quote",
@@ -11170,7 +11160,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "syn 2.0.101",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tiberius",
  "time",
@@ -11210,7 +11200,7 @@ dependencies = [
  "num-bigint",
  "prost 0.13.4",
  "prost-build 0.13.4",
- "prost-reflect 0.15.1",
+ "prost-reflect",
  "prost-types 0.13.4",
  "protox",
  "reqwest 0.12.15",
@@ -11218,7 +11208,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "serde_json",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "time",
  "tracing",
@@ -11280,7 +11270,7 @@ dependencies = [
  "paste",
  "risingwave_common",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "tracing",
  "workspace-hack",
 ]
@@ -11310,7 +11300,7 @@ dependencies = [
  "madsim-tonic",
  "serde",
  "serde-error",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -11347,7 +11337,7 @@ dependencies = [
  "risingwave_pb",
  "smallvec",
  "static_assertions",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
  "workspace-hack",
@@ -11399,7 +11389,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "sql-json-path",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tonic",
  "tracing",
@@ -11494,7 +11484,7 @@ dependencies = [
  "smallvec",
  "speedate",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -11582,7 +11572,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "tracing",
 ]
 
@@ -11628,7 +11618,7 @@ dependencies = [
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_pb",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -11643,7 +11633,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -11721,7 +11711,7 @@ dependencies = [
  "strum 0.27.1",
  "sync-point",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
@@ -11860,7 +11850,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_jni_core",
  "spin 0.10.0",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tracing",
@@ -11883,7 +11873,7 @@ dependencies = [
  "serde",
  "static_assertions",
  "strum 0.27.1",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "walkdir",
  "workspace-hack",
 ]
@@ -11946,7 +11936,7 @@ dependencies = [
  "risingwave_pb",
  "rw_futures_util",
  "static_assertions",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
@@ -12053,7 +12043,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "task-local",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "tracing",
  "tracing-subscriber",
  "walkdir",
@@ -12165,7 +12155,7 @@ dependencies = [
  "spin 0.10.0",
  "sync-point",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tracing",
@@ -12237,7 +12227,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum_macros 0.27.1",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-metrics",
  "tokio-retry",
@@ -13723,7 +13713,7 @@ dependencies = [
  "similar",
  "subst",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.12",
  "tracing",
 ]
 
@@ -14207,7 +14197,7 @@ dependencies = [
  "futures-util",
  "madsim-tokio",
  "spin 0.10.0",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -14354,28 +14344,28 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.3"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
 dependencies = [
- "thiserror-impl 2.0.3",
+ "thiserror-impl 2.0.12",
 ]
 
 [[package]]
 name = "thiserror-ext"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4323942237f7cc071061f2c5f0db919e6053c2cdf58c6bc974883073429737"
+checksum = "5fb7e61141f4141832ca9aad63c3c90023843f944a1975460abdacc64d03f534"
 dependencies = [
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext-derive",
 ]
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96541747c50e6c73e094737938f4f5dfaf50c48a31adff4197a3e2a481371674"
+checksum = "2b5042dd3b562d1d57711be902006a0003fa2781b81d5b2bec07416be31586ff"
 dependencies = [
  "either",
  "proc-macro2",
@@ -14396,9 +14386,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.3"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
 dependencies = [
  "proc-macro2",
  "quote",

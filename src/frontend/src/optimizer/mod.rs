@@ -35,6 +35,7 @@ pub use plan_visitor::{
     SysTableVisitor,
 };
 
+pub mod backfill_order_strategy;
 mod logical_optimization;
 mod optimizer_context;
 pub mod plan_expr_rewriter;

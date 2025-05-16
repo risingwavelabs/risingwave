@@ -750,8 +750,6 @@ impl DdlController {
             .try_into()
             .expect("Target table should exist in sink into table");
 
-        assert_eq!(table_catalog.incoming_sinks, target_table.incoming_sinks);
-
         {
             let catalogs = mgr
                 .get_sink_catalog_by_ids(&table_catalog.incoming_sinks)

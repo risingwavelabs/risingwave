@@ -27,10 +27,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -126,10 +126,9 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             let obj = obj_store.metadata(&obj_path).await?;
             print_object(&obj);
             let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
-            let obj_id = SstableStore::get_object_id_from_path(&obj.key);
             sst_dump_via_sstable_store(
                 &sstable_store,
-                obj_id,
+                (*obj_id).into(),
                 meta_offset,
                 obj.total_size as u64,
                 &table_data,
@@ -138,13 +137,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             .await?;
         } else {
             let mut metadata_iter = sstable_store
-                .list_object_metadata_from_object_store(None, None, None)
+                .list_sst_object_metadata_from_object_store(None, None, None)
                 .await?;
             while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
+                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
+                let HummockObjectId::Sstable(obj_id) = obj_id;
                 let meta_offset =
                     get_meta_offset_from_object(&obj, sstable_store.store().as_ref()).await?;
-                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
                 sst_dump_via_sstable_store(
                     &sstable_store,
                     obj_id,

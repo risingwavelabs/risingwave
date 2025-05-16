@@ -14,7 +14,7 @@ assert_matches = "1"
 async-trait = "0.1"
 base64-url = { version = "3.0.0" }
 bytes = { version = "1", features = ["serde"] }
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 comfy-table = "7"
 crepe = "0.1"
@@ -62,7 +62,7 @@ serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 strum = { version = "0.27", features = ["derive"] }
 sync-point = { path = "../utils/sync-point" }
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
