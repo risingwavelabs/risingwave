@@ -14,6 +14,10 @@
 
 use crate::sink::catalog::SinkId;
 
-pub struct IcebergCompactionStat {
+pub struct IcebergSinkCompactionUpdate {
+    // statistics and information
     pub sink_id: SinkId,
+
+    // configuration
+    pub compaction_interval: u64,
 }
