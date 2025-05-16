@@ -42,6 +42,16 @@ impl Configuration {
     pub fn new(path: &str) -> Configuration {
         let data = std::fs::read_to_string(path).unwrap();
         let config: Configuration = serde_yaml::from_str(&data).unwrap();
+
+        for (feature, status) in &config.config {
+            if status.weight > 100 {
+                panic!(
+                    "Invalid weight {} for feature '{}': weight must be in [0, 100]",
+                    status.weight, feature
+                );
+            }
+        }
+
         config
     }
 
