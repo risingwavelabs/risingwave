@@ -103,6 +103,10 @@ async fn test_sink_append_only() -> Result<()> {
             }
 
             consumer.assign(&tpl).unwrap();
+
+            // poll consumer to trigger callback functions
+            let _ = tokio::time::timeout(Duration::from_millis(1000), consumer.recv()).await;
+
             consumer
         })
         .await;
@@ -185,6 +189,10 @@ async fn test_sink_debezium() -> Result<()> {
             }
 
             consumer.assign(&tpl).unwrap();
+
+            // poll consumer to trigger callback functions
+            let _ = tokio::time::timeout(Duration::from_millis(1000), consumer.recv()).await;
+
             consumer
         })
         .await;
