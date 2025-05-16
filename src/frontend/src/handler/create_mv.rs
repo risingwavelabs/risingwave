@@ -122,7 +122,7 @@ pub fn gen_create_mv_plan_bound(
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
-    let mut plan_root = Planner::new_for_stream(context, false).plan_query(query)?;
+    let mut plan_root = Planner::new_for_stream(context).plan_query(query)?;
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_column_name_not_reserved(name)?;

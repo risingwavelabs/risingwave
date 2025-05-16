@@ -236,8 +236,11 @@ pub async fn gen_sink_plan(
     };
 
     let definition = context.normalized_sql().to_owned();
-    let mut plan_root =
-        Planner::new_for_stream(context.into(), is_iceberg_engine_internal).plan_query(bound)?;
+    let mut plan_root = if is_iceberg_engine_internal {
+        Planner::new_for_iceberg_table_engine_sink(context.into()).plan_query(bound)?;
+    } else {
+        Planner::new_for_stream(context.into()).plan_query(bound)?;
+    };
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };

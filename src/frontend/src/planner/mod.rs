@@ -77,15 +77,19 @@ impl Planner {
         }
     }
 
-    pub fn new_for_stream(ctx: OptimizerContextRef, is_iceberg_engine_internal: bool) -> Planner {
+    pub fn new_for_stream(ctx: OptimizerContextRef) -> Planner {
         Planner {
             ctx,
             share_cache: Default::default(),
-            plan_for: if is_iceberg_engine_internal {
-                PlanFor::StreamIcebergEngineInternal
-            } else {
-                PlanFor::Stream
-            },
+            plan_for: PlanFor::Stream,
+        }
+    }
+
+    pub fn new_for_iceberg_table_engine_sink(ctx: OptimizerContextRef) -> Planner {
+        Planner {
+            ctx,
+            share_cache: Default::default(),
+            plan_for: PlanFor::StreamIcebergEngineInternal,
         }
     }
 
