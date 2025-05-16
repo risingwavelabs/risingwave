@@ -12070,6 +12070,8 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_sqlparser",
+ "serde",
+ "serde_yaml",
  "similar",
  "thiserror-ext",
  "tokio-postgres",

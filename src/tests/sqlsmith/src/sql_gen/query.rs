@@ -195,7 +195,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
-        let can_agg = self.flip_coin();
+        let can_agg = self.should_generate("agg");
         let context = SqlGeneratorContext::new_with_can_agg(can_agg);
         (0..num_select_items)
             .map(|i| self.gen_select_item(i, context))
@@ -249,7 +249,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
-        if self.flip_coin() {
+        if self.should_generate("where") {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {
