@@ -129,6 +129,8 @@ mod state {
         pub sequence_number: i64,
         /// equality ids
         pub equality_ids: Vec<i32>,
+
+        pub file_size_in_bytes: u64,
     }
 
     impl PersistedFileScanTask {
@@ -161,6 +163,7 @@ mod state {
                 deletes,
                 sequence_number,
                 equality_ids,
+                file_size_in_bytes,
             }: Self,
         ) -> FileScanTask {
             FileScanTask {
@@ -179,6 +182,7 @@ mod state {
                     .collect(),
                 sequence_number,
                 equality_ids,
+                file_size_in_bytes,
             }
         }
 
@@ -197,6 +201,7 @@ mod state {
                 deletes,
                 sequence_number,
                 equality_ids,
+                file_size_in_bytes,
             }: FileScanTask,
         ) -> Self {
             Self {
@@ -215,6 +220,7 @@ mod state {
                     .collect(),
                 sequence_number,
                 equality_ids,
+                file_size_in_bytes,
             }
         }
     }

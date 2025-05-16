@@ -638,7 +638,10 @@ impl IcebergCompactionEventHandler {
 
             for handle in iceberg_compaction_handles {
                 // send iceberg commit task to compactor
-                if let Err(e) = handle.send_compact_task(compactor.clone()).await {
+                if let Err(e) = handle
+                    .send_compact_task(compactor.clone(), &self.compaction_manager.env)
+                    .await
+                {
                     tracing::warn!(
                         error = %e.as_report(),
                         "Failed to send iceberg commit task to {}",
