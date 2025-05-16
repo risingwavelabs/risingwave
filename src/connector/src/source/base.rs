@@ -30,7 +30,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
-use risingwave_pb::source::ConnectorSplit;
+use risingwave_pb::source::{ConnectorExtraInfo, ConnectorSplit};
 use rw_futures_util::select_all;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -206,6 +206,7 @@ pub trait SplitEnumerator: Sized + Send {
 
 pub type SourceContextRef = Arc<SourceContext>;
 pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
+use std::any::Any;
 
 /// Dyn-compatible [`SplitEnumerator`].
 #[async_trait]
@@ -213,10 +214,13 @@ pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+
+    // downcast
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[async_trait]
-impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
+impl<T: SplitEnumerator<Split: Into<SplitImpl>> + 'static> AnySplitEnumerator for T {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         SplitEnumerator::list_splits(self)
             .await
@@ -229,6 +233,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
 
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -291,6 +299,7 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    pub connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 impl SourceContext {
@@ -305,6 +314,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        connector_extra_info: Option<ConnectorExtraInfo>,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +325,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            connector_extra_info,
         }
     }
 
@@ -332,6 +343,7 @@ impl SourceContext {
                 split_txn: false,
             },
             ConnectorProperties::default(),
+            None,
             None,
         )
     }

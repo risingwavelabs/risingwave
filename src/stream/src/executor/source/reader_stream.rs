@@ -23,6 +23,7 @@ use risingwave_connector::source::{
     BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
     SplitMetaData, StreamChunkWithState,
 };
+use risingwave_pb::source::ConnectorExtraInfo;
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
@@ -40,6 +41,7 @@ pub(crate) struct StreamReaderBuilder {
     // cdc related
     pub is_auto_schema_change_enable: bool,
     pub actor_ctx: ActorContextRef,
+    pub connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 impl StreamReaderBuilder {

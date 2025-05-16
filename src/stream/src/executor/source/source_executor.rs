@@ -32,6 +32,7 @@ use risingwave_connector::source::{
     StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::source::ConnectorExtraInfo;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -69,6 +70,8 @@ pub struct SourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     is_shared_non_cdc: bool,
+
+    connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -89,10 +92,15 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
+            connector_extra_info: None,
         }
     }
 
-    fn stream_reader_builder(&self, source_desc: SourceDesc) -> StreamReaderBuilder {
+    fn stream_reader_builder(
+        &self,
+        source_desc: SourceDesc,
+        connector_extra_info: Option<ConnectorExtraInfo>,
+    ) -> StreamReaderBuilder {
         StreamReaderBuilder {
             source_desc,
             rate_limit: self.rate_limit_rps,
@@ -106,6 +114,7 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
+            connector_extra_info,
         }
     }
 
@@ -196,6 +205,7 @@ impl<S: StateStore> SourceExecutor<S> {
             },
             source_desc.source.config.clone(),
             schema_change_tx,
+            self.connector_extra_info,
         );
 
         (column_ids, source_ctx)
@@ -382,7 +392,8 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         // Replace the source reader with a new one of the new state.
-        let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
+        let reader_stream_builder =
+            self.stream_reader_builder(source_desc.clone(), self.connector_extra_info);
         let reader_stream =
             reader_stream_builder.into_retry_stream(Some(target_state.clone()), false);
 
@@ -454,6 +465,7 @@ impl<S: StateStore> SourceExecutor<S> {
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
+        self.connector_extra_info = first_barrier.get_connector_extra_info();
 
         yield Message::Barrier(first_barrier);
 
@@ -505,7 +517,8 @@ impl<S: StateStore> SourceExecutor<S> {
         tracing::debug!(state = ?recover_state, "start with state");
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut reader_stream_builder = self.stream_reader_builder(source_desc.clone());
+        let mut reader_stream_builder =
+            self.stream_reader_builder(source_desc.clone(), self.connector_extra_info);
         let mut latest_splits = None;
         // Build the source stream reader.
         if is_uninitialized {
@@ -1003,6 +1016,7 @@ mod tests {
                 pause: false,
                 subscriptions_to_add: vec![],
                 backfill_nodes_to_pause: Default::default(),
+                connector_extra_info: None,
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1081,6 +1095,7 @@ mod tests {
         let mut epoch = test_epoch(1);
         let init_barrier =
             Barrier::new_test_barrier(epoch).with_mutation(Mutation::Add(AddMutation {
+                connector_extra_info: None,
                 adds: HashMap::new(),
                 added_actors: HashSet::new(),
                 splits: hashmap! {

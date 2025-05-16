@@ -43,6 +43,7 @@ use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
+use crate::executor::source::check_fd_limit;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use crate::task::CreateMviewProgressReporter;
 
@@ -338,6 +339,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .unwrap_or(&[])
             .to_vec();
         let is_pause_on_startup = barrier.is_pause_on_startup();
+        check_fd_limit(&barrier).await?;
         yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder = self.source_desc_builder.take().unwrap();

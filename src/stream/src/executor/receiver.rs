@@ -248,6 +248,7 @@ mod tests {
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
+                connector_extra_info: None,
             },
         ));
 

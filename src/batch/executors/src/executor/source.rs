@@ -154,6 +154,7 @@ impl SourceExecutor {
             },
             ConnectorProperties::default(),
             None,
+            None, //todo: should have broker num info, should we pass it via source catalog?
         ));
         let (stream, _) = self
             .source

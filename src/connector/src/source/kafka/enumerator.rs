@@ -482,6 +482,14 @@ impl KafkaSplitEnumerator {
             .is_ok()
     }
 
+    pub async fn get_broker_number(&self) -> ConnectorResult<u32> {
+        let metadata = self
+            .client
+            .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
+            .await?;
+        Ok(metadata.brokers().len() as u32)
+    }
+
     async fn fetch_topic_partition(&self) -> ConnectorResult<Vec<i32>> {
         // for now, we only support one topic
         let metadata = self

@@ -141,7 +141,7 @@ pub use now::*;
 pub use over_window::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
-use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_pb::source::{ConnectorExtraInfo, ConnectorSplit, ConnectorSplits};
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
@@ -288,6 +288,7 @@ pub struct UpdateMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+    pub connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -301,6 +302,7 @@ pub struct AddMutation {
     pub subscriptions_to_add: Vec<(TableId, u32)>,
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
+    pub connector_extra_info: Option<ConnectorExtraInfo>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -450,6 +452,20 @@ impl Barrier {
             }
         }
         .map(|s| s.as_slice())
+    }
+
+    pub fn get_connector_extra_info(&self) -> Option<ConnectorExtraInfo> {
+        match self.mutation.as_deref() {
+            Some(Mutation::Add(AddMutation {
+                connector_extra_info,
+                ..
+            }))
+            | Some(Mutation::Update(UpdateMutation {
+                connector_extra_info,
+                ..
+            })) => *connector_extra_info,
+            _ => None,
+        }
     }
 
     /// Get all actors that to be stopped (dropped) by this barrier.
@@ -674,7 +690,9 @@ impl Mutation {
                 dropped_actors,
                 actor_splits,
                 actor_new_dispatchers,
+                connector_extra_info,
             }) => PbMutation::Update(PbUpdateMutation {
+                connector_extra_info: *connector_extra_info,
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
@@ -702,7 +720,9 @@ impl Mutation {
                 pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
+                connector_extra_info,
             }) => PbMutation::Add(PbAddMutation {
+                connector_extra_info: *connector_extra_info,
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -804,6 +824,7 @@ impl Mutation {
             }
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
+                connector_extra_info: update.connector_extra_info,
                 dispatchers: update
                     .dispatcher_update
                     .iter()
@@ -878,6 +899,7 @@ impl Mutation {
                     )
                     .collect(),
                 backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
+                connector_extra_info: add.connector_extra_info,
             }),
 
             PbMutation::Splits(s) => {
