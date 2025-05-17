@@ -142,5 +142,10 @@ async fn build_kafka_client(
     .await?;
     let client_ctx = RwConsumerContext::new(ctx_common);
     let client: KafkaMetaConsumer = config.create_with_context(client_ctx).await?;
+    // Initial poll to trigger the oauth token refresh
+    #[cfg(not(madsim))]
+    client.poll(Duration::from_secs(10)); // note: this is a blocking call
+    #[cfg(madsim)]
+    client.poll(Duration::from_secs(10)).await;
     Ok(Arc::new(client))
 }
