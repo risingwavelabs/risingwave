@@ -19,7 +19,8 @@ use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, LookupUnionNode, StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, LookupUnionNode,
+    PbDispatchOutputMapping, StreamNode,
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
@@ -70,7 +71,7 @@ fn dispatch_no_shuffle(output_indices: Vec<u32>) -> DispatchStrategy {
     DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
         dist_key_indices: vec![],
-        output_indices,
+        output_mapping: PbDispatchOutputMapping::simple(output_indices).into(),
     }
 }
 
@@ -82,7 +83,7 @@ fn dispatch_consistent_hash_shuffle(
     DispatchStrategy {
         r#type: DispatcherType::Hash.into(),
         dist_key_indices,
-        output_indices,
+        output_mapping: PbDispatchOutputMapping::simple(output_indices).into(),
     }
 }
 

@@ -37,9 +37,10 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    BackfillOrderFixed, BackfillOrderStrategy, DispatchStrategy, DispatcherType, FragmentTypeFlag,
-    PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
-    StreamScanType, backfill_order_strategy,
+    BackfillOrderFixed, BackfillOrderStrategy, DispatchOutputMapping, DispatchStrategy,
+    DispatcherType, FragmentTypeFlag, PbStreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
+    backfill_order_strategy,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -987,7 +988,10 @@ impl CompleteStreamFragmentGraph {
                                 dispatch_strategy: DispatchStrategy {
                                     r#type: DispatcherType::NoShuffle as _,
                                     dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
+                                    output_mapping: DispatchOutputMapping::identical(
+                                        CDC_SOURCE_COLUMN_NUM as _,
+                                    )
+                                    .into(),
                                 },
                             }
                         }
@@ -1002,25 +1006,25 @@ impl CompleteStreamFragmentGraph {
                                 != 0
                             {
                                 // Resolve the required output columns from the upstream materialized view.
-                                let (dist_key_indices, output_indices) = {
+                                let (dist_key_indices, output_mapping) = {
                                     let nodes = &upstream_fragment.nodes;
                                     let mview_node =
                                         nodes.get_node_body().unwrap().as_materialize().unwrap();
                                     let all_column_ids = mview_node.column_ids();
                                     let dist_key_indices = mview_node.dist_key_indices();
-                                    let output_indices = gen_output_indices(
+                                    let output_mapping = gen_output_mapping(
                                         required_columns,
                                         all_column_ids,
                                     )
                                     .context(
                                         "BUG: column not found in the upstream materialized view",
                                     )?;
-                                    (dist_key_indices, output_indices)
+                                    (dist_key_indices, output_mapping)
                                 };
                                 let dispatch_strategy = mv_on_mv_dispatch_strategy(
                                     uses_shuffled_backfill,
                                     dist_key_indices,
-                                    output_indices,
+                                    output_mapping,
                                 );
 
                                 StreamFragmentEdge {
@@ -1037,13 +1041,13 @@ impl CompleteStreamFragmentGraph {
                                 & FragmentTypeFlag::Source as u32
                                 != 0
                             {
-                                let output_indices = {
+                                let output_mapping = {
                                     let nodes = &upstream_fragment.nodes;
                                     let source_node =
                                         nodes.get_node_body().unwrap().as_source().unwrap();
 
                                     let all_column_ids = source_node.column_ids().unwrap();
-                                    gen_output_indices(required_columns, all_column_ids).context(
+                                    gen_output_mapping(required_columns, all_column_ids).context(
                                         "BUG: column not found in the upstream source node",
                                     )?
                                 };
@@ -1058,7 +1062,7 @@ impl CompleteStreamFragmentGraph {
                                     dispatch_strategy: DispatchStrategy {
                                         r#type: DispatcherType::NoShuffle as _,
                                         dist_key_indices: vec![], // not used for `NoShuffle`
-                                        output_indices,
+                                        output_mapping: Some(output_mapping),
                                     },
                                 }
                             } else {
@@ -1137,25 +1141,25 @@ impl CompleteStreamFragmentGraph {
                 let table_fragment = graph.fragments.get(&table_fragment_id).unwrap();
                 let nodes = table_fragment.node.as_ref().unwrap();
 
-                let (dist_key_indices, output_indices) = match job_type {
+                let (dist_key_indices, output_mapping) = match job_type {
                     StreamingJobType::Table(_) => {
                         let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
                         let all_column_ids = mview_node.column_ids();
                         let dist_key_indices = mview_node.dist_key_indices();
-                        let output_indices = gen_output_indices(&output_columns, all_column_ids)
+                        let output_mapping = gen_output_mapping(&output_columns, all_column_ids)
                             .ok_or_else(|| {
                                 MetaError::invalid_parameter(
                                     "unable to drop the column due to \
                                      being referenced by downstream materialized views or sinks",
                                 )
                             })?;
-                        (dist_key_indices, output_indices)
+                        (dist_key_indices, output_mapping)
                     }
 
                     StreamingJobType::Source => {
                         let source_node = nodes.get_node_body().unwrap().as_source().unwrap();
                         let all_column_ids = source_node.column_ids().unwrap();
-                        let output_indices = gen_output_indices(&output_columns, all_column_ids)
+                        let output_mapping = gen_output_mapping(&output_columns, all_column_ids)
                             .ok_or_else(|| {
                                 MetaError::invalid_parameter(
                                     "unable to drop the column due to \
@@ -1165,7 +1169,7 @@ impl CompleteStreamFragmentGraph {
                         assert_eq!(*dispatcher_type, DispatcherType::NoShuffle);
                         (
                             vec![], // not used for `NoShuffle`
-                            output_indices,
+                            output_mapping,
                         )
                     }
 
@@ -1179,7 +1183,7 @@ impl CompleteStreamFragmentGraph {
                     }),
                     dispatch_strategy: DispatchStrategy {
                         r#type: *dispatcher_type as i32,
-                        output_indices,
+                        output_mapping: Some(output_mapping),
                         dist_key_indices,
                     },
                 };
@@ -1215,9 +1219,12 @@ impl CompleteStreamFragmentGraph {
     }
 }
 
-/// Generate the `output_indices` for [`DispatchStrategy`].
-fn gen_output_indices(required_columns: &Vec<i32>, upstream_columns: Vec<i32>) -> Option<Vec<u32>> {
-    required_columns
+/// Generate the `output_mapping` for [`DispatchStrategy`].
+fn gen_output_mapping(
+    required_columns: &Vec<i32>,
+    upstream_columns: Vec<i32>,
+) -> Option<DispatchOutputMapping> {
+    let indices = required_columns
         .iter()
         .map(|c| {
             upstream_columns
@@ -1225,33 +1232,35 @@ fn gen_output_indices(required_columns: &Vec<i32>, upstream_columns: Vec<i32>) -
                 .position(|&id| id == *c)
                 .map(|i| i as u32)
         })
-        .collect()
+        .collect::<Option<_>>()?;
+
+    Some(DispatchOutputMapping::simple(indices))
 }
 
 fn mv_on_mv_dispatch_strategy(
     uses_shuffled_backfill: bool,
     dist_key_indices: Vec<u32>,
-    output_indices: Vec<u32>,
+    output_mapping: DispatchOutputMapping,
 ) -> DispatchStrategy {
     if uses_shuffled_backfill {
         if !dist_key_indices.is_empty() {
             DispatchStrategy {
                 r#type: DispatcherType::Hash as _,
                 dist_key_indices,
-                output_indices,
+                output_mapping: Some(output_mapping),
             }
         } else {
             DispatchStrategy {
                 r#type: DispatcherType::Simple as _,
                 dist_key_indices: vec![], // empty for Simple
-                output_indices,
+                output_mapping: Some(output_mapping),
             }
         }
     } else {
         DispatchStrategy {
             r#type: DispatcherType::NoShuffle as _,
             dist_key_indices: vec![], // not used for `NoShuffle`
-            output_indices,
+            output_mapping: Some(output_mapping),
         }
     }
 }

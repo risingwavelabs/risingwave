@@ -140,7 +140,7 @@ impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
             downstream_fragment_id: fragment_id,
             dispatcher_type: dispatch.get_type().unwrap().into(),
             dist_key_indices: dispatch.dist_key_indices,
-            output_indices: dispatch.output_indices,
+            output_indices: dispatch.output_mapping.unwrap().into_simple_indices(),
         }
     }
 }
