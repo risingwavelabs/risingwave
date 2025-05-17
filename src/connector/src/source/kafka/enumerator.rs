@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
-use moka::ops::compute::Op;
 use rdkafka::admin::{AdminClient, AdminOptions};
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
@@ -27,7 +26,8 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
-use crate::error::{ConnectorError, ConnectorResult};
+use super::meta_data_reader::SharedKafkaMetaClient;
+use crate::error::ConnectorResult;
 use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
@@ -39,9 +39,6 @@ use crate::source::kafka::{
 type KafkaConsumer = BaseConsumer<RwConsumerContext>;
 type KafkaAdmin = AdminClient<RwConsumerContext>;
 
-/// Consumer client is shared, and the cache doesn't manage the lifecycle, so we store `Weak` and no eviction.
-pub static SHARED_KAFKA_CONSUMER: LazyLock<MokaCache<KafkaConnectionProps, Weak<KafkaConsumer>>> =
-    LazyLock::new(|| moka::future::Cache::builder().build());
 /// Admin client is short-lived, so we store `Arc` and sets a time-to-idle eviction policy.
 pub static SHARED_KAFKA_ADMIN: LazyLock<MokaCache<KafkaConnectionProps, Arc<KafkaAdmin>>> =
     LazyLock::new(|| {
@@ -140,30 +137,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let mut client: Option<Arc<KafkaConsumer>> = None;
-        SHARED_KAFKA_CONSUMER
-            .entry_by_ref(&properties.connection)
-            .and_try_compute_with::<_, _, ConnectorError>(|maybe_entry| async {
-                if let Some(entry) = maybe_entry {
-                    let entry_value = entry.into_value();
-                    if let Some(client_) = entry_value.upgrade() {
-                        // return if the client is already built
-                        tracing::info!("reuse existing kafka client for {}", broker_address);
-                        client = Some(client_);
-                        return Ok(Op::Nop);
-                    }
-                }
-                tracing::info!("build new kafka client for {}", broker_address);
-                client = Some(build_kafka_client(&config, &properties).await?);
-                Ok(Op::Put(Arc::downgrade(client.as_ref().unwrap())))
-            })
-            .await?;
+        let client = SharedKafkaMetaClient::get_client(&properties).await?;
 
         Ok(Self {
             context,
             broker_address,
             topic,
-            client: client.unwrap(),
+            client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
@@ -212,34 +192,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 }
 
-pub async fn build_kafka_client(
-    config: &ClientConfig,
-    properties: &KafkaProperties,
-) -> ConnectorResult<Arc<KafkaConsumer>> {
-    let ctx_common = KafkaContextCommon::new(
-        properties.privatelink_common.broker_rewrite_map.clone(),
-        None,
-        None,
-        properties.aws_auth_props.clone(),
-        properties.connection.is_aws_msk_iam(),
-    )
-    .await?;
-    let client_ctx = RwConsumerContext::new(ctx_common);
-    let client: KafkaConsumer = config.create_with_context(client_ctx).await?;
-
-    // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
-    // rd_kafka_oauthbearer_set_token() once – either directly or, more typically, by invoking either
-    // rd_kafka_poll(), rd_kafka_consumer_poll(), rd_kafka_queue_poll(), etc, in order to cause retrieval
-    // of an initial token to occur.
-    // https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html#a988395722598f63396d7a1bedb22adaf
-    if properties.connection.is_aws_msk_iam() {
-        #[cfg(not(madsim))]
-        client.poll(Duration::from_secs(10)); // note: this is a blocking call
-        #[cfg(madsim)]
-        client.poll(Duration::from_secs(10)).await;
-    }
-    Ok(Arc::new(client))
-}
 async fn build_kafka_admin(
     config: &ClientConfig,
     properties: &KafkaProperties,
