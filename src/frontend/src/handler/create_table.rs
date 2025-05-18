@@ -27,7 +27,6 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
-use risingwave_pb::ddl_service::PbTableJobType;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -46,7 +45,7 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
-use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
