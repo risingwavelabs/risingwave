@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
+use risingwave_pb::ddl_service::PbTableJobType;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -1434,7 +1435,6 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            assert_eq!(job_type, TableJobType::General);
             create_iceberg_engine_table(
                 session,
                 handler_args,
@@ -1442,6 +1442,7 @@ pub async fn handle_create_table(
                 hummock_table,
                 graph,
                 table_name,
+                job_type,
             )
             .await?;
         }
@@ -1466,6 +1467,7 @@ pub async fn create_iceberg_engine_table(
     table: PbTable,
     graph: StreamFragmentGraph,
     table_name: ObjectName,
+    job_type: PbTableJobType,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
@@ -1726,7 +1728,7 @@ pub async fn create_iceberg_engine_table(
     // TODO(iceberg): make iceberg engine table creation ddl atomic
     let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, TableJobType::General)
+        .create_table(source, table, graph, job_type)
         .await?;
     create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await?;
     create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
