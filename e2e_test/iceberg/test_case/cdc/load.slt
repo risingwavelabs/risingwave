@@ -25,6 +25,7 @@ create table products ( id INT,
 ) FROM mysql_mydb TABLE 'mydb.products';
 
 
+# Sink into iceberg (verified by no_partition_cdc.toml)
 statement ok
 CREATE SINK s1 AS select * from products WITH (
     connector = 'iceberg',
@@ -42,6 +43,15 @@ CREATE SINK s1 AS select * from products WITH (
     primary_key = 'id'
 );
 
+
+# iceberg table engine with CDC table
+statement ok
+create table products_iceberg ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) FROM mysql_mydb TABLE 'mydb.products' ENGINE = ICEBERG;
+
 sleep 20s
 
 query I
@@ -55,11 +65,25 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_inse
 
 sleep 20s
 
+query I
+SELECT * FROM products_iceberg ORDER BY id ASC;
+----
+101 101 101
+102 102 102
+103 103 103
+104 104 104
+105 105 105
+106 106 106
+107 107 107
+108 108 108
+109 109 109
+110 110 110
+111 111 111
+112 112 112
+113 113 113
+
 statement ok
 drop sink s1;
 
 statement ok
-drop table products;
-
-statement ok
-drop source mysql_mydb;
+drop source mysql_mydb cascade;
