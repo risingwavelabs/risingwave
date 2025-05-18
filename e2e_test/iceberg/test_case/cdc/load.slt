@@ -45,7 +45,7 @@ CREATE SINK s1 AS select * from products WITH (
 
 
 statement ok
-set sink_decouple = false
+set sink_decouple = true
 
 
 # iceberg table engine with CDC table

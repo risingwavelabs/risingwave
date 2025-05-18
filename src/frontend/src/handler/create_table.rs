@@ -1547,7 +1547,7 @@ pub async fn create_iceberg_engine_table(
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) {
         bail!(
-            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = false` to resolve it"
+            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = true` to resolve it"
         );
     }
 
