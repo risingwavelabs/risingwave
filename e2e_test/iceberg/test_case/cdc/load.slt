@@ -44,6 +44,10 @@ CREATE SINK s1 AS select * from products WITH (
 );
 
 
+statement ok
+set sink_decouple = false
+
+
 # iceberg table engine with CDC table
 statement ok
 create table products_iceberg ( id INT,
