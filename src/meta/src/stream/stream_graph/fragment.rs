@@ -724,7 +724,7 @@ impl StreamFragmentGraph {
     /// Initially the mapping that comes from frontend is between `table_ids`.
     /// We should remap it to fragment level, since we track progress by actor, and we can get
     /// a fragment <-> actor mapping
-    pub fn create_fragment_backfill_ordering(&self) -> Option<FragmentBackfillOrder> {
+    pub fn create_fragment_backfill_ordering(&self) -> FragmentBackfillOrder {
         let mapping = self.collect_backfill_mapping();
         let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
         for (rel_id, downstream_rel_ids) in &self.backfill_order.order {
@@ -739,7 +739,7 @@ impl StreamFragmentGraph {
                 fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
             }
         }
-        Some(fragment_ordering)
+        fragment_ordering
     }
 }
 
