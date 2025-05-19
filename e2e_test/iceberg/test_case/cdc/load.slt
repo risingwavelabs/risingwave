@@ -25,6 +25,7 @@ create table products ( id INT,
 ) FROM mysql_mydb TABLE 'mydb.products';
 
 
+# Sink into iceberg (verified by no_partition_cdc.toml)
 statement ok
 CREATE SINK s1 AS select * from products WITH (
     connector = 'iceberg',
@@ -42,6 +43,46 @@ CREATE SINK s1 AS select * from products WITH (
     primary_key = 'id'
 );
 
+
+statement ok
+set sink_decouple = true
+
+
+# iceberg table engine with CDC table
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+
+statement ok
+create connection my_hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_hosted_catalog_conn';
+
+statement ok
+create table products_iceberg ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+)
+with (commit_checkpoint_interval = 1)
+FROM mysql_mydb TABLE 'mydb.products'
+ENGINE = ICEBERG;
+
+statement ok
+FLUSH;
+
 sleep 20s
 
 query I
@@ -49,17 +90,51 @@ select count(*) from products;
 ----
 8
 
+query I
+select count(*) from products_iceberg;
+----
+8
+
 # insert new data to mysql
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
 
+statement ok
+FLUSH;
+
 sleep 20s
+
+query I
+SELECT * FROM products_iceberg ORDER BY id ASC;
+----
+101 101 101
+102 102 102
+103 103 103
+104 104 104
+105 105 105
+106 106 106
+107 107 107
+108 108 108
+109 109 109
+110 110 110
+111 111 111
+112 112 112
+113 113 113
 
 statement ok
 drop sink s1;
+
+statement ok
+drop table products_iceberg;
 
 statement ok
 drop table products;
 
 statement ok
 drop source mysql_mydb;
+
+statement ok
+drop connection my_hosted_catalog_conn;
+
+statement ok
+drop secret my_secret;
