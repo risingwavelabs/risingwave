@@ -581,11 +581,11 @@ pub fn start_compactor(
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
                                 let(parallelism,icebert_runner) = match async move {
-                                    let icebert_runner = IcebergCompactorRunner::new(
+                                    let iceberg_runner = IcebergCompactorRunner::new(
                                         iceberg_compaction_task,
                                     ).await?;
-                                    let parallelism = icebert_runner.calculate_task_parallelism().await?.min(max_task_parallelism);
-                                    Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, icebert_runner))
+                                    let parallelism = iceberg_runner.calculate_task_parallelism().await?.min(max_task_parallelism);
+                                    Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, iceberg_runner))
                                 }.await{
                                     Ok((parallelism, iceberg_runner)) => {
                                         (parallelism, iceberg_runner)
