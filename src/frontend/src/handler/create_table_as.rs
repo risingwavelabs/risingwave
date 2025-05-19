@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use either::Either;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -25,6 +24,7 @@ use crate::handler::create_table::{
     ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
+use crate::session::DuplicateCheckOutcome;
 use crate::stream_fragmenter::GraphJobType;
 use crate::{Binder, OptimizerContext, build_graph};
 
@@ -52,7 +52,7 @@ pub async fn handle_create_as(
 
     let session = handler_args.session.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,
         if_not_exists,

@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
-use either::Either;
 use iceberg::arrow::type_to_arrow_type;
 use iceberg::spec::Transform;
 use itertools::Itertools;
@@ -68,8 +67,8 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
+use crate::session::{DuplicateCheckOutcome, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
@@ -478,7 +477,7 @@ pub async fn handle_create_sink(
 
     session.check_cluster_limits().await?;
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
         StatementType::CREATE_SINK,
         stmt.if_not_exists,

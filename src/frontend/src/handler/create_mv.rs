@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 
-use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
@@ -37,7 +36,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{SESSION_MANAGER, SessionImpl};
+use crate::session::{DuplicateCheckOutcome, SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::ordinal;
 
@@ -227,12 +226,26 @@ pub async fn handle_create_mv_bound(
     // Check cluster limits
     session.check_cluster_limits().await?;
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    match session.check_relation_name_duplicated(
         name.clone(),
         StatementType::CREATE_MATERIALIZED_VIEW,
         if_not_exists,
     )? {
-        return Ok(resp);
+        DuplicateCheckOutcome::ExistsAndIgnored(resp) => return Ok(resp),
+        DuplicateCheckOutcome::AwaitingOngoingCreation {
+            database_id,
+            job_id,
+        } => {
+            let session = session.clone();
+            let catalog_writer = session.catalog_writer()?;
+            catalog_writer
+                .wait_job_to_finish(database_id, job_id.table_id)
+                .await?;
+            let resp = PgResponse::builder(StatementType::CREATE_MATERIALIZED_VIEW)
+                .notice(format!("relation \"{}\" already exists, skipping", name));
+            return Ok(resp.into());
+        }
+        _ => {}
     }
 
     let (table, graph, dependencies, resource_group) = {

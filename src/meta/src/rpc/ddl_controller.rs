@@ -2152,6 +2152,16 @@ impl DdlController {
             .comment_on(comment)
             .await
     }
+
+    pub async fn wait_streaming_job_finished(
+        &self,
+        database_id: risingwave_common::catalog::DatabaseId,
+        job_id: ObjectId,
+    ) -> MetaResult<NotificationVersion> {
+        self.metadata_manager
+            .wait_streaming_job_finished(database_id, job_id)
+            .await
+    }
 }
 
 fn report_create_object(

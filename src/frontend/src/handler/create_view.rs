@@ -14,7 +14,6 @@
 
 //! Handle creation of logical (non-materialized) views.
 
-use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -26,6 +25,7 @@ use crate::binder::Binder;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
+use crate::session::DuplicateCheckOutcome;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -42,7 +42,7 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
         name.clone(),
         StatementType::CREATE_VIEW,
         if_not_exists,

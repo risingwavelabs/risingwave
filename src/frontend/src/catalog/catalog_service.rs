@@ -234,6 +234,8 @@ pub trait CatalogWriter: Send + Sync {
     ) -> Result<()>;
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()>;
+
+    async fn wait_job_to_finish(&self, database_id: DatabaseId, job_id: u32) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -608,6 +610,15 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_resource_group(table_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
+    }
+
+    async fn wait_job_to_finish(&self, database_id: DatabaseId, job_id: u32) -> Result<()> {
+        self.meta_client
+            .wait_job_to_finish(database_id, job_id)
             .await
             .map_err(|e| anyhow!(e))?;
 

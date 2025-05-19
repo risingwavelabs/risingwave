@@ -694,6 +694,10 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         todo!()
     }
+
+    async fn wait_job_to_finish(&self, _database_id: DatabaseId, _job_id: u32) -> Result<()> {
+        unreachable!()
+    }
 }
 
 impl MockCatalogWriter {

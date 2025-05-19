@@ -97,8 +97,8 @@ use crate::handler::util::{
 };
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
-use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
+use crate::session::{DuplicateCheckOutcome, SessionImpl};
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
     resolve_secret_ref_in_with_options,
@@ -1048,7 +1048,7 @@ pub async fn handle_create_source(
     let session = handler_args.session.clone();
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
         stmt.source_name.clone(),
         StatementType::CREATE_SOURCE,
         stmt.if_not_exists,

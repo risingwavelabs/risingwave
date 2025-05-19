@@ -542,6 +542,15 @@ message AutoSchemaChangeRequest {
 
 message AutoSchemaChangeResponse {}
 
+message WaitJobToFinishRequest {
+  uint32 database_id = 1;
+  uint32 job_id = 2;
+}
+
+message WaitJobToFinishResponse {
+  common.Status status = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -584,4 +593,5 @@ service DdlService {
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
+  rpc WaitJobToFinish(WaitJobToFinishRequest) returns (WaitJobToFinishResponse);
 }

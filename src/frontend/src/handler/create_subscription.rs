@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::UserId;
 use risingwave_sqlparser::ast::CreateSubscriptionStatement;
@@ -25,7 +24,7 @@ use crate::catalog::subscription_catalog::{
 };
 use crate::error::Result;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
+use crate::session::{DuplicateCheckOutcome, SessionImpl};
 use crate::{Binder, OptimizerContext, OptimizerContextRef};
 
 pub fn create_subscription_catalog(
@@ -78,7 +77,7 @@ pub async fn handle_create_subscription(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
         stmt.subscription_name.clone(),
         StatementType::CREATE_SUBSCRIPTION,
         stmt.if_not_exists,

@@ -81,8 +81,8 @@ use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
+use crate::session::{DuplicateCheckOutcome, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
 use crate::{Binder, Explain, TableCatalog, WithOptions};
@@ -1387,7 +1387,7 @@ pub async fn handle_create_table(
         }
     }
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
+    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,
         if_not_exists,

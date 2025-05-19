@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, DatabaseId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
@@ -1163,6 +1163,26 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn wait_job_to_finish(
+        &self,
+        request: Request<WaitJobToFinishRequest>,
+    ) -> Result<Response<WaitJobToFinishResponse>, Status> {
+        let req = request.into_inner();
+        let database_id = req.get_database_id();
+        let job_id = req.get_job_id();
+
+        self.ddl_controller
+            .wait_streaming_job_finished(
+                DatabaseId {
+                    database_id: database_id,
+                },
+                job_id as _,
+            )
+            .await?;
+
+        Ok(Response::new(WaitJobToFinishResponse { status: None }))
     }
 }
 

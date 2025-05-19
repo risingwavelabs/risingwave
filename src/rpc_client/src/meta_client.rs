@@ -1601,6 +1601,15 @@ impl MetaClient {
         let resp = self.inner.list_iceberg_tables(request).await?;
         Ok(resp.iceberg_tables)
     }
+
+    pub async fn wait_job_to_finish(&self, database_id: DatabaseId, job_id: u32) -> Result<()> {
+        let request = WaitJobToFinishRequest {
+            database_id,
+            job_id,
+        };
+        self.inner.wait_job_to_finish(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -2230,6 +2239,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
+            ,{ ddl_client, wait_job_to_finish, WaitJobToFinishRequest, WaitJobToFinishResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
