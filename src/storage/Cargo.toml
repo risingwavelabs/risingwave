@@ -13,6 +13,7 @@ arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
+bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "ca396b3a3e37ac393db8a6cae4f7327856542318" }
 bytes = { version = "1", features = ["serde"] }
 dyn-clone = "1.0.14"
 either = "1"
@@ -22,7 +23,6 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
-ic-core = { git = "https://github.com/nimtable/IC.git", rev = "5413259891919f631c81c2336b0b04c2da9d27b5" }
 iceberg = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"

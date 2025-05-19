@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ic_core::CompactionConfig;
-use ic_core::compaction::{Compaction, CompactionType};
+use bergloom_core::CompactionConfig;
+use bergloom_core::compaction::{Compaction, CompactionType};
 use iceberg::{Catalog, TableIdent};
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;

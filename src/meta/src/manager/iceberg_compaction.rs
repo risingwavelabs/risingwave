@@ -124,6 +124,7 @@ impl IcebergCompactionHandle {
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+                // Todo! Use iceberg's compaction task ID
                 task_id: next_compaction_task_id(env).await?,
                 props: param.properties,
             }));
