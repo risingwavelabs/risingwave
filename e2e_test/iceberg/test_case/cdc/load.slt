@@ -80,6 +80,9 @@ with (commit_checkpoint_interval = 1)
 FROM mysql_mydb TABLE 'mydb.products'
 ENGINE = ICEBERG;
 
+statement ok
+FLUSH;
+
 sleep 20s
 
 query I
@@ -90,6 +93,9 @@ select count(*) from products;
 # insert new data to mysql
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
+
+statement ok
+FLUSH;
 
 sleep 20s
 
