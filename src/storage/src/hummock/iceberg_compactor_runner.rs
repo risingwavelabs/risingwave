@@ -69,11 +69,11 @@ impl IcebergCompactorRunner {
 
         let mut all_data_file_size: u32 = 0;
         for manifest_file in manifest_list.entries() {
-            let a = manifest_file
+            let manifest = manifest_file
                 .load_manifest(table.file_io())
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            let (entry, _) = a.into_parts();
+            let (entry, _) = manifest.into_parts();
             for i in entry {
                 match i.content_type() {
                     iceberg::spec::DataContentType::Data => {
