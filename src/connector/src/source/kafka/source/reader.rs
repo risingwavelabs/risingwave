@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::mem::swap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -31,6 +32,7 @@ use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::kafka::client_context::spawn_consumer_poll_task;
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
@@ -40,7 +42,7 @@ use crate::source::{
 };
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<RwConsumerContext>,
+    consumer: Arc<StreamConsumer<RwConsumerContext>>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
     splits: Vec<KafkaSplit>,
@@ -99,8 +101,8 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
-        // poll consumer to trigger callback functions
-        let _ = tokio::time::timeout(Duration::from_millis(100), consumer.recv()).await;
+        let consumer = Arc::new(consumer);
+        spawn_consumer_poll_task(Arc::downgrade(&consumer));
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
