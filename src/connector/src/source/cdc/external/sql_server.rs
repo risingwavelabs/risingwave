@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
@@ -78,11 +79,18 @@ pub struct SqlServerExternalTable {
 }
 
 impl SqlServerExternalTable {
-    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+    pub async fn connect(
+        config: ExternalTableConfig,
+        defined_column_descs: Option<Vec<ColumnDesc>>,
+    ) -> ConnectorResult<Self> {
         tracing::debug!("connect to sql server");
-
         let mut client_config = Config::new();
 
+        let name_to_data_type: HashMap<String, DataType> = defined_column_descs
+            .unwrap()
+            .iter()
+            .map(|column| (column.name.clone(), column.data_type.clone()))
+            .collect();
         client_config.host(&config.host);
         client_config.database(&config.database);
         client_config.port(config.port.parse::<u16>().unwrap());
@@ -121,10 +129,15 @@ impl SqlServerExternalTable {
                     QueryItem::Row(row) => {
                         let col_name: &str = row.try_get(0)?.unwrap();
                         let col_type: &str = row.try_get(1)?.unwrap();
+                        let rw_data_type = name_to_data_type.get(col_name);
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            mssql_type_to_rw_type(col_type, col_name)?,
+                            check_mssql_type_and_convert_to_rw_type(
+                                col_type,
+                                col_name,
+                                rw_data_type,
+                            )?,
                         ));
                     }
                 }
@@ -183,34 +196,170 @@ impl SqlServerExternalTable {
     }
 }
 
-fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
-    let dtype = match col_type.to_lowercase().as_str() {
-        "bit" => DataType::Boolean,
-        "binary" | "varbinary" => DataType::Bytea,
-        "tinyint" | "smallint" => DataType::Int16,
-        "integer" | "int" => DataType::Int32,
-        "bigint" => DataType::Int64,
-        "real" => DataType::Float32,
-        "float" => DataType::Float64,
-        "money" => DataType::Decimal,
-        "decimal" | "numeric" => DataType::Decimal,
-        "date" => DataType::Date,
-        "time" => DataType::Time,
-        "datetime" | "datetime2" | "smalldatetime" => DataType::Timestamp,
-        "datetimeoffset" => DataType::Timestamptz,
-        "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
-        | "uniqueidentifier" => DataType::Varchar,
-        "money" => DataType::Decimal,
-        mssql_type => {
-            return Err(anyhow!(
-                "Unsupported Sql Server data type: {:?}, column name: {}",
-                mssql_type,
-                col_name
-            )
-            .into());
-        }
-    };
-    Ok(dtype)
+fn check_mssql_type_and_convert_to_rw_type(
+    col_type: &str,
+    col_name: &str,
+    rw_data_type: Option<&DataType>,
+) -> ConnectorResult<DataType> {
+    if let Some(rw_data_type) = rw_data_type {
+        let dtype = match col_type.to_lowercase().as_str() {
+            "bit" => {
+                if rw_data_type != &DataType::Boolean {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Boolean, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Boolean
+            }
+            "binary" | "varbinary" => {
+                if rw_data_type != &DataType::Bytea {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Bytea, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Bytea
+            }
+            "tinyint" | "smallint" => {
+                if rw_data_type != &DataType::Int16 {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Int16, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Int16
+            }
+            "integer" | "int" => {
+                if rw_data_type != &DataType::Int32 {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Int32, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Int32
+            }
+            "bigint" => {
+                if rw_data_type != &DataType::Int64 {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Int64, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Int64
+            }
+            "real" => {
+                if rw_data_type != &DataType::Float32 {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Float32, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Float32
+            }
+            "float" => {
+                if rw_data_type != &DataType::Float64 {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Float64, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Float64
+            }
+            "money" | "decimal" | "numeric" => {
+                if rw_data_type != &DataType::Decimal {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Decimal, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Decimal
+            }
+            "date" => {
+                if rw_data_type != &DataType::Date {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Date, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Date
+            }
+            "time" => {
+                if rw_data_type != &DataType::Time {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Time, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Time
+            }
+            "datetime" | "datetime2" | "smalldatetime" => {
+                if rw_data_type != &DataType::Timestamp {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Timestamp, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Timestamp
+            }
+            "datetimeoffset" => {
+                if rw_data_type != &DataType::Timestamptz {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Timestamptz, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Timestamptz
+            }
+            "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
+            | "uniqueidentifier" => {
+                if rw_data_type != &DataType::Varchar {
+                    return Err(anyhow!(
+                        "Type mismatch for column '{}': expected Varchar, found {:?}",
+                        col_name,
+                        rw_data_type
+                    )
+                    .into());
+                }
+                DataType::Varchar
+            }
+            mssql_type => {
+                return Err(anyhow!(
+                    "Unsupported Sql Server data type: {:?}, column name: {}",
+                    mssql_type,
+                    col_name
+                )
+                .into());
+            }
+        };
+        Ok(dtype)
+    } else {
+        return Err(anyhow!("Type mismatch for column '{}'", col_name).into());
+    }
 }
 
 #[derive(Debug)]
