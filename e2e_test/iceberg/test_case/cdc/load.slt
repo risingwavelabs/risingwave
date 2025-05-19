@@ -90,6 +90,11 @@ select count(*) from products;
 ----
 8
 
+query I
+select count(*) from products_iceberg;
+----
+8
+
 # insert new data to mysql
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_insert.sql
