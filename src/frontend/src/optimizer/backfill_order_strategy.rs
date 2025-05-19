@@ -387,12 +387,19 @@ pub mod display {
     ) -> crate::error::Result<String> {
         let mut result = String::new();
         result.push_str("digraph G {\n");
+        // NOTE(kwannoel): This is a hack to make the edge ordering deterministic.
+        // so our planner tests are deterministic.
+        let mut edges = vec![];
         for (start, end) in order.order {
             let start_name = get_table_name(session, start)?;
             for end in end.data {
                 let end_name = get_table_name(session, end)?;
-                result.push_str(&format!("  \"{}\" -> \"{}\";\n", start_name, end_name));
+                edges.push(format!("  \"{}\" -> \"{}\";\n", start_name, end_name));
             }
+        }
+        edges.sort();
+        for edge in edges {
+            result.push_str(&edge);
         }
         result.push_str("}\n");
         Ok(result)

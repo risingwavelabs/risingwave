@@ -100,13 +100,13 @@
               └─StreamTableScan { table: dim4, columns: [dim4.v1, dim4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim4._row_id], pk: [_row_id], dist: UpstreamHashShard(dim4._row_id) }
   backfill_order_plan: |
     digraph G {
+      "public.dim1" -> "public.fact1";
+      "public.dim2" -> "public.fact2";
+      "public.dim3" -> "public.fact3";
+      "public.dim4" -> "public.fact4";
+      "public.fact2" -> "public.fact1";
       "public.fact3" -> "public.fact1";
       "public.fact4" -> "public.fact3";
-      "public.dim4" -> "public.fact4";
-      "public.dim2" -> "public.fact2";
-      "public.fact2" -> "public.fact1";
-      "public.dim3" -> "public.fact3";
-      "public.dim1" -> "public.fact1";
     }
 - name: backfill order, auto, union, empty
   sql: |
@@ -182,14 +182,14 @@
                     └─StreamTableScan { table: dim4, columns: [dim4.v1, dim4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim4._row_id], pk: [_row_id], dist: UpstreamHashShard(dim4._row_id) }
   backfill_order_plan: |
     digraph G {
-      "public.dim2" -> "public.fact2";
-      "public.dim4" -> "public.fact4";
-      "public.fact4" -> "public.fact1";
-      "public.fact4" -> "public.fact2";
       "public.dim1" -> "public.fact1";
+      "public.dim2" -> "public.fact2";
+      "public.dim3" -> "public.fact3";
+      "public.dim4" -> "public.fact4";
       "public.fact3" -> "public.fact1";
       "public.fact3" -> "public.fact2";
-      "public.dim3" -> "public.fact3";
+      "public.fact4" -> "public.fact1";
+      "public.fact4" -> "public.fact2";
     }
 - name: backfill order, auto, union with join, test explain
   sql: |
@@ -214,13 +214,13 @@
   explain_output: |
     digraph G {
       "public.dim1" -> "public.fact1";
-      "public.fact4" -> "public.fact2";
-      "public.fact4" -> "public.fact1";
       "public.dim2" -> "public.fact2";
       "public.dim3" -> "public.fact3";
+      "public.dim4" -> "public.fact4";
       "public.fact3" -> "public.fact1";
       "public.fact3" -> "public.fact2";
-      "public.dim4" -> "public.fact4";
+      "public.fact4" -> "public.fact1";
+      "public.fact4" -> "public.fact2";
     }
 - name: |
     Test backfill order, auto, stream share cycle.
