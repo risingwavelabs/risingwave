@@ -107,6 +107,10 @@ impl SourceCatalog {
             .get_connector()
             .expect("connector name is missing")
     }
+
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.with_properties.is_iceberg_connector()
+    }
 }
 
 impl SourceCatalog {
