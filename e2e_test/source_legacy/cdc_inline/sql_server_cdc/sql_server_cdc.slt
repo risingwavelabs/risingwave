@@ -136,6 +136,7 @@ CREATE SOURCE upper_mssql_source WITH (
 
 # ------------ Create source/table/mv stage ------------
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+
 statement ok
 CREATE SOURCE mssql_source WITH (
     connector = 'sqlserver-cdc',
