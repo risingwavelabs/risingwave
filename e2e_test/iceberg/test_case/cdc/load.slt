@@ -125,7 +125,13 @@ statement ok
 drop sink s1;
 
 statement ok
-drop source mysql_mydb cascade;
+drop table products_iceberg;
+
+statement ok
+drop table products;
+
+statement ok
+drop source mysql_mydb;
 
 statement ok
 drop connection my_hosted_catalog_conn;
