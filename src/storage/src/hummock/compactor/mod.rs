@@ -580,7 +580,7 @@ pub fn start_compactor(
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
-                                let(parallelism,icebert_runner) = match async move {
+                                let(parallelism,iceberg_runner) = match async move {
                                     let iceberg_runner = IcebergCompactorRunner::new(
                                         iceberg_compaction_task,
                                     ).await?;
@@ -616,7 +616,7 @@ pub fn start_compactor(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    icebert_runner.compact_iceberg(
+                                    iceberg_runner.compact_iceberg(
                                         rx,
                                         parallelism as usize,
                                     )
