@@ -157,10 +157,32 @@ pub fn start(
             .await;
         }),
 
-        Some(CompactorMode::DedicatedIceberg) => {
-            unimplemented!("Dedicated iceberg compactor is not supported yet");
-        }
+        Some(CompactorMode::DedicatedIceberg) => Box::pin(async move {
+            tracing::info!("Iceberg Compactor node options: {:?}", opts);
+            tracing::info!("meta address: {}", opts.meta_address.clone());
 
+            let listen_addr = opts.listen_addr.parse().unwrap();
+
+            let advertise_addr = opts
+                .advertise_addr
+                .as_ref()
+                .unwrap_or_else(|| {
+                    tracing::warn!("advertise addr is not specified, defaulting to listen address");
+                    &opts.listen_addr
+                })
+                .parse()
+                .unwrap();
+            tracing::info!(" address is {}", advertise_addr);
+
+            compactor_serve(
+                listen_addr,
+                advertise_addr,
+                opts,
+                shutdown,
+                CompactorMode::DedicatedIceberg,
+            )
+            .await;
+        }),
         Some(CompactorMode::SharedIceberg) => {
             unimplemented!("Shared iceberg compactor is not supported yet");
         }
