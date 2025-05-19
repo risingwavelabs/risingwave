@@ -1655,7 +1655,24 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("primary_key".to_owned(), pks.join(","));
     sink_with.insert("type".to_owned(), "upsert".to_owned());
-
+    // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
+    //
+    // Note: in theory, we don't need to backfill from the table to the sink,
+    // but we don't have atomic DDL now https://github.com/risingwavelabs/risingwave/issues/21863
+    // so it may have potential data loss problem on the first barrier.
+    //
+    // For non-append-only table, we can always solve it by the initial sink with backfill, since
+    // data will be present in hummock table.
+    //
+    // For append-only table, we need to be more careful.
+    //
+    // The possible cases for a table:
+    // - For table without connector: it doesn't matter, since there's no data before the table is created
+    // - For table with connector: we workarounded it by setting SOURCE_RATE_LIMIT to 0
+    //   + If we support blocking DDL for table with connector, we need to be careful.
+    // - For table with an upstream job: Specifically, CDC table from shared CDC source.
+    //   + Data may come from both upstream connector, and CDC table backfill, so we need to pause both of them.
+    //   + For now we don't support APPEND ONLY CDC table, so it's safe.
     let commit_checkpoint_interval = handler_args
         .with_options
         .get(COMMIT_CHECKPOINT_INTERVAL)

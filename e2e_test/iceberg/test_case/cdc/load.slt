@@ -126,3 +126,9 @@ drop sink s1;
 
 statement ok
 drop source mysql_mydb cascade;
+
+statement ok
+drop connection my_hosted_catalog_conn;
+
+statement ok
+drop secret my_secret;
