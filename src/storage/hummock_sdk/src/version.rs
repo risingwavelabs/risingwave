@@ -594,7 +594,9 @@ where
             .map(|sst| sst.sst_id())
             .collect()
     }
+}
 
+impl<T> HummockVersionDeltaCommon<T> {
     pub fn newly_added_sst_infos(
         &self,
         exclude_table_change_log: bool,
