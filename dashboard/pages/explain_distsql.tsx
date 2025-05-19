@@ -1,9 +1,9 @@
 import { Box, Button, Stack, Textarea } from "@chakra-ui/react"
-import { Graphviz } from "graphviz-react"
 import { Fragment, SetStateAction, useState } from "react"
 import styled from "styled-components"
 import Title from "../components/Title"
 import NodeType from "./node"
+import GraphvizComponent from "../components/GraphvizComponent"
 
 const ContainerDiv = styled(Box)`
   font-family: sans-serif;
@@ -60,12 +60,12 @@ export default function Explain() {
           </Button>
         </Stack>
 
-        <ContainerDiv fluid>
+        <ContainerDiv>
           <DemoArea>
             {/* Render Graphviz visualization only when DOT input is provided */}
             {isDotParsed && input && (
               <Box mt={4}>
-                <Graphviz dot={input} options={{ width: 600, height: 400 }} />
+                <GraphvizComponent dot={input} />
               </Box>
             )}
           </DemoArea>
