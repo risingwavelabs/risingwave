@@ -1,4 +1,3 @@
-import React from "react"
 import { Graphviz } from "@hpcc-js/wasm-graphviz"
 import { useEffect, useRef, useState } from "react"
 
@@ -8,7 +7,11 @@ interface GraphvizComponentProps {
   height?: number
 }
 
-export default function GraphvizComponent({ dot, width = 1200, height = 800 }: GraphvizComponentProps) {
+export default function GraphvizComponent({
+  dot,
+  width = 1200,
+  height = 800,
+}: GraphvizComponentProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [graphviz, setGraphviz] = useState<Graphviz | null>(null)
 
@@ -30,16 +33,16 @@ export default function GraphvizComponent({ dot, width = 1200, height = 800 }: G
   }, [graphviz, dot])
 
   return (
-    <div 
-      ref={containerRef} 
-      style={{ 
-        width: `${width}px`, 
+    <div
+      ref={containerRef}
+      style={{
+        width: `${width}px`,
         height: `${height}px`,
-        overflow: 'auto',
-        border: '1px solid #e2e8f0',
-        borderRadius: '4px',
-        padding: '16px'
-      }} 
+        overflow: "auto",
+        border: "1px solid #e2e8f0",
+        borderRadius: "4px",
+        padding: "16px",
+      }}
     />
   )
-} 
+}

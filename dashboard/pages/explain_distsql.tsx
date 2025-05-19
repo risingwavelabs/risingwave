@@ -1,9 +1,9 @@
 import { Box, Button, Stack, Textarea } from "@chakra-ui/react"
 import { Fragment, SetStateAction, useState } from "react"
 import styled from "styled-components"
+import GraphvizComponent from "../components/GraphvizComponent"
 import Title from "../components/Title"
 import NodeType from "./node"
-import GraphvizComponent from "../components/GraphvizComponent"
 
 const ContainerDiv = styled(Box)`
   font-family: sans-serif;
