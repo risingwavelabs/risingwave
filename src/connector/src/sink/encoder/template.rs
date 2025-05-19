@@ -29,6 +29,7 @@ pub enum TemplateEncoder {
     String(TemplateStringEncoder),
     RedisGeoKey(TemplateRedisGeoKeyEncoder),
     RedisGeoValue(TemplateRedisGeoValueEncoder),
+    RedisPubSubKey(TemplateRedisPubSubKeyEncoder),
 }
 impl TemplateEncoder {
     pub fn new_string(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
@@ -56,6 +57,17 @@ impl TemplateEncoder {
             TemplateRedisGeoKeyEncoder::new(schema, col_indices, member_name, template)?,
         ))
     }
+
+    pub fn new_pubsub_key(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        channel: Option<String>,
+        channel_column: Option<String>,
+    ) -> Result<Self> {
+        Ok(TemplateEncoder::RedisPubSubKey(
+            TemplateRedisPubSubKeyEncoder::new(schema, col_indices, channel, channel_column)?,
+        ))
+    }
 }
 impl RowEncoder for TemplateEncoder {
     type Output = TemplateEncoderOutput;
@@ -65,6 +77,7 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::String(encoder) => &encoder.schema,
             TemplateEncoder::RedisGeoValue(encoder) => &encoder.schema,
             TemplateEncoder::RedisGeoKey(encoder) => &encoder.key_encoder.schema,
+            TemplateEncoder::RedisPubSubKey(encoder) => &encoder.schema,
         }
     }
 
@@ -73,6 +86,7 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::String(encoder) => encoder.col_indices.as_deref(),
             TemplateEncoder::RedisGeoValue(encoder) => encoder.col_indices.as_deref(),
             TemplateEncoder::RedisGeoKey(encoder) => encoder.key_encoder.col_indices.as_deref(),
+            TemplateEncoder::RedisPubSubKey(encoder) => encoder.col_indices.as_deref(),
         }
     }
 
@@ -87,6 +101,7 @@ impl RowEncoder for TemplateEncoder {
             )),
             TemplateEncoder::RedisGeoValue(encoder) => encoder.encode_cols(row, col_indices),
             TemplateEncoder::RedisGeoKey(encoder) => encoder.encode_cols(row, col_indices),
+            TemplateEncoder::RedisPubSubKey(encoder) => encoder.encode_cols(row, col_indices),
         }
     }
 }
@@ -274,6 +289,73 @@ impl TemplateRedisGeoKeyEncoder {
     }
 }
 
+pub enum TemplateRedisPubSubKeyEncoderInner {
+    PubSubName(String),
+    PubSubColumnIndex(usize),
+}
+pub struct TemplateRedisPubSubKeyEncoder {
+    inner: TemplateRedisPubSubKeyEncoderInner,
+    schema: Schema,
+    col_indices: Option<Vec<usize>>,
+}
+
+impl TemplateRedisPubSubKeyEncoder {
+    pub fn new(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        channel: Option<String>,
+        channel_column: Option<String>,
+    ) -> Result<Self> {
+        if let Some(channel) = channel {
+            return Ok(Self {
+                inner: TemplateRedisPubSubKeyEncoderInner::PubSubName(channel),
+                schema,
+                col_indices,
+            });
+        }
+        if let Some(channel_column) = channel_column {
+            let channel_column_index = schema
+                .names_str()
+                .iter()
+                .position(|name| name == &channel_column)
+                .ok_or_else(|| {
+                    SinkError::Redis(format!(
+                        "Can't find pubsub column({}) in schema",
+                        channel_column
+                    ))
+                })?;
+            return Ok(Self {
+                inner: TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(channel_column_index),
+                schema,
+                col_indices,
+            });
+        }
+        Err(SinkError::Redis(
+            "`channel` or `channel_column` must be set".to_owned(),
+        ))
+    }
+
+    pub fn encode_cols(
+        &self,
+        row: impl Row,
+        _col_indices: impl Iterator<Item = usize>,
+    ) -> Result<TemplateEncoderOutput> {
+        match &self.inner {
+            TemplateRedisPubSubKeyEncoderInner::PubSubName(channel) => {
+                Ok(TemplateEncoderOutput::RedisPubSubKey(channel.clone()))
+            }
+            TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(pubsub_col) => {
+                let pubsub_key = row
+                    .datum_at(*pubsub_col)
+                    .ok_or_else(|| SinkError::Redis("pubsub_key is null".to_owned()))?
+                    .to_text()
+                    .clone();
+                Ok(TemplateEncoderOutput::RedisPubSubKey(pubsub_key))
+            }
+        }
+    }
+}
+
 pub enum TemplateEncoderOutput {
     // String formatted according to the template
     String(String),
@@ -281,6 +363,8 @@ pub enum TemplateEncoderOutput {
     RedisGeoValue((String, String)),
     // The key of redis's geospatial, including redis's key and member
     RedisGeoKey((String, String)),
+
+    RedisPubSubKey(String),
 }
 
 impl TemplateEncoderOutput {
@@ -293,6 +377,7 @@ impl TemplateEncoderOutput {
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
                 "RedisGeoVelue can't convert to string".to_owned(),
             )),
+            TemplateEncoderOutput::RedisPubSubKey(s) => Ok(s),
         }
     }
 }
@@ -307,11 +392,13 @@ impl SerTo<String> for TemplateEncoderOutput {
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
                 "RedisGeoVelue can't convert to string".to_owned(),
             )),
+            TemplateEncoderOutput::RedisPubSubKey(s) => Ok(s),
         }
     }
 }
 
 /// The enum of inputs to `RedisSinkPayloadWriter`
+#[derive(Debug)]
 pub enum RedisSinkPayloadWriterInput {
     // Json and String will be convert to string
     String(String),
@@ -319,6 +406,7 @@ pub enum RedisSinkPayloadWriterInput {
     RedisGeoValue((String, String)),
     // The key of redis's geospatial, including redis's key and member
     RedisGeoKey((String, String)),
+    RedisPubSubKey(String),
 }
 
 impl SerTo<RedisSinkPayloadWriterInput> for TemplateEncoderOutput {
@@ -330,6 +418,9 @@ impl SerTo<RedisSinkPayloadWriterInput> for TemplateEncoderOutput {
             }
             TemplateEncoderOutput::RedisGeoValue((key, member)) => {
                 Ok(RedisSinkPayloadWriterInput::RedisGeoValue((key, member)))
+            }
+            TemplateEncoderOutput::RedisPubSubKey(s) => {
+                Ok(RedisSinkPayloadWriterInput::RedisPubSubKey(s))
             }
         }
     }
