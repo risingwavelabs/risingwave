@@ -134,8 +134,8 @@ mod tests {
         };
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -155,8 +155,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0)
                     .encode()
@@ -176,8 +176,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -197,8 +197,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -218,8 +218,8 @@ mod tests {
         );
 
         let sst_info = SstableInfoInner {
-            object_id: 1,
-            sst_id: 1,
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()

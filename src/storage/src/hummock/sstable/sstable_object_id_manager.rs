@@ -45,10 +45,7 @@ impl SstableObjectIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
             wait_queue: Default::default(),
-            available_sst_object_ids: Mutex::new(SstObjectIdRange::new(
-                HummockSstableObjectId::MIN,
-                HummockSstableObjectId::MIN,
-            )),
+            available_sst_object_ids: Mutex::new(SstObjectIdRange::new(u64::MIN, u64::MIN)),
             remote_fetch_number,
             hummock_meta_client,
         }
@@ -153,13 +150,13 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 }
 
 struct SharedComapctorObjectIdManagerCore {
-    output_object_ids: VecDeque<u64>,
+    output_object_ids: VecDeque<HummockSstableObjectId>,
     client: Option<GrpcCompactorProxyClient>,
     sstable_id_remote_fetch_number: u32,
 }
 impl SharedComapctorObjectIdManagerCore {
     pub fn new(
-        output_object_ids: VecDeque<u64>,
+        output_object_ids: VecDeque<HummockSstableObjectId>,
         client: GrpcCompactorProxyClient,
         sstable_id_remote_fetch_number: u32,
     ) -> Self {
@@ -172,7 +169,7 @@ impl SharedComapctorObjectIdManagerCore {
 
     pub fn for_test(output_object_ids: VecDeque<u64>) -> Self {
         Self {
-            output_object_ids,
+            output_object_ids: output_object_ids.into_iter().map(|x| x.into()).collect(),
             client: None,
             sstable_id_remote_fetch_number: 0,
         }
@@ -186,7 +183,7 @@ pub struct SharedComapctorObjectIdManager {
 
 impl SharedComapctorObjectIdManager {
     pub fn new(
-        output_object_ids: VecDeque<u64>,
+        output_object_ids: VecDeque<HummockSstableObjectId>,
         client: GrpcCompactorProxyClient,
         sstable_id_remote_fetch_number: u32,
     ) -> Self {
@@ -235,8 +232,10 @@ impl GetObjectId for SharedComapctorObjectIdManager {
                 Ok(response) => {
                     let resp = response.into_inner();
                     let start_id = resp.start_id;
-                    core.output_object_ids.extend((start_id + 1)..resp.end_id);
-                    Ok(start_id)
+                    core.output_object_ids.extend(
+                        ((start_id + 1)..resp.end_id).map(Into::<HummockSstableObjectId>::into),
+                    );
+                    Ok(start_id.into())
                 }
                 Err(e) => Err(HummockError::other(format!(
                     "Fail to get new sst id: {}",

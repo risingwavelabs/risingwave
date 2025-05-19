@@ -25,7 +25,7 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_connector::connector_common::IcebergCompactionStat;
+use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{
     Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkParam, build_sink,
@@ -370,7 +370,7 @@ impl CoordinatorWorker {
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
-        iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+        iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,

@@ -15,7 +15,7 @@ prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 strum = { version = "0.27", features = ["derive"] }
-thiserror = "1"
+thiserror = "2"
 tonic = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]

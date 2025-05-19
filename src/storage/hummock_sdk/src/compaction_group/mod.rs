@@ -63,7 +63,7 @@ pub mod group_split {
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{HummockEpoch, KeyComparator, can_concat};
+    use crate::{HummockEpoch, HummockSstableId, KeyComparator, can_concat};
 
     // By default, the split key is constructed with vnode = 0 and epoch = MAX, so that we can split table_id to the right group
     pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {
@@ -136,7 +136,7 @@ pub mod group_split {
     /// }
     pub fn split_sst(
         origin_sst_info: SstableInfo,
-        new_sst_id: &mut u64,
+        new_sst_id: &mut HummockSstableId,
         split_key: Bytes,
         left_size: u64,
         right_size: u64,
@@ -205,7 +205,7 @@ pub mod group_split {
     /// In contrast to `split_sst`, this function does not modify the `key_range` and does not guarantee that the split ssts can be merged, which needs to be guaranteed by the caller.
     pub fn split_sst_with_table_ids(
         origin_sst_info: &SstableInfo,
-        new_sst_id: &mut u64,
+        new_sst_id: &mut HummockSstableId,
         old_sst_size: u64,
         new_sst_size: u64,
         new_table_ids: Vec<u32>,
@@ -380,7 +380,7 @@ pub mod group_split {
     /// Split the SSTs in the level according to the split key.
     pub fn split_sst_info_for_level_v2(
         level: &mut Level,
-        new_sst_id: &mut u64,
+        new_sst_id: &mut HummockSstableId,
         split_key: Bytes,
     ) -> Vec<SstableInfo> {
         if level.table_infos.is_empty() {
@@ -401,8 +401,8 @@ pub mod group_split {
                         let sst_size = sst.sst_size;
                         if sst_size / 2 == 0 {
                             tracing::warn!(
-                                id = sst.sst_id,
-                                object_id = sst.object_id,
+                                id = %sst.sst_id,
+                                object_id = %sst.object_id,
                                 sst_size = sst.sst_size,
                                 file_size = sst.file_size,
                                 "Sstable sst_size is under expected",
@@ -452,8 +452,8 @@ pub mod group_split {
                     let sst_size = sst.sst_size;
                     if sst_size / 2 == 0 {
                         tracing::warn!(
-                            id = sst.sst_id,
-                            object_id = sst.object_id,
+                            id = %sst.sst_id,
+                            object_id = %sst.object_id,
                             sst_size = sst.sst_size,
                             file_size = sst.file_size,
                             "Sstable sst_size is under expected",

@@ -26,7 +26,7 @@ use foyer::{
 };
 use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId, SST_OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -491,14 +491,19 @@ impl SstableStore {
         }
     }
 
-    pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
+    pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
+        let object_id = object_id.into();
         let obj_prefix = self
             .store
-            .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
-        risingwave_hummock_sdk::get_sst_data_path(&obj_prefix, &self.path, object_id)
+            .get_object_prefix(object_id.inner(), self.use_new_object_prefix_strategy);
+        risingwave_hummock_sdk::get_object_data_path(
+            &obj_prefix,
+            &self.path,
+            HummockObjectId::Sstable(object_id),
+        )
     }
 
-    pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
+    pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
         risingwave_hummock_sdk::get_object_id_from_path(path)
     }
 
@@ -566,7 +571,7 @@ impl SstableStore {
         async move { entry.await.map_err(HummockError::foyer_error) }
     }
 
-    pub async fn list_object_metadata_from_object_store(
+    pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
         start_after: Option<String>,
@@ -575,7 +580,7 @@ impl SstableStore {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
         let raw_iter = self.store.list(&list_path, start_after, limit).await?;
         let iter = raw_iter.filter(|r| match r {
-            Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
+            Ok(i) => future::ready(i.key.ends_with(&format!(".{}", SST_OBJECT_SUFFIX))),
             Err(_) => future::ready(true),
         });
         Ok(Box::pin(iter))
@@ -583,7 +588,7 @@ impl SstableStore {
 
     pub fn create_sst_writer(
         self: Arc<Self>,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId>,
         options: SstableWriterOptions,
     ) -> BatchUploadWriter {
         BatchUploadWriter::new(object_id, self, options)
@@ -673,7 +678,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::HummockSstableObjectId;
+    use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
@@ -687,7 +692,7 @@ mod tests {
     use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
-    const SST_ID: HummockSstableObjectId = 1;
+    const SST_ID: u64 = 1;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
@@ -788,6 +793,9 @@ mod tests {
         let object_id = 123;
         let data_path = sstable_store.get_sst_data_path(object_id);
         assert_eq!(data_path, "test/123.data");
-        assert_eq!(SstableStore::get_object_id_from_path(&data_path), object_id);
+        assert_eq!(
+            SstableStore::get_object_id_from_path(&data_path),
+            HummockObjectId::Sstable(object_id.into())
+        );
     }
 }

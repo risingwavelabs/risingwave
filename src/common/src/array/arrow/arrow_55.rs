@@ -18,6 +18,6 @@ mod arrow_impl;
 type ArrowIntervalType = arrow_buffer::IntervalMonthDayNano;
 pub use arrow_impl::{FromArrow, ToArrow};
 pub use {
-    arrow_53_array as arrow_array, arrow_53_buffer as arrow_buffer, arrow_53_cast as arrow_cast,
-    arrow_53_schema as arrow_schema,
+    arrow_55_array as arrow_array, arrow_55_buffer as arrow_buffer, arrow_55_cast as arrow_cast,
+    arrow_55_schema as arrow_schema,
 };

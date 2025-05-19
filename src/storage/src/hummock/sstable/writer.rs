@@ -112,7 +112,7 @@ pub trait SstableWriterFactory: Send {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer>;
 }
@@ -133,7 +133,7 @@ impl SstableWriterFactory for BatchSstableWriterFactory {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         Ok(BatchUploadWriter::new(
@@ -157,12 +157,12 @@ pub struct BatchUploadWriter {
 
 impl BatchUploadWriter {
     pub fn new(
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId>,
         sstable_store: Arc<SstableStore>,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
-            object_id,
+            object_id: object_id.into(),
             sstable_store,
             policy: options.policy,
             buf: Vec::with_capacity(options.capacity_hint.unwrap_or(0)),
@@ -382,9 +382,10 @@ impl SstableWriterFactory for UnifiedSstableWriterFactory {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
+        let object_id = object_id.into();
         if self.sstable_store.store().support_streaming_upload() {
             let path = self.sstable_store.get_sst_data_path(object_id);
             let uploader = self.sstable_store.create_streaming_uploader(&path).await?;
@@ -414,9 +415,10 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
 
     async fn create_sst_writer(
         &mut self,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId> + Send,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
+        let object_id = object_id.into();
         let path = self.sstable_store.get_sst_data_path(object_id);
         let uploader = self.sstable_store.create_streaming_uploader(&path).await?;
         Ok(StreamingUploadWriter::new(

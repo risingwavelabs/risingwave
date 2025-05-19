@@ -190,7 +190,7 @@ pub async fn unused() -> ObjectStoreMetaSnapshotStorage {
     ObjectStoreMetaSnapshotStorage::new(
         "",
         Arc::new(ObjectStoreImpl::InMem(MonitoredObjectStore::new(
-            InMemObjectStore::new(),
+            InMemObjectStore::for_test(),
             Arc::new(ObjectStoreMetrics::unused()),
             Arc::new(ObjectStoreConfig::default()),
         ))),

@@ -21,6 +21,7 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
@@ -386,7 +387,7 @@ impl DiagnoseCommand {
         #[derive(PartialEq, Eq)]
         struct SstableSort {
             compaction_group_id: u64,
-            sst_id: u64,
+            sst_id: HummockSstableId,
             delete_ratio: u64,
         }
         impl PartialOrd for SstableSort {

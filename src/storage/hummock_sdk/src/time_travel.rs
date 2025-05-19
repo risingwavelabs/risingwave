@@ -209,8 +209,8 @@ impl ObjectIdReader for SstableIdInVersion {
 impl From<&SstableIdInVersion> for PbSstableInfo {
     fn from(sst_id: &SstableIdInVersion) -> Self {
         Self {
-            sst_id: sst_id.sst_id,
-            object_id: sst_id.object_id,
+            sst_id: sst_id.sst_id.inner(),
+            object_id: sst_id.object_id.inner(),
             ..Default::default()
         }
     }
@@ -225,8 +225,8 @@ impl From<SstableIdInVersion> for PbSstableInfo {
 impl From<&PbSstableInfo> for SstableIdInVersion {
     fn from(s: &PbSstableInfo) -> Self {
         SstableIdInVersion {
-            sst_id: s.sst_id,
-            object_id: s.object_id,
+            sst_id: s.sst_id.into(),
+            object_id: s.object_id.into(),
         }
     }
 }

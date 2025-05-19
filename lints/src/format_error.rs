@@ -71,8 +71,8 @@ const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
 const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
 const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
 const ANYHOW_ERROR: [&str; 2] = ["anyhow", "Error"];
+const THISERROR_IMPL_ERROR: [&str; 2] = ["thiserror_impl", "Error"];
 const THISERROR_EXT_REPORT_REPORT: [&str; 3] = ["thiserror_ext", "report", "Report"];
-
 fn match_function_call<'tcx>(
     cx: &LateContext<'tcx>,
     expr: &'tcx Expr<'_>,
@@ -110,6 +110,8 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
             .any(|macro_call| match_def_path(cx, macro_call.def_id, &TRACING_MACROS_EVENT));
         let in_anyhow_macro = macro_backtrace(expr.span)
             .any(|macro_call| match_def_path(cx, macro_call.def_id, &ANYHOW_MACROS_ANYHOW));
+        let in_thiserror_macro = macro_backtrace(expr.span)
+            .any(|macro_call| match_def_path(cx, macro_call.def_id, &THISERROR_IMPL_ERROR));
 
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
@@ -129,6 +131,10 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
                             } else {
                                 check_fmt_arg_in_anyhow_context(cx, arg_expr);
                             }
+                        } else if in_thiserror_macro {
+                            // Allow formatting error in `#[error("...")]` attribute from `thiserror::Error`,
+                            // because it can be normalized by `thiserror_ext::Report` when formatting.
+                            continue;
                         } else {
                             check_fmt_arg(cx, arg_expr);
                         }

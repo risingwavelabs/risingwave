@@ -161,8 +161,8 @@ pub(super) fn gen_sstable_info(
     let gen_sst_object_id = (start_epoch << 8) + end_epoch;
     vec![LocalSstableInfo::for_test(
         SstableInfoInner {
-            object_id: gen_sst_object_id,
-            sst_id: gen_sst_object_id,
+            object_id: gen_sst_object_id.into(),
+            sst_id: gen_sst_object_id.into(),
             key_range: KeyRange {
                 left: start_full_key.encode().into(),
                 right: end_full_key.encode().into(),

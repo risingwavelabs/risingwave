@@ -179,8 +179,8 @@ impl HummockManagerService for HummockServiceImpl {
             .await?;
         Ok(Response::new(GetNewSstIdsResponse {
             status: None,
-            start_id: sst_id_range.start_id,
-            end_id: sst_id_range.end_id,
+            start_id: sst_id_range.start_id.inner(),
+            end_id: sst_id_range.end_id.inner(),
         }))
     }
 
@@ -192,7 +192,7 @@ impl HummockManagerService for HummockServiceImpl {
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
-            sst_ids: request.sst_ids,
+            sst_ids: request.sst_ids.into_iter().map(|id| id.into()).collect(),
             ..Default::default()
         };
 
@@ -528,9 +528,9 @@ impl HummockManagerService for HummockServiceImpl {
             .into_iter()
             .flat_map(|(object_id, v)| {
                 v.into_iter()
-                    .map(move |(compaction_group_id, sst_id)| BranchedObject {
-                        object_id,
-                        sst_id,
+                    .map(move |(compaction_group_id, sst_ids)| BranchedObject {
+                        object_id: object_id.inner(),
+                        sst_id: sst_ids.into_iter().map(|id| id.inner()).collect(),
                         compaction_group_id,
                     })
             })

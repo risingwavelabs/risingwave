@@ -33,6 +33,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
 };
+use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay,
@@ -131,6 +132,13 @@ impl LogicalMultiJoinBuilder {
         }
         let left = join.left();
         let right = join.right();
+
+        if TemporalJoinValidator::exist_dangling_temporal_scan(left.clone()) {
+            return Self::with_input(plan);
+        }
+        if TemporalJoinValidator::exist_dangling_temporal_scan(right.clone()) {
+            return Self::with_input(plan);
+        }
 
         let mut builder = Self::new(left);
 

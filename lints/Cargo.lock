@@ -658,6 +658,7 @@ dependencies = [
  "dylint_linting",
  "dylint_testing",
  "itertools 0.14.0",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]

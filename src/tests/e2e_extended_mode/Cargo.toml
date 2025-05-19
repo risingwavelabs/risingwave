@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-chrono = { version = "0.4", features = ['serde'] }
+chrono = { workspace = true, features = ['serde'] }
 clap = { workspace = true }
 pg_interval = "0.4"
 rust_decimal = { version = "1.37", features = ["db-postgres"] }

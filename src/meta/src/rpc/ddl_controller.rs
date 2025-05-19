@@ -726,7 +726,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         let (mut replace_table_ctx, mut stream_job_fragments) = self
-            .build_replace_job(stream_ctx, streaming_job, fragment_graph, None, tmp_id as _)
+            .build_replace_job(stream_ctx, streaming_job, fragment_graph, tmp_id as _)
             .await?;
 
         let target_table = streaming_job.table().unwrap();
@@ -749,8 +749,6 @@ impl DdlController {
             .await?
             .try_into()
             .expect("Target table should exist in sink into table");
-
-        assert_eq!(table_catalog.incoming_sinks, target_table.incoming_sinks);
 
         {
             let catalogs = mgr
@@ -941,6 +939,7 @@ impl DdlController {
             id = job_id,
             definition = streaming_job.definition(),
             create_type = streaming_job.create_type().as_str_name(),
+            job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
         let _permit = self
@@ -1407,13 +1406,7 @@ impl DdlController {
         let mut drop_table_connector_ctx = None;
         let result: MetaResult<_> = try {
             let (mut ctx, mut stream_job_fragments) = self
-                .build_replace_job(
-                    ctx,
-                    &streaming_job,
-                    fragment_graph,
-                    col_index_mapping.as_ref(),
-                    tmp_id as _,
-                )
+                .build_replace_job(ctx, &streaming_job, fragment_graph, tmp_id as _)
                 .await?;
             drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
 
@@ -1845,7 +1838,6 @@ impl DdlController {
         stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
-        col_index_mapping: Option<&ColIndexMapping>,
         tmp_job_id: TableId,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         match &stream_job {
@@ -1904,20 +1896,9 @@ impl DdlController {
 
         let job_type = StreamingJobType::from(stream_job);
 
-        // Map the column indices in the dispatchers with the given mapping.
-        let (mut downstream_fragments, downstream_actor_location) =
+        // Extract the downstream fragments from the fragment graph.
+        let (downstream_fragments, downstream_actor_location) =
             self.metadata_manager.get_downstream_fragments(id).await?;
-        if let Some(mapping) = &col_index_mapping {
-            for (d, _f) in &mut downstream_fragments {
-                *d = mapping.rewrite_dispatch_strategy(d).ok_or_else(|| {
-                    // The `rewrite` only fails if some column is dropped (missing) or altered (type changed).
-                    // TODO: support altering referenced columns
-                    MetaError::invalid_parameter(
-                        "unable to drop or alter the column due to being referenced by downstream materialized views or sinks",
-                    )
-                })?;
-            }
-        }
 
         // build complete graph based on the table job type
         let complete_graph = match &job_type {

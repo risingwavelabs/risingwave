@@ -112,8 +112,8 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
             for sst in level.table_infos {
                 let key_range = sst.key_range.clone();
                 sstables.push(RwHummockSstable {
-                    sstable_id: sst.sst_id as _,
-                    object_id: sst.object_id as _,
+                    sstable_id: sst.sst_id.inner() as _,
+                    object_id: sst.object_id.inner() as _,
                     compaction_group_id: cg.group_id as _,
                     level_id: level.level_idx as _,
                     sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),

@@ -11,7 +11,7 @@ repository = { workspace = true }
 anyhow = "1"
 async-trait = "0.1"
 await-tree = { workspace = true }
-chrono = { version = "0.4" }
+chrono = { workspace = true }
 clap = { workspace = true }
 either = "1"
 foyer = { workspace = true }

@@ -482,7 +482,7 @@ impl HummockManager {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id,
-                        new_sst_start_id,
+                        new_sst_start_id: new_sst_start_id.inner(),
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),

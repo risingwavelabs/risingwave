@@ -37,7 +37,7 @@ pub struct BackfillNode {
 /// Actor done                   -> update `fragment_id` state
 /// Operator done                -> update downstream operator dependency
 /// Operator's dependencies done -> queue operator for backfill
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BackfillOrderState {
     // The order plan.
     current_backfill_nodes: HashMap<FragmentId, BackfillNode>,
@@ -117,19 +117,21 @@ impl BackfillOrderState {
 impl BackfillOrderState {
     pub fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
         // Find the fragment_id of the actor.
-        let fragment_id = self.actor_to_fragment_id.get(&actor_id).unwrap();
-        // Decrease the remaining_actor_count of the operator.
-        // If the remaining_actor_count is 0, add the operator to the current_backfill_nodes.
-        let node = self.current_backfill_nodes.get_mut(fragment_id).unwrap();
-        assert!(node.remaining_actors.remove(&actor_id), "missing actor");
-        tracing::debug!(
-            actor_id,
-            remaining_actors = node.remaining_actors.len(),
-            fragment_id,
-            "finish_backfilling_actor"
-        );
-        if node.remaining_actors.is_empty() {
-            return self.finish_fragment(*fragment_id);
+        if let Some(fragment_id) = self.actor_to_fragment_id.get(&actor_id)
+            // Decrease the remaining_actor_count of the operator.
+            // If the remaining_actor_count is 0, add the operator to the current_backfill_nodes.
+            && let Some(node) = self.current_backfill_nodes.get_mut(fragment_id)
+        {
+            assert!(node.remaining_actors.remove(&actor_id), "missing actor");
+            tracing::debug!(
+                actor_id,
+                remaining_actors = node.remaining_actors.len(),
+                fragment_id,
+                "finish_backfilling_actor"
+            );
+            if node.remaining_actors.is_empty() {
+                return self.finish_fragment(*fragment_id);
+            }
         }
         vec![]
     }
@@ -138,18 +140,19 @@ impl BackfillOrderState {
         let mut newly_scheduled = vec![];
         // Decrease the remaining_dependency_count of the children.
         // If the remaining_dependency_count is 0, add the child to the current_backfill_nodes.
-        let node = self.current_backfill_nodes.remove(&fragment_id).unwrap();
-        for child_id in &node.children {
-            let child = self.remaining_backfill_nodes.get_mut(child_id).unwrap();
-            assert!(
-                child.remaining_dependencies.remove(&fragment_id),
-                "missing dependency"
-            );
-            if child.remaining_dependencies.is_empty() {
-                tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
-                self.current_backfill_nodes
-                    .insert(child.fragment_id, child.clone());
-                newly_scheduled.push(child.fragment_id)
+        if let Some(node) = self.current_backfill_nodes.remove(&fragment_id) {
+            for child_id in &node.children {
+                let child = self.remaining_backfill_nodes.get_mut(child_id).unwrap();
+                assert!(
+                    child.remaining_dependencies.remove(&fragment_id),
+                    "missing dependency"
+                );
+                if child.remaining_dependencies.is_empty() {
+                    tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                    self.current_backfill_nodes
+                        .insert(child.fragment_id, child.clone());
+                    newly_scheduled.push(child.fragment_id)
+                }
             }
         }
         newly_scheduled

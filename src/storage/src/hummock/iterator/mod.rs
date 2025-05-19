@@ -40,8 +40,8 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::MergeIterator;
-use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
@@ -58,7 +58,7 @@ use crate::monitor::StoreLocalStatistic;
 
 #[derive(Default)]
 pub struct ValueMeta {
-    pub object_id: Option<u64>,
+    pub object_id: Option<HummockSstableObjectId>,
     pub block_id: Option<u64>,
 }
 

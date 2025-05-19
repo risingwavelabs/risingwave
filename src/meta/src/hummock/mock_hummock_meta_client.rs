@@ -360,7 +360,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                                     .map(SstableInfo::from)
                                     .collect_vec(),
                                 Some(table_stats_change),
-                                object_timestamps,
+                                object_timestamps
+                                    .into_iter()
+                                    .map(|(id, ts)| (id.into(), ts))
+                                    .collect(),
                             )
                             .await
                         {

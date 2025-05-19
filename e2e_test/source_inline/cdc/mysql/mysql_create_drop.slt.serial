@@ -47,6 +47,12 @@ create source s with (
   database.name = 'testdb1',
 );
 
+# Purified definition should not have the internal `payload` column.
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 's';
+----
+CREATE SOURCE s
+
 sleep 2s
 
 

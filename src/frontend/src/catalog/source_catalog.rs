@@ -107,6 +107,10 @@ impl SourceCatalog {
             .get_connector()
             .expect("connector name is missing")
     }
+
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.with_properties.is_iceberg_connector()
+    }
 }
 
 impl SourceCatalog {
@@ -121,6 +125,12 @@ impl SourceCatalog {
     ///
     /// Returns error if it's invalid.
     pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
+        if self.with_properties.is_cdc_connector() {
+            // For CDC sources, we should not purify the SQL definition to add column definitions
+            // or constraints.
+            return self.create_sql_ast();
+        }
+
         match try_purify_table_source_create_sql_ast(
             self.create_sql_ast()?,
             &self.columns,

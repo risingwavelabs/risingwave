@@ -20,7 +20,7 @@ prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
-thiserror = "1.0"
+thiserror = "2"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tracing = "0.1"
 foyer = { workspace = true }

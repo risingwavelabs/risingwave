@@ -383,8 +383,8 @@ macro_rules! impl_system_params_for_test {
                 ..Default::default() // `None` for deprecated params
             };
             ret.data_directory = Some("hummock_001".to_owned());
-            ret.state_store = Some("hummock+memory".to_owned());
-            ret.backup_storage_url = Some("memory".into());
+            ret.state_store = Some("hummock+memory-isolated-for-test".to_owned());
+            ret.backup_storage_url = Some("memory-isolated-for-test".into());
             ret.backup_storage_directory = Some("backup".into());
             ret.use_new_object_prefix_strategy = Some(false);
             ret.time_travel_retention_ms = Some(0);

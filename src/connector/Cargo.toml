@@ -39,7 +39,7 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
 cfg-or-panic = "0.2"
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
@@ -91,7 +91,7 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
 ] }
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
-openssl = "0.10"
+openssl = "0.10.72"
 parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
@@ -122,7 +122,7 @@ redis = { workspace = true, features = [
     "cluster-async",
     "geospatial",
 ] }
-regex = "1.4"
+regex = { workspace = true }
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
@@ -150,16 +150,16 @@ serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
 simd-json = { version = "0.15.0", features = ["hints"] }
-smallvec = "1"
+smallvec = { workspace = true }
 sqlx = { workspace = true }
 strum = "0.27"
 strum_macros = "0.27"
 tempfile = "3"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
-tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "f834f2deeb9e2fb08afaf73865f330cf31a3876a", default-features = false, features = [
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "59350b92775a61611cf1fc3a5d0ff38bf264e6ac", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
     "rustls",
@@ -193,6 +193,11 @@ yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[build-dependencies]
+# Workaround for datafusion. Feel free to remove it if you can.
+# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 
 [dev-dependencies]
 assert_matches = "1"

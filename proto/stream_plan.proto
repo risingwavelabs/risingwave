@@ -1050,17 +1050,8 @@ message StreamContext {
   string timezone = 1;
 }
 
-message BackfillOrderAuto {}
-
-message BackfillOrderFixed {
+message BackfillOrder {
   map<uint32, common.Uint32Vector> order = 1;
-}
-
-message BackfillOrderStrategy {
-  oneof strategy {
-    BackfillOrderAuto auto = 1;
-    BackfillOrderFixed fixed = 2;
-  }
 }
 
 // Representation of a graph of stream fragments.
@@ -1126,5 +1117,5 @@ message StreamFragmentGraph {
   uint32 max_parallelism = 7;
 
   // The backfill order strategy for the fragments.
-  BackfillOrderStrategy backfill_order_strategy = 8;
+  BackfillOrder backfill_order = 8;
 }

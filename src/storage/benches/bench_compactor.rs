@@ -56,7 +56,7 @@ use risingwave_storage::monitor::{
 };
 
 pub async fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored(
+    let store = InMemObjectStore::for_test().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );

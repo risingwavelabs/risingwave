@@ -16,8 +16,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
@@ -136,7 +137,7 @@ impl ManualCompactionPicker {
         // Construct input.
         for idx in 0..=max_sub_level_idx {
             for table in &l0.sub_levels[idx].table_infos {
-                info.update(table);
+                info.update(&table.key_range);
             }
             input_levels.push(InputLevel {
                 level_idx: 0,
@@ -178,16 +179,11 @@ impl ManualCompactionPicker {
     /// Returns false if the given `sst` is rejected by filter defined by `option`.
     /// Otherwise returns true.
     fn filter_level_by_option(&self, level: &Level) -> bool {
-        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
+        let mut hint_sst_ids: HashSet<HummockSstableId> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
-        let tmp_sst_info = SstableInfoInner {
-            key_range: self.option.key_range.clone(),
-            ..Default::default()
-        }
-        .into();
         if self
             .overlap_strategy
-            .check_overlap_with_tables(&[tmp_sst_info], &level.table_infos)
+            .check_overlap_with_range(&self.option.key_range, &level.table_infos)
             .is_empty()
         {
             return false;
@@ -230,12 +226,10 @@ impl CompactionPicker for ManualCompactionPicker {
                 return None;
             }
         }
-        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
+        let mut hint_sst_ids: HashSet<HummockSstableId> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
-        let mut tmp_sst_info = SstableInfoInner::default();
         let mut range_overlap_info = RangeOverlapInfo::default();
-        tmp_sst_info.key_range = self.option.key_range.clone();
-        range_overlap_info.update(&tmp_sst_info.into());
+        range_overlap_info.update(&self.option.key_range);
         let level = self.option.level;
         let target_level = self.target_level;
         assert!(
@@ -583,7 +577,7 @@ pub mod tests {
                     let mut t_inner = t.get_inner();
                     t_inner.table_ids.clear();
                     if idx == 0 {
-                        t_inner.table_ids.push(((t.sst_id % 2) + 1) as _);
+                        t_inner.table_ids.push(((t.sst_id.inner() % 2) + 1) as _);
                     } else {
                         t_inner.table_ids.push(3);
                     }
@@ -647,7 +641,7 @@ pub mod tests {
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let option = ManualCompactionOption {
-            sst_ids: vec![1],
+            sst_ids: vec![1.into()],
             level: 0,
             key_range: KeyRange {
                 left: Bytes::default(),
@@ -775,7 +769,7 @@ pub mod tests {
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let expected = expected.iter().rev().cloned().collect_vec();
             let option = ManualCompactionOption {
-                sst_ids: sst_id_filter.clone(),
+                sst_ids: sst_id_filter.iter().cloned().map(Into::into).collect(),
                 level: *input_level as _,
                 key_range: KeyRange {
                     left: Bytes::default(),
@@ -1083,7 +1077,7 @@ pub mod tests {
         let mut local_stats = LocalPickerStatistic::default();
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let option = ManualCompactionOption {
-                sst_ids: sst_id_filter.clone(),
+                sst_ids: sst_id_filter.iter().cloned().map(Into::into).collect(),
                 level: *input_level as _,
                 key_range: KeyRange {
                     left: Bytes::default(),
@@ -1129,7 +1123,7 @@ pub mod tests {
         ];
         for (input_level, sst_id_filter, expected) in &sst_id_filters {
             let option = ManualCompactionOption {
-                sst_ids: sst_id_filter.clone(),
+                sst_ids: sst_id_filter.iter().cloned().map(Into::into).collect(),
                 level: *input_level as _,
                 key_range: KeyRange {
                     left: Bytes::default(),
@@ -1200,7 +1194,7 @@ pub mod tests {
         // pick_l0_to_sub_level
         {
             let option = ManualCompactionOption {
-                sst_ids: vec![0, 1],
+                sst_ids: [0, 1].iter().cloned().map(Into::into).collect(),
                 key_range: KeyRange {
                     left: Bytes::default(),
                     right: Bytes::default(),
@@ -1320,7 +1314,7 @@ pub mod tests {
         // pick l3 -> l4
         {
             let option = ManualCompactionOption {
-                sst_ids: vec![0, 1],
+                sst_ids: [0, 1].iter().cloned().map(Into::into).collect(),
                 key_range: KeyRange {
                     left: Bytes::default(),
                     right: Bytes::default(),

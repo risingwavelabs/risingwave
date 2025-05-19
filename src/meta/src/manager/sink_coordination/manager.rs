@@ -21,7 +21,7 @@ use futures::future::{BoxFuture, Either, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_connector::connector_common::IcebergCompactionStat;
+use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
 use risingwave_pb::connector_service::coordinate_request::Msg;
@@ -104,7 +104,7 @@ impl SinkCoordinatorManager {
         db: DatabaseConnection,
         hummock_manager: HummockManagerRef,
         metadata_manager: MetadataManager,
-        iceberg_compact_stat_sender: UnboundedSender<IcebergCompactionStat>,
+        iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber =
             new_committed_epoch_subscriber(hummock_manager.clone(), metadata_manager.clone());

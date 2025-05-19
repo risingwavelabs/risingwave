@@ -44,7 +44,7 @@ pub(super) fn collect_resp_info(
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
             let sst_info = local_sst.sst.expect("field not None");
-            sst_to_worker.insert(sst_info.object_id, resp.worker_id);
+            sst_to_worker.insert(sst_info.object_id.into(), resp.worker_id);
             LocalSstableInfo::new(
                 sst_info.into(),
                 from_prost_table_stats_map(local_sst.table_stats_map),

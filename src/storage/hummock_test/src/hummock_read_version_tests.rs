@@ -152,8 +152,8 @@ async fn test_read_version_basic() {
             vec![
                 LocalSstableInfo::for_test(
                     SstableInfoInner {
-                        object_id: 1,
-                        sst_id: 1,
+                        object_id: 1.into(),
+                        sst_id: 1.into(),
                         key_range: KeyRange {
                             left: key_with_epoch(
                                 iterator_test_user_key_of(1).encode(),
@@ -180,8 +180,8 @@ async fn test_read_version_basic() {
                 ),
                 LocalSstableInfo::for_test(
                     SstableInfoInner {
-                        object_id: 2,
-                        sst_id: 2,
+                        object_id: 2.into(),
+                        sst_id: 2.into(),
                         key_range: KeyRange {
                             left: key_with_epoch(
                                 iterator_test_user_key_of(3).encode(),
