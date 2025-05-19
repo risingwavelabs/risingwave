@@ -62,14 +62,14 @@ impl IcebergCompactorRunner {
         let manifest_list = table
             .metadata()
             .current_snapshot()
-            .unwrap()
+            .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
             .load_manifest_list(table.file_io(), table.metadata())
             .await
-            .unwrap();
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
         let mut all_data_file_size: u32 = 0;
         for manifest_file in manifest_list.entries() {
-            let a = manifest_file.load_manifest(table.file_io()).await.unwrap();
+            let a = manifest_file.load_manifest(table.file_io()).await.map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             let (entry, _) = a.into_parts();
             for i in entry {
                 match i.content_type() {
