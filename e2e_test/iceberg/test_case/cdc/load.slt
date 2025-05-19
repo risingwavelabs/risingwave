@@ -75,7 +75,10 @@ create table products_iceberg ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) FROM mysql_mydb TABLE 'mydb.products' ENGINE = ICEBERG;
+)
+with (commit_checkpoint_interval = 1)
+FROM mysql_mydb TABLE 'mydb.products'
+ENGINE = ICEBERG;
 
 sleep 20s
 
