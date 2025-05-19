@@ -74,10 +74,8 @@ pub enum Components {
     HummockTrace,
     Coredump,
     NoBacktrace,
-    ExternalUdf,
-    WasmUdf,
-    JsUdf,
-    PythonUdf,
+    Udf,
+    NoDefaultFeatures,
 }
 
 impl Components {
@@ -99,10 +97,8 @@ impl Components {
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
             Self::NoBacktrace => "[Runtime] Disable backtrace",
-            Self::ExternalUdf => "[Build] Enable external UDF",
-            Self::WasmUdf => "[Build] Enable Wasm UDF",
-            Self::JsUdf => "[Build] Enable JS UDF",
-            Self::PythonUdf => "[Build] Enable Python UDF",
+            Self::Udf => "[Build] Enable UDF",
+            Self::NoDefaultFeatures => "[Build] Disable default features",
         }
         .into()
     }
@@ -201,10 +197,17 @@ As a result, RisingWave will dump the core on panics.
 With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
                 "
             }
-            Self::ExternalUdf => "Required if you want to support external UDF.",
-            Self::WasmUdf => "Required if you want to support WASM UDF.",
-            Self::JsUdf => "Required if you want to support JS UDF.",
-            Self::PythonUdf => "Required if you want to support Python UDF.",
+            Self::Udf => {
+                "
+Add --features udf to build command (by default disabled).
+Required if you want to support UDF."
+            }
+            Self::NoDefaultFeatures => {
+                "
+Add --no-default-features to build command.
+Currently, default features are: rw-static-link, all-connectors
+"
+            }
         }
         .into()
     }
@@ -227,10 +230,8 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
-            "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
-            "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
-            "ENABLE_JS_UDF" => Some(Self::JsUdf),
-            "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
+            "ENABLE_UDF" => Some(Self::Udf),
+            "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
             _ => None,
         }
     }
@@ -253,10 +254,8 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
             Self::NoBacktrace => "DISABLE_BACKTRACE",
-            Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
-            Self::WasmUdf => "ENABLE_WASM_UDF",
-            Self::JsUdf => "ENABLE_JS_UDF",
-            Self::PythonUdf => "ENABLE_PYTHON_UDF",
+            Self::Udf => "ENABLE_UDF",
+            Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
         }
         .into()
     }

@@ -6,6 +6,7 @@ import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "secret.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
@@ -224,6 +225,14 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
+message GetFragmentByIdRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentByIdResponse {
+  FragmentDistribution distribution = 1;
+}
+
 message ListStreamingJobStatesRequest {}
 
 message ListStreamingJobStatesResponse {
@@ -240,18 +249,19 @@ message ListStreamingJobStatesResponse {
 
 message ListFragmentDistributionRequest {}
 
+message FragmentDistribution {
+  uint32 fragment_id = 1;
+  uint32 table_id = 2;
+  TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
+  repeated uint32 state_table_ids = 4;
+  repeated uint32 upstream_fragment_ids = 5;
+  uint32 fragment_type_mask = 6;
+  uint32 parallelism = 7;
+  uint32 vnode_count = 8;
+  stream_plan.StreamNode node = 9;
+}
+
 message ListFragmentDistributionResponse {
-  message FragmentDistribution {
-    uint32 fragment_id = 1;
-    uint32 table_id = 2;
-    TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
-    repeated uint32 state_table_ids = 4;
-    repeated uint32 upstream_fragment_ids = 5;
-    uint32 fragment_type_mask = 6;
-    uint32 parallelism = 7;
-    uint32 vnode_count = 8;
-    stream_plan.StreamNode node = 9;
-  }
   repeated FragmentDistribution distributions = 1;
 }
 
@@ -323,6 +333,23 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
+message AlterConnectorPropsRequest {
+  enum AlterConnectorPropsObject {
+    UNSPECIFIED = 0;
+    SOURCE = 1;
+    SINK = 2;
+    CONNECTION = 3;
+  }
+
+  uint32 object_id = 1;
+  map<string, string> changed_props = 2;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  optional uint32 connector_conn_ref = 4;
+  AlterConnectorPropsObject object_type = 5;
+}
+
+message AlterConnectorPropsResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -337,6 +364,8 @@ service StreamManagerService {
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
+  rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
+  rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
 }
 
 // Below for cluster service.
@@ -674,6 +703,7 @@ message SystemParams {
   optional uint64 time_travel_retention_ms = 18;
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
+  optional bool enforce_secret = 21;
 }
 
 message GetSystemParamsRequest {}
@@ -918,4 +948,22 @@ message ListRateLimitsResponse {
     string node_name = 5;
   }
   repeated RateLimitInfo rate_limits = 1;
+}
+
+service HostedIcebergCatalogService {
+  rpc ListIcebergTables(ListIcebergTablesRequest) returns (ListIcebergTablesResponse);
+}
+
+message ListIcebergTablesRequest {}
+
+message ListIcebergTablesResponse {
+  message IcebergTable {
+    string catalog_name = 1;
+    string table_namespace = 2;
+    string table_name = 3;
+    optional string metadata_location = 4;
+    optional string previous_metadata_location = 5;
+    optional string iceberg_type = 6;
+  }
+  repeated IcebergTable iceberg_tables = 1;
 }

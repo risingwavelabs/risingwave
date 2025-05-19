@@ -25,6 +25,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
+use crate::barrier::BarrierKind;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
@@ -33,7 +34,7 @@ struct CreatingStreamingJobEpochState {
     epoch: u64,
     node_to_collect: NodeToCollect,
     resps: Vec<BarrierCompleteResponse>,
-    is_checkpoint: bool,
+    kind: BarrierKind,
     is_first_commit: bool,
     enqueue_time: Instant,
 }
@@ -51,11 +52,11 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
 
     // metrics
-    consuming_snapshot_barrier_latency: LabelGuardedHistogram<2>,
-    consuming_log_store_barrier_latency: LabelGuardedHistogram<2>,
+    consuming_snapshot_barrier_latency: LabelGuardedHistogram,
+    consuming_log_store_barrier_latency: LabelGuardedHistogram,
 
-    wait_commit_latency: LabelGuardedHistogram<1>,
-    inflight_barrier_num: LabelGuardedIntGauge<1>,
+    wait_commit_latency: LabelGuardedHistogram,
+    inflight_barrier_num: LabelGuardedIntGauge,
 }
 
 impl CreatingStreamingJobBarrierControl {
@@ -72,10 +73,10 @@ impl CreatingStreamingJobBarrierControl {
 
             consuming_snapshot_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
-                .with_guarded_label_values(&[&table_id_str, "consuming_snapshot"]),
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_snapshot"]),
             consuming_log_store_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
-                .with_guarded_label_values(&[&table_id_str, "consuming_log_store"]),
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_log_store"]),
             wait_commit_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_wait_commit_latency
                 .with_guarded_label_values(&[&table_id_str]),
@@ -116,7 +117,7 @@ impl CreatingStreamingJobBarrierControl {
         &mut self,
         epoch: u64,
         node_to_collect: NodeToCollect,
-        is_checkpoint: bool,
+        kind: BarrierKind,
     ) {
         debug!(
             epoch,
@@ -127,7 +128,10 @@ impl CreatingStreamingJobBarrierControl {
         let is_first_commit = !self.is_first_committed;
         if !self.is_first_committed {
             self.is_first_committed = true;
-            assert!(is_checkpoint, "first barrier must be checkpoint barrier");
+            assert!(
+                kind.is_checkpoint(),
+                "first barrier must be checkpoint barrier"
+            );
         }
         if let Some(latest_epoch) = self.latest_epoch() {
             assert!(epoch > latest_epoch, "{} {}", epoch, latest_epoch);
@@ -136,7 +140,7 @@ impl CreatingStreamingJobBarrierControl {
             epoch,
             node_to_collect,
             resps: vec![],
-            is_checkpoint,
+            kind,
             is_first_commit,
             enqueue_time: Instant::now(),
         };
@@ -149,12 +153,9 @@ impl CreatingStreamingJobBarrierControl {
             .set(self.inflight_barrier_queue.len() as _);
     }
 
-    pub(super) fn collect(
-        &mut self,
-        epoch: u64,
-        worker_id: WorkerId,
-        resp: BarrierCompleteResponse,
-    ) {
+    pub(super) fn collect(&mut self, resp: BarrierCompleteResponse) {
+        let epoch = resp.epoch;
+        let worker_id = resp.worker_id as WorkerId;
         debug!(
             epoch,
             worker_id,
@@ -200,8 +201,8 @@ impl CreatingStreamingJobBarrierControl {
             let epoch = epoch_state.epoch;
             let is_first = epoch_state.is_first_commit;
             if is_first {
-                assert!(epoch_state.is_checkpoint);
-            } else if !epoch_state.is_checkpoint {
+                assert!(epoch_state.kind.is_checkpoint());
+            } else if !epoch_state.kind.is_checkpoint() {
                 continue;
             }
 
@@ -238,6 +239,8 @@ impl CreatingStreamingJobBarrierControl {
             &self.consuming_log_store_barrier_latency
         };
         barrier_latency_metrics.observe(barrier_latency);
-        self.pending_barriers_to_complete.push_front(epoch_state);
+        if !epoch_state.kind.is_initial() {
+            self.pending_barriers_to_complete.push_front(epoch_state);
+        }
     }
 }

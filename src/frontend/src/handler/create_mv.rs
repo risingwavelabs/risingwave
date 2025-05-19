@@ -31,13 +31,14 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::ordinal;
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -122,7 +123,6 @@ pub fn gen_create_mv_plan_bound(
     }
 
     let mut plan_root = Planner::new_for_stream(context).plan_query(query)?;
-    plan_root.set_req_dist_as_same_as_req_order();
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_column_name_not_reserved(name)?;
@@ -160,20 +160,20 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, dependent_udfs, bound) = {
+    let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound = binder.bind_query(query)?;
+        let bound_query = binder.bind_query(query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
-            bound,
+            bound_query,
         )
     };
     handle_create_mv_bound(
         handler_args,
         if_not_exists,
         name,
-        bound,
+        bound_query,
         dependent_relations,
         dependent_udfs,
         columns,
@@ -238,6 +238,12 @@ pub async fn handle_create_mv_bound(
     let (table, graph, dependencies, resource_group) = {
         let mut with_options = get_with_options(handler_args.clone());
         let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+        if resource_group.is_some() {
+            risingwave_common::license::Feature::ResourceGroup
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
 
         let is_serverless_backfill = with_options
             .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
@@ -305,8 +311,16 @@ It only indicates the physical clustering of the data, which may improve the per
             return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
         }
 
+        let context: OptimizerContextRef = context.into();
+
         let (plan, table) =
-            gen_create_mv_plan_bound(&session, context.into(), query, name, columns, emit_mode)?;
+            gen_create_mv_plan_bound(&session, context.clone(), query, name, columns, emit_mode)?;
+
+        let backfill_order = plan_backfill_order(
+            context.session_ctx().as_ref(),
+            context.with_options().backfill_order_strategy(),
+            plan.clone(),
+        )?;
 
         // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
         // during binding instead of visiting the optimized plan.
@@ -321,7 +335,11 @@ It only indicates the physical clustering of the data, which may improve the per
                 )
                 .collect();
 
-        let graph = build_graph(plan)?;
+        let graph = build_graph_with_strategy(
+            plan,
+            Some(GraphJobType::MaterializedView),
+            Some(backfill_order),
+        )?;
 
         (table, graph, dependencies, resource_group)
     };

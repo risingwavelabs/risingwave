@@ -15,42 +15,88 @@
 use std::env;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
+use super::ExecuteContext;
 use crate::util::is_env_set;
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
 
-/// Get the command for starting the given component of RisingWave.
-pub fn risingwave_cmd(component: &str) -> Result<Command> {
-    let mut cmd = if is_env_set("USE_SYSTEM_RISINGWAVE") {
-        let mut cmd = Command::new("risingwave");
-        cmd.arg(component);
-        cmd
-    } else {
-        let prefix_bin = std::env::var("PREFIX_BIN")?;
-        let path = Path::new(&prefix_bin).join("risingwave").join(component);
-        Command::new(path)
-    };
+impl<W> ExecuteContext<W>
+where
+    W: std::io::Write,
+{
+    /// Get the command for starting the given component of RisingWave.
+    pub fn risingwave_cmd(&mut self, component: &str) -> Result<Command> {
+        let mut cmd = if let Ok(tag) = env::var("USE_SYSTEM_RISINGWAVE")
+            && let Some(tag) = tag.strip_prefix("docker:")
+        {
+            let image = format!("risingwavelabs/risingwave:{}", tag);
 
-    if crate::util::is_enable_backtrace() {
-        cmd.env("RUST_BACKTRACE", "1");
+            // Before returning the command, pull the image first.
+            self.pb
+                .set_message(format!("pulling docker image \"{image}\"..."));
+            static DOCKER_PULL: Once = Once::new();
+            DOCKER_PULL.call_once(|| {
+                let mut pull_cmd = Command::new("docker");
+                pull_cmd.arg("pull").arg(&image);
+                let output = pull_cmd.output().expect("Failed to pull docker image");
+                output.status.exit_ok().unwrap_or_else(|_| {
+                    panic!(
+                        "Failed to pull docker image: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    )
+                })
+            });
+
+            let wd = env::var("PREFIX")?; // passthrough the working directory
+            let name = format!("risedev-{}", self.id.as_ref().unwrap());
+
+            let mut cmd = Command::new("docker");
+            cmd.arg("run")
+                .arg("-it")
+                .arg("--rm")
+                .arg("--name")
+                .arg(&name)
+                .arg("--network")
+                .arg("host")
+                .arg("--cpus")
+                .arg("4") // release build has a paid license working with <= 4 cpus
+                .arg("-v")
+                .arg(format!("{wd}:{wd}"))
+                .arg(&image)
+                .arg(component);
+            cmd
+        } else if is_env_set("USE_SYSTEM_RISINGWAVE") {
+            let mut cmd = Command::new("risingwave");
+            cmd.arg(component);
+            cmd
+        } else {
+            let prefix_bin = std::env::var("PREFIX_BIN")?;
+            let path = Path::new(&prefix_bin).join("risingwave").join(component);
+            Command::new(path)
+        };
+
+        if crate::util::is_enable_backtrace() {
+            cmd.env("RUST_BACKTRACE", "1");
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
+            );
+        }
+
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+        cmd.arg("--config-path")
+            .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        Ok(cmd)
     }
-
-    if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-        cmd.env(
-            "CONNECTOR_LIBS_PATH",
-            Path::new(&prefix_bin).join("connector-node/libs/"),
-        );
-    }
-
-    let prefix_config = env::var("PREFIX_CONFIG")?;
-    cmd.arg("--config-path")
-        .arg(Path::new(&prefix_config).join("risingwave.toml"));
-
-    Ok(cmd)
 }
 
 /// Add a meta node to the parameters.
@@ -97,16 +143,13 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
 pub enum HummockInMemoryStrategy {
-    /// Enable isolated in-memory hummock. Used by single-node configuration.
-    Isolated,
-    /// Enable in-memory hummock shared in a single process. Used by risedev playground and
-    /// deterministic end-to-end tests.
-    Shared,
+    /// Enable in-memory hummock. Used by single-node configuration.
+    Allowed,
     /// Disallow in-memory hummock. Always requires minio or s3.
     Disallowed,
 }
 
-/// Add a hummock storage backend to the parameters. Returns whether this is a shared backend.
+/// Add a hummock storage backend to the parameters. Returns `(is_shared_backend, is_persistent_backend)`.
 pub fn add_hummock_backend(
     id: &str,
     provide_opendal: &[OpendalConfig],
@@ -121,13 +164,9 @@ pub fn add_hummock_backend(
         provide_opendal,
     ) {
         ([], [], []) => match hummock_in_memory_strategy {
-            HummockInMemoryStrategy::Isolated => {
+            HummockInMemoryStrategy::Allowed => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 (false, false)
-            }
-            HummockInMemoryStrategy::Shared => {
-                cmd.arg("--state-store").arg("hummock+memory-shared");
-                (true, false)
             }
             HummockInMemoryStrategy::Disallowed => {
                 return Err(anyhow!(

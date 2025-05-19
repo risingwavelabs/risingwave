@@ -54,24 +54,29 @@ pub(super) mod handlers {
 
     use anyhow::Context;
     use axum::Json;
+    use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{PbDatabase, PbSchema, Sink, Source, Subscription, Table, View};
+    use risingwave_pb::catalog::{
+        Index, PbDatabase, PbSchema, Sink, Source, Subscription, Table, View,
+    };
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
         ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
     };
+    use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
         GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
-        StackTraceResponse,
+        StackTraceRequest, StackTraceResponse,
     };
     use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
+    use serde::Deserialize;
     use serde_json::json;
     use thiserror_ext::AsReport;
 
@@ -141,8 +146,19 @@ pub(super) mod handlers {
         list_table_catalogs_inner(&srv.metadata_manager, TableType::Table).await
     }
 
-    pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
+    pub async fn list_index_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
         list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
+    }
+
+    pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Index>>> {
+        let indexes = srv
+            .metadata_manager
+            .catalog_controller
+            .list_indexes()
+            .await
+            .map_err(err)?;
+
+        Ok(Json(indexes))
     }
 
     pub async fn list_subscription(
@@ -346,12 +362,26 @@ pub(super) mod handlers {
     async fn dump_await_tree_inner(
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
+        params: AwaitTreeDumpParams,
     ) -> Result<Json<StackTraceResponse>> {
         let mut all = StackTraceResponse::default();
 
+        let req = StackTraceRequest {
+            actor_traces_format: match params.format.as_str() {
+                "text" => ActorTracesFormat::Text as i32,
+                "json" => ActorTracesFormat::Json as i32,
+                _ => {
+                    return Err(err(anyhow!(
+                        "Unsupported format `{}`, only `text` and `json` are supported for now",
+                        params.format
+                    )));
+                }
+            },
+        };
+
         for worker_node in worker_nodes {
             let client = compute_clients.get(worker_node).await.map_err(err)?;
-            let result = client.stack_trace().await.map_err(err)?;
+            let result = client.stack_trace(req).await.map_err(err)?;
 
             all.merge_other(result);
         }
@@ -359,7 +389,19 @@ pub(super) mod handlers {
         Ok(all.into())
     }
 
+    #[derive(Debug, Deserialize)]
+    pub struct AwaitTreeDumpParams {
+        #[serde(default = "await_tree_default_format")]
+        format: String,
+    }
+
+    fn await_tree_default_format() -> String {
+        // In dashboard, await tree is usually for engineer to debug, so we use human-readable text format by default here.
+        "text".to_owned()
+    }
+
     pub async fn dump_await_tree_all(
+        Query(params): Query<AwaitTreeDumpParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_nodes = srv
@@ -368,11 +410,12 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
 
-        dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
+        dump_await_tree_inner(&worker_nodes, &srv.compute_clients, params).await
     }
 
     pub async fn dump_await_tree(
         Path(worker_id): Path<WorkerId>,
+        Query(params): Query<AwaitTreeDumpParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_node = srv
@@ -383,7 +426,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients).await
+        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients, params).await
     }
 
     pub async fn heap_profile(
@@ -463,8 +506,27 @@ pub(super) mod handlers {
         response.map_err(err)
     }
 
-    pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
-        Ok(srv.diagnose_command.report().await)
+    #[derive(Debug, Deserialize)]
+    pub struct DiagnoseParams {
+        #[serde(default = "await_tree_default_format")]
+        actor_traces_format: String,
+    }
+
+    pub async fn diagnose(
+        Query(params): Query<DiagnoseParams>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<String> {
+        let actor_traces_format = match params.actor_traces_format.as_str() {
+            "text" => ActorTracesFormat::Text,
+            "json" => ActorTracesFormat::Json,
+            _ => {
+                return Err(err(anyhow!(
+                    "Unsupported actor_traces_format `{}`, only `text` and `json` are supported for now",
+                    params.actor_traces_format
+                )));
+            }
+        };
+        Ok(srv.diagnose_command.report(actor_traces_format).await)
     }
 
     /// NOTE(kwannoel): Although we fetch the BP for the entire graph via this API,
@@ -564,7 +626,8 @@ impl DashboardService {
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
-            .route("/indexes", get(list_indexes))
+            .route("/indexes", get(list_index_tables))
+            .route("/index_items", get(list_indexes))
             .route("/subscriptions", get(list_subscription))
             .route("/internal_tables", get(list_internal_tables))
             .route("/sources", get(list_sources))
@@ -575,7 +638,9 @@ impl DashboardService {
             .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route("/metrics/streaming_stats", get(get_streaming_stats))
+            // /monitor/await_tree/{worker_id}/?format={text or json}
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            // /monitor/await_tree/?format={text or json}
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
             .route(
@@ -583,6 +648,7 @@ impl DashboardService {
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            // /monitor/diagnose/?format={text or json}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()

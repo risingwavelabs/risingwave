@@ -109,6 +109,7 @@ impl StreamFragmentGraph {
             table_ids_cnt: 0,
             parallelism: None,
             max_parallelism: 0,
+            backfill_order: Default::default(),
         }
     }
 

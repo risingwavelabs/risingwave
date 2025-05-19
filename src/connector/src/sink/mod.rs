@@ -29,6 +29,7 @@ pub mod google_pubsub;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+use risingwave_common::bail;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
@@ -44,13 +45,18 @@ pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
+pub mod prelude {
+    pub use crate::sink::{
+        Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkError,
+        SinkParam, SinkWriterParam,
+    };
+}
 
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
 use ::clickhouse::error::Error as ClickHouseError;
-use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -88,12 +94,14 @@ use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
-use crate::error::ConnectorError;
+use crate::WithPropertiesExt;
+use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::file_sink::fs::FsSink;
@@ -122,7 +130,6 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
                 { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
-                { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
@@ -187,7 +194,8 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
-pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
+/// `snapshot = false` corresponds to [`risingwave_pb::stream_plan::StreamScanType::UpstreamOnly`]
+pub const SINK_SNAPSHOT_OPTION: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
@@ -305,32 +313,47 @@ impl SinkParam {
     }
 }
 
+pub fn enforce_secret_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()> {
+    use crate::enforce_secret::EnforceSecret;
+
+    let connector = props
+        .get_connector()
+        .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+    let key_iter = props.key_iter();
+    match_sink_name_str!(
+        connector.as_str(),
+        PropType,
+        PropType::enforce_secret(key_iter),
+        |other| bail!("connector '{}' is not supported", other)
+    )
+}
+
 pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
     LazyLock::new(|| SinkMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration: LabelGuardedHistogramVec<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounterVec<4>,
+    pub sink_commit_duration: LabelGuardedHistogramVec,
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec,
 
     // Log store writer metrics
-    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<3>,
-    pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_write_rows: LabelGuardedIntCounterVec,
 
     // Log store reader metrics
-    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
-    pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    pub log_store_read_bytes: LabelGuardedIntCounterVec<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec,
+    pub log_store_read_rows: LabelGuardedIntCounterVec,
+    pub log_store_read_bytes: LabelGuardedIntCounterVec,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec,
 
     // Iceberg metrics
-    pub iceberg_write_qps: LabelGuardedIntCounterVec<3>,
-    pub iceberg_write_latency: LabelGuardedHistogramVec<3>,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_partition_num: LabelGuardedIntGaugeVec<3>,
-    pub iceberg_write_bytes: LabelGuardedIntCounterVec<3>,
+    pub iceberg_write_qps: LabelGuardedIntCounterVec,
+    pub iceberg_write_latency: LabelGuardedHistogramVec,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
+    pub iceberg_partition_num: LabelGuardedIntGaugeVec,
+    pub iceberg_write_bytes: LabelGuardedIntCounterVec,
 }
 
 impl SinkMetrics {
@@ -497,8 +520,8 @@ pub struct SinkWriterParam {
 
 #[derive(Clone)]
 pub struct SinkWriterMetrics {
-    pub sink_commit_duration: LabelGuardedHistogram<4>,
-    pub connector_sink_rows_received: LabelGuardedIntCounter<4>,
+    pub sink_commit_duration: LabelGuardedHistogram,
+    pub connector_sink_rows_received: LabelGuardedIntCounter,
 }
 
 impl SinkWriterMetrics {
@@ -524,8 +547,8 @@ impl SinkWriterMetrics {
     #[cfg(test)]
     pub fn for_test() -> Self {
         Self {
-            sink_commit_duration: LabelGuardedHistogram::test_histogram(),
-            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            sink_commit_duration: LabelGuardedHistogram::test_histogram::<4>(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter::<4>(),
         }
     }
 }
@@ -601,6 +624,7 @@ fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
@@ -649,6 +673,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
@@ -657,7 +685,11 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        _db: DatabaseConnection,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -979,8 +1011,9 @@ impl From<ClickHouseError> for SinkError {
     }
 }
 
-impl From<DeltaTableError> for SinkError {
-    fn from(value: DeltaTableError) -> Self {
+#[cfg(feature = "sink-deltalake")]
+impl From<::deltalake::DeltaTableError> for SinkError {
+    fn from(value: ::deltalake::DeltaTableError) -> Self {
         SinkError::DeltaLake(anyhow!(value))
     }
 }

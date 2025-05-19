@@ -39,7 +39,7 @@ use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
 
-async fn do_handle_explain(
+pub async fn do_handle_explain(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     stmt: Statement,
@@ -95,7 +95,7 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
             Statement::CreateSink { stmt } => {
-                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
+                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options), false)
                     .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
@@ -189,7 +189,7 @@ async fn do_handle_explain(
                         gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
                     }
 
-                    _ => bail_not_implemented!("unsupported statement {:?}", stmt),
+                    _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
                 };
 
                 let plan = plan?;
@@ -233,7 +233,7 @@ async fn do_handle_explain(
                             }
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone())?;
+                            let graph = build_graph(plan.clone(), None)?;
                             if explain_format == ExplainFormat::Dot {
                                 blocks.push(explain_stream_graph_as_dot(&graph, explain_verbose))
                             } else {
@@ -340,6 +340,6 @@ pub async fn handle_explain(
 
 #[derive(Fields)]
 #[fields(style = "TITLE CASE")]
-struct ExplainRow {
-    query_plan: String,
+pub(crate) struct ExplainRow {
+    pub query_plan: String,
 }

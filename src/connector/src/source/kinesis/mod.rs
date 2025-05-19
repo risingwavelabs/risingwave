@@ -25,6 +25,8 @@ pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::connector_common::KinesisCommon;
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorError;
 use crate::source::SourceProperties;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
@@ -46,15 +48,59 @@ pub struct KinesisProperties {
     pub common: KinesisCommon,
 
     #[serde(flatten)]
+    pub reader_config: KinesisReaderConfig,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
 
+const fn kinesis_reader_default_eof_retry_interval_ms() -> u64 {
+    1000
+}
+
+const fn kinesis_reader_default_error_retry_interval_ms() -> u64 {
+    200
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct KinesisReaderConfig {
+    #[serde(
+        rename = "kinesis.reader.eof_retry_interval_ms",
+        default = "kinesis_reader_default_eof_retry_interval_ms"
+    )]
+    pub eof_retry_interval_ms: u64,
+
+    #[serde(
+        rename = "kinesis.reader.error_retry_interval_ms",
+        default = "kinesis_reader_default_error_retry_interval_ms"
+    )]
+    pub error_retry_interval_ms: u64,
+}
+
+impl Default for KinesisReaderConfig {
+    fn default() -> Self {
+        Self {
+            eof_retry_interval_ms: kinesis_reader_default_eof_retry_interval_ms(),
+            error_retry_interval_ms: kinesis_reader_default_error_retry_interval_ms(),
+        }
+    }
+}
 impl SourceProperties for KinesisProperties {
     type Split = KinesisSplit;
     type SplitEnumerator = KinesisSplitEnumerator;
     type SplitReader = KinesisSplitReader;
 
     const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
+}
+
+impl EnforceSecret for KinesisProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        for prop in prop_iter {
+            KinesisCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl crate::source::UnknownFields for KinesisProperties {

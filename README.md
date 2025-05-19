@@ -20,6 +20,12 @@
 
 <div align="center">
   <a
+    href="https://github.com/risingwavelabs/risingwave/releases/latest"
+    target="_blank"
+  >
+    <img alt="Release" src="https://img.shields.io/github/v/release/risingwavelabs/risingwave.svg?sort=semver" />
+  </a>
+  <a
     href="https://go.risingwave.com/slack"
     target="_blank"
   >
@@ -39,9 +45,9 @@
   </a>
 </div>
 
-RisingWave is the world's most advanced event stream processing platform engineered to provide the <i><b>simplest</b></i> and <i><b>most cost-efficient</b></i> approach for <b>processing</b>, <b>analyzing</b>, and <b>managing</b> real-time event streaming data. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
+RisingWave is a stream processing and management platform designed to offer the <i><b>simplest</b></i> and <i><b>most cost-effective</b></i> way to <b>process</b>, <b>analyze</b>, and <b>manage</b> real-time event data — with built-in support for the [Apache Iceberg™](https://iceberg.apache.org/) open table format. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
 
-RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live data streams with historical tables, <b>serve</b> ad-hoc queries at low latency, and <b>deliver</b> fresh, consistent results wherever needed.
+RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>persist</b> fresh, consistent results to Apache Iceberg™ or any other downstream system.
 
 ![RisingWave](./docs/dev/src/images/architecture_20250127.png)
 
@@ -54,20 +60,22 @@ curl -L https://risingwave.com/sh | sh
 
 To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
-## Not just a stream processor!
+## Stream, Store, and Query — All in One
 
-RisingWave simplifies **end-to-end** development of real-time data pipelines and applications - going beyond traditional stream processors.
+RisingWave delivers a full **end-to-end streaming data platform** — combining real-time processing with built-in storage and open-format persistence.
 
-Like other stream processors, RisingWave supports:
+It supports:
 
 * **Ingestion:** Ingest millions of events per second from streaming and batch sources.
 * **Stream processing:** Perform real-time incremental processing to join and analyze live data with historical tables.
-* **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg) or any destination.
+* **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg™) or any destination.
 
-But RisingWave does more. It provides both **online and offline storage**:
+What sets RisingWave apart is its integrated storage engine:
 
-* **Online serving:** Row-based storage for ad-hoc point/range queries with single-digit millisecond latency.
-* **Offline persistence:** Apache Iceberg-based storage that persists streaming data at low cost, enabling open access by other query engines.
+* **Online serving:** Row-based storage optimized for point and range queries with single-digit millisecond latency.
+* **Offline persistence:** Built-in Apache Iceberg™ integration for low-cost, durable storage with open access for external query engines.
+
+With RisingWave, real-time data isn’t just processed — it’s stored, queried, and shared across your entire stack.
 
 ## Key design decisions
 
@@ -89,6 +97,9 @@ RisingWave stores tables, materialized views, and internal states of stream proc
 ### Elastic disk cache
 
 Beyond caching hot data in memory, RisingWave supports [**elastic disk cache**](https://docs.risingwave.com/get-started/disk-cache), a powerful performance optimization that uses local disks or EBS for efficient data caching. This minimizes access to S3, lowering processing latency and cutting S3 access costs.
+
+### Apache Iceberg™ native support
+RisingWave [**natively integrates with Apache Iceberg™**](https://docs.risingwave.com/iceberg/overview), enabling continuous ingestion of streaming data into Iceberg tables. It can also read directly from Iceberg, perform automatic compaction, and maintain table health over time. Since Iceberg is an open table format, results are accessible by other query engines — making storage not only cost-efficient, but interoperable by design.
 
 ## In what use cases does RisingWave excel?
 RisingWave is particularly effective for the following use cases:

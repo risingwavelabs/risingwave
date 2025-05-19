@@ -107,8 +107,8 @@ async fn merge(
 
     let mut start_time = Instant::now();
     let barrier_align = metrics.barrier_align_duration.with_guarded_label_values(&[
-        &actor_id.to_string(),
-        &fragment_id.to_string(),
+        actor_id.to_string().as_str(),
+        fragment_id.to_string().as_str(),
         "",
         "Union",
     ]);

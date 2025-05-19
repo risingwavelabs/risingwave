@@ -23,16 +23,16 @@ use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, Worker
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId, PrivilegeId, SchemaId,
-    SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database,
-    fragment, fragment_relation, function, index, object, object_dependency, schema, secret, sink,
-    source, streaming_job, subscription, table, user, user_privilege, view,
+    ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
+    WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
+    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
+    user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -530,7 +530,9 @@ where
 {
     macro_rules! check_duplicated {
         ($obj_type:expr, $entity:ident, $table:ident) => {
-            let count = Object::find()
+            let object_id = Object::find()
+                .select_only()
+                .column(object::Column::Oid)
                 .inner_join($entity)
                 .filter(
                     object::Column::DatabaseId
@@ -538,10 +540,38 @@ where
                         .and(object::Column::SchemaId.eq(Some(schema_id)))
                         .and($table::Column::Name.eq(name)),
                 )
-                .count(db)
+                .into_tuple::<ObjectId>()
+                .one(db)
                 .await?;
-            if count != 0 {
-                return Err(MetaError::catalog_duplicated($obj_type.as_str(), name));
+            if let Some(oid) = object_id {
+                let check_creation = if $obj_type == ObjectType::View {
+                    false
+                } else if $obj_type == ObjectType::Source {
+                    let source_info = Source::find_by_id(oid)
+                        .select_only()
+                        .column(source::Column::SourceInfo)
+                        .into_tuple::<Option<StreamSourceInfo>>()
+                        .one(db)
+                        .await?
+                        .unwrap();
+                    source_info.map_or(false, |info| info.to_protobuf().is_shared())
+                } else {
+                    true
+                };
+                return if check_creation
+                    && !matches!(
+                        StreamingJob::find_by_id(oid)
+                            .select_only()
+                            .column(streaming_job::Column::JobStatus)
+                            .into_tuple::<JobStatus>()
+                            .one(db)
+                            .await?,
+                        Some(JobStatus::Created)
+                    ) {
+                    Err(MetaError::catalog_under_creation($obj_type.as_str(), name))
+                } else {
+                    Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
+                };
             }
         };
     }
@@ -1585,7 +1615,19 @@ pub async fn rename_relation(
     }
     // TODO: check is there any thing to change for shared source?
     let old_name = match object_type {
-        ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
+        ObjectType::Table => {
+            let associated_source_id: Option<SourceId> = Source::find()
+                .select_only()
+                .column(source::Column::SourceId)
+                .filter(source::Column::OptionalAssociatedTableId.eq(object_id))
+                .into_tuple()
+                .one(txn)
+                .await?;
+            if let Some(source_id) = associated_source_id {
+                rename_relation!(Source, source, source_id, source_id);
+            }
+            rename_relation!(Table, table, table_id, object_id)
+        }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
         ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
         ObjectType::Subscription => {

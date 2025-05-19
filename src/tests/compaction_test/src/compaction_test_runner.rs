@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     MetaConfig, NoOverride, extract_storage_memory_config, load_config,
@@ -639,8 +639,7 @@ async fn open_hummock_iters(
             .iter(
                 range.clone(),
                 ReadOptions {
-                    table_id: TableId { table_id },
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )

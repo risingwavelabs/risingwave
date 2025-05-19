@@ -327,6 +327,14 @@ static JOIN_COMMUTE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static CONSTANT_OUTPUT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Constant Output Operator Remove",
+        vec![EmptyAggRemoveRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static PROJECT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Project Remove",
@@ -576,6 +584,8 @@ impl LogicalOptimizer {
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
+        // Remove nodes with constant output.
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         // Remove project to make common sub-plan sharing easier.
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
@@ -679,6 +689,7 @@ impl LogicalOptimizer {
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
@@ -793,6 +804,7 @@ impl LogicalOptimizer {
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;

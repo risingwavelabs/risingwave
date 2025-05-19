@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::hash::VirtualNode;
@@ -35,9 +35,9 @@ use risingwave_storage::StateStore;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::store::*;
 use serial_test::serial;
 
 use super::compactor_tests::tests::get_hummock_storage;
@@ -463,7 +463,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     storage.wait_version(version).await;
     let read_options = ReadOptions {
         table_id: TableId::from(existing_table_id),
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
     let get_result = storage

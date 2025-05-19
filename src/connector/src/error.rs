@@ -19,6 +19,7 @@ use risingwave_common::error::def_anyhow_newtype;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
+use crate::enforce_secret::EnforceSecretError;
 use crate::parser::AccessError;
 use crate::schema::InvalidOptionError;
 use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
@@ -76,11 +77,13 @@ def_anyhow_newtype! {
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT SDK error",
     rumqttc::v5::OptionError => "MQTT Option error",
+    rumqttc::v5::ConnectionError => "MQTT Connection error",
     MqttError => "MQTT Source error",
     mongodb::error::Error => "Mongodb error",
 
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
+    EnforceSecretError => transparent,
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

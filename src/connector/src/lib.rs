@@ -43,6 +43,7 @@ use duration_str::parse_std;
 use serde::de;
 
 pub mod aws_utils;
+mod enforce_secret;
 pub mod error;
 mod macros;
 
@@ -57,7 +58,7 @@ pub use paste::paste;
 pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
-pub use with_options::{WithOptionsSecResolved, WithPropertiesExt};
+pub use with_options::{Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesExt};
 
 #[cfg(test)]
 mod with_options_test;

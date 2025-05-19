@@ -18,13 +18,13 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
 http-02 = { package = "http", version = "0.2" }
 hyper = { version = "1" }
-hyper-014 = { package = "hyper", version = "0.14", features = ["client"] }
+hyper-014 = { package = "hyper", version = "0.14.27", features = ["client"] }
 hyper-util = { version = "0.1", features = ["client-legacy"] }
 hytra = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
 serde = { version = "1", features = ["derive"] }

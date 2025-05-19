@@ -23,7 +23,7 @@ use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
@@ -315,15 +315,25 @@ impl BackupManager {
         Ok(())
     }
 
-    /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> HashSet<HummockSstableObjectId> {
+    /// List id of all objects required by backups.
+    pub fn list_pinned_object_ids(&self) -> HashSet<HummockObjectId> {
         self.backup_store
             .load()
             .0
             .manifest()
             .snapshot_metadata
             .iter()
-            .flat_map(|s| s.ssts.clone())
+            .flat_map(|s| {
+                // DO NOT REMOVE THIS LINE
+                // This is to ensure that when adding new variant to `HummockObjectId`,
+                // the compiler will warn us if we forget to handle it here.
+                match HummockObjectId::Sstable(0.into()) {
+                    HummockObjectId::Sstable(_) => {}
+                };
+                s.ssts
+                    .iter()
+                    .map(|sst_id| HummockObjectId::Sstable(*sst_id))
+            })
             .collect()
     }
 

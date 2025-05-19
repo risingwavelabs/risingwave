@@ -79,6 +79,12 @@ pub async fn handle_create_database(
         .transpose()?
         .flatten();
 
+    if resource_group.is_some() {
+        risingwave_common::license::Feature::ResourceGroup
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
+
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 
     let catalog_writer = session.catalog_writer()?;

@@ -21,12 +21,14 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
-use risingwave_pb::monitor_service::StackTraceResponse;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
+use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_rpc_client::ComputeClientPool;
 use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
 use risingwave_sqlparser::parser::Parser;
@@ -66,7 +68,7 @@ impl DiagnoseCommand {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    pub async fn report(&self) -> String {
+    pub async fn report(&self, actor_traces_format: ActorTracesFormat) -> String {
         let mut report = String::new();
         let _ = writeln!(
             report,
@@ -83,7 +85,8 @@ impl DiagnoseCommand {
         let _ = writeln!(report);
         self.write_storage(&mut report).await;
         let _ = writeln!(report);
-        self.write_await_tree(&mut report).await;
+        self.write_await_tree(&mut report, actor_traces_format)
+            .await;
         let _ = writeln!(report);
         self.write_event_logs(&mut report);
         report
@@ -384,7 +387,7 @@ impl DiagnoseCommand {
         #[derive(PartialEq, Eq)]
         struct SstableSort {
             compaction_group_id: u64,
-            sst_id: u64,
+            sst_id: HummockSstableId,
             delete_ratio: u64,
         }
         impl PartialOrd for SstableSort {
@@ -610,7 +613,7 @@ impl DiagnoseCommand {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_await_tree(&self, s: &mut String) {
+    async fn write_await_tree(&self, s: &mut String, actor_traces_format: ActorTracesFormat) {
         // Most lines of code are copied from dashboard::handlers::dump_await_tree_all, because the latter cannot be called directly from here.
         let Ok(worker_nodes) = self
             .metadata_manager
@@ -626,7 +629,11 @@ impl DiagnoseCommand {
         let compute_clients = ComputeClientPool::adhoc();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
-                && let Ok(result) = client.stack_trace().await
+                && let Ok(result) = client
+                    .stack_trace(StackTraceRequest {
+                        actor_traces_format: actor_traces_format as i32,
+                    })
+                    .await
             {
                 all.merge_other(result);
             }

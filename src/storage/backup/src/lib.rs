@@ -48,6 +48,8 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
+    /// It actually stores object id.
+    /// Bad naming, which won't be changed due to compatibility issue.
     pub ssts: HashSet<HummockSstableObjectId>,
     #[serde(default)]
     pub format_version: u32,
@@ -67,7 +69,7 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_object_ids(false),
+            ssts: v.get_sst_object_ids(false),
             format_version,
             remarks,
             state_table_info: v

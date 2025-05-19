@@ -11,7 +11,7 @@ repository = { workspace = true }
 anyhow = "1"
 async-trait = "0.1"
 await-tree = { workspace = true }
-chrono = { version = "0.4" }
+chrono = { workspace = true }
 clap = { workspace = true }
 either = "1"
 foyer = { workspace = true }
@@ -21,7 +21,7 @@ http = "1"
 itertools = { workspace = true }
 maplit = "1.0.2"
 pprof = { version = "0.14", features = ["flamegraph"] }
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 prost = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_batch_executors = { workspace = true }

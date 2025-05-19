@@ -242,7 +242,7 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
-        source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
+        source_split_change_count_metrics: &LabelGuardedIntCounter,
     ) -> StreamExecutorResult<()> {
         {
             source_split_change_count_metrics.inc();
@@ -550,12 +550,12 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_output_row_count = self
             .metrics
             .source_output_row_count
-            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+            .with_guarded_label_values(&self.get_metric_labels());
 
         let source_split_change_count = self
             .metrics
             .source_split_change_count
-            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+            .with_guarded_label_values(&self.get_metric_labels());
 
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
@@ -1002,6 +1002,7 @@ mod tests {
                 },
                 pause: false,
                 subscriptions_to_add: vec![],
+                backfill_nodes_to_pause: Default::default(),
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1093,6 +1094,7 @@ mod tests {
                 },
                 pause: false,
                 subscriptions_to_add: vec![],
+                backfill_nodes_to_pause: Default::default(),
             }));
         barrier_tx.send(init_barrier).unwrap();
 

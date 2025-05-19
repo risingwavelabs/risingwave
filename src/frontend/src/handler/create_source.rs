@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithPropertiesExt;
@@ -46,7 +47,9 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::schema_registry::{
-    SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME, SchemaRegistryAuth, name_strategy_from_str,
+    SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+    SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
     CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
@@ -113,6 +116,8 @@ mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
 
+use crate::stream_fragmenter::GraphJobType;
+
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
@@ -126,6 +131,23 @@ fn try_consume_string_from_options(
     key: &str,
 ) -> Option<AstString> {
     format_encode_options.remove(key).map(AstString)
+}
+
+fn try_consume_schema_registry_config_from_options(
+    format_encode_options: &mut BTreeMap<String, String>,
+) {
+    [
+        SCHEMA_REGISTRY_USERNAME,
+        SCHEMA_REGISTRY_PASSWORD,
+        SCHEMA_REGISTRY_MAX_DELAY_KEY,
+        SCHEMA_REGISTRY_BACKOFF_DURATION_KEY,
+        SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+        SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    ]
+    .iter()
+    .for_each(|key| {
+        try_consume_string_from_options(format_encode_options, key);
+    });
 }
 
 fn consume_string_from_options(
@@ -778,6 +800,8 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Entrypoint for binding source connector.
+/// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
@@ -810,6 +834,7 @@ pub async fn bind_create_source_or_table_with_connector(
         )
         .into());
     }
+
     if is_create_source {
         match format_encode.format {
             Format::Upsert
@@ -832,6 +857,16 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
+    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
+    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
+    // See `extract_iceberg_columns`
+    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            r#"Schema is automatically inferred for iceberg source and should not be specified
+
+HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
+        )));
+    }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
 
     let mut columns = bind_all_columns(
@@ -883,17 +918,35 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
+    // check the system parameter `enforce_secret`
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret()
+        && Feature::SecretManagement.check_available().is_ok()
+    {
+        // check enforce using secret for some props on cloud
+        ConnectorProperties::enforce_secret_source(&with_properties)?;
+    }
+
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_properties,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = with_properties.get_connector().unwrap();
+        let Some(connector) = with_properties.get_connector() else {
+            return Err(RwError::from(ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                UPSTREAM_SOURCE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
@@ -1088,7 +1141,7 @@ pub(super) fn generate_stream_graph_for_source(
     )?;
 
     let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-    let graph = build_graph(stream_plan)?;
+    let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
 

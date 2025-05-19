@@ -54,6 +54,15 @@ pub struct SubscriptionCatalog {
 
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+
+    pub subscription_state: SubscriptionState,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum SubscriptionState {
+    #[default]
+    Init,
+    Created,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -106,7 +115,10 @@ impl SubscriptionCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             dependent_table_id: self.dependent_table_id.table_id,
-            subscription_state: PbSubscriptionState::Init.into(),
+            subscription_state: match self.subscription_state {
+                SubscriptionState::Init => PbSubscriptionState::Init.into(),
+                SubscriptionState::Created => PbSubscriptionState::Created.into(),
+            },
         }
     }
 }
@@ -126,6 +138,13 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
+            subscription_state: match PbSubscriptionState::try_from(prost.subscription_state)
+                .unwrap()
+            {
+                PbSubscriptionState::Init => SubscriptionState::Init,
+                PbSubscriptionState::Created => SubscriptionState::Created,
+                PbSubscriptionState::Unspecified => unreachable!(),
+            },
         }
     }
 }

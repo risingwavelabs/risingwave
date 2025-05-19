@@ -21,6 +21,8 @@ use anyhow::{Context, anyhow};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
+use aws_sdk_kinesis::config::{AsyncSleep, SharedAsyncSleep, Sleep};
+use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
@@ -35,6 +37,7 @@ use with_options::WithOptions;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
@@ -98,6 +101,19 @@ pub struct AwsAuthProps {
     pub profile: Option<String>,
     #[serde(rename = "aws.msk.signer_timeout_sec")]
     pub msk_signer_timeout_sec: Option<u64>,
+}
+
+impl EnforceSecret for AwsAuthProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "access_key",
+        "aws.credentials.access_key_id",
+        "s3.access.key",
+        "secret_key",
+        "aws.credentials.secret_access_key",
+        "s3.secret.key",
+        "session_token",
+        "aws.credentials.session_token",
+    };
 }
 
 impl AwsAuthProps {
@@ -250,6 +266,14 @@ pub struct KafkaConnectionProps {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+}
+
+impl EnforceSecret for KafkaConnectionProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "properties.ssl.key.pem",
+        "properties.ssl.key.password",
+        "properties.sasl.password",
+    };
 }
 
 #[serde_as]
@@ -485,6 +509,12 @@ pub struct PulsarCommon {
     pub auth_token: Option<String>,
 }
 
+impl EnforceSecret for PulsarCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "pulsar.auth.token",
+    };
+}
+
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarOauthCommon {
     #[serde(rename = "oauth.issuer.url")]
@@ -595,6 +625,121 @@ pub struct KinesisCommon {
         alias = "kinesis.assumerole.external_id"
     )]
     pub assume_role_external_id: Option<String>,
+
+    #[serde(flatten)]
+    pub sdk_options: KinesisSdkOptions,
+}
+
+#[derive(Debug)]
+pub struct KinesisAsyncSleepImpl;
+
+impl AsyncSleep for KinesisAsyncSleepImpl {
+    fn sleep(&self, duration: Duration) -> Sleep {
+        Sleep::new(async move { tokio::time::sleep(duration).await })
+    }
+}
+
+const fn kinesis_default_connect_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_read_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_operation_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_operation_attempt_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_init_backoff_ms() -> u64 {
+    1000
+}
+
+const fn kinesis_default_max_backoff_ms() -> u64 {
+    20000
+}
+
+const fn kinesis_default_max_retry_limit() -> u32 {
+    3
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct KinesisSdkOptions {
+    #[serde(
+        rename = "kinesis.sdk.connect_timeout_ms",
+        default = "kinesis_default_connect_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_connect_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.read_timeout_ms",
+        default = "kinesis_default_read_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_read_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.operation_timeout_ms",
+        default = "kinesis_default_operation_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_operation_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.operation_attempt_timeout_ms",
+        default = "kinesis_default_operation_attempt_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_operation_attempt_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.max_retry_limit",
+        default = "kinesis_default_max_retry_limit"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_max_retry_limit: u32,
+
+    #[serde(
+        rename = "kinesis.sdk.init_backoff_ms",
+        default = "kinesis_default_init_backoff_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_init_backoff_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.max_backoff_ms",
+        default = "kinesis_default_max_backoff_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_max_backoff_ms: u64,
+}
+
+impl Default for KinesisSdkOptions {
+    fn default() -> Self {
+        Self {
+            sdk_connect_timeout_ms: kinesis_default_connect_timeout_ms(),
+            sdk_read_timeout_ms: kinesis_default_read_timeout_ms(),
+            sdk_operation_timeout_ms: kinesis_default_operation_timeout_ms(),
+            sdk_operation_attempt_timeout_ms: kinesis_default_operation_attempt_timeout_ms(),
+            sdk_max_retry_limit: kinesis_default_max_retry_limit(),
+            sdk_init_backoff_ms: kinesis_default_init_backoff_ms(),
+            sdk_max_backoff_ms: kinesis_default_max_backoff_ms(),
+        }
+    }
+}
+
+impl EnforceSecret for KinesisCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "kinesis.credentials.access",
+        "kinesis.credentials.secret",
+        "kinesis.credentials.session_token",
+    };
 }
 
 impl KinesisCommon {
@@ -612,6 +757,30 @@ impl KinesisCommon {
         };
         let aws_config = config.build_config().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
+        {
+            // for timeout and retry config
+            let sleep_impl = SharedAsyncSleep::new(KinesisAsyncSleepImpl);
+            builder.set_sleep_impl(Some(sleep_impl));
+            let timeout_config = aws_smithy_types::timeout::TimeoutConfig::builder()
+                .connect_timeout(Duration::from_millis(
+                    self.sdk_options.sdk_connect_timeout_ms,
+                ))
+                .read_timeout(Duration::from_millis(self.sdk_options.sdk_read_timeout_ms))
+                .operation_timeout(Duration::from_millis(
+                    self.sdk_options.sdk_operation_timeout_ms,
+                ))
+                .operation_attempt_timeout(Duration::from_millis(
+                    self.sdk_options.sdk_operation_attempt_timeout_ms,
+                ))
+                .build();
+            builder.set_timeout_config(Some(timeout_config));
+
+            let retry_config = aws_smithy_types::retry::RetryConfig::standard()
+                .with_initial_backoff(Duration::from_millis(self.sdk_options.sdk_init_backoff_ms))
+                .with_max_backoff(Duration::from_millis(self.sdk_options.sdk_max_backoff_ms))
+                .with_max_attempts(self.sdk_options.sdk_max_retry_limit);
+            builder.set_retry_config(Some(retry_config));
+        }
         if let Some(endpoint) = &config.endpoint {
             builder = builder.endpoint_url(endpoint);
         }
@@ -651,6 +820,14 @@ pub struct NatsCommon {
     #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
+}
+
+impl EnforceSecret for NatsCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "password",
+        "jwt",
+        "nkey",
+    };
 }
 
 impl NatsCommon {
@@ -856,6 +1033,12 @@ pub struct MongodbCommon {
     /// for more information.
     #[serde(rename = "collection.name")]
     pub collection_name: String,
+}
+
+impl EnforceSecret for MongodbCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "mongodb.url"
+    };
 }
 
 impl MongodbCommon {

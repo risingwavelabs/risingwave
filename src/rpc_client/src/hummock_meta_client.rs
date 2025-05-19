@@ -19,9 +19,14 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, SstObjectIdRange, S
 use risingwave_pb::hummock::{
     PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
+use risingwave_pb::iceberg_compaction::{
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventResponse, tonic::Status>;
+pub type IcebergCompactionEventItem =
+    std::result::Result<SubscribeIcebergCompactionEventResponse, tonic::Status>;
 
 use crate::error::Result;
 
@@ -68,4 +73,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         epoch: HummockEpoch,
         table_id: u32,
     ) -> Result<PbHummockVersion>;
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+        BoxStream<'static, IcebergCompactionEventItem>,
+    )>;
 }

@@ -29,6 +29,7 @@ use with_options::WithOptions;
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -124,6 +125,13 @@ pub struct PulsarConfig {
     pub producer_properties: PulsarPropertiesProducer,
 }
 
+impl EnforceSecret for PulsarConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        PulsarCommon::enforce_one(prop)?;
+        AwsAuthProps::enforce_one(prop)?;
+        Ok(())
+    }
+}
 impl PulsarConfig {
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<PulsarConfig>(serde_json::to_value(values).unwrap())
@@ -141,6 +149,17 @@ pub struct PulsarSink {
     format_desc: SinkFormatDesc,
     db_name: String,
     sink_from_name: String,
+}
+
+impl EnforceSecret for PulsarSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            PulsarConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<SinkParam> for PulsarSink {

@@ -453,6 +453,15 @@ IcebergConfig:
   - name: gcs.credential
     field_type: String
     required: false
+  - name: azblob.account_name
+    field_type: String
+    required: false
+  - name: azblob.account_key
+    field_type: String
+    required: false
+  - name: azblob.endpoint_url
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
@@ -524,6 +533,11 @@ IcebergConfig:
     comments: enable config load.
     required: false
     default: Default::default
+  - name: hosted_catalog
+    field_type: bool
+    comments: This is only used by iceberg engine to enable the hosted catalog.
+    required: false
+    default: Default::default
   - name: primary_key
     field_type: Vec<String>
     required: false
@@ -553,6 +567,16 @@ IcebergConfig:
     field_type: u32
     required: false
     default: '8'
+  - name: enable_compaction
+    field_type: bool
+    comments: Whether to enable iceberg compaction.
+    required: false
+    default: Default::default
+  - name: compaction_interval_sec
+    field_type: u64
+    comments: The interval of iceberg compaction
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: topic
@@ -856,6 +880,34 @@ KinesisSinkConfig:
     required: false
     alias:
     - kinesis.assumerole.external_id
+  - name: kinesis.sdk.connect_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.read_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.operation_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.operation_attempt_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.max_retry_limit
+    field_type: u32
+    required: false
+    default: '3'
+  - name: kinesis.sdk.init_backoff_ms
+    field_type: u64
+    required: false
+    default: '1000'
+  - name: kinesis.sdk.max_backoff_ms
+    field_type: u64
+    required: false
+    default: '20000'
 MongodbConfig:
   fields:
   - name: mongodb.url
@@ -1181,6 +1233,10 @@ SqlServerConfig:
   - name: sqlserver.database
     field_type: String
     required: true
+  - name: sqlserver.schema
+    field_type: String
+    required: false
+    default: '"dbo" . to_owned ()'
   - name: sqlserver.table
     field_type: String
     required: true

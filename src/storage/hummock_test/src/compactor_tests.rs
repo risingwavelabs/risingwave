@@ -19,7 +19,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::CacheHint;
+    use foyer::Hint;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::bitmap::BitmapBuilder;
@@ -70,7 +70,7 @@ pub(crate) mod tests {
         PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-    use risingwave_storage::hummock::test_utils::*;
+    use risingwave_storage::hummock::test_utils::{ReadOptions, *};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
@@ -175,16 +175,10 @@ pub(crate) mod tests {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local
-                .ingest_batch(
-                    vec![(
-                        TableKey(key.clone()),
-                        StorageValue::new_put(Bytes::from(new_val)),
-                    )],
-                    WriteOptions {
-                        epoch,
-                        table_id: Default::default(),
-                    },
-                )
+                .ingest_batch(vec![(
+                    TableKey(key.clone()),
+                    StorageValue::new_put(Bytes::from(new_val)),
+                )])
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
@@ -336,7 +330,7 @@ pub(crate) mod tests {
                 TableKey(key.clone()),
                 get_epoch,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -662,7 +656,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -865,7 +859,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -1078,7 +1072,7 @@ pub(crate) mod tests {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )

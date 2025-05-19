@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -27,13 +27,10 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::StateStore;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, TryWaitEpochOptions,
-    WriteOptions,
-};
+use risingwave_storage::store::*;
 
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
@@ -87,16 +84,7 @@ async fn test_failpoints_state_store_read_upload() {
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     local.init_for_test(1).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: 1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     local.seal_current_epoch(
         3,
@@ -116,7 +104,7 @@ async fn test_failpoints_state_store_read_upload() {
             1,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -125,16 +113,7 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
     assert_eq!(value, Bytes::from("111"));
     // // Write second batch.
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: 3,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     local.seal_current_epoch(
         u64::MAX,
@@ -172,7 +151,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -187,7 +166,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 table_id: Default::default(),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -206,7 +185,7 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(bee_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -248,7 +227,7 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -265,7 +244,7 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
