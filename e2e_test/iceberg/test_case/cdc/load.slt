@@ -50,6 +50,27 @@ set sink_decouple = true
 
 # iceberg table engine with CDC table
 statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+
+statement ok
+create connection my_hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_hosted_catalog_conn';
+
+statement ok
 create table products_iceberg ( id INT,
  name STRING,
  description STRING,
