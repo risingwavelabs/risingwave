@@ -19,7 +19,7 @@ mv target/ci-sim target/sim
 TEST_PATTERN="$@"
 
 echo "--- Run integration tests in deterministic simulation mode"
-seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
+seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim RUST_LOG='risingwave_stream::executor::sync_kv_log_store=trace,integration_tests::log_store::scale=info,risingwave_stream::common::log_store_impl::kv_log_store=trace' \
  cargo nextest run \
  $NEXTEST_PARTITION_ARG \
  --no-fail-fast \
