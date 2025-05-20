@@ -95,7 +95,6 @@ use anyhow::{Context, Result, anyhow};
 ///      key_i = -ln(r) / weight_i
 ///      ```
 ///    - Assign `x` to the container with the smallest `key_i`.
-/// ```
 pub fn assign_items_weighted_with_scale_fn<C, I, S>(
     containers: &BTreeMap<C, NonZeroUsize>,
     items: &[I],
