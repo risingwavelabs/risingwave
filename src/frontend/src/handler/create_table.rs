@@ -44,7 +44,8 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
-use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
+use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
@@ -62,7 +63,7 @@ use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, create_sink, create_source};
+use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -84,7 +85,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
@@ -1339,7 +1340,7 @@ fn bind_cdc_table_schema(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1367,6 +1368,21 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
+    if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
+        // HACK: since we don't have atomic DDL, table with connector may lose data.
+        // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
+        if let Some(_rate_limit) = handler_args.with_options.insert(
+            OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
+            "0".to_owned(),
+        ) {
+            // prevent user specified rate limit
+            return Err(ErrorCode::NotSupported(
+                "source_rate_limit for iceberg table engine during table creation".to_owned(),
+                "Please remove source_rate_limit from WITH options.".to_owned(),
+            )
+            .into());
+        }
+    }
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
@@ -1376,7 +1392,7 @@ pub async fn handle_create_table(
         return Ok(resp);
     }
 
-    let (graph, source, table, job_type) = {
+    let (graph, source, hummock_table, job_type) = {
         let (plan, source, table, job_type) = handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
@@ -1395,6 +1411,7 @@ pub async fn handle_create_table(
             engine,
         )
         .await?;
+        tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
         let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
@@ -1412,7 +1429,7 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, table, graph, job_type)
+                .create_table(source, hummock_table, graph, job_type)
                 .await?;
         }
         Engine::Iceberg => {
@@ -1420,10 +1437,10 @@ pub async fn handle_create_table(
                 session,
                 handler_args,
                 source,
-                table,
+                hummock_table,
                 graph,
-                job_type,
                 table_name,
+                job_type,
             )
             .await?;
         }
@@ -1432,6 +1449,14 @@ pub async fn handle_create_table(
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
+/// Iceberg table engine is composed of hummock table, iceberg sink and iceberg source.
+///
+/// 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
+/// 2. create a hummock table
+/// 3. create an iceberg sink
+/// 4. create an iceberg source
+///
+/// See <https://github.com/risingwavelabs/risingwave/issues/21586> for an architecture diagram.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_iceberg_engine_table(
     session: Arc<SessionImpl>,
@@ -1439,14 +1464,9 @@ pub async fn create_iceberg_engine_table(
     mut source: Option<PbSource>,
     table: PbTable,
     graph: StreamFragmentGraph,
-    job_type: TableJobType,
     table_name: ObjectName,
+    job_type: PbTableJobType,
 ) -> Result<()> {
-    // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
-    // 2. create a hummock table
-    // 3. create an iceberg sink
-    // 4. create an iceberg source
-
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
@@ -1526,7 +1546,7 @@ pub async fn create_iceberg_engine_table(
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) {
         bail!(
-            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = false` to resolve it"
+            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = true` to resolve it"
         );
     }
 
@@ -1635,7 +1655,24 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("primary_key".to_owned(), pks.join(","));
     sink_with.insert("type".to_owned(), "upsert".to_owned());
-
+    // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
+    //
+    // Note: in theory, we don't need to backfill from the table to the sink,
+    // but we don't have atomic DDL now https://github.com/risingwavelabs/risingwave/issues/21863
+    // so it may have potential data loss problem on the first barrier.
+    //
+    // For non-append-only table, we can always solve it by the initial sink with backfill, since
+    // data will be present in hummock table.
+    //
+    // For append-only table, we need to be more careful.
+    //
+    // The possible cases for a table:
+    // - For table without connector: it doesn't matter, since there's no data before the table is created
+    // - For table with connector: we workarounded it by setting SOURCE_RATE_LIMIT to 0
+    //   + If we support blocking DDL for table with connector, we need to be careful.
+    // - For table with an upstream job: Specifically, CDC table from shared CDC source.
+    //   + Data may come from both upstream connector, and CDC table backfill, so we need to pause both of them.
+    //   + For now we don't support APPEND ONLY CDC table, so it's safe.
     let commit_checkpoint_interval = handler_args
         .with_options
         .get(COMMIT_CHECKPOINT_INTERVAL)
@@ -1703,11 +1740,21 @@ pub async fn create_iceberg_engine_table(
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic
+    let has_connector = source.is_some();
     catalog_writer
         .create_table(source, table, graph, job_type)
         .await?;
-    create_sink::handle_create_sink(sink_handler_args, create_sink_stmt).await?;
+    create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await?;
     create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
+    if has_connector {
+        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+            handler_args,
+            PbThrottleTarget::TableWithSource,
+            table_name,
+            -1,
+        )
+        .await?;
+    }
 
     Ok(())
 }

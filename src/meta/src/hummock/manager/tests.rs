@@ -33,8 +33,8 @@ use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, FIRST_VERSION_ID, HummockContextId, HummockEpoch, HummockSstableObjectId,
-    HummockVersionId, LocalSstableInfo, SyncResult,
+    CompactionGroupId, FIRST_VERSION_ID, HummockContextId, HummockEpoch, HummockObjectId,
+    HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -1180,10 +1180,10 @@ async fn test_extend_objects_to_delete() {
     let all_object_ids = sst_infos
         .iter()
         .flatten()
-        .map(|s| s.object_id)
+        .map(|s| HummockObjectId::Sstable(s.object_id))
         .chain(
             (max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
-                .map(Into::into),
+                .map(|id| HummockObjectId::Sstable(id.into())),
         )
         .collect_vec();
     assert_eq!(
@@ -2602,7 +2602,7 @@ async fn test_vacuum() {
         .complete_gc_batch(
             sst_infos
                 .iter()
-                .flat_map(|ssts| ssts.iter().map(|s| s.object_id))
+                .flat_map(|ssts| ssts.iter().map(|s| HummockObjectId::Sstable(s.object_id)))
                 .collect(),
             None,
         )

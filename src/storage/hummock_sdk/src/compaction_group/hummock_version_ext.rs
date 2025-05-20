@@ -41,7 +41,9 @@ use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
-use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId, can_concat};
+use crate::{
+    CompactionGroupId, HummockObjectId, HummockSstableId, HummockSstableObjectId, can_concat,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct SstDeltaInfo {
@@ -956,9 +958,21 @@ impl<T> HummockVersionCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+    pub fn get_sst_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
         self.get_sst_infos(exclude_change_log)
             .map(|s| s.object_id())
+            .collect()
+    }
+
+    pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockObjectId> {
+        // DO NOT REMOVE THIS LINE
+        // This is to ensure that when adding new variant to `HummockObjectId`,
+        // the compiler will warn us if we forget to handle it here.
+        match HummockObjectId::Sstable(0.into()) {
+            HummockObjectId::Sstable(_) => {}
+        };
+        self.get_sst_infos(exclude_change_log)
+            .map(|s| HummockObjectId::Sstable(s.object_id()))
             .collect()
     }
 
@@ -1428,7 +1442,13 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
     }
 }
 
-pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
+pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
+    // DO NOT REMOVE THIS LINE
+    // This is to ensure that when adding new variant to `HummockObjectId`,
+    // the compiler will warn us if we forget to handle it here.
+    match HummockObjectId::Sstable(0.into()) {
+        HummockObjectId::Sstable(_) => {}
+    };
     version
         .levels
         .values()
@@ -1447,6 +1467,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                     .map(|t| (t.object_id, t.file_size))
             })
         }))
+        .map(|(object_id, size)| (HummockObjectId::Sstable(object_id), size))
         .collect()
 }
 

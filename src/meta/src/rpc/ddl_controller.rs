@@ -750,8 +750,6 @@ impl DdlController {
             .try_into()
             .expect("Target table should exist in sink into table");
 
-        assert_eq!(table_catalog.incoming_sinks, target_table.incoming_sinks);
-
         {
             let catalogs = mgr
                 .get_sink_catalog_by_ids(&table_catalog.incoming_sinks)
@@ -941,6 +939,7 @@ impl DdlController {
             id = job_id,
             definition = streaming_job.definition(),
             create_type = streaming_job.create_type().as_str_name(),
+            job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
         let _permit = self

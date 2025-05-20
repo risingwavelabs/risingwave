@@ -26,7 +26,7 @@ bitfield-struct = "0.11"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
@@ -44,7 +44,7 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
-hashbrown = "0.15"
+hashbrown = "0.15.2"
 hex = "0.4.3"
 http = "1"
 humantime = "2.2"
@@ -71,7 +71,7 @@ postgres-types = { version = "0.2.6", features = [
 prometheus = { version = "0.14" }
 prost = { workspace = true }
 rand = { workspace = true }
-regex = "1"
+regex = { workspace = true }
 reqwest = { version = "0.12.2", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
@@ -92,14 +92,14 @@ serde_default = "0.2"
 serde_json = "1"
 serde_with = "3"
 smallbitset = "0.7.1"
-smallvec = "1"
+smallvec = { workspace = true }
 speedate = "0.15.0"
 stacker = "0.1"
 static_assertions = "1"
 strum = "0.27"
 strum_macros = "0.27"
 sysinfo = { version = "0.35", default-features = false, features = ["system"] }
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

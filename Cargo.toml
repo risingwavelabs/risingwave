@@ -143,6 +143,7 @@ aws-endpoint = "0.60"
 aws-types = "1"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 axum-extra = "0.9"
+chrono = { version = "0.4.40", default-features = false }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.4.3", features = [
@@ -181,7 +182,7 @@ parquet = { version = "54", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
-thiserror-ext = { version = "0.2.1", features = ["backtrace"] }
+thiserror-ext = { version = "0.3", features = ["backtrace"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
@@ -202,6 +203,7 @@ sea-orm = { version = "~1.1", features = [
     "with-uuid",
 ] }
 sea-orm-migration = "~1.1"
+smallvec = "1.15"
 sqlx = { version = "0.8.2", default-features = false, features = [
     "bigdecimal",
     "chrono",
@@ -223,6 +225,7 @@ tracing-opentelemetry = "0.30"
 rand = { version = "0.9", features = ["small_rng"] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
 redis = { version = "0.28" }
+regex = "1.11"
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_batch_executors = { path = "./src/batch/executors" }

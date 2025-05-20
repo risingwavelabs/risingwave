@@ -7641,18 +7641,18 @@ dependencies = [
 
 [[package]]
 name = "logos"
-version = "0.14.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff1ceb190eb9bdeecdd8f1ad6a71d6d632a50905948771718741b5461fb01e13"
+checksum = "ab6f536c1af4c7cc81edf73da1f8029896e7e1e16a219ef09b184e76a296f3db"
 dependencies = [
  "logos-derive",
 ]
 
 [[package]]
 name = "logos-codegen"
-version = "0.14.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90be66cb7bd40cb5cc2e9cfaf2d1133b04a3d93b72344267715010a466e0915a"
+checksum = "189bbfd0b61330abea797e5e9276408f2edbe4f822d7ad08685d67419aafb34e"
 dependencies = [
  "beef",
  "fnv",
@@ -7660,14 +7660,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex-syntax 0.8.5",
+ "rustc_version",
  "syn 2.0.101",
 ]
 
 [[package]]
 name = "logos-derive"
-version = "0.14.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45154231e8e96586b39494029e58f12f8ffcb5ecf80333a603a13aa205ea8cbd"
+checksum = "ebfe8e1a19049ddbfccbd14ac834b215e11b85b90bab0c2dba7c7b92fb5d5cba"
 dependencies = [
  "logos-codegen",
 ]
@@ -9575,7 +9576,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.9",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
@@ -10289,24 +10290,13 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.14.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5edd582b62f5cde844716e66d92565d7faf7ab1445c8cebce6e00fba83ddb2"
-dependencies = [
- "logos",
- "miette",
- "once_cell",
- "prost 0.13.4",
- "prost-types 0.13.4",
-]
-
-[[package]]
-name = "prost-reflect"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "134584672a2f89128da60df70d4b9d2eddfeb3ab00ab9c854ee7ee360ea7a7fc"
 dependencies = [
  "base64 0.22.1",
+ "logos",
+ "miette",
  "prost 0.13.4",
  "prost-types 0.13.4",
  "serde",
@@ -10362,29 +10352,29 @@ dependencies = [
 
 [[package]]
 name = "protox"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f352af331bf637b8ecc720f7c87bf903d2571fa2e14a66e9b2558846864b54a"
+checksum = "424c2bd294b69c49b949f3619362bc3c5d28298cd1163b6d1a62df37c16461aa"
 dependencies = [
  "bytes",
  "miette",
  "prost 0.13.4",
- "prost-reflect 0.14.7",
+ "prost-reflect",
  "prost-types 0.13.4",
  "protox-parse",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "protox-parse"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a462d115462c080ae000c29a47f0b3985737e5d3a995fcdbcaa5c782068dde"
+checksum = "57927f9dbeeffcce7192404deee6157a640cbb3fe8ac11eabbe571565949ab75"
 dependencies = [
  "logos",
  "miette",
  "prost-types 0.13.4",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -11223,7 +11213,7 @@ dependencies = [
  "risingwave_pb",
  "serde",
  "serde_json",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "twox-hash 2.1.0",
 ]
 
@@ -11263,7 +11253,7 @@ dependencies = [
  "scopeguard",
  "serde_json",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -11491,7 +11481,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "sysinfo",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tinyvec",
  "tokio-retry",
@@ -11531,7 +11521,7 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "risingwave_common",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
@@ -11612,7 +11602,7 @@ dependencies = [
  "prost 0.13.4",
  "risingwave_pb",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -11633,7 +11623,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tower 0.5.2",
  "tower-http",
@@ -11813,7 +11803,7 @@ dependencies = [
  "proc-macro2",
  "prometheus",
  "prost 0.13.4",
- "prost-reflect 0.15.1",
+ "prost-reflect",
  "prost-types 0.13.4",
  "pulsar",
  "quote",
@@ -11850,7 +11840,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "syn 2.0.101",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tiberius",
  "time",
@@ -11890,7 +11880,7 @@ dependencies = [
  "num-bigint",
  "prost 0.13.4",
  "prost-build 0.13.4",
- "prost-reflect 0.15.1",
+ "prost-reflect",
  "prost-types 0.13.4",
  "protox",
  "reqwest 0.12.15",
@@ -11898,7 +11888,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "serde_json",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "time",
  "tracing",
@@ -11960,7 +11950,7 @@ dependencies = [
  "paste",
  "risingwave_common",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "tracing",
  "workspace-hack",
 ]
@@ -11990,7 +11980,7 @@ dependencies = [
  "madsim-tonic",
  "serde",
  "serde-error",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -12027,7 +12017,7 @@ dependencies = [
  "risingwave_pb",
  "smallvec",
  "static_assertions",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
  "workspace-hack",
@@ -12079,7 +12069,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "sql-json-path",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tonic 0.12.3",
  "tracing",
@@ -12174,7 +12164,7 @@ dependencies = [
  "smallvec",
  "speedate",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -12262,7 +12252,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "tracing",
 ]
 
@@ -12308,7 +12298,7 @@ dependencies = [
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_pb",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -12323,7 +12313,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tracing",
 ]
@@ -12401,7 +12391,7 @@ dependencies = [
  "strum 0.27.1",
  "sync-point",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
@@ -12540,7 +12530,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_jni_core",
  "spin 0.10.0",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tracing",
@@ -12563,7 +12553,7 @@ dependencies = [
  "serde",
  "static_assertions",
  "strum 0.27.1",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "walkdir",
  "workspace-hack",
 ]
@@ -12626,7 +12616,7 @@ dependencies = [
  "risingwave_pb",
  "rw_futures_util",
  "static_assertions",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
@@ -12733,7 +12723,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "task-local",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "tracing",
  "tracing-subscriber",
  "walkdir",
@@ -12848,7 +12838,7 @@ dependencies = [
  "spin 0.10.0",
  "sync-point",
  "tempfile",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-retry",
  "tracing",
@@ -12920,7 +12910,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum_macros 0.27.1",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext",
  "tokio-metrics",
  "tokio-retry",
@@ -14921,7 +14911,7 @@ dependencies = [
  "futures-util",
  "madsim-tokio",
  "spin 0.10.0",
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -15077,19 +15067,19 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4323942237f7cc071061f2c5f0db919e6053c2cdf58c6bc974883073429737"
+checksum = "5fb7e61141f4141832ca9aad63c3c90023843f944a1975460abdacc64d03f534"
 dependencies = [
- "thiserror 1.0.63",
+ "thiserror 2.0.12",
  "thiserror-ext-derive",
 ]
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96541747c50e6c73e094737938f4f5dfaf50c48a31adff4197a3e2a481371674"
+checksum = "2b5042dd3b562d1d57711be902006a0003fa2781b81d5b2bec07416be31586ff"
 dependencies = [
  "either",
  "proc-macro2",
@@ -15171,7 +15161,7 @@ dependencies = [
 [[package]]
 name = "tiberius"
 version = "0.12.2"
-source = "git+https://github.com/risingwavelabs/tiberius.git?rev=f834f2deeb9e2fb08afaf73865f330cf31a3876a#f834f2deeb9e2fb08afaf73865f330cf31a3876a"
+source = "git+https://github.com/risingwavelabs/tiberius.git?rev=59350b92775a61611cf1fc3a5d0ff38bf264e6ac#59350b92775a61611cf1fc3a5d0ff38bf264e6ac"
 dependencies = [
  "async-trait",
  "asynchronous-codec",
