@@ -1174,12 +1174,7 @@ impl DdlService for DdlServiceImpl {
         let job_id = req.get_job_id();
 
         self.ddl_controller
-            .wait_streaming_job_finished(
-                DatabaseId {
-                    database_id: database_id,
-                },
-                job_id as _,
-            )
+            .wait_streaming_job_finished(DatabaseId { database_id }, job_id as _)
             .await?;
 
         Ok(Response::new(WaitJobToFinishResponse { status: None }))
