@@ -13,20 +13,22 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Weak};
 
 use anyhow::anyhow;
 use aws_config::Region;
 use aws_sdk_s3::config::SharedCredentialsProvider;
 use rdkafka::client::{BrokerAddr, OAuthToken};
-use rdkafka::consumer::{ConsumerContext};
+use rdkafka::consumer::{Consumer, ConsumerContext, StreamConsumer};
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::ProducerContext;
 use rdkafka::{ClientContext, Statistics};
 use tokio::runtime::Runtime;
+use tokio::time::interval;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
 use super::stats::RdKafkaStats;
+use crate::Duration;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 
@@ -51,6 +53,23 @@ pub struct KafkaContextCommon {
 
     /// Credential and region for AWS MSK
     auth: Option<IamAuthEnv>,
+}
+
+pub fn spawn_consumer_poll_task(weak_consumer: Weak<StreamConsumer<RwConsumerContext>>) {
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(60));
+        loop {
+            if let Some(consumer) = weak_consumer.upgrade() {
+                let _ = tokio::task::spawn_blocking(move || unsafe {
+                    rdkafka::bindings::rd_kafka_poll(consumer.client().native_ptr(), 0)
+                })
+                .await;
+            } else {
+                break;
+            }
+            interval.tick().await;
+        }
+    });
 }
 
 impl KafkaContextCommon {
