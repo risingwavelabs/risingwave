@@ -76,10 +76,10 @@ pub fn mview_sql_gen<R: Rng>(
 ) -> (String, Table) {
     let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let append_only_tables: Vec<_> = tables
-      .iter()
-      .filter(|table| table.is_append_only)
-      .cloned()
-      .collect();
+        .iter()
+        .filter(|table| table.is_append_only)
+        .cloned()
+        .collect();
     let (mview, table) = r#gen.gen_mview_stmt(name, append_only_tables);
     (mview.to_string(), table)
 }
