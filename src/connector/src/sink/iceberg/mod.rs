@@ -1220,7 +1220,9 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -1240,7 +1242,9 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -1261,7 +1265,9 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
