@@ -15,7 +15,6 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
-use risingwave_common::config::CompactorMode;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
@@ -30,7 +29,7 @@ use risingwave_pb::iceberg_compaction::{
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
-use tonic::{Request, Status};
+use tonic::Request;
 
 pub mod compactor_runner;
 mod context;
@@ -39,7 +38,6 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use core::pin::Pin;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -55,7 +53,7 @@ pub use compaction_filter::{
 pub use context::{
     CompactionAwaitTreeRegRef, CompactorContext, await_tree_key, new_compaction_await_tree_reg_ref,
 };
-use futures::{Stream, StreamExt, pin_mut};
+use futures::{StreamExt, pin_mut};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
@@ -84,8 +82,7 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManager,
-    Xor16FilterBuilder,
+    GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -95,8 +92,8 @@ use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact
 use crate::hummock::iceberg_compactor_runner::IcebergCompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
-    UnifiedSstableWriterFactory, validate_ssts,
+    BlockedXor16FilterBuilder, FilterBuilder, HummockError, SharedComapctorObjectIdManager,
+    SstableWriterFactory, UnifiedSstableWriterFactory, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -283,144 +280,17 @@ impl Compactor {
     }
 }
 
-enum CompactionEventStreams {
-    Hummock(Pin<Box<dyn Stream<Item = Result<SubscribeCompactionEventResponse, Status>> + Send>>),
-    Iceberg(
-        Pin<Box<dyn Stream<Item = Result<SubscribeIcebergCompactionEventResponse, Status>> + Send>>,
-    ),
-}
-
-enum CompactionEventResponses {
-    Hummock(SubscribeCompactionEventResponse),
-    Iceberg(SubscribeIcebergCompactionEventResponse),
-}
-
-impl CompactionEventStreams {
-    async fn next(&mut self) -> Option<Result<CompactionEventResponses, Status>> {
-        match self {
-            CompactionEventStreams::Hummock(stream) => stream
-                .next()
-                .await
-                .map(|r| r.map(CompactionEventResponses::Hummock)),
-            CompactionEventStreams::Iceberg(stream) => stream
-                .next()
-                .await
-                .map(|r| r.map(CompactionEventResponses::Iceberg)),
-        }
-    }
-}
-
-enum CompactionRequestSender {
-    Hummock(mpsc::UnboundedSender<SubscribeCompactionEventRequest>),
-    Iceberg(mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>),
-}
-
-impl CompactionRequestSender {
-    fn clone(&self) -> CompactionRequestSender {
-        match self {
-            CompactionRequestSender::Hummock(unbounded_sender) => {
-                CompactionRequestSender::Hummock(unbounded_sender.clone())
-            }
-            CompactionRequestSender::Iceberg(unbounded_sender) => {
-                CompactionRequestSender::Iceberg(unbounded_sender.clone())
-            }
-        }
-    }
-
-    fn send_heartbeat(&self, progress_list: Vec<CompactTaskProgress>) -> HummockResult<()> {
-        match self {
-            CompactionRequestSender::Hummock(unbounded_sender) => unbounded_sender
-                .send(SubscribeCompactionEventRequest {
-                    event: Some(RequestEvent::HeartBeat(HeartBeat {
-                        progress: progress_list,
-                    })),
-                    create_at: SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_millis() as u64,
-                })
-                .map_err(|e| HummockError::other(e.as_report())),
-            CompactionRequestSender::Iceberg(_unbounded_sender) => Ok(()),
-        }
-    }
-
-    fn send_pulltask(&self, pull_task_count: u32) -> HummockResult<()> {
-        match self {
-            CompactionRequestSender::Hummock(unbounded_sender) => unbounded_sender
-                .send(SubscribeCompactionEventRequest {
-                    event: Some(RequestEvent::PullTask(PullTask { pull_task_count })),
-                    create_at: SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_millis() as u64,
-                })
-                .map_err(|e| HummockError::other(e.as_report())),
-            CompactionRequestSender::Iceberg(unbounded_sender) => unbounded_sender
-                .send(SubscribeIcebergCompactionEventRequest {
-                    event: Some(subscribe_iceberg_compaction_event_request::Event::PullTask(
-                        subscribe_iceberg_compaction_event_request::PullTask { pull_task_count },
-                    )),
-                    create_at: SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_millis() as u64,
-                })
-                .map_err(|e| HummockError::other(e.as_report())),
-        }
-    }
-
-    fn send_report_task_event(
-        &self,
-        compact_task: &CompactTask,
-        table_stats: TableStatsMap,
-        object_timestamps: HashMap<HummockSstableObjectId, u64>,
-    ) {
-        match self {
-            CompactionRequestSender::Hummock(unbounded_sender) => {
-                if let Err(e) = unbounded_sender.send(SubscribeCompactionEventRequest {
-                    event: Some(RequestEvent::ReportTask(ReportTask {
-                        task_id: compact_task.task_id,
-                        task_status: compact_task.task_status.into(),
-                        sorted_output_ssts: compact_task
-                            .sorted_output_ssts
-                            .iter()
-                            .map(|sst| sst.into())
-                            .collect(),
-                        table_stats_change: to_prost_table_stats_map(table_stats),
-                        object_timestamps: object_timestamps
-                            .iter()
-                            .map(|(object_id, timestamp)| (object_id.inner(), *timestamp))
-                            .collect(),
-                    })),
-                    create_at: SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_millis() as u64,
-                }) {
-                    let task_id = compact_task.task_id;
-                    tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
-                }
-            }
-            CompactionRequestSender::Iceberg(_unbounded_sender) => {}
-        }
-    }
-}
-
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
 #[must_use]
-pub fn start_compactor(
+pub fn start_compactor_iceberg(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
-    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-    compactor_mode: CompactorMode,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
-    let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
 
     let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
@@ -456,55 +326,27 @@ pub fn start_compactor(
                 }
             }
 
-            let (request_sender, response_event_stream) = match compactor_mode {
-                CompactorMode::Shared => unreachable!(),
-                CompactorMode::SharedIceberg => unreachable!(),
-                CompactorMode::Dedicated => {
-                    match hummock_meta_client.subscribe_compaction_event().await {
-                        Ok((request_sender, response_event_stream)) => {
-                            tracing::debug!("Succeeded subscribe_compaction_event.");
-                            (
-                                CompactionRequestSender::Hummock(request_sender),
-                                CompactionEventStreams::Hummock(response_event_stream),
-                            )
-                        }
-
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e.as_report(),
-                                "Subscribing to compaction tasks failed with error. Will retry.",
-                            );
-                            continue 'start_stream;
-                        }
-                    }
+            let (request_sender, response_event_stream) = match hummock_meta_client
+                .subscribe_iceberg_compaction_event()
+                .await
+            {
+                Ok((request_sender, response_event_stream)) => {
+                    tracing::debug!("Succeeded subscribe_iceberg_compaction_event.");
+                    (request_sender, response_event_stream)
                 }
-                CompactorMode::DedicatedIceberg => {
-                    match hummock_meta_client
-                        .subscribe_iceberg_compaction_event()
-                        .await
-                    {
-                        Ok((request_sender, response_event_stream)) => {
-                            tracing::debug!("Succeeded subscribe_iceberg_compaction_event.");
-                            (
-                                CompactionRequestSender::Iceberg(request_sender),
-                                CompactionEventStreams::Iceberg(response_event_stream),
-                            )
-                        }
 
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e.as_report(),
-                                "Subscribing to iceberg compaction tasks failed with error. Will retry.",
-                            );
-                            continue 'start_stream;
-                        }
-                    }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Subscribing to iceberg compaction tasks failed with error. Will retry.",
+                    );
+                    continue 'start_stream;
                 }
             };
+
             pin_mut!(response_event_stream);
 
             let executor = compactor_context.compaction_executor.clone();
-            let sstable_object_id_manager = sstable_object_id_manager.clone();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -520,25 +362,27 @@ pub fn start_compactor(
 
                 let running_task_parallelism = running_task_parallelism.clone();
                 let request_sender = request_sender.clone();
-                let event: Option<Result<CompactionEventResponses, _>> = tokio::select! {
+                let event: Option<Result<SubscribeIcebergCompactionEventResponse, _>> = tokio::select! {
                     _ = periodic_event_interval.tick() => {
-                        let progress_list = get_task_progress(task_progress.clone());
-
-                        if let Err(e) = request_sender.send_heartbeat(progress_list) {
-                            tracing::warn!(error = %e.as_report(), "Failed to report task progress");
-                            // re subscribe stream
-                            continue 'start_stream;
-                        }
-
-
                         let mut pending_pull_task_count = 0;
                         if pull_task_ack {
                             // TODO: Compute parallelism on meta side
                             pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
 
                             if pending_pull_task_count > 0 {
-                                if let Err(e) = request_sender.send_pulltask(pending_pull_task_count) {
+                                if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
+                                    event: Some(subscribe_iceberg_compaction_event_request::Event::PullTask(
+                                        subscribe_iceberg_compaction_event_request::PullTask {
+                                            pull_task_count: pending_pull_task_count,
+                                        }
+                                    )),
+                                    create_at: SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .expect("Clock may have gone backwards")
+                                        .as_millis() as u64,
+                                }) {
                                     tracing::warn!(error = %e.as_report(), "Failed to pull task");
+
                                     // re subscribe stream
                                     continue 'start_stream;
                                 } else {
@@ -560,17 +404,16 @@ pub fn start_compactor(
                     }
 
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Compactor is shutting down");
+                        tracing::info!("Iceberg Compactor is shutting down");
                         return
                     }
                 };
+
                 match event {
-                    Some(Ok(CompactionEventResponses::Iceberg(
-                        SubscribeIcebergCompactionEventResponse {
-                            create_at: _create_at,
-                            event,
-                        },
-                    ))) => {
+                    Some(Ok(SubscribeIcebergCompactionEventResponse {
+                        event,
+                        create_at: _create_at,
+                    })) => {
                         let event = match event {
                             Some(event) => event,
                             None => continue 'consume_stream,
@@ -630,11 +473,207 @@ pub fn start_compactor(
                                 // set flag
                                 pull_task_ack = true;
                             },
-                        }
                     }
-                    Some(Ok(CompactionEventResponses::Hummock(
-                        SubscribeCompactionEventResponse { event, create_at },
-                    ))) => {
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("Failed to consume stream. {}", e.message());
+                        continue 'start_stream;
+                    }
+                    _ => {
+                        // The stream is exhausted
+                        continue 'start_stream;
+                    }
+                }
+            }
+        }
+    });
+
+    (join_handle, shutdown_tx)
+}
+
+/// The background compaction thread that receives compaction tasks from hummock compaction
+/// manager and runs compaction tasks.
+#[cfg_attr(coverage, coverage(off))]
+#[must_use]
+pub fn start_compactor(
+    compactor_context: CompactorContext,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
+) -> (JoinHandle<()>, Sender<()>) {
+    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let stream_retry_interval = Duration::from_secs(30);
+    let task_progress = compactor_context.task_progress_manager.clone();
+    let periodic_event_update_interval = Duration::from_millis(1000);
+
+    let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
+        * compactor_context.storage_opts.compactor_max_task_multiplier)
+        .ceil() as u32;
+    let running_task_parallelism = Arc::new(AtomicU32::new(0));
+
+    const MAX_PULL_TASK_COUNT: u32 = 4;
+    let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
+
+    assert_ge!(
+        compactor_context.storage_opts.compactor_max_task_multiplier,
+        0.0
+    );
+
+    let join_handle = tokio::spawn(async move {
+        let shutdown_map = CompactionShutdownMap::default();
+        let mut min_interval = tokio::time::interval(stream_retry_interval);
+        let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
+
+        // This outer loop is to recreate stream.
+        'start_stream: loop {
+            // reset state
+            // pull_task_ack.store(true, Ordering::SeqCst);
+            let mut pull_task_ack = true;
+            tokio::select! {
+                // Wait for interval.
+                _ = min_interval.tick() => {},
+                // Shutdown compactor.
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Compactor is shutting down");
+                    return;
+                }
+            }
+
+            let (request_sender, response_event_stream) =
+                match hummock_meta_client.subscribe_compaction_event().await {
+                    Ok((request_sender, response_event_stream)) => {
+                        tracing::debug!("Succeeded subscribe_compaction_event.");
+                        (request_sender, response_event_stream)
+                    }
+
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Subscribing to compaction tasks failed with error. Will retry.",
+                        );
+                        continue 'start_stream;
+                    }
+                };
+
+            pin_mut!(response_event_stream);
+
+            let executor = compactor_context.compaction_executor.clone();
+            let sstable_object_id_manager = sstable_object_id_manager.clone();
+
+            // This inner loop is to consume stream or report task progress.
+            let mut event_loop_iteration_now = Instant::now();
+            'consume_stream: loop {
+                {
+                    // report
+                    compactor_context
+                        .compactor_metrics
+                        .compaction_event_loop_iteration_latency
+                        .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                    event_loop_iteration_now = Instant::now();
+                }
+
+                let running_task_parallelism = running_task_parallelism.clone();
+                let request_sender = request_sender.clone();
+                let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
+                    _ = periodic_event_interval.tick() => {
+                        let progress_list = get_task_progress(task_progress.clone());
+
+                        if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                            event: Some(RequestEvent::HeartBeat(
+                                HeartBeat {
+                                    progress: progress_list
+                                }
+                            )),
+                            create_at: SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Clock may have gone backwards")
+                                .as_millis() as u64,
+                        }) {
+                            tracing::warn!(error = %e.as_report(), "Failed to report task progress");
+                            // re subscribe stream
+                            continue 'start_stream;
+                        }
+
+
+                        let mut pending_pull_task_count = 0;
+                        if pull_task_ack {
+                            // TODO: Compute parallelism on meta side
+                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
+
+                            if pending_pull_task_count > 0 {
+                                if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                                    event: Some(RequestEvent::PullTask(
+                                        PullTask {
+                                            pull_task_count: pending_pull_task_count,
+                                        }
+                                    )),
+                                    create_at: SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .expect("Clock may have gone backwards")
+                                        .as_millis() as u64,
+                                }) {
+                                    tracing::warn!(error = %e.as_report(), "Failed to pull task");
+
+                                    // re subscribe stream
+                                    continue 'start_stream;
+                                } else {
+                                    pull_task_ack = false;
+                                }
+                            }
+                        }
+
+                        tracing::info!(
+                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
+                            pull_task_ack = %pull_task_ack,
+                            pending_pull_task_count = %pending_pull_task_count
+                        );
+
+                        continue;
+                    }
+                    event = response_event_stream.next() => {
+                        event
+                    }
+
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Compactor is shutting down");
+                        return
+                    }
+                };
+
+                fn send_report_task_event(
+                    compact_task: &CompactTask,
+                    table_stats: TableStatsMap,
+                    object_timestamps: HashMap<HummockSstableObjectId, u64>,
+                    request_sender: &mpsc::UnboundedSender<SubscribeCompactionEventRequest>,
+                ) {
+                    if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
+                        event: Some(RequestEvent::ReportTask(ReportTask {
+                            task_id: compact_task.task_id,
+                            task_status: compact_task.task_status.into(),
+                            sorted_output_ssts: compact_task
+                                .sorted_output_ssts
+                                .iter()
+                                .map(|sst| sst.into())
+                                .collect(),
+                            table_stats_change: to_prost_table_stats_map(table_stats),
+                            object_timestamps: object_timestamps
+                                .into_iter()
+                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                .collect(),
+                        })),
+                        create_at: SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .expect("Clock may have gone backwards")
+                            .as_millis() as u64,
+                    }) {
+                        let task_id = compact_task.task_id;
+                        tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
+                    }
+                }
+
+                match event {
+                    Some(Ok(SubscribeCompactionEventResponse { event, create_at })) => {
                         let event = match event {
                             Some(event) => event,
                             None => continue 'consume_stream,
@@ -681,10 +720,11 @@ pub fn start_compactor(
                                             TaskStatus::NoAvailCpuResourceCanceled,
                                         );
 
-                                    request_sender.send_report_task_event(
+                                    send_report_task_event(
                                         &compact_task,
                                         table_stats,
                                         object_timestamps,
+                                        &request_sender,
                                     );
 
                                     continue 'consume_stream;
@@ -709,7 +749,12 @@ pub fn start_compactor(
                                     shutdown.lock().unwrap().remove(&task_id);
                                     running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
 
-                                    request_sender.send_report_task_event(&compact_task, table_stats, object_timestamps);
+                                    send_report_task_event(
+                                        &compact_task,
+                                        table_stats,
+                                        object_timestamps,
+                                        &request_sender,
+                                    );
 
                                     let enable_check_compaction_result =
                                     context.storage_opts.check_compaction_result;
@@ -884,10 +929,10 @@ pub fn start_shared_compactor(
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
                                             object_timestamps: object_timestamps
-                                                .into_iter()
-                                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                                                .collect(),
-                                        })),
+                                            .into_iter()
+                                            .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                            .collect(),
+                                    })),
                                     };
 
                                     match cloned_grpc_proxy_client

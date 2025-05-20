@@ -23,8 +23,8 @@ use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MAX_CONNECTION_WINDOW_SIZE, MetricLevel,
-    STREAM_WINDOW_SIZE, StorageMemoryConfig, load_config,
+    AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
+    StorageMemoryConfig, load_config,
 };
 use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
@@ -265,7 +265,6 @@ pub async fn compute_node_serve(
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
                 storage.compaction_catalog_manager_ref().clone(),
-                CompactorMode::Dedicated,
             );
             sub_tasks.push((handle, shutdown_sender));
         }
