@@ -501,7 +501,8 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
     retry: *auto-retry
 
