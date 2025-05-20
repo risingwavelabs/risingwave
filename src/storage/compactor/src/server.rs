@@ -272,17 +272,19 @@ pub async fn compactor_serve(
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
         match compactor_mode {
-            CompactorMode::Dedicated => risingwave_storage::hummock::compactor::start_compactor(
-                compactor_context.clone(),
-                hummock_meta_client.clone(),
-                sstable_object_id_manager.clone(),
-                compaction_catalog_manager_ref,
-            ),
-            CompactorMode::Shared => unreachable!(),
-            CompactorMode::DedicatedIceberg => {
+            CompactorMode::Dedicated => {
                 risingwave_storage::hummock::compactor::start_compactor_iceberg(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),
+                )
+            }
+            CompactorMode::Shared => unreachable!(),
+            CompactorMode::DedicatedIceberg => {
+                risingwave_storage::hummock::compactor::start_compactor(
+                    compactor_context.clone(),
+                    hummock_meta_client.clone(),
+                    sstable_object_id_manager.clone(),
+                    compaction_catalog_manager_ref,
                 )
             }
             CompactorMode::SharedIceberg => unreachable!(),
