@@ -239,6 +239,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t2",
@@ -254,6 +256,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t3",
@@ -273,6 +277,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                     ],
                     [
@@ -456,6 +462,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 0,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t2",
@@ -473,6 +481,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t3",
@@ -491,6 +501,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t4",
@@ -514,6 +526,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 2,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                     ],
                     [
@@ -769,5 +783,44 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                     ],
                 )"#]],
         );
+    }
+
+    #[test]
+    fn test_parse_create_table_statements_with_append_only_and_watermark() {
+        let test_string = r#"
+    CREATE TABLE t1 (
+        v1 INT,
+        ts TIMESTAMP,
+        WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+    ) APPEND ONLY;
+
+    CREATE TABLE t2 (
+        v1 INT,
+        ts TIMESTAMP
+    ) APPEND ONLY;
+
+    CREATE TABLE t3 (
+        v1 INT,
+        ts TIMESTAMP
+    );
+    "#;
+
+        let (tables, _) = parse_create_table_statements(test_string);
+
+        // Check t1
+        let t1 = &tables[0];
+        assert!(t1.is_append_only);
+        assert_eq!(t1.source_watermarks.len(), 1);
+        assert_eq!(t1.source_watermarks[0].column.real_value(), "ts");
+
+        // Check t2
+        let t2 = &tables[1];
+        assert!(t2.is_append_only);
+        assert_eq!(t2.source_watermarks.len(), 0);
+
+        // Check t3
+        let t3 = &tables[2];
+        assert!(!t3.is_append_only);
+        assert_eq!(t3.source_watermarks.len(), 0);
     }
 }
