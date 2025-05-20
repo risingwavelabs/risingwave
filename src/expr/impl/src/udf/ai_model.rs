@@ -16,6 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::bail;
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
+use async_openai::types::{
+    CreateEmbeddingRequest, CreateEmbeddingRequestArgs, Embedding, EmbeddingInput,
+};
 use futures_util::{StreamExt, TryStreamExt};
 use risingwave_common::array::arrow::arrow_array_udf::{
     Array, ArrayRef, Float32Array, RecordBatch, StringArray,
@@ -31,6 +36,7 @@ use risingwave_common::types::{DataType, Datum, F32, Scalar, ScalarImpl, ScalarR
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::sig::UdfKind;
 use risingwave_pb::catalog::PbFunction;
+use thiserror_ext::AsReport;
 
 use super::*;
 
@@ -60,7 +66,7 @@ static AI_MODEL: UdfImplDescriptor = UdfImplDescriptor {
 
         // check if the AI function is supported
         let Some(kind) = AiModelFunctionKind::from_name(name_in_runtime) else {
-            bail!("Unsupported AI model function: {}", name_in_runtime);
+            bail!("Unsupported AI model: {}", name_in_runtime);
         };
 
         match kind {
@@ -76,16 +82,16 @@ static AI_MODEL: UdfImplDescriptor = UdfImplDescriptor {
                         }
                     }
                     _ => bail!(
-                        "`openai_embedding` should have a `text` argument and return a `float4[]`"
+                        "`openai_embedding` model should accept a `text` argument and return a `float4[]`"
                     ),
                 }
                 // check required options
                 hyper_params
                     .get("api_key")
-                    .context("`api_key` option is required")?;
+                    .context("`api_key` hyper parameter must be provided in WITH option")?;
                 hyper_params
                     .get("model")
-                    .context("`model` option is required")?;
+                    .context("`model` hyper parameter must be provided in WITH option")?;
             }
         }
 
@@ -115,8 +121,11 @@ static AI_MODEL: UdfImplDescriptor = UdfImplDescriptor {
                     .get("model")
                     .with_context(|| "`model` is required for `openai_embedding` function")?;
 
+                let config = OpenAIConfig::new().with_api_key(api_key);
+                let client = Client::with_config(config);
+
                 Ok(Box::new(OpenaiEmbeddingFunction {
-                    api_key: api_key.to_owned(),
+                    client,
                     model: model.to_owned(),
                     arrow_convert: UdfArrowConvert::default(),
                 }))
@@ -127,7 +136,7 @@ static AI_MODEL: UdfImplDescriptor = UdfImplDescriptor {
 
 #[derive(Debug)]
 struct OpenaiEmbeddingFunction {
-    api_key: String,
+    client: Client<OpenAIConfig>,
     model: String,
     arrow_convert: UdfArrowConvert,
 }
@@ -138,29 +147,62 @@ impl UdfImpl for OpenaiEmbeddingFunction {
         let column = input.column(0);
         let n_rows = column.len();
 
-        let input_chunk = self.arrow_convert.from_record_batch(input)?;
-        println!("[rc] input_chunk: \n{}", input_chunk.to_pretty());
+        // Get the string array
+        let string_array = column
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .with_context(|| "Expected string array")?;
 
-        let mut embeddings = Vec::with_capacity(n_rows);
+        // Prepare batch input and tracking non-null inputs
+        let mut input_texts = Vec::with_capacity(n_rows);
+        let mut index_map = Vec::with_capacity(n_rows);
 
-        // TODO(): call the OpenAI API here
-        for i in 0..n_rows {
-            if column.is_null(i) {
-                embeddings.push(None);
-                continue;
+        // Collect all non-null values with their indices
+        for (i, value_opt) in string_array.iter().enumerate() {
+            if let Some(value) = value_opt {
+                input_texts.push(value.to_owned());
+                index_map.push(i);
+            }
+        }
+
+        // Initialize embeddings vector with None values
+        let mut embeddings = vec![None; n_rows];
+
+        // Only call the API if we have non-null inputs
+        if !input_texts.is_empty() {
+            // Call the OpenAI API for batch embeddings
+            let embedding_request = CreateEmbeddingRequestArgs::default()
+                .model(&self.model)
+                .input(EmbeddingInput::StringArray(input_texts))
+                .build()?;
+
+            let response = match self.client.embeddings().create(embedding_request).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), "Failed to get embedding from OpenAI");
+                    bail!("Failed to get embedding from OpenAI");
+                }
+            };
+
+            if response.data.is_empty() {
+                bail!("No embedding data returned from OpenAI");
             }
 
-            let float_array = risingwave_common::array::F32Array::from_iter([
-                Some(F32::from(0.1)),
-                Some(F32::from(0.2)),
-                Some(F32::from(0.3)),
-                Some(F32::from(0.4)),
-                Some(F32::from(0.5)),
-            ]);
+            // Map the returned embeddings to their original positions
+            for (batch_idx, &orig_idx) in index_map.iter().enumerate() {
+                if batch_idx < response.data.len() {
+                    let embedding_values = &response.data[batch_idx].embedding;
+                    let float_array = risingwave_common::array::F32Array::from_iter(
+                        embedding_values.iter().map(|&v| Some(F32::from(v))),
+                    );
 
-            let float_array_impl = float_array.into();
-            let list_value = ListValue::new(float_array_impl);
-            embeddings.push(Some(list_value));
+                    let float_array_impl = float_array.into();
+                    let list_value = ListValue::new(float_array_impl);
+                    embeddings[orig_idx] = Some(list_value);
+                } else {
+                    bail!("OpenAI API returned fewer embeddings than requested");
+                }
+            }
         }
 
         let vector_type = DataType::List(Box::new(DataType::Float32));

@@ -19,6 +19,7 @@ udf = ["arrow-udf-runtime", "tonic", "ginepro", "zstd"]
 aho-corasick = "1"
 anyhow = "1"
 arrow-udf-runtime = { workspace = true, optional = true }
+async-openai = "0.28.1"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 bytes = "1"
