@@ -25,4 +25,4 @@ seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFI
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- test_scale_in_synced_log_store"
+ test_scale_in_synced_log_store > $LOGDIR/test_scale_in_synced_log_store_{}.log 2>&1"
