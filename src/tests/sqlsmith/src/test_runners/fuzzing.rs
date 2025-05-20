@@ -14,6 +14,7 @@
 
 //! Provides E2E Test runner functionality.
 
+use risingwave_sqlparser::ast::Statement;
 use tokio_postgres::Client;
 
 use crate::test_runners::utils::{
@@ -149,8 +150,30 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         .unwrap();
     tracing::info!("Created tables");
 
+    // Filter out not-append-only tables.
+    let updatable_base_tables: Vec<_> = base_tables
+        .iter()
+        .filter(|table| !table.is_append_only)
+        .cloned()
+        .collect();
+
+    // Filter out inserts on not-append-only tables.
+    let updatable_inserts: Vec<_> = inserts
+        .iter()
+        .filter(|stmt| {
+            if let Statement::Insert { table_name, .. } = stmt {
+                updatable_base_tables
+                    .iter()
+                    .any(|table| table.name == table_name.base_name())
+            } else {
+                false
+            }
+        })
+        .cloned()
+        .collect();
+
     // Generate an update for some inserts, on the corresponding table.
-    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    update_base_tables(client, &mut rng, &updatable_base_tables, &updatable_inserts).await;
     tracing::info!("Ran updates");
 
     let max_rows_inserted = rows_per_table * base_tables.len();

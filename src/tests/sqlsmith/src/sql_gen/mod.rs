@@ -44,6 +44,7 @@ pub struct Table {
     pub columns: Vec<Column>,
     pub pk_indices: Vec<usize>,
     pub is_base_table: bool,
+    pub is_append_only: bool,
 }
 
 impl Table {
@@ -53,15 +54,22 @@ impl Table {
             columns,
             pk_indices: vec![],
             is_base_table: false,
+            is_append_only: false,
         }
     }
 
-    pub fn new_for_base_table(name: String, columns: Vec<Column>, pk_indices: Vec<usize>) -> Self {
+    pub fn new_for_base_table(
+        name: String,
+        columns: Vec<Column>,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Self {
         Self {
             name,
             columns,
             pk_indices,
             is_base_table: true,
+            is_append_only,
         }
     }
 

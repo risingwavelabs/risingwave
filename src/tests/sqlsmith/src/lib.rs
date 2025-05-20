@@ -122,6 +122,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             name,
             columns,
             constraints,
+            append_only,
             ..
         } => {
             let column_name_to_index_mapping: HashMap<_, _> = columns
@@ -158,6 +159,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 name.0[0].real_value(),
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
+                *append_only,
             )
         }
         _ => panic!(
