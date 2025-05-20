@@ -24,6 +24,7 @@ use risingwave_common::array::{Array, ArrayRef, DataChunk};
 use risingwave_common::metrics::*;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
@@ -179,6 +180,10 @@ impl Build for UserDefinedFunction {
             .name_in_runtime()
             .expect("SQL UDF won't get here, other UDFs must have `name_in_runtime`");
 
+        let hyper_params_sec_filled = LocalSecretManager::global()
+            .fill_secrets(udf.hyper_params.clone(), udf.hyper_params_secrets.clone())
+            .context("failed to resolve secrets in hyper params")?;
+
         // lookup UDF builder
         let build_fn = crate::sig::find_udf_impl(language, runtime, link)?.build_fn;
         let runtime = build_fn(BuildOptions {
@@ -194,6 +199,7 @@ impl Build for UserDefinedFunction {
             language,
             is_async: udf.is_async,
             is_batched: udf.is_batched,
+            hyper_params: Some(&hyper_params_sec_filled),
         })
         .context("failed to build UDF runtime")?;
 

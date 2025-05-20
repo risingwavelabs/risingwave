@@ -341,6 +341,9 @@ message Function {
   // additional options for javascript functions
   optional bool is_async = 20;
   optional bool is_batched = 21;
+  // additional hyper parameters for the function
+  map<string, string> hyper_params = 22;
+  map<string, secret.SecretRef> hyper_params_secrets = 23;
 
   oneof kind {
     ScalarFunction scalar = 11;

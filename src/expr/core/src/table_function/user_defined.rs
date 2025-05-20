@@ -148,6 +148,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         language,
         is_async: None,
         is_batched: None,
+        hyper_params: None, // XXX(rc): we don't support hyper params for UDTF
     })
     .context("failed to build UDF runtime")?;
 

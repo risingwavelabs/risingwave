@@ -4,6 +4,7 @@ package expr;
 
 import "common.proto";
 import "data.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -634,6 +635,9 @@ message UserDefinedFunction {
   // additional options for javascript functions
   optional bool is_async = 13;
   optional bool is_batched = 14;
+  // additional hyper parameters for the function
+  map<string, string> hyper_params = 15;
+  map<string, secret.SecretRef> hyper_params_secrets = 16;
 
   UdfExprVersion version = 1000;
 }

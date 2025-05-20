@@ -3489,7 +3489,7 @@ impl fmt::Display for CreateFunctionBody {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateFunctionWithOptions {
     /// Always retry on network errors.
@@ -3498,6 +3498,8 @@ pub struct CreateFunctionWithOptions {
     pub r#async: Option<bool>,
     /// Call in batch mode (only available for JS UDF)
     pub batch: Option<bool>,
+    /// Other WITH properties for the function
+    pub with_properties: WithProperties,
 }
 
 /// TODO(kwannoel): Generate from the struct definition instead.
@@ -3505,41 +3507,47 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
     type Error = StrError;
 
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
-        let mut options = Self::default();
+        let mut always_retry_on_network_error = None;
+        let mut r#async = None;
+        let mut batch = None;
+        let mut options = Vec::new();
         for option in with_options {
             match option.name.to_string().to_lowercase().as_str() {
                 "always_retry_on_network_error" => {
-                    options.always_retry_on_network_error = Some(matches!(
+                    always_retry_on_network_error = Some(matches!(
                         option.value,
                         SqlOptionValue::Value(Value::Boolean(true))
                     ));
                 }
                 "async" => {
-                    options.r#async = Some(matches!(
+                    r#async = Some(matches!(
                         option.value,
                         SqlOptionValue::Value(Value::Boolean(true))
-                    ))
+                    ));
                 }
                 "batch" => {
-                    options.batch = Some(matches!(
+                    batch = Some(matches!(
                         option.value,
                         SqlOptionValue::Value(Value::Boolean(true))
-                    ))
+                    ));
                 }
                 _ => {
-                    return Err(StrError(format!("unknown option: {}", option.name)));
+                    // push other options to the `with_properties` field
+                    options.push(option);
                 }
             }
         }
-        Ok(options)
+        Ok(CreateFunctionWithOptions {
+            always_retry_on_network_error,
+            r#async,
+            batch,
+            with_properties: WithProperties(options),
+        })
     }
 }
 
 impl Display for CreateFunctionWithOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self == &Self::default() {
-            return Ok(());
-        }
         let mut options = vec![];
         if let Some(v) = self.always_retry_on_network_error {
             options.push(format!("always_retry_on_network_error = {}", v));
@@ -3549,6 +3557,12 @@ impl Display for CreateFunctionWithOptions {
         }
         if let Some(v) = self.batch {
             options.push(format!("batch = {}", v));
+        }
+        for option in &self.with_properties.0 {
+            options.push(format!("{}", option));
+        }
+        if options.is_empty() {
+            return Ok(());
         }
         write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
@@ -3881,6 +3895,7 @@ mod tests {
                 always_retry_on_network_error: None,
                 r#async: None,
                 batch: None,
+                with_properties: WithProperties(vec![]),
             },
         };
         assert_eq!(
@@ -3906,6 +3921,7 @@ mod tests {
                 always_retry_on_network_error: Some(true),
                 r#async: None,
                 batch: None,
+                with_properties: WithProperties(vec![]),
             },
         };
         assert_eq!(

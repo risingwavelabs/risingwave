@@ -16,7 +16,7 @@ use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
 use risingwave_expr::sig::{CreateOptions, UdfKind};
-use risingwave_pb::catalog::Function;
+use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_sqlparser::ast::DataType as AstDataType;
 
@@ -125,9 +125,10 @@ pub async fn handle_create_aggregate(
         as_: params.as_.as_ref().map(|s| s.as_str()),
         using_link: link,
         using_base64_decoded: base64_decoded.as_deref(),
+        hyper_params: None, // XXX(rc): we don't support hyper params for UDAF
     })?;
 
-    let function = Function {
+    let function = PbFunction {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
@@ -146,6 +147,8 @@ pub async fn handle_create_aggregate(
         always_retry_on_network_error: false,
         is_async: None,
         is_batched: None,
+        hyper_params: Default::default(),         // empty for UDAF
+        hyper_params_secrets: Default::default(), // empty for UDAF
     };
 
     let catalog_writer = session.catalog_writer()?;
