@@ -190,6 +190,7 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
+once_cell = "1.21.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
