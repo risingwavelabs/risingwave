@@ -1846,7 +1846,6 @@ impl IcebergSinkCommitter {
                 SinkError::Iceberg(anyhow!(err))
             })
         })
-        .instrument_await("iceberg_commit")
         .await?;
         self.table = table;
 
