@@ -36,6 +36,7 @@
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
+#![feature(once_cell_get_mut)]
 
 use std::time::Duration;
 

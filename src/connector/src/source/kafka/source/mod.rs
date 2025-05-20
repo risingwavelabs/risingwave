@@ -13,7 +13,9 @@
 // limitations under the License.
 
 mod message;
+mod mux_reader;
 mod reader;
 
 pub use message::*;
+pub use mux_reader::*;
 pub use reader::*;

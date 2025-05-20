@@ -187,7 +187,7 @@ impl EnforceSecret for KafkaProperties {
 impl SourceProperties for KafkaProperties {
     type Split = KafkaSplit;
     type SplitEnumerator = KafkaSplitEnumerator;
-    type SplitReader = KafkaSplitReader;
+    type SplitReader = KafkaMuxSplitReader;
 
     const SOURCE_NAME: &'static str = KAFKA_CONNECTOR;
 }
