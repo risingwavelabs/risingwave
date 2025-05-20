@@ -773,7 +773,12 @@ fn parse_create_function() {
                 )),
                 ..Default::default()
             },
-            with_options: Default::default(),
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                with_properties: WithProperties(vec![]),
+            },
         }
     );
 
@@ -797,7 +802,12 @@ fn parse_create_function() {
                 )),
                 ..Default::default()
             },
-            with_options: Default::default(),
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                with_properties: WithProperties(vec![]),
+            },
         },
     );
 
@@ -824,7 +834,12 @@ fn parse_create_function() {
                 }),
                 ..Default::default()
             },
-            with_options: Default::default(),
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                with_properties: WithProperties(vec![]),
+            },
         },
     );
 
@@ -856,7 +871,12 @@ fn parse_create_function() {
                 }),
                 ..Default::default()
             },
-            with_options: Default::default(),
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                with_properties: WithProperties(vec![]),
+            },
         }
     );
 
@@ -882,7 +902,12 @@ fn parse_create_function() {
                 return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
-            with_options: Default::default(),
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                with_properties: WithProperties(vec![]),
+            },
         }
     );
 
@@ -907,7 +932,12 @@ fn parse_create_function() {
                 )),
                 ..Default::default()
             },
-            with_options: Default::default(),
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+                r#async: None,
+                batch: None,
+                with_properties: WithProperties(vec![]),
+            },
         }
     );
 }
