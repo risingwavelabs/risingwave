@@ -78,7 +78,7 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
+    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -282,7 +282,7 @@ impl Compactor {
 pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    object_id_manager: Arc<ObjectIdManager>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
@@ -343,7 +343,7 @@ pub fn start_compactor(
             pin_mut!(response_event_stream);
 
             let executor = compactor_context.compaction_executor.clone();
-            let sstable_object_id_manager = sstable_object_id_manager.clone();
+            let object_id_manager = object_id_manager.clone();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -474,7 +474,7 @@ pub fn start_compactor(
                             .compaction_event_consumed_latency
                             .observe(consumed_latency_ms as _);
 
-                        let sstable_object_id_manager = sstable_object_id_manager.clone();
+                        let object_id_manager = object_id_manager.clone();
                         let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
 
                         match event {
@@ -525,7 +525,7 @@ pub fn start_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(sstable_object_id_manager.clone()),
+                                        Box::new(object_id_manager.clone()),
                                         compaction_catalog_manager_ref.clone(),
                                     )
                                     .await;
