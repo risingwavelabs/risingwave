@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
     DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
@@ -1050,6 +1051,7 @@ impl SinkWriter for IcebergSinkWriter {
         let writer = self.writer.get_writer().unwrap();
         writer
             .write(batch)
+            .instrument_await("iceberg_write")
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
@@ -1070,7 +1072,7 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
             } => {
                 let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
+                    Some(writer.close().instrument_await("iceberg_close").await)
                 } else {
                     None
                 };
@@ -1088,7 +1090,7 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
             } => {
                 let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
+                    Some(writer.close().instrument_await("iceberg_close").await)
                 } else {
                     None
                 };
@@ -1107,7 +1109,7 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
+                    Some(writer.close().instrument_await("iceberg_close").await)
                 } else {
                     None
                 };
@@ -1126,7 +1128,7 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
+                    Some(writer.close().instrument_await("iceberg_close").await)
                 } else {
                     None
                 };
