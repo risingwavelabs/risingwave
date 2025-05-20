@@ -21,7 +21,9 @@ use std::vec;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
-use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SetExpr, Statement, TableFactor,
+};
 
 mod agg;
 mod cast;
@@ -200,11 +202,40 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Statement::Query(Box::new(query))
     }
 
-    pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
+    pub(crate) fn gen_mview_stmt(
+        &mut self,
+        name: &str,
+        append_only_tables: Vec<Table>,
+    ) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
         let table = Table::new(name.to_owned(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
+        let uses_append_only_table = if let SetExpr::Select(ref select) = query.body {
+            select.from.iter().any(|table_with_joins| {
+                if let TableFactor::Table { name, .. } = &table_with_joins.relation {
+                    append_only_tables
+                        .iter()
+                        .any(|t| t.name == name.base_name())
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        };
+
+        // Randomly choose emit mode if allowed
+        let emit_mode = if uses_append_only_table {
+            match self.rng.random_range(0..3) {
+                0 => Some(EmitMode::Immediately),
+                1 => Some(EmitMode::OnWindowClose),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
@@ -213,7 +244,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             columns: vec![],
             query,
             with_options: vec![],
-            emit_mode: None,
+            emit_mode,
         };
         (mview, table)
     }

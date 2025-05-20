@@ -62,8 +62,13 @@ pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> V
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
 pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables);
-    let (mview, table) = r#gen.gen_mview_stmt(name);
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone());
+    let append_only_tables: Vec<_> = tables
+        .iter()
+        .filter(|table| table.is_append_only)
+        .cloned()
+        .collect();
+    let (mview, table) = r#gen.gen_mview_stmt(name, append_only_tables);
     (mview.to_string(), table)
 }
 
@@ -72,8 +77,13 @@ pub fn differential_sql_gen<R: Rng>(
     tables: Vec<Table>,
     name: &str,
 ) -> Result<(String, String, Table)> {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables);
-    let (stream, table) = r#gen.gen_mview_stmt(name);
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone());
+    let append_only_tables: Vec<_> = tables
+        .iter()
+        .filter(|table| table.is_append_only)
+        .cloned()
+        .collect();
+    let (stream, table) = r#gen.gen_mview_stmt(name, append_only_tables);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),
         _ => bail!("Differential pair should be mview statement!"),
