@@ -115,7 +115,7 @@ static AI_MODEL: UdfImplDescriptor = UdfImplDescriptor {
                     .get("model")
                     .with_context(|| "`model` is required for `openai_embedding` function")?;
 
-                Ok(Box::new(OpenAiEmbeddingFunction {
+                Ok(Box::new(OpenaiEmbeddingFunction {
                     api_key: api_key.to_owned(),
                     model: model.to_owned(),
                     arrow_convert: UdfArrowConvert::default(),
@@ -126,14 +126,14 @@ static AI_MODEL: UdfImplDescriptor = UdfImplDescriptor {
 };
 
 #[derive(Debug)]
-struct OpenAiEmbeddingFunction {
+struct OpenaiEmbeddingFunction {
     api_key: String,
     model: String,
     arrow_convert: UdfArrowConvert,
 }
 
 #[async_trait::async_trait]
-impl UdfImpl for OpenAiEmbeddingFunction {
+impl UdfImpl for OpenaiEmbeddingFunction {
     async fn call(&self, input: &RecordBatch) -> Result<RecordBatch> {
         let column = input.column(0);
         let n_rows = column.len();
