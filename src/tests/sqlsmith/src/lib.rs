@@ -24,6 +24,7 @@ risingwave_expr_impl::enable!();
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, bail};
+use config::Configuration;
 use itertools::Itertools;
 use rand::Rng;
 use rand::prelude::IndexedRandom;
@@ -35,6 +36,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use crate::sql_gen::SqlGenerator;
 
+pub mod config;
 pub mod reducer;
 mod sql_gen;
 pub mod test_runners;
@@ -45,14 +47,19 @@ pub use validation::is_permissible_error;
 pub use crate::sql_gen::{Table, print_function_table};
 
 /// Generate a random SQL string.
-pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
-    let mut r#gen = SqlGenerator::new(rng, tables);
+pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>, config: &Configuration) -> String {
+    let mut r#gen = SqlGenerator::new(rng, tables, config.clone());
     format!("{}", r#gen.gen_batch_query_stmt())
 }
 
 /// Generate `INSERT`
-pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> Vec<String> {
-    let mut r#gen = SqlGenerator::new(rng, vec![]);
+pub fn insert_sql_gen(
+    rng: &mut impl Rng,
+    tables: Vec<Table>,
+    count: usize,
+    config: &Configuration,
+) -> Vec<String> {
+    let mut r#gen = SqlGenerator::new(rng, vec![], config.clone());
     tables
         .into_iter()
         .map(|table| format!("{}", r#gen.generate_insert_statement(&table, count)))
@@ -61,13 +68,18 @@ pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> V
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
-pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone());
+pub fn mview_sql_gen<R: Rng>(
+    rng: &mut R,
+    tables: Vec<Table>,
+    name: &str,
+    config: &Configuration,
+) -> (String, Table) {
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let append_only_tables: Vec<_> = tables
-        .iter()
-        .filter(|table| table.is_append_only)
-        .cloned()
-        .collect();
+      .iter()
+      .filter(|table| table.is_append_only)
+      .cloned()
+      .collect();
     let (mview, table) = r#gen.gen_mview_stmt(name, append_only_tables);
     (mview.to_string(), table)
 }
@@ -76,8 +88,9 @@ pub fn differential_sql_gen<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     name: &str,
+    config: &Configuration,
 ) -> Result<(String, String, Table)> {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let append_only_tables: Vec<_> = tables
         .iter()
         .filter(|table| table.is_append_only)
@@ -113,8 +126,9 @@ pub fn generate_update_statements<R: Rng>(
     rng: &mut R,
     tables: &[Table],
     inserts: &[Statement],
+    config: &Configuration,
 ) -> Result<Vec<Statement>> {
-    let mut r#gen = SqlGenerator::new(rng, vec![]);
+    let mut r#gen = SqlGenerator::new(rng, vec![], config.clone());
     r#gen.generate_update_statements(tables, inserts)
 }
 
