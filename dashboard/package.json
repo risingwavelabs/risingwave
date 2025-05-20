@@ -44,7 +44,6 @@
     "react-dom": "^18.2.0",
     "react-flow-renderer": "10.3.16",
     "react-json-view": "^1.21.3",
-    "react-syntax-highlighter": "^15.5.0",
     "recharts": "^2.3.2",
     "reflect-metadata": "^0.2.2",
     "styled-components": "5.3.0",
