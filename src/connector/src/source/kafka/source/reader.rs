@@ -35,6 +35,7 @@ use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::kafka::client_context::spawn_consumer_poll_task;
 use crate::source::kafka::{
     KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
@@ -111,11 +112,7 @@ impl SplitReader for KafkaSplitReader {
             .await
             .context("failed to create kafka consumer")?;
         let consumer = Arc::new(consumer);
-        unsafe {
-            rdkafka::bindings::rd_kafka_sasl_background_callbacks_enable(
-                consumer.client().native_ptr(),
-            );
-        }
+        spawn_consumer_poll_task(Arc::downgrade(&consumer));
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
