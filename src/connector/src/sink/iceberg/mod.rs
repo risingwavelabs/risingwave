@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
     DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
@@ -1198,6 +1199,7 @@ impl SinkWriter for IcebergSinkWriter {
         let writer = self.writer.get_writer().unwrap();
         writer
             .write(batch)
+            .instrument_await("iceberg_write")
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
@@ -1280,7 +1282,7 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => Some(writer.close().instrument_await("iceberg_close").await),
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -1836,6 +1838,7 @@ impl IcebergSinkCommitter {
                 SinkError::Iceberg(anyhow!(err))
             })
         })
+        .instrument_await("iceberg_commit")
         .await?;
         self.table = table;
 
