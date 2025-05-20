@@ -69,7 +69,7 @@ async fn test_syncpoints_object_id_manager() {
     });
 
     // Start the task that fetches new ids.
-    let mut object_id_manager_clone = object_id_manager.clone();
+    let object_id_manager_clone = object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         object_id_manager_clone
             .get_new_sst_object_id()
@@ -86,7 +86,7 @@ async fn test_syncpoints_object_id_manager() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let mut object_id_manager_clone = object_id_manager.clone();
+        let object_id_manager_clone = object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             object_id_manager_clone
                 .get_new_sst_object_id()
@@ -132,7 +132,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     });
 
     // Start the task that fetches new ids.
-    let mut object_id_manager_clone = object_id_manager.clone();
+    let object_id_manager_clone = object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
         object_id_manager_clone
@@ -148,7 +148,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let mut object_id_manager_clone = object_id_manager.clone();
+        let object_id_manager_clone = object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             object_id_manager_clone
                 .get_new_sst_object_id()
@@ -204,7 +204,7 @@ pub async fn compact_once(
         compact_ctx,
         compact_task.clone(),
         rx,
-        Box::new(object_id_manager),
+        object_id_manager,
         compaction_catalog_agent_ref.clone(),
     )
     .await;

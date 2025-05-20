@@ -283,7 +283,7 @@ pub(crate) mod tests {
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
-                Box::new(object_id_manager.clone()),
+                object_id_manager.clone(),
                 compaction_catalog_agent_ref.clone(),
             )
             .await;
@@ -599,7 +599,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -799,7 +799,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -1003,7 +1003,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -1188,7 +1188,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -1296,18 +1296,18 @@ pub(crate) mod tests {
             0,
             compact_ctx.clone(),
             task.clone(),
-            Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([5, 6, 7, 8, 9, 10, 11, 12, 13]),
-            )),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
+                5, 6, 7, 8, 9, 10, 11, 12, 13,
+            ])),
         );
 
         let fast_compact_runner = FastCompactorRunner::new(
             compact_ctx.clone(),
             task.clone(),
             compaction_catalog_agent_ref.clone(),
-            Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([22, 23, 24, 25, 26, 27, 28, 29]),
-            )),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
+                22, 23, 24, 25, 26, 27, 28, 29,
+            ])),
             Arc::new(TaskProgress::default()),
         );
         let (_, ret1, _) = slow_compact_runner
@@ -2044,7 +2044,7 @@ pub(crate) mod tests {
                 compact_ctx,
                 compact_task.clone(),
                 rx,
-                Box::new(object_id_manager.clone()),
+                object_id_manager.clone(),
                 compaction_catalog_agent_ref.clone(),
             )
             .await;
@@ -2283,7 +2283,7 @@ pub(crate) mod tests {
                     compact_ctx.clone(),
                     compact_task.clone(),
                     rx,
-                    Box::new(object_id_manager.clone()),
+                    object_id_manager.clone(),
                     compaction_catalog_agent_ref.clone(),
                 )
                 .await;

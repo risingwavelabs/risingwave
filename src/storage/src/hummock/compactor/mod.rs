@@ -96,7 +96,7 @@ use crate::monitor::CompactorMetrics;
 pub struct Compactor {
     /// The context of the compactor.
     context: CompactorContext,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
@@ -110,7 +110,7 @@ impl Compactor {
         context: CompactorContext,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         Self {
             context,
@@ -233,7 +233,7 @@ impl Compactor {
         compaction_filter: impl CompactionFilter,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             object_id_getter,
@@ -525,7 +525,7 @@ pub fn start_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(object_id_manager.clone()),
+                                        object_id_manager.clone(),
                                         compaction_catalog_manager_ref.clone(),
                                     )
                                     .await;
@@ -703,7 +703,7 @@ pub fn start_shared_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(shared_compactor_object_id_manager),
+                                        shared_compactor_object_id_manager,
                                         compaction_catalog_agent_ref.clone(),
                                     )
                                     .await;

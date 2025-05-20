@@ -195,7 +195,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             sub_compaction_sstable_size as usize,
             table_vnode_partition.clone(),
             use_block_based_filter,
-            Box::new(object_id_manager.clone()),
+            object_id_manager.clone(),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
         for imm in &payload {
@@ -555,7 +555,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         table_vnode_partition: BTreeMap<u32, u32>,
         use_block_based_filter: bool,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;

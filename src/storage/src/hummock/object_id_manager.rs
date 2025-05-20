@@ -26,13 +26,11 @@ use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 pub type ObjectIdManagerRef = Arc<ObjectIdManager>;
-use dyn_clone::DynClone;
 
 #[async_trait::async_trait]
-pub trait GetObjectId: DynClone + Send + Sync {
-    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId>;
+pub trait GetObjectId: Send + Sync {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId>;
 }
-dyn_clone::clone_trait_object!(GetObjectId);
 
 /// Caches SST object ids fetched from meta.
 pub struct ObjectIdManager {
@@ -55,7 +53,7 @@ impl ObjectIdManager {
 
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
-    async fn map_next_object_id<F>(self: &Arc<Self>, f: F) -> HummockResult<HummockRawObjectId>
+    async fn map_next_object_id<F>(&self, f: F) -> HummockResult<HummockRawObjectId>
     where
         F: Fn(&mut ObjectIdRange) -> Option<HummockRawObjectId>,
     {
@@ -89,17 +87,16 @@ impl ObjectIdManager {
             // Fetch new ids.
             sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
-            let this = self.clone();
-            tokio::spawn(async move {
-                let new_sst_ids = match this
+            async move {
+                let new_sst_ids = match self
                     .hummock_meta_client
-                    .get_new_object_ids(this.remote_fetch_number)
+                    .get_new_object_ids(self.remote_fetch_number)
                     .await
                     .map_err(HummockError::meta_error)
                 {
                     Ok(new_sst_ids) => new_sst_ids,
                     Err(err) => {
-                        this.notify_waiters(false);
+                        self.notify_waiters(false);
                         return Err(err);
                     }
                 };
@@ -107,7 +104,7 @@ impl ObjectIdManager {
                 sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE");
                 // Update local cache.
                 let result = {
-                    let mut guard = this.available_object_ids.lock();
+                    let mut guard = self.available_object_ids.lock();
                     let available_object_ids = guard.deref_mut();
                     if new_sst_ids.start_id < available_object_ids.end_id {
                         Err(HummockError::meta_error(format!(
@@ -119,11 +116,10 @@ impl ObjectIdManager {
                         Ok(())
                     }
                 };
-                this.notify_waiters(result.is_ok());
+                self.notify_waiters(result.is_ok());
                 result
-            })
-            .await
-            .unwrap()?;
+            }
+            .await?;
         }
     }
 
@@ -137,10 +133,10 @@ impl ObjectIdManager {
 }
 
 #[async_trait::async_trait]
-impl GetObjectId for Arc<ObjectIdManager> {
+impl GetObjectId for ObjectIdManager {
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
         self.map_next_object_id(|available_object_ids| available_object_ids.get_next_object_id())
             .await
             .map(Into::into)
@@ -174,9 +170,8 @@ impl SharedComapctorObjectIdManagerCore {
     }
 }
 /// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
-#[derive(Clone)]
 pub struct SharedComapctorObjectIdManager {
-    core: Arc<tokio::sync::Mutex<SharedComapctorObjectIdManagerCore>>,
+    core: tokio::sync::Mutex<SharedComapctorObjectIdManagerCore>,
 }
 
 impl SharedComapctorObjectIdManager {
@@ -184,30 +179,28 @@ impl SharedComapctorObjectIdManager {
         output_object_ids: VecDeque<HummockSstableObjectId>,
         client: GrpcCompactorProxyClient,
         sstable_id_remote_fetch_number: u32,
-    ) -> Self {
-        Self {
-            core: Arc::new(tokio::sync::Mutex::new(
-                SharedComapctorObjectIdManagerCore::new(
-                    output_object_ids,
-                    client,
-                    sstable_id_remote_fetch_number,
-                ),
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            core: tokio::sync::Mutex::new(SharedComapctorObjectIdManagerCore::new(
+                output_object_ids,
+                client,
+                sstable_id_remote_fetch_number,
             )),
-        }
+        })
     }
 
-    pub fn for_test(output_object_ids: VecDeque<u64>) -> Self {
-        Self {
-            core: Arc::new(tokio::sync::Mutex::new(
-                SharedComapctorObjectIdManagerCore::for_test(output_object_ids),
+    pub fn for_test(output_object_ids: VecDeque<u64>) -> Arc<Self> {
+        Arc::new(Self {
+            core: tokio::sync::Mutex::new(SharedComapctorObjectIdManagerCore::for_test(
+                output_object_ids,
             )),
-        }
+        })
     }
 }
 
 #[async_trait::async_trait]
 impl GetObjectId for SharedComapctorObjectIdManager {
-    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
         let mut guard = self.core.lock().await;
         let core = guard.deref_mut();
 
