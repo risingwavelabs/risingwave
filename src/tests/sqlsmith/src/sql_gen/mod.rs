@@ -28,7 +28,7 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
-use crate::config::Configuration;
+use crate::config::{Configuration, Feature};
 
 mod dml;
 mod functions;
@@ -238,7 +238,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Decide whether to generate on config.
-    pub(crate) fn should_generate(&mut self, feature: &str) -> bool {
+    pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
         self.config.should_generate(feature, self.rng)
     }
 }

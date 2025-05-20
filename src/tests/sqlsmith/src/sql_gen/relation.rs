@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
 
+use crate::config::Feature;
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -36,7 +37,7 @@ fn create_equi_expr(left: String, right: String) -> Expr {
 impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        if !self.should_generate("join") {
+        if !self.should_generate(Feature::Join) {
             return self.gen_no_join();
         }
         match self.rng.random_range(1..=3) {

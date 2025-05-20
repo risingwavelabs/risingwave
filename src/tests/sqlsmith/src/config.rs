@@ -13,12 +13,33 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use rand::Rng;
 use serde::Deserialize;
+
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Feature {
+    Where,
+    Agg,
+    Join,
+}
+
+impl fmt::Display for Feature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Feature::Where => "where",
+            Feature::Agg => "agg",
+            Feature::Join => "join",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Configuration {
-    pub config: BTreeMap<String, Status>,
+    pub config: BTreeMap<Feature, Status>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -57,17 +78,17 @@ impl Configuration {
 
     /// Returns true if the feature is enabled and passes the random check.
     /// If the feature is not configured, defaults to 50% chance.
-    pub fn should_generate<R: Rng>(&self, feature: &str, rng: &mut R) -> bool {
-        match self.config.get(feature) {
+    pub fn should_generate<R: Rng>(&self, feature: Feature, rng: &mut R) -> bool {
+        match self.config.get(&feature) {
             Some(status) if status.enabled => rng.random_range(0..100) < status.weight,
             Some(_) => false,
             None => rng.random_bool(0.5),
         }
     }
 
-    pub fn set_weight(&mut self, feature: &str, weight: u8) {
+    pub fn set_weight(&mut self, feature: Feature, weight: u8) {
         self.config
-            .entry(feature.to_owned())
+            .entry(feature)
             .or_insert_with(|| Status {
                 weight: 0,
                 enabled: true,
@@ -75,9 +96,9 @@ impl Configuration {
             .weight = weight;
     }
 
-    pub fn set_enabled(&mut self, feature: &str, enabled: bool) {
+    pub fn set_enabled(&mut self, feature: Feature, enabled: bool) {
         self.config
-            .entry(feature.to_owned())
+            .entry(feature)
             .or_insert_with(|| Status {
                 weight: 0,
                 enabled: true,
