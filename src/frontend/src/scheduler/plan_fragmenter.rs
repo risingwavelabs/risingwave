@@ -327,7 +327,7 @@ impl SourceScanInfo {
         };
         match (fetch_info.connector, fetch_info.fetch_parameters) {
             (
-                ConnectorProperties::Kafka(prop),
+                ConnectorProperties::KafkaMux(prop),
                 SourceFetchParameters::KafkaTimebound { lower, upper },
             ) => {
                 let mut kafka_enumerator =
@@ -337,7 +337,7 @@ impl SourceScanInfo {
                     .list_splits_batch(lower, upper)
                     .await?
                     .into_iter()
-                    .map(SplitImpl::Kafka)
+                    .map(SplitImpl::KafkaMux)
                     .collect_vec();
 
                 Ok(SourceScanInfo::Complete(split_info))

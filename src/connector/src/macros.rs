@@ -27,7 +27,7 @@ macro_rules! for_all_classified_sources {
             // other sources
             // todo: file source do not nest with mq source.
             {
-                { Kafka, $crate::source::kafka::KafkaProperties, $crate::source::kafka::KafkaSplit },
+                { KafkaMux, $crate::source::kafka::KafkaProperties, $crate::source::kafka::KafkaSplit },
                 { Pulsar, $crate::source::pulsar::PulsarProperties, $crate::source::pulsar::PulsarSplit },
                 { Kinesis, $crate::source::kinesis::KinesisProperties, $crate::source::kinesis::split::KinesisSplit },
                 { Nexmark, $crate::source::nexmark::NexmarkProperties, $crate::source::nexmark::NexmarkSplit },

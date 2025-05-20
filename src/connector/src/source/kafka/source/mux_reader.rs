@@ -23,7 +23,7 @@ use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData, SplitReader,
     into_chunk_stream,
 };
 
@@ -51,10 +51,21 @@ fn ensure_global_mux() -> mpsc::Sender<MuxControl> {
 #[derive(Debug)]
 pub enum MuxControl {
     AddSplits(AddSplitsMessage),
+    SeekToLast(SeekToLastMessage),
 }
 
 #[derive(Debug)]
 pub struct AddSplitsMessage {
+    source: u64,
+
+    properties: KafkaProperties,
+    splits: Vec<KafkaSplit>,
+
+    sender: mpsc::Sender<SourceMessage>,
+}
+
+#[derive(Debug)]
+pub struct SeekToLastMessage {
     source: u64,
 
     properties: KafkaProperties,
@@ -282,6 +293,8 @@ impl SplitReader for KafkaMuxSplitReader {
 
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
+
+    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {}
 }
 
 impl KafkaMuxSplitReader {
