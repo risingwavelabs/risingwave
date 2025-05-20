@@ -172,6 +172,7 @@ impl KafkaContextCommon {
                 .unwrap()
                 .unwrap()
             };
+            tracing::info!(?expiration_time_ms, "generated token");
             Ok(OAuthToken {
                 token,
                 principal_name: "".to_owned(),
