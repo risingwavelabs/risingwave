@@ -133,6 +133,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             columns,
             constraints,
             append_only,
+            source_watermarks,
             ..
         } => {
             let column_name_to_index_mapping: HashMap<_, _> = columns
@@ -170,6 +171,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
                 *append_only,
+                source_watermarks.to_vec(),
             )
         }
         _ => panic!(

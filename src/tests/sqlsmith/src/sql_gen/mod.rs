@@ -22,7 +22,7 @@ use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    ColumnDef, EmitMode, Expr, Ident, ObjectName, SetExpr, Statement, TableFactor,
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SetExpr, SourceWatermark, Statement, TableFactor,
 };
 
 mod agg;
@@ -47,6 +47,7 @@ pub struct Table {
     pub pk_indices: Vec<usize>,
     pub is_base_table: bool,
     pub is_append_only: bool,
+    pub source_watermarks: Vec<SourceWatermark>,
 }
 
 impl Table {
@@ -57,6 +58,7 @@ impl Table {
             pk_indices: vec![],
             is_base_table: false,
             is_append_only: false,
+            source_watermarks: vec![],
         }
     }
 
@@ -65,6 +67,7 @@ impl Table {
         columns: Vec<Column>,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        source_watermarks: Vec<SourceWatermark>,
     ) -> Self {
         Self {
             name,
@@ -72,6 +75,7 @@ impl Table {
             pk_indices,
             is_base_table: true,
             is_append_only,
+            source_watermarks,
         }
     }
 
@@ -225,8 +229,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             false
         };
 
+        let uses_group_by_with_watermarks = if let SetExpr::Select(ref select) = query.body {
+            select.group_by.iter().any(|group_expr| {
+                if let Expr::Identifier(group_ident) = group_expr {
+                    append_only_tables.iter().any(|table| {
+                        table.source_watermarks.iter().any(|watermark| {
+                            matches!(&watermark.expr, Expr::Identifier(w_ident) if w_ident.real_value() == group_ident.real_value())
+                        })
+                    })
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        };
+
         // Randomly choose emit mode if allowed
-        let emit_mode = if uses_append_only_table {
+        let emit_mode = if uses_append_only_table && uses_group_by_with_watermarks {
             match self.rng.random_range(0..3) {
                 0 => Some(EmitMode::Immediately),
                 1 => Some(EmitMode::OnWindowClose),
