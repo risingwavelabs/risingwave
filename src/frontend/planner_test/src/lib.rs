@@ -32,6 +32,7 @@ use risingwave_frontend::handler::{
     HandlerArgs, create_index, create_mv, create_schema, create_source, create_table, create_view,
     drop_table, explain, variable,
 };
+use risingwave_frontend::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{LocalFrontend, create_proto_file, get_explain_output};
 use risingwave_frontend::{
@@ -39,7 +40,7 @@ use risingwave_frontend::{
     WithOptionsSecResolved, build_graph, explain_stream_graph,
 };
 use risingwave_sqlparser::ast::{
-    AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
+    AstOption, BackfillOrderStrategy, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,8 @@ pub enum TestType {
     EowcStreamPlan,
     /// Create MV fragments plan with EOWC semantics
     EowcStreamDistPlan,
+    /// Create Backfill Order Plan
+    BackfillOrderPlan,
 
     /// Create sink plan (assumes blackhole sink)
     /// TODO: Other sinks
@@ -220,6 +223,9 @@ pub struct TestCaseResult {
 
     /// Create MV fragments plan with EOWC semantics
     pub eowc_stream_dist_plan: Option<String>,
+
+    /// Create Backfill Order Plan
+    pub backfill_order_plan: Option<String>,
 
     /// Error of binder
     pub binder_error: Option<String>,
@@ -827,8 +833,23 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan, None)?;
+                    let graph = build_graph(stream_plan.clone(), None)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
+                }
+
+                if self.expected_outputs.contains(&TestType::BackfillOrderPlan) {
+                    match explain_backfill_order_in_dot_format(
+                        &session,
+                        BackfillOrderStrategy::Auto,
+                        stream_plan,
+                    ) {
+                        Ok(formatted_order_plan) => {
+                            ret.backfill_order_plan = Some(formatted_order_plan);
+                        }
+                        Err(err) => {
+                            *ret_error_str = Some(err.to_report_string_pretty());
+                        }
+                    }
                 }
             }
         }
