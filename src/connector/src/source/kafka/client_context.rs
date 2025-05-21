@@ -28,9 +28,9 @@ use tokio::time::interval;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
 use super::stats::RdKafkaStats;
-use crate::Duration;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
+use crate::Duration;
 
 struct IamAuthEnv {
     credentials_provider: SharedCredentialsProvider,
@@ -141,13 +141,11 @@ impl KafkaContextCommon {
         if let Some(IamAuthEnv {
             credentials_provider,
             region,
-            signer_timeout_sec,
             ..
         }) = &self.auth
         {
             let region = region.clone();
             let credentials_provider = credentials_provider.clone();
-            let signer_timeout_sec = *signer_timeout_sec;
             let (token, expiration_time_ms) = {
                 tokio::task::block_in_place(move || {
                     KAFKA_SOURCE_RUNTIME.block_on(async {

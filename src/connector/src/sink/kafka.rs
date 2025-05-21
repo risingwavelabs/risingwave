@@ -35,8 +35,8 @@ use with_options::WithOptions;
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
 use crate::connector_common::{
-    AwsAuthProps, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
-    RdKafkaPropertiesCommon, read_kafka_log_level,
+    read_kafka_log_level, AwsAuthProps, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
+    RdKafkaPropertiesCommon,
 };
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;

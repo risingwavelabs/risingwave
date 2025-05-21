@@ -23,7 +23,6 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use prometheus::core::{AtomicI64, GenericGauge};
-use rdkafka::config::RDKafkaLogLevel;
 use rdkafka;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
