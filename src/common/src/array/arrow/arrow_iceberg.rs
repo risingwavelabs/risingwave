@@ -24,7 +24,9 @@ pub use super::arrow_54::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
     is_parquet_schema_match_source_schema,
 };
-use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
+use crate::array::{
+    Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
+};
 use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
@@ -116,6 +118,11 @@ impl ToArrow for IcebergArrowConvert {
     }
 
     #[inline]
+    fn interval_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Utf8
+    }
+
+    #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
         // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
         let data_type =
@@ -168,6 +175,13 @@ impl ToArrow for IcebergArrowConvert {
             .map_err(ArrayError::from_arrow)?;
         Ok(Arc::new(array) as ArrayRef)
     }
+
+    fn interval_to_arrow(
+        &self,
+        array: &IntervalArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::StringArray::from(array)))
+    }
 }
 
 impl FromArrow for IcebergArrowConvert {}
@@ -219,6 +233,11 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
         self.add_field_id(&mut arrow_field);
         arrow_field
+    }
+
+    #[inline]
+    fn interval_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Utf8
     }
 
     fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {

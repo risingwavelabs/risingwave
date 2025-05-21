@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
+use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
@@ -29,7 +30,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
-    hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
+    HummockVersionId, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
@@ -270,11 +271,14 @@ impl HummockManager {
         Ok(())
     }
 
-    pub(crate) async fn filter_out_objects_by_time_travel(
+    pub(crate) async fn filter_out_objects_by_time_travel_v1(
         &self,
         objects: impl Iterator<Item = HummockObjectId>,
-        batch_size: usize,
     ) -> Result<HashSet<HummockObjectId>> {
+        let batch_size = self
+            .env
+            .opts
+            .hummock_time_travel_filter_out_objects_batch_size;
         // The input object count is much smaller than time travel pinned object count in meta store.
         // So search input object in meta store.
         let mut result: HashSet<_> = objects.collect();
@@ -309,6 +313,94 @@ impl HummockManager {
                 result.remove(&object_id);
             }
         }
+        Ok(result)
+    }
+
+    pub(crate) async fn filter_out_objects_by_time_travel(
+        &self,
+        objects: impl Iterator<Item = HummockObjectId>,
+    ) -> Result<HashSet<HummockObjectId>> {
+        if self.env.opts.hummock_time_travel_filter_out_objects_v1 {
+            return self.filter_out_objects_by_time_travel_v1(objects).await;
+        }
+        let mut result: HashSet<_> = objects.collect();
+
+        // filtered out object id pinned by time travel hummock version
+        {
+            let mut prev_version_id: Option<HummockVersionId> = None;
+            loop {
+                let query = hummock_time_travel_version::Entity::find();
+                let query = if let Some(prev_version_id) = prev_version_id {
+                    query.filter(hummock_time_travel_version::Column::VersionId.gt(prev_version_id))
+                } else {
+                    query
+                };
+                let mut version_stream = query
+                    .order_by_asc(hummock_time_travel_version::Column::VersionId)
+                    .limit(
+                        self.env
+                            .opts
+                            .hummock_time_travel_filter_out_objects_list_version_batch_size
+                            as u64,
+                    )
+                    .stream(&self.env.meta_store_ref().conn)
+                    .await?;
+                let mut next_prev_version_id = None;
+                while let Some(model) = version_stream.try_next().await? {
+                    let version =
+                        HummockVersion::from_persisted_protobuf(&model.version.to_protobuf());
+                    for object_id in version.get_object_ids(true) {
+                        result.remove(&object_id);
+                    }
+                    next_prev_version_id = Some(model.version_id);
+                }
+                if let Some(next_prev_version_id) = next_prev_version_id {
+                    prev_version_id = Some(next_prev_version_id);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // filtered out object ids pinned by time travel hummock version delta
+        {
+            let mut prev_version_id: Option<HummockVersionId> = None;
+            loop {
+                let query = hummock_time_travel_delta::Entity::find();
+                let query = if let Some(prev_version_id) = prev_version_id {
+                    query.filter(hummock_time_travel_delta::Column::VersionId.gt(prev_version_id))
+                } else {
+                    query
+                };
+                let mut version_stream = query
+                    .order_by_asc(hummock_time_travel_delta::Column::VersionId)
+                    .limit(
+                        self.env
+                            .opts
+                            .hummock_time_travel_filter_out_objects_list_delta_batch_size
+                            as u64,
+                    )
+                    .stream(&self.env.meta_store_ref().conn)
+                    .await?;
+                let mut next_prev_version_id = None;
+                while let Some(model) = version_stream.try_next().await? {
+                    let version_delta = HummockVersionDelta::from_persisted_protobuf(
+                        &model.version_delta.to_protobuf(),
+                    );
+                    // set exclude_table_change_log to true because in time travel delta we ignore the table change log
+                    for object_id in version_delta.newly_added_object_ids(true) {
+                        result.remove(&object_id);
+                    }
+                    next_prev_version_id = Some(model.version_id);
+                }
+                if let Some(next_prev_version_id) = next_prev_version_id {
+                    prev_version_id = Some(next_prev_version_id);
+                } else {
+                    break;
+                }
+            }
+        }
+
         Ok(result)
     }
 
