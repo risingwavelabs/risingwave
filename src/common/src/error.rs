@@ -18,4 +18,5 @@
 //! only re-export them here.
 
 pub use risingwave_error::common::*;
+pub use risingwave_error::wrappers::*;
 pub use risingwave_error::*;
