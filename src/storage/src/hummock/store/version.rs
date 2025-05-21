@@ -390,7 +390,7 @@ impl HummockReadVersion {
                     }));
 
                     if let Some(committed_watermarks) =
-                        self.committed.table_watermarks.get(&self.table_id)
+                        committed_version.table_watermarks.get(&self.table_id)
                     {
                         if let Some(watermark_index) = &mut self.table_watermarks {
                             watermark_index.apply_committed_watermarks(
