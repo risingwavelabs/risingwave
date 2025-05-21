@@ -22,8 +22,7 @@ use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    ColumnDef, EmitMode, Expr, FunctionArg, FunctionArgExpr, Ident, ObjectName, SetExpr,
-    SourceWatermark, Statement, TableFactor,
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SetExpr, SourceWatermark, Statement, TableFactor,
 };
 
 mod agg;
@@ -225,11 +224,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
 
         let uses_append_only_table = self.uses_append_only_table(&query.body, &append_only_tables);
-        let uses_valid_window_function =
-            self.uses_valid_window_function(&query.body, &append_only_tables);
 
         // Randomly choose emit mode if allowed
-        let emit_mode = if uses_append_only_table && uses_valid_window_function {
+        let emit_mode = if uses_append_only_table {
             match self.rng.random_range(0..3) {
                 0 => Some(EmitMode::Immediately),
                 1 => Some(EmitMode::OnWindowClose),
@@ -272,44 +269,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 } else {
                     false
                 }
-            })
-        } else {
-            false
-        }
-    }
-
-    /// Check whether the query uses a valid HOP or TUMBLE table function
-    /// whose time column matches a watermark column in an append-only table.
-    ///
-    /// This is the key condition for enabling `EMIT ON WINDOW CLOSE`.
-    /// Specifically, this function checks that:
-    ///   - The FROM clause uses a table function (TVF): `TUMBLE(...)` or `HOP(...)`
-    ///   - The second argument of the function is a time column
-    ///   - That column must match the `WATERMARK FOR ...` column in one of the append-only tables
-    fn uses_valid_window_function(&self, query: &SetExpr, append_only_tables: &[Table]) -> bool {
-        if let SetExpr::Select(select) = query {
-            select.from.iter().any(|table_with_joins| {
-                if let TableFactor::TableFunction { name, args, .. } = &table_with_joins.relation {
-                    let fn_name = name.real_value().to_lowercase();
-                    // Must be either HOP or TUMBLE
-                    if (fn_name == "hop" || fn_name == "tumble") && args.len() >= 2 {
-                        // Second argument is the time column
-                        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
-                            ident,
-                        ))) = &args[1]
-                        {
-                            let time_col = ident.real_value();
-                            // Match against any append-only table's watermark column
-                            return append_only_tables.iter().any(|table| {
-                                table
-                                    .source_watermarks
-                                    .iter()
-                                    .any(|wm| wm.column.real_value() == time_col)
-                            });
-                        }
-                    }
-                }
-                false
             })
         } else {
             false
