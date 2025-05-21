@@ -176,7 +176,7 @@ IcebergProperties:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load.
+    comments: Enable config load. This parameter set to true will load warehouse credentials from environment. Only allowed to be used in BYOC and self-hosted environment.
     required: false
     default: Default::default
   - name: hosted_catalog
