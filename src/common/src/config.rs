@@ -562,6 +562,19 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
 
+    #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_v1")]
+    pub hummock_time_travel_filter_out_objects_v1: bool,
+
+    #[serde(
+        default = "default::developer::hummock_time_travel_filter_out_objects_list_version_batch_size"
+    )]
+    pub hummock_time_travel_filter_out_objects_list_version_batch_size: usize,
+
+    #[serde(
+        default = "default::developer::hummock_time_travel_filter_out_objects_list_delta_batch_size"
+    )]
+    pub hummock_time_travel_filter_out_objects_list_delta_batch_size: usize,
+
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
 
@@ -2225,6 +2238,18 @@ pub mod default {
         }
 
         pub fn hummock_time_travel_filter_out_objects_batch_size() -> usize {
+            1000
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_v1() -> bool {
+            false
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_list_version_batch_size() -> usize {
+            10
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_list_delta_batch_size() -> usize {
             1000
         }
 
