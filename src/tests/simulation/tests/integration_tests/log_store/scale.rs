@@ -57,7 +57,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         setup_mv(&mut cluster, UNALIGNED_MV_NAME, true).await?;
         tracing::info!("setup tables and mv");
         run_amplification_workload(&mut cluster, dimension_count).await?;
-        tracing::info!("ran amplification workload");
+        tracing::info!("ran initial amplification workload");
         assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
 
         async fn assert_parallelism_eq(session: &mut Session, parallelism: usize) {
@@ -75,7 +75,9 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
 
         /// Trigger a number of scale operations, with different combinations of nodes
         for (a, b) in (1..=2).tuple_combinations() {
+            tracing::info!("running delete amplification workload");
             delete_amplification_workload(&mut cluster).await?;
+            tracing::info!("ran delete amplification workload");
             let node_name_a = format!("compute-{a}");
             let node_name_b = format!("compute-{b}");
             let nodes = vec![node_name_a.clone(), node_name_b.clone()];
@@ -97,7 +99,9 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             assert_parallelism_eq(&mut session, 10).await;
             assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
 
+            tracing::info!("running insert amplification workload");
             run_amplification_workload(&mut cluster, dimension_count).await?;
+            tracing::info!("ran insert amplification workload");
         }
 
         wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
