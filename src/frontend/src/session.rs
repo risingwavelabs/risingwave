@@ -752,16 +752,6 @@ impl From<CheckRelationError> for RwError {
     }
 }
 
-#[derive(Debug)]
-pub enum DuplicateCheckOutcome {
-    NotExists,
-    ExistsAndIgnored(RwPgResponse),
-    AwaitingOngoingCreation {
-        database_id: DatabaseId,
-        job_id: TableId,
-    },
-}
-
 impl SessionImpl {
     pub(crate) fn new(
         env: FrontendEnv,
@@ -940,7 +930,7 @@ impl SessionImpl {
         name: ObjectName,
         stmt_type: StatementType,
         if_not_exists: bool,
-    ) -> std::result::Result<DuplicateCheckOutcome, CheckRelationError> {
+    ) -> std::result::Result<Either<(), RwPgResponse>, CheckRelationError> {
         let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -958,34 +948,21 @@ impl SessionImpl {
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
             Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
-                if let Some(table) = catalog_reader
-                    .get_schema_by_name(db_name, &schema_name)?
-                    .get_table_by_name(&relation_name)
-                {
-                    let background_ddl = self.config().background_ddl();
-                    if !background_ddl && is_creating {
-                        return Ok(DuplicateCheckOutcome::AwaitingOngoingCreation {
-                            database_id: table.database_id,
-                            job_id: table.id,
-                        });
-                    }
-                }
-                let is_creating_str = if is_creating {
-                    " but still creating"
+                // If relation is created, return directly.
+                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                // Only the type in StreamingJob may be is_creating, defined in streaming_job.rs.
+                if !is_creating {
+                    Ok(Either::Right(
+                        PgResponse::builder(stmt_type)
+                            .notice(format!("relation \"{}\" already exists, skipping", name))
+                            .into(),
+                    ))
                 } else {
-                    ""
-                };
-                Ok(DuplicateCheckOutcome::ExistsAndIgnored(
-                    PgResponse::builder(stmt_type)
-                        .notice(format!(
-                            "relation \"{}\" already exists{}, skipping",
-                            name, is_creating_str
-                        ))
-                        .into(),
-                ))
+                    Ok(Either::Left(()))
+                }
             }
             Err(e) => Err(e.into()),
-            Ok(_) => Ok(DuplicateCheckOutcome::NotExists),
+            Ok(_) => Ok(Either::Left(())),
         }
     }
 

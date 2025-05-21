@@ -17,6 +17,7 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -39,7 +40,7 @@ use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMa
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{DuplicateCheckOutcome, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 
 pub(crate) fn resolve_index_schema(
@@ -436,13 +437,11 @@ pub async fn handle_create_index(
             Ident::with_quote_unchecked('"', &schema_name),
             Ident::with_quote_unchecked('"', &index_table_name),
         ]);
-        if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session
-            .check_relation_name_duplicated(
-                qualified_index_name,
-                StatementType::CREATE_INDEX,
-                if_not_exists,
-            )?
-        {
+        if let Either::Right(resp) = session.check_relation_name_duplicated(
+            qualified_index_name,
+            StatementType::CREATE_INDEX,
+            if_not_exists,
+        )? {
             return Ok(resp);
         }
 
@@ -481,7 +480,7 @@ pub async fn handle_create_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_index(index, index_table, graph)
+        .create_index(index, index_table, graph, if_not_exists)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

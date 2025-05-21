@@ -81,8 +81,8 @@ use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::session::{DuplicateCheckOutcome, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
 use crate::{Binder, Explain, TableCatalog, WithOptions};
@@ -1387,7 +1387,7 @@ pub async fn handle_create_table(
         }
     }
 
-    if let DuplicateCheckOutcome::ExistsAndIgnored(resp) = session.check_relation_name_duplicated(
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
         StatementType::CREATE_TABLE,
         if_not_exists,
@@ -1432,7 +1432,7 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, hummock_table, graph, job_type)
+                .create_table(source, hummock_table, graph, job_type, if_not_exists)
                 .await?;
         }
         Engine::Iceberg => {
@@ -1444,6 +1444,7 @@ pub async fn handle_create_table(
                 graph,
                 table_name,
                 job_type,
+                if_not_exists,
             )
             .await?;
         }
@@ -1469,6 +1470,7 @@ pub async fn create_iceberg_engine_table(
     graph: StreamFragmentGraph,
     table_name: ObjectName,
     job_type: PbTableJobType,
+    if_not_exists: bool,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
@@ -1783,7 +1785,7 @@ pub async fn create_iceberg_engine_table(
     // TODO(iceberg): make iceberg engine table creation ddl atomic
     let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, job_type)
+        .create_table(source, table, graph, job_type, if_not_exists)
         .await?;
     let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
     if res.is_err() {
