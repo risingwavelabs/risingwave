@@ -89,6 +89,9 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
+
+use crate::handler::drop_table::handle_drop_table;
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -1709,6 +1712,44 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
 
+    let partition_by = handler_args
+        .with_options
+        .get("partition_by")
+        .map(|v| v.to_owned());
+
+    if let Some(partition_by) = &partition_by {
+        let mut partition_columns = vec![];
+        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
+            table_catalog
+                .columns()
+                .iter()
+                .find(|col| col.name().eq_ignore_ascii_case(&column))
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "Partition source column does not exist in schema: {}",
+                        column
+                    ))
+                })?;
+
+            partition_columns.push(column.to_owned());
+        }
+
+        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
+            |_| {
+                ErrorCode::InvalidInputSyntax(
+                    "The partition columns should be the prefix of the primary key".to_owned(),
+                )
+            },
+        )?;
+
+        sink_with.insert("partition_by".to_owned(), partition_by.to_owned());
+
+        // remove partition_by from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("partition_by"));
+    }
+
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
 
@@ -1744,8 +1785,19 @@ pub async fn create_iceberg_engine_table(
     catalog_writer
         .create_table(source, table, graph, job_type)
         .await?;
-    create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await?;
-    create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
+    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
+    if res.is_err() {
+        // Since we don't support ddl atomicity, we need to drop the partial created table.
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        res?;
+    }
+    let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
+    if res.is_err() {
+        // Since we don't support ddl atomicity, we need to drop the partial created table.
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        res?;
+    }
+
     if has_connector {
         alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
             handler_args,
@@ -1783,6 +1835,26 @@ pub fn check_create_table_with_source(
         })?;
     }
     Ok(format_encode)
+}
+
+fn ensure_partition_columns_are_prefix_of_primary_key(
+    partition_columns: &[String],
+    primary_key_columns: &[String],
+) -> std::result::Result<(), String> {
+    if partition_columns.len() > primary_key_columns.len() {
+        return Err("Partition columns cannot be longer than primary key columns.".to_owned());
+    }
+
+    for (i, partition_col) in partition_columns.iter().enumerate() {
+        if primary_key_columns.get(i) != Some(partition_col) {
+            return Err(format!(
+                "Partition column '{}' is not a prefix of the primary key.",
+                partition_col
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -257,7 +257,7 @@ select * from t_hosted_catalog;
 1 xxx
 
 query ?
-select count(*) from rw_catalog.iceberg_tables where table_namespace = 'public' and table_name = 't_hosted_catalog';
+select count(*) from rw_catalog.iceberg_tables where catalog_name = 'dev' AND table_namespace = 'public' and table_name = 't_hosted_catalog';
 ----
 1
 
@@ -270,9 +270,37 @@ statement ok
 DROP TABLE t_hosted_catalog;
 
 query ?
-select count(*) from rw_catalog.iceberg_tables;
+select count(*) from rw_catalog.iceberg_tables where catalog_name = 'dev';
 ----
 0
+
+statement ok
+create table t_partition1(id int primary key, name varchar) with(commit_checkpoint_interval = 1, partition_by='id') engine = iceberg;
+
+statement ok
+create table t_partition2(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c1,c2') engine = iceberg;
+
+statement ok
+create table t_partition3(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='bucket(4, c1),c2') engine = iceberg;
+
+statement ok
+create table t_partition4(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c1,truncate(8, c2)') engine = iceberg;
+
+# the partition key should be the prefix of the primary key
+statement error
+create table t_partition5(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c2,c3') engine = iceberg;
+
+statement ok
+DROP TABLE t_partition1;
+
+statement ok
+DROP TABLE t_partition2;
+
+statement ok
+DROP TABLE t_partition3;
+
+statement ok
+DROP TABLE t_partition4;
 
 statement ok
 DROP CONNECTION public.my_hosted_catalog_conn;
