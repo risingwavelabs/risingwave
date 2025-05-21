@@ -214,7 +214,7 @@ pub struct IcebergConnection {
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
 
-    /// Enable config load. This parameter set to true will load warehouse credentials from environment. Only allowed to be used in BYOC and self-hosted environment.
+    /// Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
 
