@@ -2023,7 +2023,7 @@ pub fn parse_partition_by_exprs(
             (
                 &mat["field"],
                 Transform::from_str(&func)
-                    .map_err(|e| anyhow!("invalid transform function {}", e.as_report()))?,
+                    .map_err(|e| anyhow!("invalid transform function {}", func))?,
             )
         };
         partition_columns.push((column.to_owned(), transform));
