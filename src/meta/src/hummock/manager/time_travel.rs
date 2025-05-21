@@ -25,7 +25,9 @@ use risingwave_hummock_sdk::time_travel::{
     IncompleteHummockVersion, IncompleteHummockVersionDelta, refill_version,
 };
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId, HummockSstableObjectId,
+};
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
     HummockVersionId, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
@@ -269,12 +271,59 @@ impl HummockManager {
         Ok(())
     }
 
+    pub(crate) async fn filter_out_objects_by_time_travel_v1(
+        &self,
+        objects: impl Iterator<Item = HummockObjectId>,
+    ) -> Result<HashSet<HummockObjectId>> {
+        let batch_size = self
+            .env
+            .opts
+            .hummock_time_travel_filter_out_objects_batch_size;
+        // The input object count is much smaller than time travel pinned object count in meta store.
+        // So search input object in meta store.
+        let mut result: HashSet<_> = objects.collect();
+        let mut remain_sst: VecDeque<_> = result
+            .iter()
+            .map(|object_id| {
+                let HummockObjectId::Sstable(sst_id) = object_id;
+                *sst_id
+            })
+            .collect();
+        while !remain_sst.is_empty() {
+            let batch = remain_sst
+                .drain(..std::cmp::min(remain_sst.len(), batch_size))
+                .map(|object_id| object_id.as_raw().inner());
+            let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
+                hummock_sstable_info::Entity::find()
+                    .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))
+                    .select_only()
+                    .column(hummock_sstable_info::Column::ObjectId)
+                    .into_tuple()
+                    .all(&self.env.meta_store_ref().conn)
+                    .await?;
+            for reject in reject_object_ids {
+                // DO NOT REMOVE THIS LINE
+                // This is to ensure that when adding new variant to `HummockObjectId`,
+                // the compiler will warn us if we forget to handle it here.
+                match HummockObjectId::Sstable(0.into()) {
+                    HummockObjectId::Sstable(_) => {}
+                };
+                let reject: u64 = reject.try_into().unwrap();
+                let object_id = HummockObjectId::Sstable(HummockSstableObjectId::from(reject));
+                result.remove(&object_id);
+            }
+        }
+        Ok(result)
+    }
+
     pub(crate) async fn filter_out_objects_by_time_travel(
         &self,
         objects: impl Iterator<Item = HummockObjectId>,
     ) -> Result<HashSet<HummockObjectId>> {
+        if self.env.opts.hummock_time_travel_filter_out_objects_v1 {
+            return self.filter_out_objects_by_time_travel_v1(objects).await;
+        }
         let mut result: HashSet<_> = objects.collect();
-        const MAX_BATCH_TIME_TRAVEL_VERSION_COUNT: u64 = 10;
 
         // filtered out object id pinned by time travel hummock version
         {
@@ -288,7 +337,12 @@ impl HummockManager {
                 };
                 let mut version_stream = query
                     .order_by_asc(hummock_time_travel_version::Column::VersionId)
-                    .limit(MAX_BATCH_TIME_TRAVEL_VERSION_COUNT)
+                    .limit(
+                        self.env
+                            .opts
+                            .hummock_time_travel_filter_out_objects_list_version_batch_size
+                            as u64,
+                    )
                     .stream(&self.env.meta_store_ref().conn)
                     .await?;
                 let mut next_prev_version_id = None;
@@ -320,7 +374,12 @@ impl HummockManager {
                 };
                 let mut version_stream = query
                     .order_by_asc(hummock_time_travel_delta::Column::VersionId)
-                    .limit(MAX_BATCH_TIME_TRAVEL_VERSION_COUNT)
+                    .limit(
+                        self.env
+                            .opts
+                            .hummock_time_travel_filter_out_objects_list_delta_batch_size
+                            as u64,
+                    )
                     .stream(&self.env.meta_store_ref().conn)
                     .await?;
                 let mut next_prev_version_id = None;
