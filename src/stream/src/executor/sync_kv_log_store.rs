@@ -632,6 +632,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             }
                                             let write_state_post_write_barrier =
                                                 Self::write_barrier(
+                                                    self.actor_context.id,
                                                     &mut write_state,
                                                     barrier.clone(),
                                                     &self.metrics,
@@ -891,13 +892,14 @@ impl<S: StateStoreRead> ReadFuture<S> {
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     async fn write_barrier<'a>(
+        actor_id: u32,
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &SyncedKvLogStoreMetrics,
         progress: LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
-        tracing::trace!(?progress, "applying truncation");
+        tracing::trace!(actor_id, ?progress, "applying truncation");
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
         // to reduce memory consumption of logstore.
 
