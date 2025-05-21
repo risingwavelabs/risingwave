@@ -380,45 +380,13 @@ impl IcebergSink {
             };
 
             let partition_spec = match &self.config.partition_by {
-                Some(partition_field) => {
+                Some(partition_by) => {
                     let mut partition_fields = Vec::<UnboundPartitionField>::new();
-                    // captures column, transform(column), transform(n,column), transform(n, column)
-                    let re = Regex::new(
-                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
-                    )
-                    .unwrap();
-                    if !re.is_match(partition_field) {
-                        bail!(format!(
-                            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
-                            partition_field
-                        ))
-                    }
-                    let caps = re.captures_iter(partition_field);
-                    for (i, mat) in caps.enumerate() {
-                        let (column, transform) =
-                            if mat.name("n").is_none() && mat.name("field").is_none() {
-                                (&mat["transform"], Transform::Identity)
-                            } else {
-                                let mut func = mat["transform"].to_owned();
-                                if func == "bucket" || func == "truncate" {
-                                    let n = &mat
-                                        .name("n")
-                                        .ok_or_else(|| {
-                                            SinkError::Iceberg(anyhow!(
-                                                "The `n` must be set with `bucket` and `truncate`"
-                                            ))
-                                        })?
-                                        .as_str();
-                                    func = format!("{func}[{n}]");
-                                }
-                                (
-                                    &mat["field"],
-                                    Transform::from_str(&func)
-                                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?,
-                                )
-                            };
-
-                        match iceberg_schema.field_id_by_name(column) {
+                    for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        match iceberg_schema.field_id_by_name(&column) {
                             Some(id) => partition_fields.push(
                                 UnboundPartitionField::builder()
                                     .source_id(id)
@@ -2023,6 +1991,44 @@ pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
 
 pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
+}
+
+pub fn parse_partition_by_exprs(
+    expr: String,
+) -> std::result::Result<Vec<(String, Transform)>, anyhow::Error> {
+    // captures column, transform(column), transform(n,column), transform(n, column)
+    let re = Regex::new(r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?").unwrap();
+    if !re.is_match(&expr) {
+        bail!(format!(
+            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
+            expr
+        ))
+    }
+    let caps = re.captures_iter(&expr);
+
+    let mut partition_columns = vec![];
+
+    for mat in caps {
+        let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none() {
+            (&mat["transform"], Transform::Identity)
+        } else {
+            let mut func = mat["transform"].to_owned();
+            if func == "bucket" || func == "truncate" {
+                let n = &mat
+                    .name("n")
+                    .ok_or_else(|| anyhow!("The `n` must be set with `bucket` and `truncate`"))?
+                    .as_str();
+                func = format!("{func}[{n}]");
+            }
+            (
+                &mat["field"],
+                Transform::from_str(&func)
+                    .map_err(|e| anyhow!("invalid transform function {}", e.as_report()))?,
+            )
+        };
+        partition_columns.push((column.to_owned(), transform));
+    }
+    Ok(partition_columns)
 }
 
 #[cfg(test)]

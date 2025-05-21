@@ -14,16 +14,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
-use iceberg::spec::Transform;
 use itertools::Itertools;
-use parse_display::helpers::regex::Regex;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
@@ -92,6 +89,7 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
 
 use crate::handler::drop_table::handle_drop_table;
 
@@ -1720,50 +1718,12 @@ pub async fn create_iceberg_engine_table(
         .map(|v| v.to_owned());
 
     if let Some(partition_by) = &partition_by {
-        // captures column, transform(column), transform(n,column), transform(n, column)
-        let re =
-            Regex::new(r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?").unwrap();
-        if !re.is_match(partition_by) {
-            bail!(format!(
-                "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
-                partition_by
-            ))
-        }
-        let caps = re.captures_iter(partition_by);
-
         let mut partition_columns = vec![];
-
-        for mat in caps {
-            let (column, _) = if mat.name("n").is_none() && mat.name("field").is_none() {
-                (&mat["transform"], Transform::Identity)
-            } else {
-                let mut func = mat["transform"].to_owned();
-                if func == "bucket" || func == "truncate" {
-                    let n = &mat
-                        .name("n")
-                        .ok_or_else(|| {
-                            ErrorCode::InvalidInputSyntax(
-                                "The `n` must be set with `bucket` and `truncate`".to_owned(),
-                            )
-                        })?
-                        .as_str();
-                    func = format!("{func}[{n}]");
-                }
-                (
-                    &mat["field"],
-                    Transform::from_str(&func).map_err(|e| {
-                        ErrorCode::InvalidInputSyntax(format!(
-                            "invalid transform function {}",
-                            e.as_report()
-                        ))
-                    })?,
-                )
-            };
-
+        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
             table_catalog
                 .columns()
                 .iter()
-                .find(|col| col.name().eq_ignore_ascii_case(column))
+                .find(|col| col.name().eq_ignore_ascii_case(&column))
                 .ok_or_else(|| {
                     ErrorCode::InvalidInputSyntax(format!(
                         "Partition source column does not exist in schema: {}",
