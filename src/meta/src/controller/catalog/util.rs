@@ -428,27 +428,19 @@ impl CatalogController {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             node.input.retain_mut(|input| match &mut input.node_body {
                                 Some(NodeBody::Project(_)) => {
-                                    let body = input.input.iter().exactly_one().unwrap();
+                                    let body = input
+                                        .input
+                                        .iter()
+                                        .exactly_one()
+                                        .expect("Project node must have exactly one input");
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };
-                                    if all_fragment_ids
+                                    all_fragment_ids
                                         .contains(&(merge_node.upstream_fragment_id as i32))
-                                    {
-                                        true
-                                    } else {
-                                        false
-                                    }
                                 }
-                                Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
-                                    {
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }
+                                Some(NodeBody::Merge(merge_node)) => all_fragment_ids
+                                    .contains(&(merge_node.upstream_fragment_id as i32)),
                                 _ => false,
                             });
                         }
