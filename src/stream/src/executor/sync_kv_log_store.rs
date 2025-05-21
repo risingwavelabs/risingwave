@@ -643,6 +643,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             let update_vnode_bitmap = barrier
                                                 .as_update_vnode_bitmap(self.actor_context.id);
                                             let barrier_epoch = barrier.epoch;
+                                            tracing::trace!(
+                                                ?update_vnode_bitmap,
+                                                actor_id = self.actor_context.id,
+                                                "update vnode bitmap"
+                                            );
 
                                             yield Message::Barrier(barrier);
 
