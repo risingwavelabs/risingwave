@@ -349,7 +349,7 @@ impl HummockManager {
                 while let Some(model) = version_stream.try_next().await? {
                     let version =
                         HummockVersion::from_persisted_protobuf(&model.version.to_protobuf());
-                    for object_id in version.get_object_ids(false) {
+                    for object_id in version.get_object_ids(true) {
                         result.remove(&object_id);
                     }
                     next_prev_version_id = Some(model.version_id);
