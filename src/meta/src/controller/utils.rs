@@ -568,7 +568,11 @@ where
                             .await?,
                         Some(JobStatus::Created)
                     ) {
-                    Err(MetaError::catalog_under_creation($obj_type.as_str(), name))
+                    Err(MetaError::catalog_under_creation(
+                        $obj_type.as_str(),
+                        name,
+                        oid,
+                    ))
                 } else {
                     Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
                 };

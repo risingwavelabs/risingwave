@@ -942,13 +942,12 @@ impl DdlController {
             if !if_not_exists {
                 return Err(meta_err);
             }
-            if let MetaErrorInner::Duplicated(_, _, is_creating) = meta_err.inner() {
-                if *is_creating && streaming_job.create_type() == CreateType::Foreground {
+            if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
+                if streaming_job.create_type() == CreateType::Foreground {
                     let database_id = streaming_job.database_id();
-                    let job_id = streaming_job.id();
                     return self
                         .metadata_manager
-                        .wait_streaming_job_finished(database_id.into(), job_id as _)
+                        .wait_streaming_job_finished(database_id.into(), *job_id)
                         .await;
                 } else {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
