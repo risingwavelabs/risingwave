@@ -2,23 +2,11 @@
 
 ##################### Common
 
-psql_remote() {
+run_psql() {
   psql "$PSQL_URL" "$@"
 }
 
-export -f psql_remote
-
-# Ensure you're using release-profile via ./risedev configure
-setup() {
-  ./risedev k
-  ./risedev clean-data
-  ./risedev d full
-}
-
-cleanup() {
-  ./risedev k
-  ./risedev clean-data
-}
+export -f run_psql
 
 prepare() {
   bench_prepare="
@@ -109,13 +97,13 @@ prepare() {
     SELECT t.id as id, 'type_' || t.id::text
     FROM generate_series(1, 115000) t(id);
   "
-  psql_remote -c "${bench_prepare}"
+  run_psql -c "${bench_prepare}"
 
   # Wait for car_sales to generate some data
   sleep 10
 
   # Create a snapshot of car_sales
-  psql_remote -c "
+  run_psql -c "
     CREATE TABLE car_sales_snapshot AS SELECT * FROM car_sales;
     DROP TABLE car_sales;
     ALTER TABLE car_sales_snapshot RENAME TO car_sales;
@@ -131,7 +119,7 @@ conclude() {
     drop table if exists car_colors;
     drop table if exists car_types;
   "
-  psql_remote -c "${bench_teardown}"
+  run_psql -c "${bench_teardown}"
 }
 
 export -f setup
@@ -180,7 +168,7 @@ worst_benchmark() {
           price_ranges
         GROUP BY name, region, color, type, price_range;
   "
-  psql_remote -c "${bench_workload}"
+  run_psql -c "${bench_workload}"
 }
 
 export -f worst_benchmark
@@ -224,7 +212,7 @@ baseline_benchmark() {
           price_ranges
         GROUP BY name, region, color, type, price_range;
   "
-  psql_remote -c "${bench_workload}"
+  run_psql -c "${bench_workload}"
 }
 
 export -f baseline_benchmark
@@ -270,7 +258,7 @@ optimized_benchmark() {
           price_ranges
         GROUP BY name, region, color, type, price_range;
   "
-  psql_remote -c "${bench_workload}"
+  run_psql -c "${bench_workload}"
 }
 
 export -f optimized_benchmark
