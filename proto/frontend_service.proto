@@ -18,6 +18,24 @@ message GetTableReplacePlanResponse {
   ddl_service.ReplaceJobPlan replace_plan = 1;
 }
 
+message GetRunningSqlsRequest {
+
+}
+
+message GetRunningSqlsResponse {
+  repeated RunningSql running_sqls = 1;
+}
+
+message RunningSql {
+  int32 process_id = 1;
+  string user_name = 2;
+  string peer_addr = 3;
+  string database = 4;
+  optional uint64 elapsed_millis = 5;
+  optional string sql = 6;
+}
+
 service FrontendService {
   rpc GetTableReplacePlan(GetTableReplacePlanRequest) returns (GetTableReplacePlanResponse);
+  rpc GetRunningSqls(GetRunningSqlsRequest) returns (GetRunningSqlsResponse);
 }

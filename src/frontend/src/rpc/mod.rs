@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_server::{BoxedError, SessionManager};
+use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
-use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
+use risingwave_pb::frontend_service::{
+    GetRunningSqlsRequest, GetRunningSqlsResponse, GetTableReplacePlanRequest,
+    GetTableReplacePlanResponse, RunningSql,
+};
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
@@ -24,7 +27,7 @@ use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 use crate::error::RwError;
 use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
-use crate::session::SESSION_MANAGER;
+use crate::session::{SESSION_MANAGER, SessionMapRef};
 
 #[derive(thiserror::Error, Debug)]
 pub enum AutoSchemaChangeError {
@@ -49,11 +52,13 @@ impl From<AutoSchemaChangeError> for tonic::Status {
 }
 
 #[derive(Default)]
-pub struct FrontendServiceImpl {}
+pub struct FrontendServiceImpl {
+    session_map: SessionMapRef,
+}
 
 impl FrontendServiceImpl {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(session_map: SessionMapRef) -> Self {
+        Self { session_map }
     }
 }
 
@@ -73,6 +78,29 @@ impl FrontendService for FrontendServiceImpl {
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
         }))
+    }
+
+    async fn get_running_sqls(
+        &self,
+        _request: RpcRequest<GetRunningSqlsRequest>,
+    ) -> Result<RpcResponse<GetRunningSqlsResponse>, Status> {
+        let running_sqls = self
+            .session_map
+            .read()
+            .values()
+            .map(|s| RunningSql {
+                process_id: s.id().0,
+                user_name: s.user_name(),
+                peer_addr: format!("{}", s.peer_addr()),
+                database: s.database(),
+                elapsed_millis: s
+                    .elapse_since_running_sql()
+                    .map(|e| e.try_into().ok())
+                    .flatten(),
+                sql: s.running_sql().map(|sql| format!("{}", sql)),
+            })
+            .collect();
+        Ok(RpcResponse::new(GetRunningSqlsResponse { running_sqls }))
     }
 }
 

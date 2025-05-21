@@ -1299,6 +1299,9 @@ pub struct BatchDeveloperConfig {
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
 
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
+
     #[serde(default = "default::developer::batch_local_execute_buffer_size")]
     pub local_execute_buffer_size: usize,
 }
