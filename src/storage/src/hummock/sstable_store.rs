@@ -21,7 +21,8 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    Engine, EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    HybridCacheProperties,
 };
 use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -83,14 +84,14 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CacheHint),
+    Fill(Hint),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CacheHint::Normal)
+        CachePolicy::Fill(Hint::Normal)
     }
 }
 
@@ -349,19 +350,15 @@ impl SstableStore {
                 sst.meta.block_metas[idx].uncompressed_size as usize,
                 true,
             )?;
-            let holder = if let CachePolicy::Fill(priority) = policy {
-                let cache_priority = if idx == block_index {
-                    priority
-                } else {
-                    CacheHint::Low
-                };
-                let entry = self.block_cache.insert_with_hint(
+            let holder = if let CachePolicy::Fill(hint) = policy {
+                let hint = if idx == block_index { hint } else { Hint::Low };
+                let entry = self.block_cache.insert_with_properties(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
                     },
                     Box::new(block),
-                    cache_priority,
+                    HybridCacheProperties::default().with_hint(hint),
                 );
                 BlockHolder::from_hybrid_cache_entry(entry)
             } else {
@@ -438,13 +435,13 @@ impl SstableStore {
         }
 
         match policy {
-            CachePolicy::Fill(context) => {
-                let entry = self.block_cache.fetch_with_hint(
+            CachePolicy::Fill(hint) => {
+                let entry = self.block_cache.fetch_with_properties(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
                     },
-                    context,
+                    HybridCacheProperties::default().with_hint(hint),
                     fetch_block,
                 );
                 if matches!(entry.state(), FetchState::Miss) {

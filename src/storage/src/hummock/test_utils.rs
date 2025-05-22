@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    CacheHint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    Hint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
 use itertools::Itertools;
@@ -397,7 +397,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         object_id,
         kv_iter,
         sstable_store.clone(),
-        CachePolicy::Fill(CacheHint::Normal),
+        CachePolicy::Fill(Hint::Normal),
         table_id_to_vnode,
         table_id_to_watermark_serde,
     )
