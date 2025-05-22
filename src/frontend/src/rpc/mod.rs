@@ -93,10 +93,7 @@ impl FrontendService for FrontendServiceImpl {
                 user_name: s.user_name(),
                 peer_addr: format!("{}", s.peer_addr()),
                 database: s.database(),
-                elapsed_millis: s
-                    .elapse_since_running_sql()
-                    .map(|e| e.try_into().ok())
-                    .flatten(),
+                elapsed_millis: s.elapse_since_running_sql().and_then(|e| e.try_into().ok()),
                 sql: s.running_sql().map(|sql| format!("{}", sql)),
             })
             .collect();

@@ -860,17 +860,17 @@ async fn show_process_list_impl(
 ) -> Vec<ShowProcessListRow> {
     // Create a placeholder row for the worker in case of any errors while fetching its running SQLs.
     fn on_error(worker_id: u32, err_msg: String) -> Vec<ShowProcessListRow> {
-        return vec![ShowProcessListRow {
+        vec![ShowProcessListRow {
             worker_id: format!("{}", worker_id),
-            id: "".to_string(),
-            user: "".to_string(),
-            host: "".to_string(),
-            database: "".to_string(),
+            id: "".to_owned(),
+            user: "".to_owned(),
+            host: "".to_owned(),
+            database: "".to_owned(),
             time: None,
             info: Some(format!(
                 "Failed to show process list from worker {worker_id} due to: {err_msg}"
             )),
-        }];
+        }]
     }
     let futures = worker_node_manager
         .list_frontend_nodes()
