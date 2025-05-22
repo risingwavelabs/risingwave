@@ -34,6 +34,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
+        let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
             object_id
         } else {
@@ -132,6 +133,26 @@ impl CatalogController {
                         return Err(MetaError::permission_denied(format!(
                             "Found sink into table in dependency: {}, please drop it manually",
                             sink.name,
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 1. Detect when an Iceberg table is part of the dependencies.
+        // 2. Drop database with iceberg tables in it is not supported.
+        if object_type != ObjectType::Table || drop_database {
+            for obj in &removed_objects {
+                // if the obj is iceberg engine table, bail out
+                if obj.obj_type == ObjectType::Table {
+                    let table = Table::find_by_id(obj.oid)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
+                    if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                        return Err(MetaError::permission_denied(format!(
+                            "Found iceberg table in dependency: {}, please drop it manually",
+                            table.name,
                         )));
                     }
                 }
