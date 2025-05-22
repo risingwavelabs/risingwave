@@ -30,7 +30,7 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
-use risingwave_meta_model::*;
+use risingwave_meta_model::{alter_connector_props, *};
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
@@ -1630,16 +1630,13 @@ impl CatalogController {
                     connector_type.as_str(),
                     SinkType,
                     {
-                        for (k, v) in &props {
-                            if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
-                                return Err(SinkError::Config(anyhow!(
-                                    "unsupported alter config: {}={}",
-                                    k,
-                                    v
-                                ))
-                                .into());
-                            }
-                        }
+                        check_alter_props_allowed(
+                            &txn,
+                            connector_type.as_str(),
+                            alter_connector_props::AlterPropsObjectType::Sink,
+                            props.keys(),
+                        )
+                        .await?;
                         let mut new_props = sink.properties.0.clone();
                         new_props.extend(props.clone());
                         SinkType::validate_alter_config(&new_props)
@@ -2085,4 +2082,34 @@ pub struct SinkIntoTableContext {
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,
+}
+
+async fn check_alter_props_allowed(
+    txn: &DatabaseTransaction,
+    connector_name: &str,
+    object_type: alter_connector_props::AlterPropsObjectType,
+    to_alter_prop_keys: impl IntoIterator<Item = &String>,
+) -> MetaResult<()> {
+    let allow_alter_props = AllowAlterConnectorProps::find()
+        .filter(alter_connector_props::Column::ObjectType.eq(object_type))
+        .one(txn)
+        .await?;
+
+    if let Some(allow_alter_props) = allow_alter_props {
+        for to_alter_key in to_alter_prop_keys {
+            if !allow_alter_props.allow_alter_props.contains(to_alter_key) {
+                return Err(MetaError::invalid_parameter(format!(
+                    "connector {} for {:?} cannot be altered, supported alter props: {:?}",
+                    connector_name, object_type, allow_alter_props.allow_alter_props
+                )));
+            }
+        }
+    } else {
+        return Err(MetaError::invalid_parameter(format!(
+            "connector {} for {:?} does not support alter props",
+            connector_name, object_type
+        )));
+    }
+
+    Ok(())
 }
