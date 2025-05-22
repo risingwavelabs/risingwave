@@ -11,6 +11,7 @@ chrono = { version = "0.4", default-features = false }
 fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 jni = { version = "0.21.1", features = ["invocation"] }
+opendal = { workspace = true }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
