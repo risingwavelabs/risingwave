@@ -144,6 +144,9 @@ batch_local_execute_buffer_size = 64
 [batch.developer.batch_compute_client_config]
 connect_timeout_secs = 5
 
+[batch.developer.batch_frontend_client_config]
+connect_timeout_secs = 5
+
 [frontend]
 max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
