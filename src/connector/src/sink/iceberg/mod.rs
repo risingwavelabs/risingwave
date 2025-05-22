@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
     DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
@@ -378,45 +379,13 @@ impl IcebergSink {
             };
 
             let partition_spec = match &self.config.partition_by {
-                Some(partition_field) => {
+                Some(partition_by) => {
                     let mut partition_fields = Vec::<UnboundPartitionField>::new();
-                    // captures column, transform(column), transform(n,column), transform(n, column)
-                    let re = Regex::new(
-                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
-                    )
-                    .unwrap();
-                    if !re.is_match(partition_field) {
-                        bail!(format!(
-                            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
-                            partition_field
-                        ))
-                    }
-                    let caps = re.captures_iter(partition_field);
-                    for (i, mat) in caps.enumerate() {
-                        let (column, transform) =
-                            if mat.name("n").is_none() && mat.name("field").is_none() {
-                                (&mat["transform"], Transform::Identity)
-                            } else {
-                                let mut func = mat["transform"].to_owned();
-                                if func == "bucket" || func == "truncate" {
-                                    let n = &mat
-                                        .name("n")
-                                        .ok_or_else(|| {
-                                            SinkError::Iceberg(anyhow!(
-                                                "The `n` must be set with `bucket` and `truncate`"
-                                            ))
-                                        })?
-                                        .as_str();
-                                    func = format!("{func}[{n}]");
-                                }
-                                (
-                                    &mat["field"],
-                                    Transform::from_str(&func)
-                                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?,
-                                )
-                            };
-
-                        match iceberg_schema.field_id_by_name(column) {
+                    for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        match iceberg_schema.field_id_by_name(&column) {
                             Some(id) => partition_fields.push(
                                 UnboundPartitionField::builder()
                                     .source_id(id)
@@ -1197,6 +1166,7 @@ impl SinkWriter for IcebergSinkWriter {
         let writer = self.writer.get_writer().unwrap();
         writer
             .write(batch)
+            .instrument_await("iceberg_write")
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
@@ -1217,7 +1187,9 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -1237,7 +1209,9 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -1258,7 +1232,9 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -1279,7 +1255,9 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let close_result = match writer.take() {
-                    Some(mut writer) => Some(writer.close().await),
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
                     _ => None,
                 };
                 match writer_builder.clone().build().await {
@@ -2012,6 +1990,44 @@ pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
 
 pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
+}
+
+pub fn parse_partition_by_exprs(
+    expr: String,
+) -> std::result::Result<Vec<(String, Transform)>, anyhow::Error> {
+    // captures column, transform(column), transform(n,column), transform(n, column)
+    let re = Regex::new(r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?").unwrap();
+    if !re.is_match(&expr) {
+        bail!(format!(
+            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
+            expr
+        ))
+    }
+    let caps = re.captures_iter(&expr);
+
+    let mut partition_columns = vec![];
+
+    for mat in caps {
+        let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none() {
+            (&mat["transform"], Transform::Identity)
+        } else {
+            let mut func = mat["transform"].to_owned();
+            if func == "bucket" || func == "truncate" {
+                let n = &mat
+                    .name("n")
+                    .ok_or_else(|| anyhow!("The `n` must be set with `bucket` and `truncate`"))?
+                    .as_str();
+                func = format!("{func}[{n}]");
+            }
+            (
+                &mat["field"],
+                Transform::from_str(&func)
+                    .with_context(|| format!("invalid transform function {}", func))?,
+            )
+        };
+        partition_columns.push((column.to_owned(), transform));
+    }
+    Ok(partition_columns)
 }
 
 #[cfg(test)]

@@ -46,7 +46,7 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
-use risingwave_storage::hummock::{MemoryLimiter, SstableObjectIdManager, SstableStore};
+use risingwave_storage::hummock::{MemoryLimiter, ObjectIdManager, SstableStore};
 use risingwave_storage::monitor::{
     CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, monitor_cache,
 };
@@ -245,7 +245,7 @@ pub async fn compactor_serve(
     // limited at first.
     let _observer_join_handle = observer_manager.start().await;
 
-    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+    let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
@@ -275,7 +275,7 @@ pub async fn compactor_serve(
             CompactorMode::Dedicated => risingwave_storage::hummock::compactor::start_compactor(
                 compactor_context.clone(),
                 hummock_meta_client.clone(),
-                sstable_object_id_manager.clone(),
+                object_id_manager.clone(),
                 compaction_catalog_manager_ref,
             ),
             CompactorMode::Shared => unreachable!(),

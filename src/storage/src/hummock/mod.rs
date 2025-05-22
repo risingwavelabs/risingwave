@@ -55,7 +55,9 @@ pub mod block_stream;
 mod iceberg_compactor_runner;
 mod time_travel_version_cache;
 
+mod object_id_manager;
 pub use error::*;
+pub use object_id_manager::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 pub use validator::*;
 use value::*;

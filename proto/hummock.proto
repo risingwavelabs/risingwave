@@ -429,11 +429,11 @@ message HummockPinnedSnapshot {
   uint64 minimal_pinned_snapshot = 2;
 }
 
-message GetNewSstIdsRequest {
+message GetNewObjectIdsRequest {
   uint32 number = 1;
 }
 
-message GetNewSstIdsResponse {
+message GetNewObjectIdsResponse {
   common.Status status = 1;
   // inclusive
   uint64 start_id = 2;
@@ -814,7 +814,7 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
+  rpc GetNewObjectIds(GetNewObjectIdsRequest) returns (GetNewObjectIdsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);

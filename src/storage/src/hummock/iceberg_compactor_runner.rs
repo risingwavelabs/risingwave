@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use bergloom_core::CompactionConfig;
 use bergloom_core::compaction::{Compaction, CompactionType};
-use iceberg::{Catalog, TableIdent};
+use iceberg::Catalog;
+use iceberg::TableIdent;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use thiserror_ext::AsReport;

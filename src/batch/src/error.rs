@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::disallowed_types, clippy::disallowed_methods)]
-
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
-use iceberg::Error as IcebergError;
 use mysql_async::Error as MySqlError;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{BoxedError, def_anyhow_newtype, def_anyhow_variant};
+use risingwave_common::error::{BoxedError, IcebergError, def_anyhow_newtype, def_anyhow_variant};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
@@ -198,4 +195,11 @@ def_anyhow_variant! {
     IcebergError => "Iceberg error",
     ParquetError => "Parquet error",
     MySqlError => "MySQL error",
+}
+
+#[expect(clippy::disallowed_types)]
+impl From<iceberg::Error> for BatchExternalSystemError {
+    fn from(value: iceberg::Error) -> Self {
+        risingwave_common::error::IcebergError::from(value).into()
+    }
 }

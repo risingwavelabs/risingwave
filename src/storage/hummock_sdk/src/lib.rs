@@ -160,6 +160,12 @@ impl HummockSstableObjectId {
     }
 }
 
+impl From<HummockRawObjectId> for HummockSstableObjectId {
+    fn from(id: HummockRawObjectId) -> Self {
+        Self(id.0)
+    }
+}
+
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
@@ -433,17 +439,17 @@ impl HummockReadEpoch {
         }
     }
 }
-pub struct SstObjectIdRange {
+pub struct ObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableObjectId,
+    pub start_id: HummockRawObjectId,
     // exclusive
-    pub end_id: HummockSstableObjectId,
+    pub end_id: HummockRawObjectId,
 }
 
-impl SstObjectIdRange {
+impl ObjectIdRange {
     pub fn new(
-        start_id: impl Into<HummockSstableObjectId>,
-        end_id: impl Into<HummockSstableObjectId>,
+        start_id: impl Into<HummockRawObjectId>,
+        end_id: impl Into<HummockRawObjectId>,
     ) -> Self {
         Self {
             start_id: start_id.into(),
@@ -451,7 +457,7 @@ impl SstObjectIdRange {
         }
     }
 
-    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
+    fn peek_next_object_id(&self) -> Option<HummockRawObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -459,8 +465,8 @@ impl SstObjectIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
-        let next_id = self.peek_next_sst_object_id();
+    pub fn get_next_object_id(&mut self) -> Option<HummockRawObjectId> {
+        let next_id = self.peek_next_object_id();
         self.start_id += 1;
         next_id
     }

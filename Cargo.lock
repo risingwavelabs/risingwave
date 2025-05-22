@@ -890,9 +890,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.40.0"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e23419d455dc57d3ae60a2f4278cf561fc74fe866e548e14d2b0ad3e1b8ca0b2"
+checksum = "2cf0ae68ffe9ef362127a2223b42f57104edb20a50429f8c6e058912212884f7"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1849,7 +1849,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 [[package]]
 name = "bergloom-codegen"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=ca396b3a3e37ac393db8a6cae4f7327856542318#ca396b3a3e37ac393db8a6cae4f7327856542318"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=9f536db3d27e2a7418e732481139e452fd99ef93#9f536db3d27e2a7418e732481139e452fd99ef93"
 dependencies = [
  "prost 0.12.6",
  "prost-build 0.12.6",
@@ -1860,7 +1860,7 @@ dependencies = [
 [[package]]
 name = "bergloom-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=ca396b3a3e37ac393db8a6cae4f7327856542318#ca396b3a3e37ac393db8a6cae4f7327856542318"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=9f536db3d27e2a7418e732481139e452fd99ef93#9f536db3d27e2a7418e732481139e452fd99ef93"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6794,7 +6794,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fd79d47#fd79d4784cba62fcc2442f47e0afd401ed9aa559"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6846,7 +6846,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fd79d47#fd79d4784cba62fcc2442f47e0afd401ed9aa559"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6863,7 +6863,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fd79d47#fd79d4784cba62fcc2442f47e0afd401ed9aa559"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6883,7 +6883,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-sql"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fd79d47#fd79d4784cba62fcc2442f47e0afd401ed9aa559"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
 dependencies = [
  "async-trait",
  "iceberg",
@@ -6896,7 +6896,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fd79d47#fd79d4784cba62fcc2442f47e0afd401ed9aa559"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9529,6 +9529,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
+dependencies = [
+ "fixedbitset 0.5.7",
+ "hashbrown 0.15.2",
+ "indexmap 2.9.0",
+ "serde",
+]
+
+[[package]]
 name = "pg_bigdecimal"
 version = "0.1.5"
 source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=0b7893d88894ca082b4525f94f812da034486f7c#0b7893d88894ca082b4525f94f812da034486f7c"
@@ -11977,6 +11989,7 @@ dependencies = [
  "anyhow",
  "bincode 1.3.3",
  "easy-ext",
+ "iceberg",
  "madsim-tonic",
  "serde",
  "serde-error",
@@ -12130,7 +12143,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
- "petgraph 0.7.1",
+ "petgraph 0.8.1",
  "pgwire",
  "pin-project-lite",
  "postgres-types",
@@ -12750,6 +12763,8 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_sqlparser",
+ "serde",
+ "serde_yaml",
  "similar",
  "thiserror-ext",
  "tokio-postgres",
