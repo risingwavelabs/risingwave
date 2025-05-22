@@ -162,6 +162,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Struct(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Uuid(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Map(_) => {
                 bail_not_implemented!(
                     issue = 7949,

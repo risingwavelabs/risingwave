@@ -52,6 +52,7 @@ impl DataType {
                 AstDataType::Map(Box::new((map.key().to_ast(), map.value().to_ast())))
             }
             DataType::Serial => unreachable!("serial type should not be user-defined"),
+            DataType::Uuid => AstDataType::Uuid,
         }
     }
 }
