@@ -803,7 +803,7 @@ profile:
         port: 5432
         address: db
         user: postgres
-        password: postgres
+        password: postgresx
         user-managed: true
 
   ci-redis:
