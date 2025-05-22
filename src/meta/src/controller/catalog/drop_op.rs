@@ -139,11 +139,9 @@ impl CatalogController {
             }
         }
 
-        // 1. Detect the case where the iceberg table created from a shared source and drop source cascade.
-        // Currently, iceberg engine table doesn't support atomic ddl. To drop the source, we need to drop the iceberg table first.
-        //
+        // 1. Detect when an Iceberg table is part of the dependencies.
         // 2. Drop database with iceberg tables in it is not supported.
-        if object_type == ObjectType::Source || drop_database {
+        if object_type != ObjectType::Table || drop_database {
             for obj in &removed_objects {
                 // if the obj is iceberg engine table, bail out
                 if obj.obj_type == ObjectType::Table {
