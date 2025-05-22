@@ -181,7 +181,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
-    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
+    pub fragment_backfill_ordering: FragmentBackfillOrder,
 }
 
 impl StreamJobFragments {
@@ -736,12 +736,10 @@ impl Command {
                     } else {
                         Default::default()
                     };
-                let backfill_nodes_to_pause: Vec<_> = match fragment_backfill_ordering {
-                    Some(backfill_order) => get_nodes_with_backfill_dependencies(backfill_order)
+                let backfill_nodes_to_pause: Vec<_> =
+                    get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
-                        .collect(),
-                    None => Default::default(),
-                };
+                        .collect();
                 let add = Some(Mutation::Add(AddMutation {
                     actor_dispatchers: edges
                         .dispatchers

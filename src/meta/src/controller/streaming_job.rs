@@ -569,6 +569,41 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
+        // Check if the job is creating sink into table.
+        if table_obj.is_none()
+            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id)
+                .select_only()
+                .column(sink::Column::TargetTable)
+                .into_tuple::<Option<TableId>>()
+                .one(&txn)
+                .await?
+        {
+            let tmp_id: Option<ObjectId> = ObjectDependency::find()
+                .select_only()
+                .column(object_dependency::Column::UsedBy)
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(
+                    object_dependency::Column::Oid
+                        .eq(target_table_id)
+                        .and(object::Column::ObjType.eq(ObjectType::Table))
+                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
+                )
+                .into_tuple()
+                .one(&txn)
+                .await?;
+            if let Some(tmp_id) = tmp_id {
+                tracing::warn!(
+                    id = tmp_id,
+                    "aborting temp streaming job for sink into table"
+                );
+                Object::delete_by_id(tmp_id).exec(&txn).await?;
+            }
+        }
+
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
@@ -587,7 +622,7 @@ impl CatalogController {
         } else {
             MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
         };
-        let abort_reason = format!("streaing job aborted {}", err.as_report());
+        let abort_reason = format!("streaming job aborted {}", err.as_report());
         for tx in inner
             .creating_table_finish_notifier
             .get_mut(&database_id)

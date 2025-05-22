@@ -17,9 +17,9 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
-use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion};
+use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
     PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
@@ -153,43 +153,17 @@ impl HummockManager {
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            for group_deltas in version_delta.group_deltas.values() {
-                object_sizes.extend(
-                    group_deltas
-                        .group_deltas
-                        .iter()
-                        .flat_map(|delta| {
-                            match delta {
-                                GroupDeltaCommon::IntraLevel(level_delta) => {
-                                    Some(level_delta.inserted_table_infos.iter())
-                                }
-                                GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {
-                                    Some(inserted_table_infos.iter())
-                                }
-                                GroupDeltaCommon::GroupConstruct(_)
-                                | GroupDeltaCommon::GroupDestroy(_)
-                                | GroupDeltaCommon::GroupMerge(_) => None,
-                            }
-                            .into_iter()
-                            .flatten()
-                            .map(|t| (t.object_id, t.file_size))
-                        })
-                        .chain(
-                            version_delta
-                                .change_log_delta
-                                .values()
-                                .flat_map(|change_log| {
-                                    let new_log = &change_log.new_log;
-                                    new_log
-                                        .new_value
-                                        .iter()
-                                        .chain(new_log.old_value.iter())
-                                        .map(|t| (t.object_id, t.file_size))
-                                }),
-                        ),
-                );
+            // DO NOT REMOVE THIS LINE
+            // This is to ensure that when adding new variant to `HummockObjectId`,
+            // the compiler will warn us if we forget to handle it here.
+            match HummockObjectId::Sstable(0.into()) {
+                HummockObjectId::Sstable(_) => {}
+            };
+            for sst in version_delta.newly_added_sst_infos(false) {
+                let object_id = HummockObjectId::Sstable(sst.object_id);
+                object_sizes.insert(object_id, sst.file_size);
+                versions_object_ids.insert(object_id);
             }
-            versions_object_ids.extend(version_delta.newly_added_object_ids(false));
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
@@ -198,7 +172,7 @@ impl HummockManager {
             .iter()
             .map(|t| {
                 object_sizes.get(t).copied().unwrap_or_else(|| {
-                    warn!(object_id = t, "unable to get size of removed object id");
+                    warn!(object_id = ?t, "unable to get size of removed object id");
                     0
                 })
             })
@@ -206,7 +180,13 @@ impl HummockManager {
         stale_objects.insert(
             current_version.id,
             StaleObjects {
-                id: removed_object_ids.into_iter().collect(),
+                id: removed_object_ids
+                    .into_iter()
+                    .map(|object_id| {
+                        let HummockObjectId::Sstable(sst_id) = object_id;
+                        sst_id.inner()
+                    })
+                    .collect(),
                 total_file_size,
             },
         );
@@ -227,7 +207,7 @@ impl HummockManager {
                 if *version_id >= min_pinned_version_id {
                     return None;
                 }
-                Some(object_ids.id.clone())
+                Some(get_stale_object_ids(object_ids))
             })
             .flatten();
         self.gc_manager.add_may_delete_object_ids(may_delete_object);

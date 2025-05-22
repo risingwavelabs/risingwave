@@ -14,7 +14,7 @@ hex = "0.4"
 otlp-embedded = { workspace = true }
 prometheus-http-query = "0.8"
 redact = "0.1.5"
-regex = "1"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }

@@ -156,6 +156,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.subscriptions.clone(), db).await?;
         insert_models(metadata.session_parameters.clone(), db).await?;
         insert_models(metadata.secrets.clone(), db).await?;
+        insert_models(metadata.exactly_once_iceberg_sinks.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())

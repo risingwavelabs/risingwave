@@ -108,6 +108,9 @@ meta_time_travel_vacuum_interval_sec = 30
 meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
 meta_hummock_gc_history_insert_batch_size = 1000
 meta_hummock_time_travel_filter_out_objects_batch_size = 1000
+meta_hummock_time_travel_filter_out_objects_v1 = false
+meta_hummock_time_travel_filter_out_objects_list_version_batch_size = 10
+meta_hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
 
 [meta.developer.meta_compute_client_config]
 connect_timeout_secs = 5
@@ -242,6 +245,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
+fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
 
 [storage.data_file_cache.throttle]
@@ -267,6 +271,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
+fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
 
 [storage.meta_file_cache.throttle]

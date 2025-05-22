@@ -78,7 +78,7 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
+    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -96,7 +96,7 @@ use crate::monitor::CompactorMetrics;
 pub struct Compactor {
     /// The context of the compactor.
     context: CompactorContext,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
@@ -110,7 +110,7 @@ impl Compactor {
         context: CompactorContext,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         Self {
             context,
@@ -233,7 +233,7 @@ impl Compactor {
         compaction_filter: impl CompactionFilter,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             object_id_getter,
@@ -282,7 +282,7 @@ impl Compactor {
 pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    object_id_manager: Arc<ObjectIdManager>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
@@ -343,7 +343,7 @@ pub fn start_compactor(
             pin_mut!(response_event_stream);
 
             let executor = compactor_context.compaction_executor.clone();
-            let sstable_object_id_manager = sstable_object_id_manager.clone();
+            let object_id_manager = object_id_manager.clone();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -441,7 +441,10 @@ pub fn start_compactor(
                                 .map(|sst| sst.into())
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
-                            object_timestamps,
+                            object_timestamps: object_timestamps
+                                .iter()
+                                .map(|(object_id, timestamp)| (object_id.inner(), *timestamp))
+                                .collect(),
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -471,7 +474,7 @@ pub fn start_compactor(
                             .compaction_event_consumed_latency
                             .observe(consumed_latency_ms as _);
 
-                        let sstable_object_id_manager = sstable_object_id_manager.clone();
+                        let object_id_manager = object_id_manager.clone();
                         let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
 
                         match event {
@@ -522,7 +525,7 @@ pub fn start_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(sstable_object_id_manager.clone()),
+                                        object_id_manager.clone(),
                                         compaction_catalog_manager_ref.clone(),
                                     )
                                     .await;
@@ -685,7 +688,7 @@ pub fn start_shared_compactor(
                         });
 
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
-                        output_object_ids_deque.extend(output_object_ids);
+                        output_object_ids_deque.extend(output_object_ids.into_iter().map(Into::<HummockSstableObjectId>::into));
                         let shared_compactor_object_id_manager =
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
@@ -700,7 +703,7 @@ pub fn start_shared_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(shared_compactor_object_id_manager),
+                                        shared_compactor_object_id_manager,
                                         compaction_catalog_agent_ref.clone(),
                                     )
                                     .await;
@@ -709,7 +712,10 @@ pub fn start_shared_compactor(
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
-                                            object_timestamps,
+                                            object_timestamps: object_timestamps
+                                                .into_iter()
+                                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                                .collect(),
                                         })),
                                     };
 

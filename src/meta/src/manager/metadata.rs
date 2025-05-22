@@ -26,7 +26,7 @@ use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::secret::SecretRef;
-use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep};
@@ -507,7 +507,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatchStrategy, Fragment)>,
+        Vec<(PbDispatcherType, Fragment)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self

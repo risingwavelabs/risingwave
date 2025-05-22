@@ -1875,6 +1875,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
             explain_format: ExplainFormat::Text,
+            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1885,6 +1886,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
             explain_format: ExplainFormat::Text,
+            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1895,6 +1897,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
             explain_format: ExplainFormat::Text,
+            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1905,6 +1908,7 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: false,
             explain_type: ExplainType::Logical,
             explain_format: ExplainFormat::Json,
+            ..Default::default()
         },
     );
 }
@@ -1922,7 +1926,7 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let expected = "sql parser error: expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT or DURATION_SECS, found: )";
+    let expected = "sql parser error: expected one of BACKFILL or VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT or DURATION_SECS, found: )";
     let actual = res.unwrap_err().to_string();
     assert!(
         actual.contains(expected),

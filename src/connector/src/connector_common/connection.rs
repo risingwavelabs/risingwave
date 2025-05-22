@@ -23,6 +23,7 @@ use rdkafka::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::catalog::PbConnection;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -30,6 +31,7 @@ use tonic::async_trait;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
@@ -212,6 +214,10 @@ pub struct IcebergConnection {
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
 
+    /// Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
+
     /// This is only used by iceberg engine to enable the hosted catalog.
     #[serde(
         rename = "hosted_catalog",
@@ -317,6 +323,12 @@ impl Connection for IcebergConnection {
             }
         }
 
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL)
+            && matches!(self.enable_config_load, Some(true))
+        {
+            bail!("`enable_config_load` can't be enabled in this environment");
+        }
+
         if self.hosted_catalog.unwrap_or(false) {
             // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
             if self.catalog_type.is_some() {
@@ -367,7 +379,7 @@ impl Connection for IcebergConnection {
             path_style_access: self.path_style_access,
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
-            enable_config_load: Some(false),
+            enable_config_load: self.enable_config_load,
             hosted_catalog: self.hosted_catalog,
         };
 

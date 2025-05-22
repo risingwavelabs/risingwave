@@ -4358,6 +4358,7 @@ impl Parser<'_> {
         let mut analyze_duration = None;
 
         let explain_key_words = [
+            Keyword::BACKFILL,
             Keyword::VERBOSE,
             Keyword::TRACE,
             Keyword::TYPE,
@@ -4373,6 +4374,7 @@ impl Parser<'_> {
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
+                Keyword::BACKFILL => options.backfill = parser.parse_optional_boolean(true),
                 Keyword::TYPE => {
                     let explain_type = parser.expect_one_of_keywords(&[
                         Keyword::LOGICAL,

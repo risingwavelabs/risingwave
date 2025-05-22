@@ -17,38 +17,35 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange};
-use risingwave_pb::hummock::GetNewSstIdsRequest;
+use risingwave_hummock_sdk::{HummockRawObjectId, HummockSstableObjectId, ObjectIdRange};
+use risingwave_pb::hummock::GetNewObjectIdsRequest;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, HummockMetaClient};
 use sync_point::sync_point;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
-pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
-use dyn_clone::DynClone;
+pub type ObjectIdManagerRef = Arc<ObjectIdManager>;
+
 #[async_trait::async_trait]
-pub trait GetObjectId: DynClone + Send + Sync {
-    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId>;
+pub trait GetObjectId: Send + Sync {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId>;
 }
-dyn_clone::clone_trait_object!(GetObjectId);
+
 /// Caches SST object ids fetched from meta.
-pub struct SstableObjectIdManager {
-    // Lock order: `wait_queue` before `available_sst_object_ids`.
+pub struct ObjectIdManager {
+    // Lock order: `wait_queue` before `available_object_ids`.
     wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
-    available_sst_object_ids: Mutex<SstObjectIdRange>,
+    available_object_ids: Mutex<ObjectIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
-impl SstableObjectIdManager {
+impl ObjectIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
             wait_queue: Default::default(),
-            available_sst_object_ids: Mutex::new(SstObjectIdRange::new(
-                HummockSstableObjectId::MIN,
-                HummockSstableObjectId::MIN,
-            )),
+            available_object_ids: Mutex::new(ObjectIdRange::new(u64::MIN, u64::MIN)),
             remote_fetch_number,
             hummock_meta_client,
         }
@@ -56,22 +53,19 @@ impl SstableObjectIdManager {
 
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
-    async fn map_next_sst_object_id<F>(
-        self: &Arc<Self>,
-        f: F,
-    ) -> HummockResult<HummockSstableObjectId>
+    async fn map_next_object_id<F>(&self, f: F) -> HummockResult<HummockRawObjectId>
     where
-        F: Fn(&mut SstObjectIdRange) -> Option<HummockSstableObjectId>,
+        F: Fn(&mut ObjectIdRange) -> Option<HummockRawObjectId>,
     {
         loop {
             // 1. Try to get
-            if let Some(new_id) = f(self.available_sst_object_ids.lock().deref_mut()) {
+            if let Some(new_id) = f(self.available_object_ids.lock().deref_mut()) {
                 return Ok(new_id);
             }
             // 2. Otherwise either fetch new ids, or wait for previous fetch if any.
             let waiter = {
                 let mut guard = self.wait_queue.lock();
-                if let Some(new_id) = f(self.available_sst_object_ids.lock().deref_mut()) {
+                if let Some(new_id) = f(self.available_object_ids.lock().deref_mut()) {
                     return Ok(new_id);
                 }
                 let wait_queue = guard.deref_mut();
@@ -93,17 +87,16 @@ impl SstableObjectIdManager {
             // Fetch new ids.
             sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
-            let this = self.clone();
-            tokio::spawn(async move {
-                let new_sst_ids = match this
+            async move {
+                let new_sst_ids = match self
                     .hummock_meta_client
-                    .get_new_sst_ids(this.remote_fetch_number)
+                    .get_new_object_ids(self.remote_fetch_number)
                     .await
                     .map_err(HummockError::meta_error)
                 {
                     Ok(new_sst_ids) => new_sst_ids,
                     Err(err) => {
-                        this.notify_waiters(false);
+                        self.notify_waiters(false);
                         return Err(err);
                     }
                 };
@@ -111,23 +104,22 @@ impl SstableObjectIdManager {
                 sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE");
                 // Update local cache.
                 let result = {
-                    let mut guard = this.available_sst_object_ids.lock();
-                    let available_sst_object_ids = guard.deref_mut();
-                    if new_sst_ids.start_id < available_sst_object_ids.end_id {
+                    let mut guard = self.available_object_ids.lock();
+                    let available_object_ids = guard.deref_mut();
+                    if new_sst_ids.start_id < available_object_ids.end_id {
                         Err(HummockError::meta_error(format!(
                             "SST id moves backwards. new {} < old {}",
-                            new_sst_ids.start_id, available_sst_object_ids.end_id
+                            new_sst_ids.start_id, available_object_ids.end_id
                         )))
                     } else {
-                        *available_sst_object_ids = new_sst_ids;
+                        *available_object_ids = new_sst_ids;
                         Ok(())
                     }
                 };
-                this.notify_waiters(result.is_ok());
+                self.notify_waiters(result.is_ok());
                 result
-            })
-            .await
-            .unwrap()?;
+            }
+            .await?;
         }
     }
 
@@ -141,25 +133,24 @@ impl SstableObjectIdManager {
 }
 
 #[async_trait::async_trait]
-impl GetObjectId for Arc<SstableObjectIdManager> {
+impl GetObjectId for ObjectIdManager {
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
-        self.map_next_sst_object_id(|available_sst_object_ids| {
-            available_sst_object_ids.get_next_sst_object_id()
-        })
-        .await
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
+        self.map_next_object_id(|available_object_ids| available_object_ids.get_next_object_id())
+            .await
+            .map(Into::into)
     }
 }
 
 struct SharedComapctorObjectIdManagerCore {
-    output_object_ids: VecDeque<u64>,
+    output_object_ids: VecDeque<HummockSstableObjectId>,
     client: Option<GrpcCompactorProxyClient>,
     sstable_id_remote_fetch_number: u32,
 }
 impl SharedComapctorObjectIdManagerCore {
     pub fn new(
-        output_object_ids: VecDeque<u64>,
+        output_object_ids: VecDeque<HummockSstableObjectId>,
         client: GrpcCompactorProxyClient,
         sstable_id_remote_fetch_number: u32,
     ) -> Self {
@@ -172,47 +163,44 @@ impl SharedComapctorObjectIdManagerCore {
 
     pub fn for_test(output_object_ids: VecDeque<u64>) -> Self {
         Self {
-            output_object_ids,
+            output_object_ids: output_object_ids.into_iter().map(|x| x.into()).collect(),
             client: None,
             sstable_id_remote_fetch_number: 0,
         }
     }
 }
 /// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
-#[derive(Clone)]
 pub struct SharedComapctorObjectIdManager {
-    core: Arc<tokio::sync::Mutex<SharedComapctorObjectIdManagerCore>>,
+    core: tokio::sync::Mutex<SharedComapctorObjectIdManagerCore>,
 }
 
 impl SharedComapctorObjectIdManager {
     pub fn new(
-        output_object_ids: VecDeque<u64>,
+        output_object_ids: VecDeque<HummockSstableObjectId>,
         client: GrpcCompactorProxyClient,
         sstable_id_remote_fetch_number: u32,
-    ) -> Self {
-        Self {
-            core: Arc::new(tokio::sync::Mutex::new(
-                SharedComapctorObjectIdManagerCore::new(
-                    output_object_ids,
-                    client,
-                    sstable_id_remote_fetch_number,
-                ),
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            core: tokio::sync::Mutex::new(SharedComapctorObjectIdManagerCore::new(
+                output_object_ids,
+                client,
+                sstable_id_remote_fetch_number,
             )),
-        }
+        })
     }
 
-    pub fn for_test(output_object_ids: VecDeque<u64>) -> Self {
-        Self {
-            core: Arc::new(tokio::sync::Mutex::new(
-                SharedComapctorObjectIdManagerCore::for_test(output_object_ids),
+    pub fn for_test(output_object_ids: VecDeque<u64>) -> Arc<Self> {
+        Arc::new(Self {
+            core: tokio::sync::Mutex::new(SharedComapctorObjectIdManagerCore::for_test(
+                output_object_ids,
             )),
-        }
+        })
     }
 }
 
 #[async_trait::async_trait]
 impl GetObjectId for SharedComapctorObjectIdManager {
-    async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
+    async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
         let mut guard = self.core.lock().await;
         let core = guard.deref_mut();
 
@@ -222,7 +210,7 @@ impl GetObjectId for SharedComapctorObjectIdManager {
             tracing::warn!(
                 "The pre-allocated object ids are used up, and new object id are obtained through RPC."
             );
-            let request = GetNewSstIdsRequest {
+            let request = GetNewObjectIdsRequest {
                 number: core.sstable_id_remote_fetch_number,
             };
             match core
@@ -235,8 +223,10 @@ impl GetObjectId for SharedComapctorObjectIdManager {
                 Ok(response) => {
                     let resp = response.into_inner();
                     let start_id = resp.start_id;
-                    core.output_object_ids.extend((start_id + 1)..resp.end_id);
-                    Ok(start_id)
+                    core.output_object_ids.extend(
+                        ((start_id + 1)..resp.end_id).map(Into::<HummockSstableObjectId>::into),
+                    );
+                    Ok(start_id.into())
                 }
                 Err(e) => Err(HummockError::other(format!(
                     "Fail to get new sst id: {}",
