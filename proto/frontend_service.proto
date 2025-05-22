@@ -18,9 +18,7 @@ message GetTableReplacePlanResponse {
   ddl_service.ReplaceJobPlan replace_plan = 1;
 }
 
-message GetRunningSqlsRequest {
-
-}
+message GetRunningSqlsRequest {}
 
 message GetRunningSqlsResponse {
   repeated RunningSql running_sqls = 1;
