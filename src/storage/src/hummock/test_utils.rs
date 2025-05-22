@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    Hint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    Engine, Hint, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
 use futures::TryFutureExt;
