@@ -18,7 +18,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{DirectFsDeviceOptions, Engine, FifoPicker, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -681,8 +683,7 @@ impl StateStoreImpl {
                         .with_device_options(
                             DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
                                 .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                                .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                                .with_throttle(opts.meta_file_cache_throttle.clone()),
+                                .with_file_size(opts.meta_file_cache_file_capacity_mb * MB),
                         )
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
                         .with_compression(opts.meta_file_cache_compression)
@@ -700,11 +701,13 @@ impl StateStoreImpl {
                                         + opts.meta_file_cache_reclaimers / 2,
                                 )
                                 .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB)
-                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                                    opts.meta_file_cache_fifo_probation_ratio,
-                                ))]),
+                                .with_blob_index_size(16 * KB),
                         );
+                    if opts.meta_file_cache_insert_rate_limit_mb > 0 {
+                        builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                            opts.meta_file_cache_insert_rate_limit_mb * MB,
+                        )));
+                    }
                 }
             }
 
@@ -735,8 +738,7 @@ impl StateStoreImpl {
                         .with_device_options(
                             DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
                                 .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                                .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                                .with_throttle(opts.data_file_cache_throttle.clone()),
+                                .with_file_size(opts.data_file_cache_file_capacity_mb * MB),
                         )
                         .with_recover_mode(opts.data_file_cache_recover_mode)
                         .with_compression(opts.data_file_cache_compression)
@@ -754,11 +756,13 @@ impl StateStoreImpl {
                                         + opts.data_file_cache_reclaimers / 2,
                                 )
                                 .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB)
-                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                                    opts.data_file_cache_fifo_probation_ratio,
-                                ))]),
+                                .with_blob_index_size(16 * KB),
                         );
+                    if opts.data_file_cache_insert_rate_limit_mb > 0 {
+                        builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
+                            opts.data_file_cache_insert_rate_limit_mb * MB,
+                        )));
+                    }
                 }
             }
 
