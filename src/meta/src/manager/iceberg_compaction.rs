@@ -34,7 +34,6 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
-use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{
     IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
     IcebergCompactor, IcebergCompactorManagerRef,
@@ -117,7 +116,7 @@ impl IcebergCompactionHandle {
     pub async fn send_compact_task(
         mut self,
         compactor: Arc<IcebergCompactor>,
-        env: &MetaSrvEnv,
+        task_id: u64,
     ) -> MetaResult<()> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
         let prost_sink_catalog: PbSink = self
@@ -131,7 +130,7 @@ impl IcebergCompactionHandle {
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
                 // Todo! Use iceberg's compaction task ID
-                task_id: next_compaction_task_id(env).await?,
+                task_id,
                 props: param.properties,
             }));
 
