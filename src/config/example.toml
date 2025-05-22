@@ -241,7 +241,6 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
 
 [storage.data_file_cache.throttle]
@@ -267,7 +266,6 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
-fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
 
 [storage.meta_file_cache.throttle]

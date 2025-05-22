@@ -93,7 +93,6 @@ pub struct StorageOpts {
     pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
-    pub data_file_cache_fifo_probation_ratio: f64,
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
     pub data_file_cache_throttle: foyer::Throttle,
 
@@ -115,7 +114,6 @@ pub struct StorageOpts {
     pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
-    pub meta_file_cache_fifo_probation_ratio: f64,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
 
@@ -214,7 +212,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
             data_file_cache_compression: c.storage.data_file_cache.compression,
             data_file_cache_flush_buffer_threshold_mb: s.block_file_cache_flush_buffer_threshold_mb,
-            data_file_cache_fifo_probation_ratio: c.storage.data_file_cache.fifo_probation_ratio,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             data_file_cache_throttle,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
@@ -227,7 +224,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
             meta_file_cache_compression: c.storage.meta_file_cache.compression,
             meta_file_cache_flush_buffer_threshold_mb: s.meta_file_cache_flush_buffer_threshold_mb,
-            meta_file_cache_fifo_probation_ratio: c.storage.meta_file_cache.fifo_probation_ratio,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             meta_file_cache_throttle,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
