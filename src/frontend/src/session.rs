@@ -949,7 +949,8 @@ impl SessionImpl {
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
             Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
                 // If relation is created, return directly.
-                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't
+                // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
                 // Only the type in StreamingJob may be is_creating, defined in streaming_job.rs.
                 if !is_creating {
                     Ok(Either::Right(
