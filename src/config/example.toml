@@ -243,15 +243,6 @@ indexer_shards = 64
 compression = "None"
 recover_mode = "Quiet"
 
-[storage.data_file_cache.throttle]
-write_iops = 100000
-read_iops = 100000
-write_throughput = 1073741824
-read_throughput = 1073741824
-
-[storage.data_file_cache.throttle.iops_counter]
-PerIoSize = 131072
-
 [storage.data_file_cache.runtime_config.Unified]
 worker_threads = 0
 max_blocking_threads = 0
@@ -267,15 +258,6 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 recover_mode = "Quiet"
-
-[storage.meta_file_cache.throttle]
-write_iops = 100000
-read_iops = 100000
-write_throughput = 1073741824
-read_throughput = 1073741824
-
-[storage.meta_file_cache.throttle.iops_counter]
-PerIoSize = 131072
 
 [storage.meta_file_cache.runtime_config.Unified]
 worker_threads = 0

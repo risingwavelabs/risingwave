@@ -607,7 +607,7 @@ impl CacheRefillTask {
 
             let mut writer = sstable_store.block_cache().storage_writer(key);
 
-            if writer.pick().admitted() {
+            if writer.pick() {
                 admits += 1;
             }
 

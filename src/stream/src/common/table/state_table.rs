@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::Hint;
+use foyer::CacheHint;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
 use itertools::{Itertools, izip};
@@ -677,7 +677,7 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            cache_policy: CachePolicy::Fill(Hint::Normal),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
 
@@ -1323,7 +1323,7 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(Hint::Normal),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
         };
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
@@ -1339,7 +1339,7 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(Hint::Normal),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
         };
 
         Ok(self

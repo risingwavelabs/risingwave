@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::Hint;
+use foyer::CacheHint;
 use futures::future::try_join;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
@@ -564,7 +564,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(Hint::Normal),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 stats_target_table_ids: None,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
-use foyer::Hint;
+use foyer::CacheHint;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -60,16 +60,16 @@ impl From<TracedCachePriority> for CachePriority {
     }
 }
 
-impl From<Hint> for TracedCachePriority {
-    fn from(value: Hint) -> Self {
+impl From<CacheHint> for TracedCachePriority {
+    fn from(value: CacheHint) -> Self {
         match value {
-            Hint::Normal => Self::High,
-            Hint::Low => Self::Low,
+            CacheHint::Normal => Self::High,
+            CacheHint::Low => Self::Low,
         }
     }
 }
 
-impl From<TracedCachePriority> for Hint {
+impl From<TracedCachePriority> for CacheHint {
     fn from(value: TracedCachePriority) -> Self {
         match value {
             TracedCachePriority::High => Self::Normal,

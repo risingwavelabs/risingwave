@@ -90,11 +90,11 @@ pub struct StorageOpts {
     pub data_file_cache_reclaimers: usize,
     pub data_file_cache_recover_mode: foyer::RecoverMode,
     pub data_file_cache_recover_concurrency: usize,
+    pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
-    pub data_file_cache_throttle: foyer::Throttle,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -111,11 +111,11 @@ pub struct StorageOpts {
     pub meta_file_cache_reclaimers: usize,
     pub meta_file_cache_recover_mode: foyer::RecoverMode,
     pub meta_file_cache_recover_concurrency: usize,
+    pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
-    pub meta_file_cache_throttle: foyer::Throttle,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -158,19 +158,6 @@ impl Default for StorageOpts {
 
 impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
     fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
-        let mut data_file_cache_throttle = c.storage.data_file_cache.throttle.clone();
-        if data_file_cache_throttle.write_throughput.is_none() {
-            data_file_cache_throttle = data_file_cache_throttle.with_write_throughput(
-                c.storage.data_file_cache.insert_rate_limit_mb * 1024 * 1024,
-            );
-        }
-        let mut meta_file_cache_throttle = c.storage.meta_file_cache.throttle.clone();
-        if meta_file_cache_throttle.write_throughput.is_none() {
-            meta_file_cache_throttle = meta_file_cache_throttle.with_write_throughput(
-                c.storage.meta_file_cache.insert_rate_limit_mb * 1024 * 1024,
-            );
-        }
-
         Self {
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
@@ -209,11 +196,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_reclaimers: c.storage.data_file_cache.reclaimers,
             data_file_cache_recover_mode: c.storage.data_file_cache.recover_mode,
             data_file_cache_recover_concurrency: c.storage.data_file_cache.recover_concurrency,
+            data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
             data_file_cache_compression: c.storage.data_file_cache.compression,
             data_file_cache_flush_buffer_threshold_mb: s.block_file_cache_flush_buffer_threshold_mb,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
-            data_file_cache_throttle,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -221,11 +208,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_reclaimers: c.storage.meta_file_cache.reclaimers,
             meta_file_cache_recover_mode: c.storage.meta_file_cache.recover_mode,
             meta_file_cache_recover_concurrency: c.storage.meta_file_cache.recover_concurrency,
+            meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
             meta_file_cache_compression: c.storage.meta_file_cache.compression,
             meta_file_cache_flush_buffer_threshold_mb: s.meta_file_cache_flush_buffer_threshold_mb,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
-            meta_file_cache_throttle,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
