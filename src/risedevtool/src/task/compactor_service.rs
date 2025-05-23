@@ -33,8 +33,6 @@ impl CompactorService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
-        println!("Compactor config: {:?}", config);
-
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
