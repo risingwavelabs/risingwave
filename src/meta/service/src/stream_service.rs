@@ -500,17 +500,6 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
-        if request.object_type != (AlterConnectorPropsObject::Sink as i32) {
-            unimplemented!()
-        }
-
-        let new_config = self
-            .metadata_manager
-            .update_sink_props_by_sink_id(
-                request.object_id as i32,
-                request.changed_props.clone().into_iter().collect(),
-            )
-            .await?;
 
         let database_id = self
             .metadata_manager
@@ -519,8 +508,36 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
         let database_id = DatabaseId::new(database_id as _);
 
+        let new_props_plaintext = match request.object_type() {
+            AlterConnectorPropsObject::Sink => {
+                self.metadata_manager
+                    .update_sink_props_by_sink_id(
+                        request.object_id as i32,
+                        request.changed_props.clone().into_iter().collect(),
+                    )
+                    .await?
+            }
+            AlterConnectorPropsObject::Source => {
+                if request.connector_conn_ref.is_some() {
+                    return Err(Status::invalid_argument(
+                        "alter connector_conn_ref is not supported",
+                    ));
+                }
+                self.metadata_manager
+                    .catalog_controller
+                    .update_source_props_by_source_id(
+                        request.object_id as SourceId,
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?
+            }
+            AlterConnectorPropsObject::Connection => {}
+            AlterConnectorPropsObject::Unspecified => unreachable!(),
+        };
+
         let mut mutation = HashMap::default();
-        mutation.insert(request.object_id, new_config.clone());
+        mutation.insert(request.object_id, new_props_plaintext);
 
         let _i = self
             .barrier_scheduler
