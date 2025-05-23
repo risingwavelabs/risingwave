@@ -43,8 +43,7 @@ use crate::version::{
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
 use crate::{
-    CompactionGroupId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
-    HummockVectorFileId, can_concat,
+    CompactionGroupId, HummockObjectId, HummockSstableId, HummockSstableObjectId, can_concat,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -973,13 +972,10 @@ where
             .collect()
     }
 
-    pub fn get_vector_file_ids(&self) -> impl Iterator<Item = HummockVectorFileId> + '_ {
-        self.vector_indexes
-            .values()
-            .flat_map(|index| index.get_objects().map(|(object_id, _)| object_id))
-    }
-
-    pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockObjectId> {
+    pub fn get_object_ids(
+        &self,
+        exclude_change_log: bool,
+    ) -> impl Iterator<Item = HummockObjectId> + '_ {
         // DO NOT REMOVE THIS LINE
         // This is to ensure that when adding new variant to `HummockObjectId`,
         // the compiler will warn us if we forget to handle it here.
@@ -989,8 +985,11 @@ where
         };
         self.get_sst_infos(exclude_change_log)
             .map(|s| HummockObjectId::Sstable(s.object_id()))
-            .chain(self.get_vector_file_ids().map(HummockObjectId::VectorFile))
-            .collect()
+            .chain(
+                self.vector_indexes
+                    .values()
+                    .flat_map(|index| index.get_objects().map(|(object_id, _)| object_id)),
+            )
     }
 
     pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableId> {
@@ -1486,11 +1485,12 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
             })
         }))
         .map(|(object_id, size)| (HummockObjectId::Sstable(object_id), size))
-        .chain(version.vector_indexes.values().flat_map(|index| {
-            index
-                .get_objects()
-                .map(|(vector_file_id, size)| (HummockObjectId::VectorFile(vector_file_id), size))
-        }))
+        .chain(
+            version
+                .vector_indexes
+                .values()
+                .flat_map(|index| index.get_objects()),
+        )
         .collect()
 }
 
@@ -1660,7 +1660,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids(false).len(), 0);
+        assert_eq!(version.get_object_ids(false).count(), 0);
 
         // Add to sub level
         version
@@ -1680,7 +1680,7 @@ mod tests {
                 ],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids(false).len(), 1);
+        assert_eq!(version.get_object_ids(false).count(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
@@ -1694,7 +1694,7 @@ mod tests {
             ],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids(false).len(), 2);
+        assert_eq!(version.get_object_ids(false).count(), 2);
     }
 
     #[test]

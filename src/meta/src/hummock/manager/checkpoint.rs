@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
@@ -148,7 +148,8 @@ impl HummockManager {
         // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = object_size_map(&old_checkpoint.version);
         // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids = old_checkpoint.version.get_object_ids(false);
+        let mut versions_object_ids: HashSet<_> =
+            old_checkpoint.version.get_object_ids(false).collect();
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
@@ -176,7 +177,8 @@ impl HummockManager {
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
-        let removed_object_ids = &versions_object_ids - &current_version.get_object_ids(false);
+        let removed_object_ids =
+            &versions_object_ids - &current_version.get_object_ids(false).collect();
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {

@@ -34,7 +34,7 @@ use itertools::Itertools;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVectorFileId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockRawObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
 use serde::{Deserialize, Serialize};
 
@@ -48,11 +48,9 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
-    /// It actually stores object id.
-    /// Bad naming, which won't be changed due to compatibility issue.
-    pub ssts: HashSet<HummockSstableObjectId>,
-    #[serde(default)]
-    pub vector_files: HashSet<HummockVectorFileId>,
+    // rename to `ssts` for backward compatibility
+    #[serde(rename = "ssts")]
+    pub objects: HashSet<HummockRawObjectId>,
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
@@ -71,8 +69,10 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_sst_object_ids(false),
-            vector_files: v.get_vector_file_ids().collect(),
+            objects: v
+                .get_object_ids(false)
+                .map(|object_id| object_id.as_raw())
+                .collect(),
             format_version,
             remarks,
             state_table_info: v

@@ -118,7 +118,9 @@ impl HummockManager {
             (
                 latest_valid_version.id,
                 latest_valid_version.get_sst_ids(true),
-                latest_valid_version.get_object_ids(true),
+                latest_valid_version
+                    .get_object_ids(true)
+                    .collect::<HashSet<_>>(),
             )
         };
         let mut object_ids_to_delete: HashSet<_> = HashSet::default();
@@ -227,7 +229,7 @@ impl HummockManager {
                 )
                 .await?;
             }
-            let new_object_ids = prev_version.get_object_ids(true);
+            let new_object_ids: HashSet<_> = prev_version.get_object_ids(true).collect();
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             next_version_sst_ids = sst_ids;
         }
