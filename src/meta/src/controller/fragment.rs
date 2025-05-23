@@ -745,15 +745,49 @@ impl CatalogController {
         job_ids: Vec<ObjectId>,
     ) -> MetaResult<HashMap<ObjectId, Vec<ActorId>>> {
         let inner = self.inner.read().await;
-        let job_actors: Vec<(ObjectId, ActorId)> = Actor::find()
+
+        let fragment_job_ids: Vec<(FragmentId, ObjectId)> = FragmentModel::find()
             .select_only()
-            .column(fragment::Column::JobId)
-            .column(actor::Column::ActorId)
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(fragment::Column::JobId.is_in(job_ids))
+            .columns([fragment::Column::FragmentId, fragment::Column::JobId])
+            .filter(fragment::Column::JobId.is_in(job_ids.clone()))
             .into_tuple()
             .all(&inner.db)
             .await?;
+
+        let job_actors: HashSet<(_, _)> = fragment_job_ids
+            .into_iter()
+            .flat_map(|(fragment_id, job_id)| {
+                let actors = inner
+                    .actors
+                    .actors_by_fragment_id
+                    .get(&fragment_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                actors.into_iter().map(move |actor_id| (job_id, actor_id))
+            })
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let job_actors_from_db: Vec<(ObjectId, ActorId)> = Actor::find()
+                .select_only()
+                .column(fragment::Column::JobId)
+                .column(actor::Column::ActorId)
+                .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+                .filter(fragment::Column::JobId.is_in(job_ids))
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let job_actors_from_db = job_actors_from_db
+                .into_iter()
+                .map(|(job_id, actor_id)| (job_id as ObjectId, actor_id as ActorId))
+                .collect::<HashSet<_>>();
+
+            debug_assert_eq!(job_actors, job_actors_from_db);
+        }
+
         Ok(job_actors.into_iter().into_group_map())
     }
 
@@ -788,14 +822,29 @@ impl CatalogController {
 
     pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
         let inner = self.inner.read().await;
-        let actor_cnt: Vec<(WorkerId, i64)> = Actor::find()
-            .select_only()
-            .column(actor::Column::WorkerId)
-            .column_as(actor::Column::ActorId.count(), "count")
-            .group_by(actor::Column::WorkerId)
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+
+        let actor_cnt: HashSet<_> = inner
+            .actors
+            .actors_by_worker_id
+            .iter()
+            .map(|(worker_id, actor_id)| (*worker_id, actor_id.len() as i64))
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let actor_cnt_from_db: Vec<(WorkerId, i64)> = Actor::find()
+                .select_only()
+                .column(actor::Column::WorkerId)
+                .column_as(actor::Column::ActorId.count(), "count")
+                .group_by(actor::Column::WorkerId)
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let actor_cnt_from_db: HashSet<_> = actor_cnt_from_db.into_iter().collect();
+
+            debug_assert_eq!(actor_cnt, actor_cnt_from_db);
+        }
 
         Ok(actor_cnt
             .into_iter()
@@ -816,11 +865,41 @@ impl CatalogController {
 
         let mut table_fragments = BTreeMap::new();
         for job in jobs {
-            let fragment_actors = FragmentModel::find()
-                .find_with_related(Actor)
+            let fragments = FragmentModel::find()
                 .filter(fragment::Column::JobId.eq(job.job_id))
                 .all(&inner.db)
                 .await?;
+
+            let fragment_actors = fragments
+                .into_iter()
+                .map(|fragment| {
+                    let actor_ids = inner
+                        .actors
+                        .actors_by_fragment_id
+                        .get(&fragment.fragment_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    // TODO: tooooo heavy
+                    let actors = actor_ids
+                        .iter()
+                        .map(|actor_id| inner.actors.models.get(actor_id).cloned().expect(""))
+                        .collect_vec();
+
+                    (fragment, actors)
+                })
+                .collect();
+
+            // #[cfg(debug_assertions)]
+            // {
+            //     let fragment_actors_from_db: Vec<(Model, Vec<Model>)> = FragmentModel::find()
+            //         .find_with_related(Actor)
+            //         .filter(fragment::Column::JobId.eq(job.job_id))
+            //         .all(&inner.db)
+            //         .await?;
+            //
+            //
+            //
+            // }
 
             table_fragments.insert(
                 job.job_id as ObjectId,
@@ -869,8 +948,34 @@ impl CatalogController {
 
     pub async fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
         let inner = self.inner.read().await;
-        let actor_locations: Vec<PartialActorLocation> =
-            Actor::find().into_partial_model().all(&inner.db).await?;
+
+        let actor_locations = inner
+            .actors
+            .models
+            .values()
+            .map(|actor| PartialActorLocation {
+                actor_id: actor.actor_id,
+                fragment_id: actor.fragment_id,
+                worker_id: actor.worker_id,
+                status: actor.status.clone(),
+            })
+            .collect_vec();
+
+        #[cfg(debug_assertions)]
+        {
+            let actor_locations_from_db: Vec<PartialActorLocation> =
+                Actor::find().into_partial_model().all(&inner.db).await?;
+
+            let actor_locations_from_db = actor_locations_from_db
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+
+            let actor_locations = actor_locations.iter().cloned().collect::<HashSet<_>>();
+
+            debug_assert_eq!(actor_locations, actor_locations_from_db);
+        }
+
         Ok(actor_locations)
     }
 
@@ -878,31 +983,83 @@ impl CatalogController {
         &self,
     ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
         let inner = self.inner.read().await;
-        let actor_locations: Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)> =
-            Actor::find()
-                .join(JoinType::LeftJoin, actor::Relation::Fragment.def())
-                .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+
+        let fragment_objects: Vec<(FragmentId, ObjectId, SchemaId, ObjectType)> =
+            FragmentModel::find()
                 .select_only()
-                .columns([actor::Column::ActorId, actor::Column::FragmentId])
+                .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                .column(actor::Column::FragmentId)
                 .column_as(object::Column::Oid, "job_id")
                 .column_as(object::Column::SchemaId, "schema_id")
                 .column_as(object::Column::ObjType, "type")
                 .into_tuple()
                 .all(&inner.db)
                 .await?;
-        Ok(actor_locations)
+
+        let actor_infos = fragment_objects
+            .into_iter()
+            .flat_map(|(fragment_id, object_id, schema_id, object_type)| {
+                let actors = inner
+                    .actors
+                    .actors_by_fragment_id
+                    .get(&fragment_id)
+                    .cloned()
+                    .unwrap_or_default();
+                actors
+                    .into_iter()
+                    .map(move |actor_id| (actor_id, fragment_id, object_id, schema_id, object_type))
+            })
+            .collect_vec();
+
+        #[cfg(debug_assertions)]
+        {
+            let actor_infos_from_db: Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)> =
+                Actor::find()
+                    .join(JoinType::LeftJoin, actor::Relation::Fragment.def())
+                    .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                    .select_only()
+                    .columns([actor::Column::ActorId, actor::Column::FragmentId])
+                    .column_as(object::Column::Oid, "job_id")
+                    .column_as(object::Column::SchemaId, "schema_id")
+                    .column_as(object::Column::ObjType, "type")
+                    .into_tuple()
+                    .all(&inner.db)
+                    .await?;
+
+            let actor_infos_from_db = actor_infos_from_db.into_iter().collect::<HashSet<_>>();
+            let actor_infos = actor_infos.iter().cloned().collect::<HashSet<_>>();
+
+            debug_assert_eq!(actor_infos, actor_infos_from_db);
+        }
+
+        Ok(actor_infos)
     }
 
     pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
         let inner = self.inner.read().await;
 
-        let source_actors: Vec<(ActorId, FragmentId)> = Actor::find()
-            .select_only()
-            .filter(actor::Column::Splits.is_not_null())
-            .columns([actor::Column::ActorId, actor::Column::FragmentId])
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let source_actors = inner
+            .actors
+            .models
+            .values()
+            .filter(|actor| actor.splits.is_some())
+            .map(|actor| (actor.actor_id, actor.fragment_id))
+            .collect_vec();
+
+        #[cfg(debug_assertions)]
+        {
+            let source_actors_from_db: Vec<(ActorId, FragmentId)> = Actor::find()
+                .select_only()
+                .filter(actor::Column::Splits.is_not_null())
+                .columns([actor::Column::ActorId, actor::Column::FragmentId])
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let source_actors_from_db = source_actors_from_db.into_iter().collect::<HashSet<_>>();
+            let source_actors = source_actors.iter().cloned().collect::<HashSet<_>>();
+            debug_assert_eq!(source_actors, source_actors_from_db);
+        }
 
         Ok(source_actors)
     }
@@ -910,7 +1067,8 @@ impl CatalogController {
     pub async fn list_fragment_descs(&self) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
         let mut result = Vec::new();
-        let fragments = FragmentModel::find()
+
+        let mut fragments: Vec<_> = FragmentModel::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -921,12 +1079,52 @@ impl CatalogController {
                 fragment::Column::VnodeCount,
                 fragment::Column::StreamNode,
             ])
-            .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
-            .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
-            .group_by(fragment::Column::FragmentId)
             .into_model::<FragmentDesc>()
             .all(&inner.db)
             .await?;
+
+        for fragment in &mut fragments {
+            fragment.parallelism = inner
+                .actors
+                .actors_by_fragment_id
+                .get(&fragment.fragment_id)
+                .map(Vec::len)
+                .unwrap_or(0) as i64;
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            let fragments_from_db = FragmentModel::find()
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::JobId,
+                    fragment::Column::FragmentTypeMask,
+                    fragment::Column::DistributionType,
+                    fragment::Column::StateTableIds,
+                    fragment::Column::VnodeCount,
+                    fragment::Column::StreamNode,
+                ])
+                .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+                .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
+                .group_by(fragment::Column::FragmentId)
+                .into_model::<FragmentDesc>()
+                .all(&inner.db)
+                .await?;
+
+            let fragments_from_db: HashMap<_, _> = fragments_from_db
+                .into_iter()
+                .map(|fragment| (fragment.fragment_id, fragment.parallelism))
+                .collect();
+
+            let fragments: HashMap<_, _> = fragments
+                .iter()
+                .map(|fragment| (fragment.fragment_id, fragment.parallelism))
+                .collect();
+
+            debug_assert_eq!(fragments, fragments_from_db);
+        }
+
         for fragment in fragments {
             let upstreams: Vec<FragmentId> = FragmentRelation::find()
                 .select_only()
@@ -958,10 +1156,48 @@ impl CatalogController {
             .column(actor::Column::ActorId)
             .columns([fragment::Column::JobId, fragment::Column::FragmentTypeMask])
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(fragment::Column::JobId.is_in(sink_ids))
+            .filter(fragment::Column::JobId.is_in(sink_ids.clone()))
             .into_tuple()
             .all(&inner.db)
             .await?;
+
+        #[cfg(debug_assertions)]
+        {
+            let sink_fragments: Vec<(FragmentId, SinkId, i32)> = FragmentModel::find()
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::JobId,
+                    fragment::Column::FragmentTypeMask,
+                ])
+                .filter(fragment::Column::JobId.is_in(sink_ids))
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let actor_with_type_from_cache = sink_fragments
+                .into_iter()
+                .flat_map(|(fragment_id, sink_id, type_mask)| {
+                    let actor_ids = inner
+                        .actors
+                        .actors_by_fragment_id
+                        .get(&fragment_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    actor_ids
+                        .into_iter()
+                        .map(move |actor_id| (actor_id, sink_id, type_mask))
+                })
+                .collect_vec();
+
+            let actor_with_type_from_db = actor_with_type.iter().cloned().collect::<HashSet<_>>();
+            let actor_with_type_from_cache = actor_with_type_from_cache
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+
+            debug_assert_eq!(actor_with_type_from_cache, actor_with_type_from_db);
+        }
 
         let mut sink_actor_mapping = HashMap::new();
         for (actor_id, sink_id, type_mask) in actor_with_type {
@@ -1465,14 +1701,42 @@ impl CatalogController {
 
     pub async fn get_actors_by_job_ids(&self, job_ids: Vec<ObjectId>) -> MetaResult<Vec<ActorId>> {
         let inner = self.inner.read().await;
-        let actors: Vec<ActorId> = Actor::find()
+
+        let fragment_ids: Vec<FragmentId> = FragmentModel::find()
             .select_only()
-            .column(actor::Column::ActorId)
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(fragment::Column::JobId.is_in(job_ids))
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(job_ids.clone()))
             .into_tuple()
             .all(&inner.db)
             .await?;
+
+        let actors_from_cache: Vec<ActorId> = fragment_ids
+            .into_iter()
+            .filter_map(|fid| inner.actors.actors_by_fragment_id.get(&fid))
+            .flat_map(|ids| ids.iter().copied())
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let actors_from_db: Vec<ActorId> = Actor::find()
+                .select_only()
+                .column(actor::Column::ActorId)
+                .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+                .filter(fragment::Column::JobId.is_in(job_ids))
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let set_db: HashSet<ActorId> = actors_from_db.into_iter().collect();
+            let set_cache: HashSet<ActorId> = actors_from_cache.iter().copied().collect();
+
+            debug_assert_eq!(
+                set_db, set_cache,
+                "Actor lists mismatch between DB and cache"
+            );
+        }
+
+        let actors = actors_from_cache;
         Ok(actors)
     }
 
@@ -1534,12 +1798,33 @@ impl CatalogController {
             );
         }
 
-        let actors: Vec<(ActorId, WorkerId)> = Actor::find()
-            .select_only()
-            .columns([actor::Column::ActorId, actor::Column::WorkerId])
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let actors_from_cache: Vec<(ActorId, WorkerId)> = inner
+            .actors
+            .models
+            .iter()
+            .map(|(&actor_id, model)| (actor_id, model.worker_id))
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let actors_from_db: Vec<(ActorId, WorkerId)> = Actor::find()
+                .select_only()
+                .columns([actor::Column::ActorId, actor::Column::WorkerId])
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let set_db: HashSet<(ActorId, WorkerId)> = actors_from_db.into_iter().collect();
+            let set_cache: HashSet<(ActorId, WorkerId)> =
+                actors_from_cache.iter().copied().collect();
+
+            debug_assert_eq!(
+                set_db, set_cache,
+                "Actor lists mismatch between DB and cache"
+            );
+        }
+
+        let actors = actors_from_cache;
 
         Ok((root_fragments_pb, actors))
     }
@@ -1581,15 +1866,56 @@ impl CatalogController {
             ..
         } in downstream_fragment_relations
         {
-            let mut fragment_actors = FragmentModel::find_by_id(fragment_id)
-                .find_with_related(Actor)
-                .all(&inner.db)
-                .await?;
-            if fragment_actors.is_empty() {
+            // TODO: too heavy
+            let fragment_actor_ids = inner
+                .actors
+                .actors_by_fragment_id
+                .get(&fragment_id)
+                .cloned()
+                .unwrap_or_default();
+            let fragment_actors_from_cache: Vec<actor::Model> = fragment_actor_ids
+                .iter()
+                .filter_map(|id| inner.actors.models.get(id))
+                .cloned()
+                .collect();
+
+            #[cfg(debug_assertions)]
+            {
+                let fragment_actors_from_db = FragmentModel::find_by_id(fragment_id)
+                    .find_with_related(Actor)
+                    // qq: should be .one()?
+                    .all(&inner.db)
+                    .await?;
+
+                let db_actor_models: Vec<actor::Model> = fragment_actors_from_db
+                    .into_iter()
+                    .flat_map(|(_, actors)| actors)
+                    .collect();
+
+                let set_db: HashSet<ActorId> =
+                    db_actor_models.into_iter().map(|a| a.actor_id).collect();
+
+                let set_cache: HashSet<ActorId> = fragment_actors_from_cache
+                    .iter()
+                    .map(|a| a.actor_id)
+                    .collect();
+
+                debug_assert_eq!(
+                    set_db, set_cache,
+                    "Actor lists mismatch between DB and cache"
+                );
+            }
+
+            let mut actors = fragment_actors_from_cache;
+            if actors.is_empty() {
                 bail!("No fragment found for fragment id {}", fragment_id);
             }
-            assert_eq!(fragment_actors.len(), 1);
-            let (fragment, actors) = fragment_actors.pop().unwrap();
+
+            let fragment = FragmentModel::find_by_id(fragment_id)
+                .one(&inner.db)
+                .await?
+                .expect("fragment not found");
+
             let dispatch_type = PbDispatcherType::from(dispatcher_type);
             let fragment = Self::compose_fragment(fragment, actors, job_definition.clone())?.0;
             downstream_fragments.push((dispatch_type, fragment));
@@ -1658,13 +1984,50 @@ impl CatalogController {
 
     pub async fn load_actor_splits(&self) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
         let inner = self.inner.read().await;
-        let splits: Vec<(ActorId, ConnectorSplits)> = Actor::find()
-            .select_only()
-            .columns([actor::Column::ActorId, actor::Column::Splits])
-            .filter(actor::Column::Splits.is_not_null())
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let splits_from_cache: Vec<(ActorId, ConnectorSplits)> = inner
+            .actors
+            .models
+            .iter()
+            .filter_map(|(&actor_id, model)| model.splits.clone().map(|splits| (actor_id, splits)))
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let splits_from_db: Vec<(ActorId, ConnectorSplits)> = Actor::find()
+                .select_only()
+                .columns([actor::Column::ActorId, actor::Column::Splits])
+                .filter(actor::Column::Splits.is_not_null())
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let set_db: HashSet<(ActorId, _)> = splits_from_db
+                .into_iter()
+                .flat_map(|(actor_id, splits)| {
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .into_iter()
+                        .map(move |split| (actor_id, split.encoded_split))
+                })
+                .collect();
+
+            let set_cache: HashSet<(ActorId, _)> = splits_from_cache
+                .iter()
+                .cloned()
+                .flat_map(|(actor_id, splits)| {
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .into_iter()
+                        .map(move |split| (actor_id, split.encoded_split))
+                })
+                .collect();
+
+            debug_assert_eq!(set_db, set_cache, "Splits mismatch between DB and cache");
+        }
+
+        let splits = splits_from_cache;
         Ok(splits.into_iter().collect())
     }
 
@@ -1674,20 +2037,55 @@ impl CatalogController {
         job_id: ObjectId,
     ) -> MetaResult<Option<usize>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, i32, i64)> = FragmentModel::find()
-            .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
+        let fragment_info: Vec<(FragmentId, i32)> = FragmentModel::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
                 fragment::Column::FragmentTypeMask,
             ])
-            .column_as(actor::Column::ActorId.count(), "count")
-            .filter(fragment::Column::JobId.eq(job_id))
-            .group_by(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(job_id.clone()))
             .into_tuple()
             .all(&inner.db)
             .await?;
 
+        let fragments_from_cache: Vec<(FragmentId, i32, i64)> = fragment_info
+            .into_iter()
+            .filter_map(|(fid, fmask)| {
+                let count = inner
+                    .actors
+                    .actors_by_fragment_id
+                    .get(&fid)
+                    .map(|ids| ids.len() as i64)
+                    .unwrap_or(0);
+
+                (count > 0).then(|| (fid, fmask, count))
+            })
+            .collect();
+
+        #[cfg(debug_assertions)]
+        {
+            let fragments_from_db: Vec<(FragmentId, i32, i64)> = FragmentModel::find()
+                .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::FragmentTypeMask,
+                ])
+                .column_as(actor::Column::ActorId.count(), "count")
+                .filter(fragment::Column::JobId.eq(job_id))
+                .group_by(fragment::Column::FragmentId)
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+
+            let set_db: HashSet<(FragmentId, i32, i64)> = fragments_from_db.into_iter().collect();
+            let set_cache: HashSet<(FragmentId, i32, i64)> =
+                fragments_from_cache.iter().cloned().collect();
+
+            debug_assert_eq!(set_db, set_cache, "Fragments mismatch between DB and cache");
+        }
+
+        let mut fragments = fragments_from_cache;
         fragments.retain(|(_, mask, _)| {
             *mask & PbFragmentTypeFlag::Mview as i32 != 0
                 || *mask & PbFragmentTypeFlag::Sink as i32 != 0
