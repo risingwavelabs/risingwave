@@ -33,6 +33,8 @@ impl CompactorService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
+        println!("Compactor config: {:?}", config);
+
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -47,6 +49,10 @@ impl CompactorService {
         {
             cmd.arg("--compaction-worker-threads-number")
                 .arg(format!("{}", compaction_worker_threads_number));
+        }
+
+        if config.enable_iceberg_compactor {
+            cmd.arg("--compactor-mode").arg("dedicated_iceberg");
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
