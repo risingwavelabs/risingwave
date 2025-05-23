@@ -20,13 +20,14 @@ pub fn gen_random_uuid() -> Uuid {
     Uuid::new_v4()
 }
 
-/// Generate a random UUID using the gen_random_uuid() function
+/// Generate a deterministic UUID from any string using the gen_uuid_from_string(varchar) function.
+/// This can be a contradiction with cast(varchar) -> uuid , but later only supports the conversion of uuid formatted string.
 #[function("gen_uuid_from_string(varchar) -> uuid")]
 pub fn gen_uuid_from_string(input: &str) -> Uuid {
     Uuid::new_v5(input)
 }
 
-/// Generate a UUID from 16 bytes
+/// Generate a UUID from 16 bytes. Since the cast is avaiable do we need this?
 #[function("gen_uuid_from_bytea(bytea) -> uuid")]
 pub fn gen_uuid_from_bytea(bytes: &[u8]) -> Uuid {
     if bytes.len() == 16 {
