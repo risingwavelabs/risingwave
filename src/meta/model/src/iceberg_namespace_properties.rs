@@ -17,7 +17,7 @@ use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
-#[sea_orm(table_name = "exactly_once_iceberg_namespace_properties")]
+#[sea_orm(table_name = "iceberg_namespace_properties")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub catalog_name: String,
