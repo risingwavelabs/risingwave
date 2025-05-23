@@ -18,7 +18,9 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_hummock_sdk::vector_index::{FlatIndexAdd, VectorFileInfo, VectorIndexAdd};
+use risingwave_hummock_sdk::vector_index::{
+    FlatIndexAdd, VectorFileInfo, VectorIndexAdd, VectorIndexImpl, VectorStoreDelta,
+};
 use risingwave_hummock_sdk::{HummockEpoch, HummockObjectId};
 
 use crate::error::StorageResult;
@@ -67,6 +69,7 @@ impl Drop for VectorWriterInitGuard {
 struct VectorWriterState {
     epoch: EpochPair,
     dimension: usize,
+    next_vector_id: u64,
     _guard: VectorWriterInitGuard,
 }
 
@@ -112,11 +115,13 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
         )
         .await?;
         let index = &version.vector_indexes[&self.table_id];
+        let VectorIndexImpl::Flat(flat) = &index.inner;
         assert!(
             self.state
                 .replace(VectorWriterState {
                     epoch: opts.epoch,
                     dimension: index.dimension as _,
+                    next_vector_id: flat.vector_store.next_vector_id,
                     _guard: VectorWriterInitGuard::new(
                         self.table_id,
                         opts.epoch.curr,
@@ -130,7 +135,8 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
 
     fn seal_current_epoch(&mut self, next_epoch: u64, _opts: SealCurrentEpochOptions) {
         assert!(self.block_builder.is_none());
-        let epoch = &mut self.state.as_mut().expect("should have init").epoch;
+        let state = self.state.as_mut().expect("should have init");
+        let epoch = &mut state.epoch;
         assert!(next_epoch > epoch.curr);
         epoch.prev = epoch.curr;
         epoch.curr = next_epoch;
@@ -140,7 +146,10 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
                 table_id: self.table_id,
                 next_epoch,
                 add: VectorIndexAdd::Flat(FlatIndexAdd {
-                    added_vector_files: take(&mut self.flushed_vector_files),
+                    vector_store_delta: VectorStoreDelta {
+                        next_vector_id: state.next_vector_id,
+                        added_vector_files: take(&mut self.flushed_vector_files),
+                    },
                 }),
             });
     }
@@ -165,15 +174,15 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
                 .upload(&path, encoded_block)
                 .await
                 .map_err(HummockError::from)?;
-            let epoch = self.state.as_ref().expect("should have init").epoch.curr;
+            let state = self.state.as_mut().expect("should have init");
 
             self.flushed_vector_files.push(VectorFileInfo {
                 object_id,
-                min_epoch: epoch,
-                max_epoch: epoch,
                 vector_count: vector_count as _,
                 file_size: size as _,
+                start_vector_id: state.next_vector_id,
             });
+            state.next_vector_id += vector_count as u64;
             Ok(size)
         } else {
             Ok(0)

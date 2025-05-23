@@ -706,7 +706,6 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
                 .hummock_version_reader
                 .nearest::<MeasurementType, O>(
                     version,
-                    epoch,
                     self.table_id,
                     vec,
                     options,

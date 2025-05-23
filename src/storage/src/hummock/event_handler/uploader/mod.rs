@@ -1764,7 +1764,9 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::EpochExt;
     use risingwave_hummock_sdk::HummockEpoch;
-    use risingwave_hummock_sdk::vector_index::{FlatIndexAdd, VectorFileInfo, VectorIndexAdd};
+    use risingwave_hummock_sdk::vector_index::{
+        FlatIndexAdd, VectorFileInfo, VectorIndexAdd, VectorStoreDelta,
+    };
     use tokio::sync::oneshot;
 
     use super::test_utils::*;
@@ -1874,17 +1876,20 @@ pub(crate) mod tests {
         uploader.register_vector_writer(VECTOR_INDEX_TABLE_ID, epoch1);
         let vector_info_file = VectorFileInfo {
             object_id: 1.into(),
-            min_epoch: epoch1,
-            max_epoch: epoch1,
-            vector_count: 0,
+            vector_count: 1,
             file_size: 0,
+            start_vector_id: 0,
         };
+        let vector_index_add = VectorIndexAdd::Flat(FlatIndexAdd {
+            vector_store_delta: VectorStoreDelta {
+                next_vector_id: 1,
+                added_vector_files: vec![vector_info_file.clone()],
+            },
+        });
         uploader.vector_writer_seal_epoch(
             VECTOR_INDEX_TABLE_ID,
             epoch1.next_epoch(),
-            VectorIndexAdd::Flat(FlatIndexAdd {
-                added_vector_files: vec![vector_info_file.clone()],
-            }),
+            vector_index_add.clone(),
         );
 
         let (sync_tx, sync_rx) = oneshot::channel();
@@ -1934,13 +1939,8 @@ pub(crate) mod tests {
                 let (table_id, vector_index_adds) = vector_index_adds.into_iter().next().unwrap();
                 assert_eq!(table_id, VECTOR_INDEX_TABLE_ID);
                 assert_eq!(vector_index_adds.len(), 1);
-                let vector_index_add = vector_index_adds[0].clone();
-                assert_eq!(
-                    vector_index_add,
-                    VectorIndexAdd::Flat(FlatIndexAdd {
-                        added_vector_files: vec![vector_info_file],
-                    })
-                );
+                let synced_vector_index_add = vector_index_adds[0].clone();
+                assert_eq!(vector_index_add, synced_vector_index_add);
             }
             _ => unreachable!(),
         };

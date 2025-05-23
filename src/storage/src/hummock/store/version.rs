@@ -1134,7 +1134,6 @@ impl HummockVersionReader {
     pub async fn nearest<M: MeasureDistanceBuilder, O>(
         &self,
         version: PinnedVersion,
-        epoch: u64,
         table_id: TableId,
         target: Vector,
         options: VectorNearestOptions,
@@ -1153,10 +1152,7 @@ impl HummockVersionReader {
         let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
         match &index.inner {
             VectorIndexImpl::Flat(flat) => {
-                for vector_file in &flat.vector_files {
-                    if vector_file.min_epoch > epoch {
-                        continue;
-                    }
+                for vector_file in &flat.vector_store.vector_files {
                     let path = self
                         .sstable_store
                         .get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
