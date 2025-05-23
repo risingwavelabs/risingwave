@@ -2475,6 +2475,7 @@ async fn test_commit_multi_epoch() {
                         }],
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
@@ -2801,6 +2802,7 @@ async fn test_commit_with_large_size() {
                         sstables,
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
