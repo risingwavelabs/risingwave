@@ -130,6 +130,7 @@ pub struct CompactorConfig {
 
     pub user_managed: bool,
     pub compaction_worker_threads_number: Option<usize>,
+    pub enable_iceberg_compactor: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

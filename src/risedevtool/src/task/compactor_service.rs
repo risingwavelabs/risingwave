@@ -49,6 +49,10 @@ impl CompactorService {
                 .arg(format!("{}", compaction_worker_threads_number));
         }
 
+        if config.enable_iceberg_compactor {
+            cmd.arg("--compactor-mode").arg("dedicated_iceberg");
+        }
+
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
 
