@@ -277,7 +277,6 @@ impl Sink for StarrocksSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
     async fn validate(&self) -> Result<()> {

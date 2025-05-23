@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 pub mod prelude;
 
 pub mod actor;
+pub mod alter_connector_props;
 pub mod catalog_version;
 pub mod cluster;
 pub mod compaction_config;
