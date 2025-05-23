@@ -197,6 +197,9 @@ message VectorIndexObject {
 message VectorFileInfo {
   uint64 object_id = 1;
   uint64 file_size = 2;
+  uint64 min_epoch = 3;
+  uint64 max_epoch = 4;
+  uint32 vector_count = 5;
 }
 
 message FlatIndexConfig {}
