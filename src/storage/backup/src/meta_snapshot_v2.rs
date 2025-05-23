@@ -62,7 +62,9 @@ macro_rules! for_all_metadata_models_v2 {
             {hummock_sequences, risingwave_meta_model::hummock_sequence},
             {session_parameters, risingwave_meta_model::session_parameter},
             {secrets, risingwave_meta_model::secret},
-            {exactly_once_iceberg_sinks, risingwave_meta_model::exactly_once_iceberg_sink}
+            {exactly_once_iceberg_sinks, risingwave_meta_model::exactly_once_iceberg_sink},
+            {iceberg_tables, risingwave_meta_model::iceberg_tables},
+            {iceberg_namespace_properties, risingwave_meta_model::iceberg_namespace_properties}
         }
     };
 }
