@@ -486,6 +486,7 @@ pub async fn start_service_as_election_leader(
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
     let (iceberg_compaction_mgr, iceberg_compactor_event_rx) = IcebergCompactionManager::build(
+        env.clone(),
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
