@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::future::{BoxFuture, try_join_all};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
@@ -672,7 +672,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                                 ReadOptions {
                                     prefetch_options:
                                     PrefetchOptions::prefetch_for_large_range_scan(),
-                                    cache_policy: CachePolicy::Fill(CacheHint::Low),
+                                    cache_policy: CachePolicy::Fill(Hint::Low),
                                     table_id,
                                     ..Default::default()
                                 },
@@ -747,7 +747,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Low),
+                        cache_policy: CachePolicy::Fill(Hint::Low),
                         table_id,
                         ..Default::default()
                     },

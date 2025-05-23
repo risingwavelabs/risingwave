@@ -24,7 +24,9 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig};
+use foyer::{
+    Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
+};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -1006,6 +1008,7 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::recover_concurrency")]
     pub recover_concurrency: usize,
 
+    /// Deprecated soon. Please use `throttle` to do I/O throttling instead.
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
@@ -1017,6 +1020,12 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
+
+    #[serde(default = "default::file_cache::throttle")]
+    pub throttle: Throttle,
+
+    #[serde(default = "default::file_cache::fifo_probation_ratio")]
+    pub fifo_probation_ratio: f64,
 
     /// Recover mode.
     ///
@@ -1937,7 +1946,9 @@ pub mod default {
     }
 
     pub mod file_cache {
-        use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
+        use std::num::NonZeroUsize;
+
+        use foyer::{Compression, RecoverMode, RuntimeOptions, Throttle, TokioRuntimeOptions};
 
         pub fn dir() -> String {
             "".to_owned()
@@ -1979,12 +1990,27 @@ pub mod default {
             None
         }
 
+        pub fn fifo_probation_ratio() -> f64 {
+            0.1
+        }
+
         pub fn recover_mode() -> RecoverMode {
             RecoverMode::None
         }
 
         pub fn runtime_config() -> RuntimeOptions {
             RuntimeOptions::Unified(TokioRuntimeOptions::default())
+        }
+
+        pub fn throttle() -> Throttle {
+            Throttle::new()
+                .with_iops_counter(foyer::IopsCounter::PerIoSize(
+                    NonZeroUsize::new(128 * 1024).unwrap(),
+                ))
+                .with_read_iops(100000)
+                .with_write_iops(100000)
+                .with_write_throughput(1024 * 1024 * 1024)
+                .with_read_throughput(1024 * 1024 * 1024)
         }
     }
 

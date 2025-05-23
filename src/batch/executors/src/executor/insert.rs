@@ -264,7 +264,7 @@ mod tests {
     use std::ops::Bound;
 
     use assert_matches::assert_matches;
-    use foyer::CacheHint;
+    use foyer::Hint;
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
@@ -395,7 +395,7 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )

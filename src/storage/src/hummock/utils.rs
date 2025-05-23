@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -394,7 +394,7 @@ pub(crate) async fn do_insert_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
@@ -430,7 +430,7 @@ pub(crate) async fn do_delete_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
     match inner.get(key.clone(), epoch, read_options).await? {
@@ -476,7 +476,7 @@ pub(crate) async fn do_update_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
 
