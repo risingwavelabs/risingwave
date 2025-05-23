@@ -146,9 +146,7 @@ axum-extra = "0.9"
 chrono = { version = "0.4.40", default-features = false }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.4.3", features = [
-    "cmake-build",
-] }
+rdkafka = { features = ["cmake-build"], git = "https://github.com/arkbriar/madsim.git", rev = "92f99756b29ad812bbcae6fe929bd082ab79d75e", package = "madsim-rdkafka" }
 hashbrown = { version = "0.15", features = [
     "default-hasher",
     "inline-more",
