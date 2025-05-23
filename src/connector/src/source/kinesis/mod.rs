@@ -57,7 +57,7 @@ const fn kinesis_reader_default_eof_retry_interval_ms() -> u64 {
 }
 
 const fn kinesis_reader_default_error_retry_interval_ms() -> u64 {
-    200
+    1000
 }
 
 #[serde_as]
