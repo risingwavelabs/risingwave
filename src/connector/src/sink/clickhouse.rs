@@ -498,9 +498,7 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "clickhouse can not support Bytea".to_owned(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::ClickHouse(
-                "clickhouse rust can not support Json".to_owned(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("Json")),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -1000,10 +998,11 @@ impl ClickHouseFieldWithNull {
                 };
                 ClickHouseField::Int64(ticks)
             }
-            ScalarRefImpl::Jsonb(_) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse rust interface can not support Json".to_owned(),
-                ));
+            ScalarRefImpl::Jsonb(v) => {
+                let json_str = serde_json::to_string(&v).map_err(|e| {
+                    SinkError::ClickHouse(format!("Failed to serialize JSON: {}", e))
+                })?;
+                ClickHouseField::String(json_str)
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];
