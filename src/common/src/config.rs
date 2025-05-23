@@ -1183,6 +1183,9 @@ pub struct BatchDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
 }
 
 macro_rules! define_system_config {
