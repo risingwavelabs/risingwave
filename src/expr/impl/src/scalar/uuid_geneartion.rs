@@ -44,7 +44,7 @@ mod tests {
     use risingwave_common::types::Scalar;
 
     use super::*;
- 
+
     #[test]
     fn test_gen_random_uuid() {
         // Generate multiple UUIDs to test uniqueness
@@ -55,7 +55,7 @@ mod tests {
         assert_ne!(uuid1, Uuid::nil());
         assert_ne!(uuid2, Uuid::nil());
 
-        // Test uniqueness 
+        // Test uniqueness
         assert_ne!(uuid1, uuid2);
 
         // Test that they are valid v4 UUIDs (version 4 = random)
@@ -67,7 +67,6 @@ mod tests {
         let variant_bits = (bytes[8] >> 6) & 0b11;
         assert_eq!(variant_bits, 0b10);
     }
-
 
     #[test]
     fn test_gen_uuid_from_string_deterministic() {
@@ -84,30 +83,28 @@ mod tests {
         let empty1 = gen_uuid_from_string("");
         let empty2 = gen_uuid_from_string("");
         assert_eq!(empty1, empty2);
- 
     }
- 
+
     #[test]
     fn test_gen_uuid_from_bytea_valid() {
         // Test with exactly 16 bytes
         let bytes = [
-            0x12, 0x3e, 0x45, 0x67, 0xe8, 0x9b, 0x12, 0xd3,
-            0xa4, 0x56, 0x42, 0x66, 0x14, 0x17, 0x40, 0x00,
+            0x12, 0x3e, 0x45, 0x67, 0xe8, 0x9b, 0x12, 0xd3, 0xa4, 0x56, 0x42, 0x66, 0x14, 0x17,
+            0x40, 0x00,
         ];
         let uuid = gen_uuid_from_bytea(&bytes);
-        
+
         // Should match the expected UUID string representation
         assert_eq!(uuid.to_string(), "123e4567-e89b-12d3-a456-426614174000");
-        
+
         // Round-trip test: UUID -> bytes -> UUID
         let result_bytes = uuid.as_scalar_ref().to_be_bytes();
         assert_eq!(result_bytes, bytes);
-        
+
         let round_trip_uuid = gen_uuid_from_bytea(&result_bytes);
         assert_eq!(uuid, round_trip_uuid);
     }
 
- 
     #[test]
     fn test_function_integration() {
         // Test that different functions produce different results
