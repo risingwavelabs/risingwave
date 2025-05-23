@@ -59,6 +59,7 @@ pub mod vector_index;
 pub use compact::*;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
+use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 
 use crate::table_watermark::TableWatermarks;
 
@@ -313,12 +314,16 @@ pub fn get_stale_object_ids(
         .id
         .iter()
         .map(|sst_id| HummockObjectId::Sstable((*sst_id).into()))
-        .chain(
-            stale_objects
-                .vector_file_ids
-                .iter()
-                .map(|vector_file_id| HummockObjectId::VectorFile((*vector_file_id).into())),
-        )
+        .chain(stale_objects.vector_files.iter().map(
+            |file| match file.get_object_type().unwrap() {
+                PbVectorIndexObjectType::VectorIndexObjectUnspecified => {
+                    unreachable!()
+                }
+                VectorIndexObjectType::VectorIndexObjectVector => {
+                    HummockObjectId::VectorFile(file.id.into())
+                }
+            },
+        ))
 }
 
 #[macro_export]
