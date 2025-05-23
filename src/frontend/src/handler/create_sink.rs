@@ -478,10 +478,11 @@ pub async fn handle_create_sink(
 
     session.check_cluster_limits().await?;
 
+    let if_not_exists = stmt.if_not_exists;
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
         StatementType::CREATE_SINK,
-        stmt.if_not_exists,
+        if_not_exists,
     )? {
         return Ok(resp);
     }
@@ -572,6 +573,7 @@ pub async fn handle_create_sink(
             graph,
             target_table_replace_plan,
             dependencies,
+            if_not_exists,
         )
         .await?;
 

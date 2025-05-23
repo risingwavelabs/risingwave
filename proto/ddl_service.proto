@@ -56,6 +56,7 @@ message DropSchemaResponse {
 message CreateSourceRequest {
   catalog.Source source = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  bool if_not_exists = 3;
 }
 
 message CreateSourceResponse {
@@ -91,6 +92,7 @@ message CreateSinkRequest {
   optional ReplaceJobPlan affected_table_change = 3;
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
+  bool if_not_exists = 5;
 }
 
 message CreateSinkResponse {
@@ -147,6 +149,8 @@ message CreateMaterializedViewRequest {
 
   // The specific resource group to use for the materialized view. If not set, the database resource group is used.
   optional string specific_resource_group = 5;
+
+  bool if_not_exists = 6;
 }
 
 message CreateMaterializedViewResponse {
@@ -209,6 +213,7 @@ message CreateTableRequest {
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   TableJobType job_type = 4;
+  bool if_not_exists = 5;
 }
 
 message CreateTableResponse {
@@ -352,6 +357,7 @@ message CreateIndexRequest {
   catalog.Index index = 1;
   catalog.Table index_table = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
+  bool if_not_exists = 4;
 }
 
 message CreateIndexResponse {

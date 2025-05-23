@@ -406,6 +406,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -413,6 +414,7 @@ impl MetaClient {
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
             specific_resource_group,
+            if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -441,10 +443,12 @@ impl MetaClient {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: graph,
+            if_not_exists,
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -459,12 +463,14 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             affected_table_change,
             dependencies: dependencies.into_iter().collect(),
+            if_not_exists,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -500,12 +506,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
             job_type: job_type as _,
+            if_not_exists,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -685,11 +693,13 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
             fragment_graph: Some(graph),
+            if_not_exists,
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here

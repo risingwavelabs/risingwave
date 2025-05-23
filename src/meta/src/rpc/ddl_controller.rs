@@ -65,7 +65,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
-use crate::error::{bail_invalid_parameter, bail_unavailable};
+use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
     NotificationVersion, StreamingJob, StreamingJobType,
@@ -144,6 +144,7 @@ pub enum DdlCommand {
         Option<ReplaceStreamJobInfo>,
         HashSet<ObjectId>,
         Option<String>, // specific resource group
+        bool,           // if_not_exists
     ),
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceStreamJobInfo>),
     AlterName(alter_name_request::Object, String),
@@ -186,7 +187,7 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_) => true,
-            DdlCommand::CreateStreamingJob(_, _, _, _, _, _)
+            DdlCommand::CreateStreamingJob(_, _, _, _, _, _, _)
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
@@ -323,6 +324,7 @@ impl DdlController {
                     affected_table_replace_info,
                     dependencies,
                     specific_resource_group,
+                    if_not_exists,
                 ) => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -330,6 +332,7 @@ impl DdlController {
                         affected_table_replace_info,
                         dependencies,
                         specific_resource_group,
+                        if_not_exists,
                     )
                     .await
                 }
@@ -920,9 +923,11 @@ impl DdlController {
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> MetaResult<NotificationVersion> {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
-        self.metadata_manager
+        let check_ret = self
+            .metadata_manager
             .catalog_controller
             .create_job_catalog(
                 &mut streaming_job,
@@ -932,7 +937,25 @@ impl DdlController {
                 dependencies,
                 specific_resource_group.clone(),
             )
-            .await?;
+            .await;
+        if let Err(meta_err) = check_ret {
+            if !if_not_exists {
+                return Err(meta_err);
+            }
+            if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
+                if streaming_job.create_type() == CreateType::Foreground {
+                    let database_id = streaming_job.database_id();
+                    return self
+                        .metadata_manager
+                        .wait_streaming_job_finished(database_id.into(), *job_id)
+                        .await;
+                } else {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+            } else {
+                return Err(meta_err);
+            }
+        }
         let job_id = streaming_job.id();
 
         tracing::debug!(
