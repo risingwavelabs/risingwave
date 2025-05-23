@@ -13,7 +13,7 @@ futures-async-stream = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
 risingwave_common = { workspace = true }
-thiserror = "1"
+thiserror = "2"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

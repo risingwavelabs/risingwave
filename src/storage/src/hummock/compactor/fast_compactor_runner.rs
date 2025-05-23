@@ -362,7 +362,7 @@ impl CompactorRunner {
         context: CompactorContext,
         task: CompactTask,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
         task_progress: Arc<TaskProgress>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();

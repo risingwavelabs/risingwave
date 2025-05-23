@@ -31,7 +31,7 @@ use thiserror_ext::AsReport;
 
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, ObjectIdManagerRef};
 use crate::store::*;
 use crate::store_impl::AsHummock;
 
@@ -409,8 +409,8 @@ impl TracedStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        self.inner.sstable_object_id_manager()
+    pub fn object_id_manager(&self) -> &ObjectIdManagerRef {
+        self.inner.object_id_manager()
     }
 }
 

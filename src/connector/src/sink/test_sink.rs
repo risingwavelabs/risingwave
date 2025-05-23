@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::connector_common::IcebergCompactionStat;
+use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
@@ -31,7 +31,7 @@ pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFutur
 pub trait BuildBoxCoordinatorTrait = FnMut(
         DatabaseConnection,
         SinkParam,
-        Option<UnboundedSender<IcebergCompactionStat>>,
+        Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> BoxCoordinator
     + Send
     + 'static;
@@ -79,7 +79,7 @@ impl Sink for TestSink {
     async fn new_coordinator(
         &self,
         db: DatabaseConnection,
-        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> crate::sink::Result<Self::Coordinator> {
         Ok(build_box_coordinator(
             db,
@@ -149,7 +149,7 @@ pub fn register_build_sink(
 fn build_box_coordinator(
     db: DatabaseConnection,
     sink_param: SinkParam,
-    iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+    iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
 ) -> BoxCoordinator {
     (get_registry()
         .build_box_sink

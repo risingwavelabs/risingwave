@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::{DropMode, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -24,7 +24,6 @@ pub async fn handle_drop_database(
     handler_args: HandlerArgs,
     database_name: ObjectName,
     if_exists: bool,
-    mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader();
@@ -34,9 +33,6 @@ pub async fn handle_drop_database(
             "cannot drop the currently open database".to_owned(),
         )
         .into());
-    }
-    if mode.is_some() {
-        return Err(ErrorCode::BindError("Drop database not support drop mode".to_owned()).into());
     }
     let database = {
         let reader = catalog_reader.read_guard();

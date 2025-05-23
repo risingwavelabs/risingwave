@@ -18,7 +18,9 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures::future::try_join_all;
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_hummock_sdk::{OBJECT_SUFFIX, get_object_id_from_path, get_sst_data_path};
+use risingwave_hummock_sdk::{
+    VALID_OBJECT_ID_SUFFIXES, get_object_data_path, get_object_id_from_path,
+};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::prefix::opendal_engine::get_object_prefix;
 use risingwave_object_store::object::{
@@ -60,7 +62,10 @@ pub async fn migrate_legacy_object(
     let timer = Instant::now();
     while let Some(object) = iter.next().await {
         let object = object?;
-        if !object.key.ends_with(OBJECT_SUFFIX) {
+        if !VALID_OBJECT_ID_SUFFIXES
+            .iter()
+            .any(|suffix| object.key.ends_with(suffix))
+        {
             let legacy_path = object.key;
             assert_eq!(
                 &legacy_path[..source_dir.len()],
@@ -75,16 +80,16 @@ pub async fn migrate_legacy_object(
             from_to.push((legacy_path, new_path));
         } else {
             let object_id = get_object_id_from_path(&object.key);
-            let legacy_prefix = get_object_prefix(object_id.inner(), false);
-            let legacy_path = get_sst_data_path(&legacy_prefix, source_dir, object_id);
+            let legacy_prefix = get_object_prefix(object_id.as_raw().inner(), false);
+            let legacy_path = get_object_data_path(&legacy_prefix, source_dir, object_id);
             if object.key != legacy_path {
                 return Err(anyhow!(format!(
                     "the source object store does not appear to be legacy: {} versus {}",
                     object.key, legacy_path
                 )));
             }
-            let new_path = get_sst_data_path(
-                &get_object_prefix(object_id.inner(), true),
+            let new_path = get_object_data_path(
+                &get_object_prefix(object_id.as_raw().inner(), true),
                 target_dir,
                 object_id,
             );

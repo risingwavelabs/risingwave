@@ -31,11 +31,13 @@ use iceberg::io::{
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
@@ -124,7 +126,7 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load.
+    /// Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
 
@@ -160,13 +162,21 @@ impl IcebergCommon {
             .unwrap_or_else(|| "risingwave".to_owned())
     }
 
+    pub fn enable_config_load(&self) -> bool {
+        // If the env var is set to true, we disable the default config load. (Cloud environment)
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            return false;
+        }
+        self.enable_config_load.unwrap_or(false)
+    }
+
     /// For both V1 and V2.
     fn build_jni_catalog_configs(
         &self,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<(HashMap<String, String>, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
-        let enable_config_load = self.enable_config_load.unwrap_or(false);
+        let enable_config_load = self.enable_config_load();
         let file_io_props = {
             let catalog_type = self.catalog_type().to_owned();
 
@@ -424,14 +434,14 @@ impl IcebergCommon {
                             .secret_key(self.secret_key.clone())
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
-                            .enable_config_load(self.enable_config_load)
+                            .enable_config_load(Some(self.enable_config_load()))
                             .build(),
                     ),
                     "gs" | "gcs" => StorageCatalogConfig::Gcs(
                         storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(warehouse)
                             .credential(self.gcs_credential.clone())
-                            .enable_config_load(self.enable_config_load)
+                            .enable_config_load(Some(self.enable_config_load()))
                             .build(),
                     ),
                     "azblob" => StorageCatalogConfig::Azblob(

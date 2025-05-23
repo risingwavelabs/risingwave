@@ -39,7 +39,7 @@ risingwave_expr_macro = { path = "../macro" }
 risingwave_pb = { workspace = true }
 smallvec = { workspace = true }
 static_assertions = "1"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt-multi-thread",

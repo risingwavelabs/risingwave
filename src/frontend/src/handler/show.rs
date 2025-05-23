@@ -14,11 +14,13 @@
 
 use std::sync::Arc;
 
+use futures::future::join_all;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
@@ -27,9 +29,12 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
+use risingwave_pb::frontend_service::GetRunningSqlsRequest;
+use risingwave_rpc_client::FrontendClientPoolRef;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
 };
+use thiserror_ext::AsReport;
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
@@ -292,6 +297,7 @@ struct ShowJobRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowProcessListRow {
+    worker_id: String,
     id: String,
     user: String,
     host: String,
@@ -601,23 +607,11 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::ProcessList => {
-            let sessions_map = session.env().sessions_map().read();
-            let rows = sessions_map.values().map(|s| {
-                ShowProcessListRow {
-                    // Since process id and the secret id in the session id are the same in RisingWave, just display the process id.
-                    id: format!("{}", s.id().0),
-                    user: s.user_name(),
-                    host: format!("{}", s.peer_addr()),
-                    database: s.database(),
-                    time: s
-                        .elapse_since_running_sql()
-                        .map(|mills| format!("{}ms", mills)),
-                    info: s
-                        .running_sql()
-                        .map(|sql| format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024))),
-                }
-            });
-
+            let rows = show_process_list_impl(
+                session.env().frontend_client_pool(),
+                session.env().worker_node_manager_ref(),
+            )
+            .await;
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
                 .into());
@@ -858,6 +852,63 @@ pub fn handle_show_create_object(
             create_sql: sql,
         }])
         .into())
+}
+
+async fn show_process_list_impl(
+    frontend_client_pool: FrontendClientPoolRef,
+    worker_node_manager: WorkerNodeManagerRef,
+) -> Vec<ShowProcessListRow> {
+    // Create a placeholder row for the worker in case of any errors while fetching its running SQLs.
+    fn on_error(worker_id: u32, err_msg: String) -> Vec<ShowProcessListRow> {
+        vec![ShowProcessListRow {
+            worker_id: format!("{}", worker_id),
+            id: "".to_owned(),
+            user: "".to_owned(),
+            host: "".to_owned(),
+            database: "".to_owned(),
+            time: None,
+            info: Some(format!(
+                "Failed to show process list from worker {worker_id} due to: {err_msg}"
+            )),
+        }]
+    }
+    let futures = worker_node_manager
+        .list_frontend_nodes()
+        .into_iter()
+        .map(|worker| {
+            let frontend_client_pool_ = frontend_client_pool.clone();
+            async move {
+                let client = match frontend_client_pool_.get(&worker).await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+                let resp = match client.get_running_sqls(GetRunningSqlsRequest {}).await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+                resp.into_inner()
+                    .running_sqls
+                    .into_iter()
+                    .map(|sql| ShowProcessListRow {
+                        worker_id: format!("{}", worker.id),
+                        id: format!("{}", sql.process_id),
+                        user: sql.user_name,
+                        host: sql.peer_addr,
+                        database: sql.database,
+                        time: sql.elapsed_millis.map(|mills| format!("{}ms", mills)),
+                        info: sql
+                            .sql
+                            .map(|sql| format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024))),
+                    })
+                    .collect_vec()
+            }
+        })
+        .collect_vec();
+    join_all(futures).await.into_iter().flatten().collect()
 }
 
 #[cfg(test)]

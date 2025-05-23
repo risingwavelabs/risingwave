@@ -57,22 +57,22 @@ impl StreamService for StreamServiceImpl {
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
 
-    async fn get_min_uncommitted_sst_object_id(
+    async fn get_min_uncommitted_object_id(
         &self,
-        _request: Request<GetMinUncommittedSstObjectIdRequest>,
-    ) -> Result<Response<GetMinUncommittedSstObjectIdResponse>, Status> {
-        let min_uncommitted_sst_object_id =
+        _request: Request<GetMinUncommittedObjectIdRequest>,
+    ) -> Result<Response<GetMinUncommittedObjectIdResponse>, Status> {
+        let min_uncommitted_object_id =
             if let Some(hummock) = self.mgr.env.state_store().as_hummock() {
                 hummock
-                    .min_uncommitted_sst_object_id()
+                    .min_uncommitted_object_id()
                     .await
-                    .map(|sst_id| sst_id.inner())
+                    .map(|object_id| object_id.inner())
                     .unwrap_or(u64::MAX)
             } else {
                 u64::MAX
             };
-        Ok(Response::new(GetMinUncommittedSstObjectIdResponse {
-            min_uncommitted_sst_object_id,
+        Ok(Response::new(GetMinUncommittedObjectIdResponse {
+            min_uncommitted_object_id,
         }))
     }
 }
