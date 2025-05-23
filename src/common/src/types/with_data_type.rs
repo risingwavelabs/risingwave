@@ -99,7 +99,6 @@ impl WithDataType for &str {
     }
 }
 impl WithDataType for UuidRef<'_> {
-    // Add this implementation
     fn default_data_type() -> DataType {
         DataType::Uuid
     }
