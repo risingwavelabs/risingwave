@@ -33,9 +33,6 @@ use crate::error::ConnectorResult;
 struct IamAuthEnv {
     credentials_provider: SharedCredentialsProvider,
     region: Region,
-    // XXX(runji): madsim does not support `Handle` for now
-    #[cfg(not(madsim))]
-    rt: tokio::runtime::Handle,
     signer_timeout_sec: u64,
 }
 
@@ -75,8 +72,6 @@ impl KafkaContextCommon {
             Some(IamAuthEnv {
                 credentials_provider,
                 region,
-                #[cfg(not(madsim))]
-                rt: tokio::runtime::Handle::current(),
                 signer_timeout_sec: auth
                     .msk_signer_timeout_sec
                     .unwrap_or(Self::default_msk_signer_timeout_sec()),
