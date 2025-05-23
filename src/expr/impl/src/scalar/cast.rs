@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{F64, Int256, JsonbRef, MapRef, MapValue, ToText};
+use risingwave_common::types::{F64, Int256, JsonbRef, MapRef, MapValue, ToText, UuidRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
@@ -37,6 +37,7 @@ use thiserror_ext::AsReport;
 #[function("cast(varchar) -> timestamp")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
+#[function("cast(varchar) -> uuid")]
 pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
@@ -188,6 +189,16 @@ pub fn bool_out(input: bool, writer: &mut impl Write) {
 #[function("cast(varchar) -> bytea")]
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
+}
+
+#[function("cast(uuid) -> varchar")]
+pub fn uuid_to_varchar(elem: UuidRef<'_>, writer: &mut impl Write) {
+    elem.write(writer).unwrap();
+}
+
+#[function("cast(uuid) -> bytea")]
+pub fn uuid_to_bytea(elem: UuidRef<'_>) -> Box<[u8]> {
+    elem.to_be_bytes().into()
 }
 
 #[function("cast(varchar) -> anyarray", type_infer = "unreachable")]
@@ -430,6 +441,36 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_uuid_to_varchar() {
+        let uuid = Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
+        let mut writer = String::new();
+        uuid_to_varchar(uuid.as_scalar_ref(), &mut writer);
+        assert_eq!(writer, "123e4567-e89b-12d3-a456-426614174000");
+    }
+
+    #[test]
+    fn test_uuid_to_bytea() {
+        let uuid = Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
+        let bytes = uuid_to_bytea(uuid.as_scalar_ref());
+
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(
+            &*bytes,
+            &[
+                0x12, 0x3e, 0x45, 0x67, 0xe8, 0x9b, 0x12, 0xd3, 0xa4, 0x56, 0x42, 0x66, 0x14, 0x17,
+                0x40, 0x00,
+            ]
+        );
+    }
+    #[test]
+    fn test_error_conditions() {
+        // Test invalid VARCHAR to UUID
+        assert!(Uuid::from_str("").is_err()); // Empty string
+        assert!(Uuid::from_str("not-a-uuid").is_err()); // Invalid format
+        assert!(Uuid::from_str("123e4567-e89b-12d3-a456").is_err()); // Too short
+        assert!(Uuid::from_str("123e4567-e89b-12d3-a456-42661417400g").is_err()); // Invalid char
+    }
     #[tokio::test]
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;

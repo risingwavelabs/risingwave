@@ -71,6 +71,7 @@ mod timestamptz;
 mod to_binary;
 mod to_sql;
 mod to_text;
+mod uuid;
 mod with_data_type;
 
 pub use fields::Fields;
@@ -94,6 +95,7 @@ pub use self::struct_type::StructType;
 pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_text::ToText;
+pub use self::uuid::{Uuid, UuidRef};
 pub use self::with_data_type::WithDataType;
 
 /// A 32-bit floating point type with total order.
@@ -178,6 +180,9 @@ pub enum DataType {
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Map(MapType),
+    #[display("uuid")]
+    #[from_str(regex = "(?i)^uuid$")]
+    Uuid,
 }
 
 // For DataType::List
@@ -213,6 +218,7 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
+            DataTypeName::Uuid => Ok(DataType::Uuid),
             DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => Err(
                 "Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.",
             ),
@@ -240,6 +246,7 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Interval => DataType::Interval,
             PbTypeName::Bytea => DataType::Bytea,
             PbTypeName::Jsonb => DataType::Jsonb,
+            PbTypeName::Uuid => DataType::Uuid,
             PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
@@ -295,6 +302,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
             DataTypeName::Map => PbTypeName::Map,
+            DataTypeName::Uuid => PbTypeName::Uuid,
         }
     }
 }
@@ -351,6 +359,7 @@ pub mod data_types {
                 | DataType::Jsonb
                 | DataType::Serial
                 | DataType::Int256
+                | DataType::Uuid
         };
     }
     pub use _simple_data_types as simple;
@@ -431,6 +440,7 @@ impl DataType {
             | DataType::Bytea
             | DataType::Jsonb
             | DataType::Serial
+            | DataType::Uuid
             | DataType::Int256 => (),
         }
         pb
@@ -1012,6 +1022,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
+            DataType::Uuid => Self::Uuid(Uuid::from_sql(&Type::UUID, bytes)?),
             DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
@@ -1045,6 +1056,7 @@ impl ScalarImpl {
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
+            DataType::Uuid => Uuid::from_str(s)?.into(),
             DataType::Map(_m) => return Err("map from text is not supported".into()),
         })
     }
@@ -1151,6 +1163,7 @@ impl ScalarRefImpl<'_> {
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
             Self::Map(v) => v.memcmp_serialize(ser)?,
+            Self::Uuid(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -1206,6 +1219,7 @@ impl ScalarImpl {
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
+            Ty::Uuid => Self::Uuid(Uuid::memcmp_deserialize(de)?),
         })
     }
 
@@ -1383,6 +1397,7 @@ mod tests {
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
+                DataTypeName::Uuid => (ScalarImpl::Uuid(Uuid::nil()), DataType::Uuid),
                 DataTypeName::Map => {
                     // map is not hashable
                     continue;

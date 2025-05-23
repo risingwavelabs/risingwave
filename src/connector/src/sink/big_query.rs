@@ -386,6 +386,9 @@ impl BigQuerySink {
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Map"
             ))),
+            DataType::Uuid => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support UUID"
+            ))),
         }
     }
 
@@ -439,6 +442,11 @@ impl BigQuerySink {
             DataType::Map(_) => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Bigquery cannot support Map"
+                )));
+            }
+            DataType::Uuid => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Bigquery cannot support Uuid"
                 )));
             }
         };
@@ -945,9 +953,9 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
-        DataType::Float32 | DataType::Int256 => {
+        DataType::Float32 | DataType::Int256 | DataType::Uuid => {
             return Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Don't support Float32 and Int256"
+                "Don't support Float32, Int256 and UUID"
             )));
         }
         DataType::Map(_) => todo!(),

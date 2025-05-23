@@ -200,6 +200,7 @@ pub fn mysql_datum_to_rw_datum(
         | DataType::List(_)
         | DataType::Int256
         | DataType::Serial
+        | DataType::Uuid
         | DataType::Map(_) => Err(anyhow!(
             "unsupported data type: {}, set to null",
             rw_data_type

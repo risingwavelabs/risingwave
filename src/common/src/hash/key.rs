@@ -36,7 +36,7 @@ use static_assertions::const_assert_eq;
 use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
     DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
-    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
+    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, Uuid, UuidRef,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;
@@ -616,6 +616,25 @@ impl HashKeySer<'_> for Timestamptz {
 impl HashKeyDe for Timestamptz {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
         Timestamptz::from_micros(buf.get_i64_ne())
+    }
+}
+
+impl<'a> HashKeySer<'a> for UuidRef<'a> {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let bytes = self.to_be_bytes();
+        buf.put_slice(&bytes);
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(16) // UUID is always 16 bytes
+    }
+}
+
+impl HashKeyDe for Uuid {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let mut bytes = [0; 16];
+        buf.copy_to_slice(&mut bytes);
+        Self::from_be_bytes(bytes)
     }
 }
 

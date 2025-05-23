@@ -305,6 +305,11 @@ message ExprNode {
     MAP_INSERT = 709;
     MAP_DELETE = 710;
 
+    //UUID functions
+    GEN_RANDOM_UUID = 750;
+    GEN_UUID_FROM_STRING = 751;
+    GEN_UUID_FROM_BYTEA = 752;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
