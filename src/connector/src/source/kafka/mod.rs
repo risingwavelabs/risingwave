@@ -23,6 +23,7 @@ use crate::error::ConnectorResult;
 
 mod client_context;
 pub mod enumerator;
+pub mod meta_data_reader;
 pub mod private_link;
 pub mod source;
 pub mod split;
