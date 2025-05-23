@@ -75,7 +75,7 @@ impl WorkerNodeManager {
         }
     }
 
-    pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
+    pub fn list_compute_nodes(&self) -> Vec<WorkerNode> {
         self.inner
             .read()
             .unwrap()
@@ -86,15 +86,26 @@ impl WorkerNodeManager {
             .collect()
     }
 
+    pub fn list_frontend_nodes(&self) -> Vec<WorkerNode> {
+        self.inner
+            .read()
+            .unwrap()
+            .worker_nodes
+            .iter()
+            .filter(|w| w.r#type() == WorkerType::Frontend)
+            .cloned()
+            .collect()
+    }
+
     fn list_serving_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.list_worker_nodes()
+        self.list_compute_nodes()
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
             .collect()
     }
 
     fn list_streaming_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.list_worker_nodes()
+        self.list_compute_nodes()
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
             .collect()
@@ -408,7 +419,7 @@ mod tests {
         let manager = WorkerNodeManager::mock(vec![]);
         assert_eq!(manager.list_serving_worker_nodes().len(), 0);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
-        assert_eq!(manager.list_worker_nodes(), vec![]);
+        assert_eq!(manager.list_compute_nodes(), vec![]);
 
         let worker_nodes = vec![
             WorkerNode {
@@ -445,13 +456,13 @@ mod tests {
             .for_each(|w| manager.add_worker_node(w.clone()));
         assert_eq!(manager.list_serving_worker_nodes().len(), 2);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 1);
-        assert_eq!(manager.list_worker_nodes(), worker_nodes);
+        assert_eq!(manager.list_compute_nodes(), worker_nodes);
 
         manager.remove_worker_node(worker_nodes[0].clone());
         assert_eq!(manager.list_serving_worker_nodes().len(), 1);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
         assert_eq!(
-            manager.list_worker_nodes(),
+            manager.list_compute_nodes(),
             worker_nodes.as_slice()[1..].to_vec()
         );
     }

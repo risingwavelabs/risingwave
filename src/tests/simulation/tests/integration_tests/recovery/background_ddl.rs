@@ -212,7 +212,9 @@ async fn test_ddl_cancel() -> Result<()> {
             .lines()
             .find(|line| line.to_lowercase().contains("mv1"))
         {
-            let pid = line.split_whitespace().next().unwrap();
+            let mut splits = line.split_whitespace();
+            let _worker_id = splits.next().unwrap();
+            let pid = splits.next().unwrap();
             let pid = pid.parse::<usize>().unwrap();
             session.run(format!("kill {};", pid)).await?;
             sleep(Duration::from_secs(10)).await;
