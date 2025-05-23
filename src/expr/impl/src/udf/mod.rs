@@ -32,6 +32,9 @@ mod quickjs;
 #[cfg(feature = "udf")]
 mod wasm;
 
+// TODO(rc): gate this by feature flag
+mod ai_model;
+
 /// Download wasm binary from a link.
 fn read_file_from_link(link: &str) -> Result<Vec<u8>> {
     // currently only local file system is supported

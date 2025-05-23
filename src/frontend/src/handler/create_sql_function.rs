@@ -340,6 +340,8 @@ pub async fn handle_create_sql_function(
         always_retry_on_network_error: false,
         is_async: None,
         is_batched: None,
+        hyper_params: Default::default(), // empty for SQL UDF
+        hyper_params_secrets: Default::default(), // empty for SQL UDF
     };
 
     let catalog_writer = session.catalog_writer()?;

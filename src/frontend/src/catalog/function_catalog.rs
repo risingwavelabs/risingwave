@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
@@ -19,6 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
+use risingwave_pb::secret::PbSecretRef;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -40,6 +43,8 @@ pub struct FunctionCatalog {
     pub always_retry_on_network_error: bool,
     pub is_async: Option<bool>,
     pub is_batched: Option<bool>,
+    pub hyper_params: BTreeMap<String, String>,
+    pub hyper_params_secrets: BTreeMap<String, PbSecretRef>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug, EnumAsInner)]
@@ -80,6 +85,8 @@ impl From<&PbFunction> for FunctionCatalog {
             always_retry_on_network_error: prost.always_retry_on_network_error,
             is_async: prost.is_async,
             is_batched: prost.is_batched,
+            hyper_params: prost.hyper_params.clone(),
+            hyper_params_secrets: prost.hyper_params_secrets.clone(),
         }
     }
 }

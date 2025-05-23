@@ -445,6 +445,17 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
 
 impl From<ObjectModel<function::Model>> for PbFunction {
     fn from(value: ObjectModel<function::Model>) -> Self {
+        let mut options = value.0.options.unwrap_or_default();
+        let is_async = options.0.get("async").map(|v| v == "true");
+        let is_batched = options.0.get("batch").map(|v| v == "true");
+        options.0.remove("async");
+        options.0.remove("batch");
+
+        let mut hyper_params_secrets = BTreeMap::new();
+        if let Some(secret_ref) = value.0.hyper_params_secrets {
+            hyper_params_secrets = secret_ref.to_protobuf();
+        }
+
         Self {
             id: value.0.function_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -462,16 +473,10 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
-            is_async: value
-                .0
-                .options
-                .as_ref()
-                .and_then(|o| o.0.get("async").map(|v| v == "true")),
-            is_batched: value
-                .0
-                .options
-                .as_ref()
-                .and_then(|o| o.0.get("batch").map(|v| v == "true")),
+            is_async,
+            is_batched,
+            hyper_params: options.0,
+            hyper_params_secrets,
         }
     }
 }

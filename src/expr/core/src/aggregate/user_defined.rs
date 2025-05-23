@@ -150,6 +150,7 @@ pub fn new_user_defined(
         language,
         is_async: None,
         is_batched: None,
+        hyper_params: None, // XXX(rc): we don't support hyper params for UDAF
     })
     .context("failed to build UDF runtime")?;
 

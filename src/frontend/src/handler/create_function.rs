@@ -15,12 +15,14 @@
 use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
+use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_function(
@@ -74,11 +76,17 @@ pub async fn handle_create_function(
     };
 
     let runtime = match params.runtime {
-        Some(_) => {
-            return Err(ErrorCode::InvalidParameterValue(
-                "runtime selection is currently not supported".to_owned(),
-            )
-            .into());
+        Some(runtime) => {
+            let runtime = runtime.real_value().to_lowercase();
+            if runtime == "_ai_model" {
+                // AI model functions are supported by a special UDF runtime.
+                Some(runtime)
+            } else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "runtime selection is currently not supported".to_owned(),
+                )
+                .into());
+            }
         }
         None => None,
     };
@@ -152,6 +160,12 @@ pub async fn handle_create_function(
 
     let create_fn =
         risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
+
+    let hyper_params = resolve_secret_ref_in_with_options(handler_args.with_options, session)?;
+    let (hyper_params, hyper_params_secrets) = hyper_params.into_parts();
+    let hyper_params_sec_filled = LocalSecretManager::global()
+        .fill_secrets(hyper_params.clone(), hyper_params_secrets.clone())?;
+
     let output = create_fn(CreateOptions {
         kind: match kind {
             Kind::Scalar(_) => UdfKind::Scalar,
@@ -165,6 +179,7 @@ pub async fn handle_create_function(
         as_: params.as_.as_ref().map(|s| s.as_str()),
         using_link: link,
         using_base64_decoded: base64_decoded.as_deref(),
+        hyper_params: Some(&hyper_params_sec_filled),
     })?;
 
     let function = PbFunction {
@@ -188,6 +203,8 @@ pub async fn handle_create_function(
             .unwrap_or_default(),
         is_async: with_options.r#async,
         is_batched: with_options.batch,
+        hyper_params,
+        hyper_params_secrets,
     };
 
     let catalog_writer = session.catalog_writer()?;
