@@ -22,7 +22,8 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
-    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
+    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint, PbVectorIndexObject,
+    PbVectorIndexObjectType,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -190,19 +191,22 @@ impl HummockManager {
             .sum::<u64>();
         stale_objects.insert(current_version.id, {
             let mut sst_ids = vec![];
-            let mut vector_file_ids = vec![];
+            let mut vector_files = vec![];
             for object_id in removed_object_ids {
                 match object_id {
                     HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id.inner()),
                     HummockObjectId::VectorFile(vector_file_id) => {
-                        vector_file_ids.push(vector_file_id.inner())
+                        vector_files.push(PbVectorIndexObject {
+                            id: vector_file_id.inner(),
+                            object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
+                        })
                     }
                 }
             }
             StaleObjects {
                 id: sst_ids,
                 total_file_size,
-                vector_file_ids,
+                vector_files,
             }
         });
         if self.env.opts.enable_hummock_data_archive {

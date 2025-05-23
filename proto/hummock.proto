@@ -185,6 +185,15 @@ enum DistanceType {
   DISTANCE_TYPE_INNER_PRODUCT = 4;
 }
 
+enum VectorIndexObjectType {
+  VECTOR_INDEX_OBJECT_UNSPECIFIED = 0;
+  VECTOR_INDEX_OBJECT_VECTOR = 1;
+}
+message VectorIndexObject {
+  uint64 id = 1;
+  VectorIndexObjectType object_type = 2;
+}
+
 message VectorFileInfo {
   uint64 object_id = 1;
   uint64 file_size = 2;
@@ -292,7 +301,7 @@ message HummockVersionCheckpoint {
   message StaleObjects {
     repeated uint64 id = 1;
     uint64 total_file_size = 2;
-    repeated uint64 vector_file_ids = 3;
+    repeated VectorIndexObject vector_files = 3;
   }
   HummockVersion version = 1;
   map<uint64, StaleObjects> stale_objects = 2;
