@@ -276,7 +276,7 @@ pub struct PartialFragmentStateTables {
     pub state_table_ids: I32Array,
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[derive(Clone, DerivePartialModel, FromQueryResult, Eq, PartialEq, Hash, Debug)]
 #[sea_orm(entity = "Actor")]
 pub struct PartialActorLocation {
     pub actor_id: ActorId,
