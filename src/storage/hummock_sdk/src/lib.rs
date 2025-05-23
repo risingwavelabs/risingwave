@@ -262,12 +262,12 @@ macro_rules! for_all_object_suffix {
             ),+];
 
         impl HummockObjectId {
-            fn new(id: u64, suffix: &str) -> Self {
+            fn new(id: u64, suffix: &str) -> Option<Self> {
                 match suffix {
                     $(
-                        suffix if suffix == $suffix => HummockObjectId::$name(<$type_name>::new(id)),
+                        suffix if suffix == $suffix => Some(HummockObjectId::$name(<$type_name>::new(id))),
                     )+
-                    _ => panic!("unknown object id suffix {}", suffix),
+                    _ => None,
                 }
             }
 
@@ -635,6 +635,19 @@ pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
     let id = split[split.len() - 2]
         .parse::<u64>()
         .expect("valid object id");
+    HummockObjectId::new(id, suffix)
+        .unwrap_or_else(|| panic!("unknown object id suffix {}", suffix))
+}
+
+pub fn try_get_object_id_from_path(path: &str) -> Option<HummockObjectId> {
+    let split: Vec<_> = path.split(&['/', '.']).collect();
+    if split.len() <= 2 {
+        return None;
+    }
+    let id = split[split.len() - 2]
+        .parse::<u64>()
+        .unwrap_or_else(|_| panic!("expect valid object id, got {}", split[split.len() - 2]));
+    let suffix = split[split.len() - 1];
     HummockObjectId::new(id, suffix)
 }
 

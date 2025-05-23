@@ -125,12 +125,19 @@ pub struct VectorIndex {
 }
 
 impl VectorIndex {
-    pub fn get_objects(&self) -> impl Iterator<Item = (HummockVectorFileId, u64)> + '_ {
+    pub fn get_objects(&self) -> impl Iterator<Item = (HummockObjectId, u64)> + '_ {
+        // DO NOT REMOVE THIS LINE
+        // This is to ensure that when adding new variant to `HummockObjectId`,
+        // the compiler will warn us if we forget to handle it here.
+        match HummockObjectId::Sstable(0.into()) {
+            HummockObjectId::Sstable(_) => {}
+            HummockObjectId::VectorFile(_) => {}
+        };
         match &self.inner {
             VectorIndexImpl::Flat(flat) => flat
                 .vector_files
                 .iter()
-                .map(|file| (file.object_id, file.file_size)),
+                .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size)),
         }
     }
 }
