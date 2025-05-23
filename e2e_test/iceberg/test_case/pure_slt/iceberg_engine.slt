@@ -224,6 +224,17 @@ DROP TABLE price;
 statement ok
 DROP CONNECTION my_conn;
 
+# test iceberg_tables and iceberg_namespace_properties before creating hosted catalog
+query ?
+select count(*) from iceberg_tables;
+----
+0
+
+query ?
+select count(*) from iceberg_namespace_properties;
+----
+0
+
 # test hosted catalog (meta store as jdbc catalog)
 statement ok
 create connection my_hosted_catalog_conn

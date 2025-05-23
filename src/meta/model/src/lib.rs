@@ -47,6 +47,8 @@ pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
+pub mod iceberg_namespace_properties;
+pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
