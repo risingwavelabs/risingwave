@@ -15382,6 +15382,7 @@ dependencies = [
  "js-sys",
  "rand 0.9.0",
  "serde",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
