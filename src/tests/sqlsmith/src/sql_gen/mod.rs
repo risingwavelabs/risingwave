@@ -21,7 +21,9 @@ use std::vec;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
-use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SetExpr, SourceWatermark, Statement, TableFactor,
+};
 
 mod agg;
 mod cast;
@@ -46,6 +48,8 @@ pub struct Table {
     pub columns: Vec<Column>,
     pub pk_indices: Vec<usize>,
     pub is_base_table: bool,
+    pub is_append_only: bool,
+    pub source_watermarks: Vec<SourceWatermark>,
 }
 
 impl Table {
@@ -55,15 +59,25 @@ impl Table {
             columns,
             pk_indices: vec![],
             is_base_table: false,
+            is_append_only: false,
+            source_watermarks: vec![],
         }
     }
 
-    pub fn new_for_base_table(name: String, columns: Vec<Column>, pk_indices: Vec<usize>) -> Self {
+    pub fn new_for_base_table(
+        name: String,
+        columns: Vec<Column>,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        source_watermarks: Vec<SourceWatermark>,
+    ) -> Self {
         Self {
             name,
             columns,
             pk_indices,
             is_base_table: true,
+            is_append_only,
+            source_watermarks,
         }
     }
 
@@ -199,11 +213,31 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Statement::Query(Box::new(query))
     }
 
-    pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
+    pub(crate) fn gen_mview_stmt(
+        &mut self,
+        name: &str,
+        append_only_tables: Vec<Table>,
+    ) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
         let table = Table::new(name.to_owned(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
+
+        let uses_append_only_table = self.uses_append_only_table(&query.body, &append_only_tables);
+        let group_by_contains_watermark_column =
+            self.group_by_contains_watermark_column(&query.body, &append_only_tables);
+
+        // Randomly choose emit mode if allowed
+        let emit_mode = if uses_append_only_table && group_by_contains_watermark_column {
+            match self.rng.random_range(0..3) {
+                0 => Some(EmitMode::Immediately),
+                1 => Some(EmitMode::OnWindowClose),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
@@ -212,9 +246,69 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             columns: vec![],
             query,
             with_options: vec![],
-            emit_mode: None,
+            emit_mode,
         };
         (mview, table)
+    }
+
+    /// Check whether the current query reads from at least one append-only table.
+    ///
+    /// This function looks for `FROM table_name` in the SELECT clause, and matches
+    /// it against the list of known append-only tables. If any match is found,
+    /// returns `true`.
+    ///
+    /// This is required for enabling `EMIT ON WINDOW CLOSE`, because such mode
+    /// only supports append-only sources.
+    fn uses_append_only_table(&self, query: &SetExpr, append_only_tables: &[Table]) -> bool {
+        if let SetExpr::Select(select) = query {
+            select.from.iter().any(|table_with_joins| {
+                // Only handle plain base tables (not TVF or subquery)
+                if let TableFactor::Table { name, .. } = &table_with_joins.relation {
+                    // Match table name with known append-only table list
+                    append_only_tables
+                        .iter()
+                        .any(|t| t.name == name.base_name())
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        }
+    }
+
+    /// Check whether the GROUP BY clause of the query contains a watermark column
+    /// from any append-only table.
+    ///
+    /// This is a secondary condition for enabling `EMIT ON WINDOW CLOSE`.
+    /// Specifically, this function checks that:
+    ///   - The query is a simple SELECT (not a set operation)
+    ///   - The GROUP BY clause contains at least one column
+    ///   - At least one of the columns matches a watermark column
+    ///     defined in the list of append-only tables
+    fn group_by_contains_watermark_column(
+        &self,
+        query: &SetExpr,
+        append_only_tables: &[Table],
+    ) -> bool {
+        if let SetExpr::Select(select) = query {
+            select.group_by.iter().any(|expr| {
+                if let Expr::Identifier(ident) = expr {
+                    let group_col = ident.real_value();
+                    // Check if this group_by column matches any watermark column
+                    append_only_tables.iter().any(|table| {
+                        table
+                            .source_watermarks
+                            .iter()
+                            .any(|wm| wm.column.real_value() == group_col)
+                    })
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        }
     }
 
     /// 50/50 chance to be true/false.
