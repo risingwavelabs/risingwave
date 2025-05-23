@@ -114,7 +114,7 @@ pub enum HummockEvent {
     VectorWriterSealEpoch {
         table_id: TableId,
         next_epoch: HummockEpoch,
-        add: VectorIndexAdd,
+        add: Option<VectorIndexAdd>,
     },
 
     DropVectorWriter {

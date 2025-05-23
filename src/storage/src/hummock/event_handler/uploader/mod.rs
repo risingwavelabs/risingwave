@@ -1082,13 +1082,16 @@ impl UploaderData {
                         let data = entry.get_mut();
                         let adds = take_before_epoch(&mut data.sealed_epoch_data, epoch)
                             .into_values()
+                            .flatten()
                             .collect_vec();
                         if data.is_dropped && data.sealed_epoch_data.is_empty() {
                             entry.remove();
                         }
-                        vector_index_adds
-                            .try_insert(*table_id, adds)
-                            .expect("non-duplicate");
+                        if !adds.is_empty() {
+                            vector_index_adds
+                                .try_insert(*table_id, adds)
+                                .expect("non-duplicate");
+                        }
                     }
                 }
             }
@@ -1203,7 +1206,7 @@ impl UploaderContext {
 struct SyncId(usize);
 
 struct UnsyncVectorIndexData {
-    sealed_epoch_data: BTreeMap<HummockEpoch, VectorIndexAdd>,
+    sealed_epoch_data: BTreeMap<HummockEpoch, Option<VectorIndexAdd>>,
     curr_epoch: u64,
     is_dropped: bool,
 }
@@ -1398,7 +1401,7 @@ impl HummockUploader {
         &mut self,
         table_id: TableId,
         next_epoch: HummockEpoch,
-        add: VectorIndexAdd,
+        add: Option<VectorIndexAdd>,
     ) {
         let UploaderState::Working(data) = &mut self.state else {
             return;
@@ -1889,7 +1892,7 @@ pub(crate) mod tests {
         uploader.vector_writer_seal_epoch(
             VECTOR_INDEX_TABLE_ID,
             epoch1.next_epoch(),
-            vector_index_add.clone(),
+            Some(vector_index_add.clone()),
         );
 
         let (sync_tx, sync_rx) = oneshot::channel();

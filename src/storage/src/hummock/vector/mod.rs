@@ -13,3 +13,4 @@
 // limitations under the License.
 
 pub(crate) mod block;
+pub(crate) mod writer;
