@@ -23,6 +23,7 @@ use risingwave_expr::{ExprError, Result, aggregate};
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
+#[aggregate("sum(uint256) -> uint256")]
 #[aggregate("sum(int8) -> int8", internal)] // used internally for 2-phase sum(int2) and sum(int4)
 #[aggregate("sum0(int8) -> int8", internal, init_state = "0i64")] // used internally for 2-phase count
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
@@ -47,6 +48,7 @@ where
 #[aggregate("avg(float4) -> float8", rewritten)]
 #[aggregate("avg(float8) -> float8", rewritten)]
 #[aggregate("avg(int256) -> float8", rewritten)]
+#[aggregate("avg(uint256) -> float8", rewritten)]
 #[aggregate("avg(interval) -> interval", rewritten)]
 fn _avg() {}
 
@@ -57,6 +59,7 @@ fn _avg() {}
 #[aggregate("stddev_pop(float4) -> float8", rewritten)]
 #[aggregate("stddev_pop(float8) -> float8", rewritten)]
 #[aggregate("stddev_pop(int256) -> float8", rewritten)]
+#[aggregate("stddev_pop(uint256) -> float8", rewritten)]
 fn _stddev_pop() {}
 
 #[aggregate("stddev_samp(int2) -> decimal", rewritten)]
@@ -66,6 +69,7 @@ fn _stddev_pop() {}
 #[aggregate("stddev_samp(float4) -> float8", rewritten)]
 #[aggregate("stddev_samp(float8) -> float8", rewritten)]
 #[aggregate("stddev_samp(int256) -> float8", rewritten)]
+#[aggregate("stddev_samp(uint256) -> float8", rewritten)]
 fn _stddev_samp() {}
 
 #[aggregate("var_pop(int2) -> decimal", rewritten)]
@@ -75,6 +79,7 @@ fn _stddev_samp() {}
 #[aggregate("var_pop(float4) -> float8", rewritten)]
 #[aggregate("var_pop(float8) -> float8", rewritten)]
 #[aggregate("var_pop(int256) -> float8", rewritten)]
+#[aggregate("var_pop(uint256) -> float8", rewritten)]
 fn _var_pop() {}
 
 #[aggregate("var_samp(int2) -> decimal", rewritten)]
@@ -84,6 +89,7 @@ fn _var_pop() {}
 #[aggregate("var_samp(float4) -> float8", rewritten)]
 #[aggregate("var_samp(float8) -> float8", rewritten)]
 #[aggregate("var_samp(int256) -> float8", rewritten)]
+#[aggregate("var_samp(uint256) -> float8", rewritten)]
 fn _var_samp() {}
 
 // no `min(boolean)` and `min(jsonb)`
@@ -91,6 +97,7 @@ fn _var_samp() {}
 #[aggregate("min(*float) -> auto", state = "ref")]
 #[aggregate("min(decimal) -> auto", state = "ref")]
 #[aggregate("min(int256) -> auto", state = "ref")]
+#[aggregate("min(uint256) -> auto", state = "ref")]
 #[aggregate("min(serial) -> auto", state = "ref")]
 #[aggregate("min(date) -> auto", state = "ref")]
 #[aggregate("min(time) -> auto", state = "ref")]
@@ -110,6 +117,7 @@ fn min<T: Ord>(state: T, input: T) -> T {
 #[aggregate("max(*float) -> auto", state = "ref")]
 #[aggregate("max(decimal) -> auto", state = "ref")]
 #[aggregate("max(int256) -> auto", state = "ref")]
+#[aggregate("max(uint256) -> auto", state = "ref")]
 #[aggregate("max(serial) -> auto", state = "ref")]
 #[aggregate("max(date) -> auto", state = "ref")]
 #[aggregate("max(time) -> auto", state = "ref")]
