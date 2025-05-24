@@ -54,7 +54,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, Serial, Time, Timestamp, Timestamptz,
+    DataType, Date, Decimal, Int256, UInt256, Interval, Serial, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
@@ -766,6 +766,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Timestamptz => size_of::<Timestamptz>(),
             DataType::Interval => size_of::<Interval>(),
             DataType::Int256 => Int256::size(),
+            DataType::UInt256 => UInt256::size(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,
             DataType::Jsonb => 20,
