@@ -42,7 +42,21 @@ pub struct Int256(pub(crate) Box<i256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a i256);
 
+/// A 256-bit unsigned integer.
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
+pub struct UInt256(pub(crate) Box<u256>);
+
+/// A reference to an `UInt256` value.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub struct UInt256Ref<'a>(pub &'a u256);
+
 impl Display for Int256Ref<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.write(f)
+    }
+}
+
+impl Display for UInt256Ref<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.write(f)
     }
@@ -184,6 +198,7 @@ macro_rules! impl_common_for_num256 {
 }
 
 impl_common_for_num256!(Int256, Int256Ref<'a>, i256, Int256);
+impl_common_for_num256!(UInt256, UInt256Ref<'a>, u256, Uint256);
 
 impl Int256 {
     // `i256::str_from_hex` and `i256::str_from_prefixed` doesn't support uppercase "0X", so when it
@@ -202,6 +217,23 @@ impl Int256 {
         u256::from_str_hex(src)
             .or_else(|_| u256::from_str_hex(&src.to_lowercase()))
             .map(|u| u.as_i256().into())
+    }
+}
+
+impl UInt256 {
+    // `from_str_prefixed` function accepts string inputs that start with "0x". If the parsing
+    // fails, it will attempt to parse the input as a decimal value.
+    pub fn from_str_prefixed(src: &str) -> Result<Self, ParseIntError> {
+        u256::from_str_prefixed(src)
+            .or_else(|_| u256::from_str_prefixed(&src.to_lowercase()))
+            .map(Into::into)
+    }
+
+    // `from_str_hex` function only accepts string inputs that start with "0x".
+    pub fn from_str_hex(src: &str) -> Result<Self, ParseIntError> {
+        u256::from_str_hex(src)
+            .or_else(|_| u256::from_str_hex(&src.to_lowercase()))
+            .map(Into::into)
     }
 }
 
@@ -227,6 +259,28 @@ impl Int256 {
     }
 }
 
+impl UInt256Ref<'_> {
+    pub fn memcmp_serialize(
+        &self,
+        serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
+    ) -> memcomparable::Result<()> {
+        let (hi, lo) = self.0.into_words();
+        (hi, lo).serialize(serializer)
+    }
+}
+
+impl UInt256 {
+    pub const MEMCMP_ENCODED_SIZE: usize = 32;
+
+    pub fn memcmp_deserialize(
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<Self> {
+        let (hi, lo) = <(u128, u128)>::deserialize(deserializer)?;
+        let unsigned = u256::from_words(hi, lo);
+        Ok(UInt256::from(unsigned))
+    }
+}
+
 macro_rules! impl_convert_from {
     ($($t:ty),* $(,)?) => {$(
         impl From<$t> for Int256 {
@@ -240,8 +294,61 @@ macro_rules! impl_convert_from {
 
 impl_convert_from!(i16, i32, i64);
 
+macro_rules! impl_convert_from_unsigned {
+    ($($t:ty),* $(,)?) => {$(
+        impl From<$t> for UInt256 {
+            #[inline]
+            fn from(value: $t) -> Self {
+                Self(Box::new(value.into()))
+            }
+        }
+    )*};
+}
+
+impl_convert_from_unsigned!(u16, u32, u64);
+
+// Support converting signed integers to unsigned 256-bit, checking for negative values
+impl TryFrom<i16> for UInt256 {
+    type Error = ();
+    fn try_from(value: i16) -> Result<Self, Self::Error> {
+        if value < 0 {
+            Err(())
+        } else {
+            Ok(Self(Box::new((value as u16).into())))
+        }
+    }
+}
+
+impl TryFrom<i32> for UInt256 {
+    type Error = ();
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        if value < 0 {
+            Err(())
+        } else {
+            Ok(Self(Box::new((value as u32).into())))
+        }
+    }
+}
+
+impl TryFrom<i64> for UInt256 {
+    type Error = ();
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        if value < 0 {
+            Err(())
+        } else {
+            Ok(Self(Box::new((value as u64).into())))
+        }
+    }
+}
+
 impl<'a> From<Int256Ref<'a>> for F64 {
     fn from(value: Int256Ref<'a>) -> Self {
+        Self::from(value.0.as_f64())
+    }
+}
+
+impl<'a> From<UInt256Ref<'a>> for F64 {
+    fn from(value: UInt256Ref<'a>) -> Self {
         Self::from(value.0.as_f64())
     }
 }
@@ -249,6 +356,12 @@ impl<'a> From<Int256Ref<'a>> for F64 {
 // Conversions for mathematical operations.
 impl From<Int256Ref<'_>> for Int256 {
     fn from(value: Int256Ref<'_>) -> Self {
+        value.to_owned_scalar()
+    }
+}
+
+impl From<UInt256Ref<'_>> for UInt256 {
+    fn from(value: UInt256Ref<'_>) -> Self {
         value.to_owned_scalar()
     }
 }
@@ -267,7 +380,7 @@ macro_rules! impl_checked_op {
             type Output = $scalar;
 
             fn $proxied_func(self, rhs: Self) -> Self::Output {
-                Int256::from(self.0 $op rhs.0)
+                $scalar::from(self.0 $op rhs.0)
             }
         }
 
@@ -284,6 +397,12 @@ impl_checked_op!(CheckedSub, checked_sub, -, Sub, sub, Int256, Int256Ref<'a>);
 impl_checked_op!(CheckedMul, checked_mul, *, Mul, mul, Int256, Int256Ref<'a>);
 impl_checked_op!(CheckedDiv, checked_div, /, Div, div, Int256, Int256Ref<'a>);
 impl_checked_op!(CheckedRem, checked_rem, %, Rem, rem, Int256, Int256Ref<'a>);
+
+impl_checked_op!(CheckedAdd, checked_add, +, Add, add, UInt256, UInt256Ref<'a>);
+impl_checked_op!(CheckedSub, checked_sub, -, Sub, sub, UInt256, UInt256Ref<'a>);
+impl_checked_op!(CheckedMul, checked_mul, *, Mul, mul, UInt256, UInt256Ref<'a>);
+impl_checked_op!(CheckedDiv, checked_div, /, Div, div, UInt256, UInt256Ref<'a>);
+impl_checked_op!(CheckedRem, checked_rem, %, Rem, rem, UInt256, UInt256Ref<'a>);
 
 impl Neg for Int256 {
     type Output = Int256;
@@ -326,6 +445,36 @@ impl Num for Int256 {
 impl EstimateSize for Int256 {
     fn estimated_heap_size(&self) -> usize {
         mem::size_of::<i128>() * 2
+    }
+}
+
+impl Zero for UInt256 {
+    fn zero() -> Self {
+        UInt256::from(u256::ZERO)
+    }
+
+    fn is_zero(&self) -> bool {
+        *self.0 == u256::ZERO
+    }
+}
+
+impl One for UInt256 {
+    fn one() -> Self {
+        Self::from(u256::ONE)
+    }
+}
+
+impl Num for UInt256 {
+    type FromStrRadixErr = ParseIntError;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        u256::from_str_radix(str, radix).map(Into::into)
+    }
+}
+
+impl EstimateSize for UInt256 {
+    fn estimated_heap_size(&self) -> usize {
+        mem::size_of::<u128>() * 2
     }
 }
 
