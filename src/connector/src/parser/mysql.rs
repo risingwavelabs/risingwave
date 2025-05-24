@@ -199,6 +199,7 @@ pub fn mysql_datum_to_rw_datum(
         | DataType::Struct(_)
         | DataType::List(_)
         | DataType::Int256
+        | DataType::UInt256
         | DataType::Serial
         | DataType::Map(_) => Err(anyhow!(
             "unsupported data type: {}, set to null",

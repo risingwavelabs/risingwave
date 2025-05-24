@@ -380,8 +380,8 @@ impl BigQuerySink {
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
-            DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Int256"
+            DataType::Int256 | DataType::UInt256 => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support Int256 or UInt256"
             ))),
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Map"
@@ -431,9 +431,9 @@ impl BigQuerySink {
 
             DataType::Bytea => TableFieldSchema::bytes(&rw_field.name),
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
-            DataType::Int256 => {
+            DataType::Int256 | DataType::UInt256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Int256"
+                    "Bigquery cannot support Int256 or UInt256"
                 )));
             }
             DataType::Map(_) => {
@@ -945,9 +945,9 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
-        DataType::Float32 | DataType::Int256 => {
+        DataType::Float32 | DataType::Int256 | DataType::UInt256 => {
             return Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Don't support Float32 and Int256"
+                "Don't support Float32, Int256 and UInt256"
             )));
         }
         DataType::Map(_) => todo!(),
