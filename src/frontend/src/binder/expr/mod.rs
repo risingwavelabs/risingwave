@@ -1045,6 +1045,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
                 "rw_int256" => DataType::Int256,
+                "rw_uint256" => DataType::UInt256,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
