@@ -27,6 +27,7 @@ use rust_decimal::MathematicalOps;
 #[function("add(*float, *float) -> auto")]
 #[function("add(interval, interval) -> interval")]
 #[function("add(int256, int256) -> int256")]
+#[function("add(uint256, uint256) -> uint256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -43,6 +44,7 @@ where
 #[function("subtract(*float, *float) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
 #[function("subtract(int256, int256) -> int256")]
+#[function("subtract(uint256, uint256) -> uint256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -58,6 +60,7 @@ where
 #[function("multiply(decimal, decimal) -> auto")]
 #[function("multiply(*float, *float) -> auto")]
 #[function("multiply(int256, int256) -> int256")]
+#[function("multiply(uint256, uint256) -> uint256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -75,6 +78,8 @@ where
 #[function("divide(int256, int256) -> int256")]
 #[function("divide(int256, float8) -> float8")]
 #[function("divide(int256, *int) -> int256")]
+#[function("divide(uint256, uint256) -> uint256")]
+#[function("divide(uint256, float8) -> float8")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -95,6 +100,7 @@ where
 #[function("modulus(*int, *int) -> auto")]
 #[function("modulus(decimal, decimal) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
+#[function("modulus(uint256, uint256) -> uint256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -124,6 +130,22 @@ where
         .ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("neg(uint256) -> uint256")]
+pub fn uint256_neg<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: Zero + Debug,
+{
+    // For UInt256, negation is only valid for zero (result is zero)
+    // Any other value would result in a negative number, which is invalid for unsigned
+    let value = expr.into();
+    if value.is_zero() {
+        Ok(value)
+    } else {
+        Err(ExprError::NumericOutOfRange)
+    }
+}
+
 #[function("abs(*int) -> auto")]
 pub fn general_abs<T1: IsNegative + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
@@ -150,6 +172,15 @@ where
     } else {
         Ok(expr)
     }
+}
+
+#[function("abs(uint256) -> uint256")]
+pub fn uint256_abs<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+{
+    // UInt256 is always non-negative, so abs is identity
+    Ok(expr.into())
 }
 
 #[function("abs(decimal) -> decimal")]

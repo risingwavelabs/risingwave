@@ -21,6 +21,7 @@ const TYPE_MATRIX: &str = "
     int4        Int32       I32Array            i32             i32                 y
     int8        Int64       I64Array            i64             i64                 y
     int256      Int256      Int256Array         Int256          Int256Ref<'_>       _
+    uint256     UInt256     UInt256Array        UInt256         UInt256Ref<'_>      _
     float4      Float32     F32Array            F32             F32                 y
     float8      Float64     F64Array            F64             F64                 y
     decimal     Decimal     DecimalArray        Decimal         Decimal             y
@@ -131,6 +132,15 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("int256", "int8") => "int256",
         ("int256", "float8") => "float8",
         ("float8", "int256") => "float8",
+
+        ("int2", "uint256") => "uint256",
+        ("int4", "uint256") => "uint256",
+        ("int8", "uint256") => "uint256",
+        ("uint256", "int2") => "uint256",
+        ("uint256", "int4") => "uint256",
+        ("uint256", "int8") => "uint256",
+        ("uint256", "float8") => "float8",
+        ("float8", "uint256") => "float8",
 
         ("float4", "float4") => "float4",
         ("float4", "float8") => "float8",
