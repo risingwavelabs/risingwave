@@ -1141,10 +1141,17 @@ pub(super) async fn handle_create_table_plan(
 
                     let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
+                    let defined_column_descs = columns
+                        .iter()
+                        .map(|catalog| catalog.column_desc.clone())
+                        .collect();
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
+                    ExternalTableImpl::connect(config, Some(defined_column_descs))
+                        .await
+                        .context("failed to auto derive table schema")?;
 
                     // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
@@ -1312,7 +1319,7 @@ async fn bind_cdc_table_schema_externally(
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
 
-    let table = ExternalTableImpl::connect(config)
+    let table = ExternalTableImpl::connect(config, None)
         .await
         .context("failed to auto derive table schema")?;
     Ok((
