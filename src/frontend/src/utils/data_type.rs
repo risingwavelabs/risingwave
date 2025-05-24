@@ -48,6 +48,7 @@ impl DataType {
                 AstDataType::Struct(fields)
             }
             DataType::Int256 => AstDataType::Custom(vec!["rw_int256".into()].into()),
+            DataType::UInt256 => AstDataType::Custom(vec!["rw_uint256".into()].into()),
             DataType::Map(map) => {
                 AstDataType::Map(Box::new((map.key().to_ast(), map.value().to_ast())))
             }
