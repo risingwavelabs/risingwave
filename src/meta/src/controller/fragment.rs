@@ -130,7 +130,7 @@ impl CatalogControllerInner {
 
         let mut result = vec![];
         for job_id in job_ids {
-            let mappings = get_fragment_mappings(&txn, job_id).await?;
+            let mappings = get_fragment_mappings(&txn, &self.actors, job_id).await?;
 
             result.extend(mappings.into_iter());
         }
@@ -621,7 +621,7 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<FragmentActorDispatchers> {
         let inner = self.inner.read().await;
-        get_fragment_actor_dispatchers(&inner.db, fragment_ids).await
+        get_fragment_actor_dispatchers(&inner.db, &inner.actors, fragment_ids).await
     }
 
     pub async fn get_fragment_downstream_relations(
@@ -1906,7 +1906,7 @@ impl CatalogController {
                 );
             }
 
-            let mut actors = fragment_actors_from_cache;
+            let actors = fragment_actors_from_cache;
             if actors.is_empty() {
                 bail!("No fragment found for fragment id {}", fragment_id);
             }
@@ -2043,7 +2043,7 @@ impl CatalogController {
                 fragment::Column::FragmentId,
                 fragment::Column::FragmentTypeMask,
             ])
-            .filter(fragment::Column::JobId.eq(job_id.clone()))
+            .filter(fragment::Column::JobId.eq(job_id))
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -2058,7 +2058,7 @@ impl CatalogController {
                     .map(|ids| ids.len() as i64)
                     .unwrap_or(0);
 
-                (count > 0).then(|| (fid, fmask, count))
+                (count > 0).then_some((fid, fmask, count))
             })
             .collect();
 
