@@ -17,7 +17,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
-use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{DataType, Decimal, Int256, UInt256, ListValue, ScalarImpl, ScalarRefImpl};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 
@@ -236,6 +236,9 @@ impl ScalarAdapter {
             (ScalarAdapter::Numeric(numeric), &DataType::Int256) => {
                 pg_numeric_to_rw_int256(&numeric)
             }
+            (ScalarAdapter::Numeric(numeric), &DataType::UInt256) => {
+                pg_numeric_to_rw_uint256(&numeric)
+            }
             (ScalarAdapter::Numeric(numeric), &DataType::Decimal) => {
                 pg_numeric_to_rw_numeric(&numeric)
             }
@@ -253,11 +256,11 @@ impl ScalarAdapter {
                                 ScalarAdapter::Numeric(numeric).into_scalar(dtype)
                             }
                         }
-                        (Some(numeric), box DataType::Int256 | box DataType::Decimal) => {
+                        (Some(numeric), box DataType::Int256 | box DataType::UInt256 | box DataType::Decimal) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
-                                // A PgNumeric can sometimes exceeds the range of Int256 and RwNumeric.
+                                // A PgNumeric can sometimes exceeds the range of Int256/Uint256 and RwNumeric.
                                 // In our json parsing, we fallback the array to NULL in this case.
                                 // Here we keep the behavior consistent and return None directly.
                                 match ScalarAdapter::Numeric(numeric).into_scalar(dtype) {
@@ -269,7 +272,7 @@ impl ScalarAdapter {
                             }
                         }
                         (Some(_), _) => unreachable!(
-                            "Only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]"
+                            "Only rw-numeric[], rw_int256[], rw_uint256[] and varchar[] are supported to convert to pg-numeric[]"
                         ),
                         // This item is NULL, continue to handle next item.
                         (None, _) => None,
@@ -320,11 +323,11 @@ pub fn validate_pg_type_to_rw_type(pg_type: &DataType, rw_type: &DataType) -> bo
         return true;
     }
     match rw_type {
-        DataType::Varchar => matches!(pg_type, DataType::Decimal | DataType::Int256),
+        DataType::Varchar => matches!(pg_type, DataType::Decimal | DataType::Int256 | DataType::UInt256),
         DataType::List(box DataType::Varchar) => {
             matches!(
                 pg_type,
-                DataType::List(box (DataType::Decimal | DataType::Int256))
+                DataType::List(box (DataType::Decimal | DataType::Int256 | DataType::UInt256))
             )
         }
         _ => false,
@@ -343,6 +346,16 @@ fn pg_numeric_to_rw_int256(val: &PgNumeric) -> Option<ScalarImpl> {
         Ok(num) => Some(ScalarImpl::from(num)),
         Err(err) => {
             tracing::error!(error = %err.as_report(), "failed to convert PgNumeric to Int256");
+            None
+        }
+    }
+}
+
+fn pg_numeric_to_rw_uint256(val: &PgNumeric) -> Option<ScalarImpl> {
+    match UInt256::from_str(pg_numeric_to_string(val).as_str()) {
+        Ok(num) => Some(ScalarImpl::from(num)),
+        Err(err) => {
+            tracing::error!(error = %err.as_report(), "failed to convert PgNumeric to UInt256");
             None
         }
     }
