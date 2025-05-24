@@ -255,7 +255,7 @@ impl CatalogController {
         }
 
         let (removed_source_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
+            get_fragments_for_jobs(&txn, &inner.actors, removed_streaming_job_ids.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()

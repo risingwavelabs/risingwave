@@ -58,7 +58,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamActor};
+use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -170,6 +170,21 @@ pub struct ActorInfo {
 
     pub actors_by_fragment_id: HashMap<FragmentId, Vec<ActorId>>,
     pub actors_by_worker_id: HashMap<WorkerId, Vec<ActorId>>,
+}
+
+impl ActorInfo {
+    pub fn add_actor(&mut self, actor: actor::Model) {
+        debug_assert!(!self.models.contains_key(&actor.actor_id));
+        self.actors_by_fragment_id
+            .entry(actor.fragment_id)
+            .or_default()
+            .push(actor.actor_id);
+        self.actors_by_worker_id
+            .entry(actor.worker_id)
+            .or_default()
+            .push(actor.actor_id);
+        self.models.insert(actor.actor_id, actor);
+    }
 }
 
 impl ActorInfo {
