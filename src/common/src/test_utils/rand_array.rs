@@ -26,7 +26,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
 use crate::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
+    DataType, Date, Decimal, Int256, UInt256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
     Timestamp, Timestamptz,
 };
 
@@ -130,6 +130,14 @@ impl RandValue for Int256 {
         let mut bytes = [0u8; 32];
         rand.fill_bytes(&mut bytes);
         Int256::from_ne_bytes(bytes)
+    }
+}
+
+impl RandValue for UInt256 {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let mut bytes = [0u8; 32];
+        rand.fill_bytes(&mut bytes);
+        UInt256::from_ne_bytes(bytes)
     }
 }
 

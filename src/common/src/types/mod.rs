@@ -83,7 +83,7 @@ pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::map_type::MapType;
 pub use self::native_type::*;
-pub use self::num256::{Int256, Int256Ref};
+pub use self::num256::{Int256, Int256Ref, UInt256, UInt256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
 pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
@@ -175,6 +175,9 @@ pub enum DataType {
     #[display("rw_int256")]
     #[from_str(regex = "(?i)^rw_int256$")]
     Int256,
+    #[display("rw_uint256")]
+    #[from_str(regex = "(?i)^rw_uint256$")]
+    UInt256,
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Map(MapType),
@@ -201,6 +204,7 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Int32 => Ok(DataType::Int32),
             DataTypeName::Int64 => Ok(DataType::Int64),
             DataTypeName::Int256 => Ok(DataType::Int256),
+            DataTypeName::UInt256 => Ok(DataType::UInt256),
             DataTypeName::Serial => Ok(DataType::Serial),
             DataTypeName::Decimal => Ok(DataType::Decimal),
             DataTypeName::Float32 => Ok(DataType::Float32),
@@ -268,6 +272,7 @@ impl From<&PbDataType> for DataType {
                 DataType::Map(MapType::from_entries(list_entries_type))
             }
             PbTypeName::Int256 => DataType::Int256,
+            PbTypeName::Uint256 => DataType::UInt256,
         }
     }
 }
@@ -300,6 +305,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::Struct => PbTypeName::Struct,
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
+            DataTypeName::UInt256 => PbTypeName::Uint256,
             DataTypeName::Map => PbTypeName::Map,
         }
     }
@@ -357,6 +363,7 @@ pub mod data_types {
                 | DataType::Jsonb
                 | DataType::Serial
                 | DataType::Int256
+                | DataType::UInt256
         };
     }
     pub use _simple_data_types as simple;
@@ -437,7 +444,8 @@ impl DataType {
             | DataType::Bytea
             | DataType::Jsonb
             | DataType::Serial
-            | DataType::Int256 => (),
+            | DataType::Int256
+            | DataType::UInt256 => (),
         }
         pb
     }
@@ -1018,6 +1026,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
+            DataType::UInt256 => Self::UInt256(UInt256::from_binary(bytes)?),
             DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
@@ -1035,6 +1044,7 @@ impl ScalarImpl {
             DataType::Int32 => i32::from_str(s)?.into(),
             DataType::Int64 => i64::from_str(s)?.into(),
             DataType::Int256 => Int256::from_str(s)?.into(),
+            DataType::UInt256 => UInt256::from_str(s)?.into(),
             DataType::Serial => Serial::from(i64::from_str(s)?).into(),
             DataType::Decimal => Decimal::from_str(s)?.into(),
             DataType::Float32 => F32::from_str(s)?.into(),
@@ -1153,6 +1163,7 @@ impl ScalarRefImpl<'_> {
                 v.0.nanosecond().serialize(ser)?;
             }
             Self::Int256(v) => v.memcmp_serialize(ser)?,
+            Self::UInt256(v) => v.memcmp_serialize(ser)?,
             Self::Jsonb(v) => v.memcmp_serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
@@ -1182,6 +1193,7 @@ impl ScalarImpl {
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
             Ty::Int256 => Self::Int256(Int256::memcmp_deserialize(de)?),
+            Ty::UInt256 => Self::UInt256(UInt256::memcmp_deserialize(de)?),
             Ty::Serial => Self::Serial(Serial::from(i64::deserialize(de)?)),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
@@ -1338,6 +1350,10 @@ mod tests {
                 DataTypeName::Int256 => (
                     ScalarImpl::Int256(233333333333_i64.into()),
                     DataType::Int256,
+                ),
+                DataTypeName::UInt256 => (
+                    ScalarImpl::UInt256(233333333333_u64.into()),
+                    DataType::UInt256,
                 ),
                 DataTypeName::Serial => (ScalarImpl::Serial(233333333333.into()), DataType::Serial),
                 DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),

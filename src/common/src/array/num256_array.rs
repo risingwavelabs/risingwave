@@ -14,7 +14,7 @@
 
 use std::io::{Cursor, Read};
 
-use ethnum::I256;
+use ethnum::{I256, U256};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::common::buffer::CompressionType;
@@ -22,7 +22,7 @@ use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, Int256, Int256Ref, Scalar};
+use crate::types::{DataType, Int256, Int256Ref, UInt256, UInt256Ref, Scalar};
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct Int256ArrayBuilder {
@@ -34,6 +34,18 @@ pub struct Int256ArrayBuilder {
 pub struct Int256Array {
     bitmap: Bitmap,
     data: Box<[I256]>,
+}
+
+#[derive(Debug, Clone, EstimateSize)]
+pub struct UInt256ArrayBuilder {
+    bitmap: BitmapBuilder,
+    data: Vec<U256>,
+}
+
+#[derive(Debug, Clone, PartialEq, EstimateSize)]
+pub struct UInt256Array {
+    bitmap: Bitmap,
+    data: Box<[U256]>,
 }
 
 #[rustfmt::skip]
@@ -203,10 +215,28 @@ impl_array_for_num256!(
     Int256
 );
 
+impl_array_for_num256!(
+    UInt256Array,
+    UInt256ArrayBuilder,
+    UInt256,
+    UInt256Ref<'a>,
+    UInt256
+);
+
 impl FromIterator<Int256> for Int256Array {
     fn from_iter<I: IntoIterator<Item = Int256>>(iter: I) -> Self {
         let data: Box<[I256]> = iter.into_iter().map(|i| *i.0).collect();
         Int256Array {
+            bitmap: Bitmap::ones(data.len()),
+            data,
+        }
+    }
+}
+
+impl FromIterator<UInt256> for UInt256Array {
+    fn from_iter<I: IntoIterator<Item = UInt256>>(iter: I) -> Self {
+        let data: Box<[U256]> = iter.into_iter().map(|i| *i.0).collect();
+        UInt256Array {
             bitmap: Bitmap::ones(data.len()),
             data,
         }

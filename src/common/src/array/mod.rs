@@ -65,7 +65,7 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 pub use self::error::ArrayError;
-pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
+pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder, UInt256Array, UInt256ArrayBuilder};
 use crate::bitmap::Bitmap;
 use crate::types::*;
 use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_variants};
@@ -351,6 +351,12 @@ impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
 impl From<Int256Array> for ArrayImpl {
     fn from(arr: Int256Array) -> Self {
         Self::Int256(arr)
+    }
+}
+
+impl From<UInt256Array> for ArrayImpl {
+    fn from(arr: UInt256Array) -> Self {
+        Self::UInt256(arr)
     }
 }
 
