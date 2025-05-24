@@ -2,143 +2,141 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{StreamExt, StreamExt as _};
 use once_cell::sync::OnceCell;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use tokio::sync::{RwLock, mpsc};
 
-/// 用户提供的全局 reader 标识键
+
+/// Global key == `connection_id` (already unique in metadata)
 pub type ReaderKey = String;
 
-/// Kafka 连接配置
-#[derive(Debug, Clone)]
-pub struct KafkaConfig {
-    pub brokers: String,
-    pub group_id: String,
-}
-
-/// 从 Kafka 转发给各分片的消息结构
-pub struct ConsumerRecord {
-    pub topic: String,
-    pub partition: i32,
-    pub offset: i64,
-    pub key: Option<Vec<u8>>,
-    pub payload: Option<Vec<u8>>,
-}
-
-/// 多路复用读者：同一 compute node 上同一 key 共享连接
 pub struct KafkaMuxReader {
     consumer: StreamConsumer,
-    split_senders: RwLock<HashMap<(String, i32), mpsc::Sender<ConsumerRecord>>>,
+    /// (topic, partition) -> sender  (each topic unique within this connection)
+    senders: RwLock<HashMap<(String, i32), mpsc::Sender<OwnedMessage>>>,
 }
 
-/// 全局唯一 map：ReaderKey -> KafkaMuxReader
-static GLOBAL_READERS: OnceCell<RwLock<HashMap<ReaderKey, Arc<KafkaMuxReader>>>> = OnceCell::new();
+static GLOBAL: OnceCell<RwLock<HashMap<ReaderKey, Arc<KafkaMuxReader>>>> = OnceCell::new();
 
 impl KafkaMuxReader {
-    fn global_map() -> &'static RwLock<HashMap<ReaderKey, Arc<KafkaMuxReader>>> {
-        GLOBAL_READERS.get_or_init(|| RwLock::new(HashMap::new()))
+    fn registry() -> &'static RwLock<HashMap<ReaderKey, Arc<KafkaMuxReader>>> {
+        GLOBAL.get_or_init(|| RwLock::new(HashMap::new()))
     }
 
-    /// 根据用户提供的 key 获取或创建共享 MuxReader
-    pub async fn get_or_create(key: ReaderKey, config: KafkaConfig) -> Arc<KafkaMuxReader> {
-        let map = Self::global_map();
-        {
-            let readers = map.read().await;
-            if let Some(existing) = readers.get(&key) {
-                return Arc::clone(existing);
-            }
+    /// Create or reuse the reader for a given connection.
+    /// `connection_id` : globally unique identifier assigned by metadata.
+    /// `brokers`       : comma‑separated list for this connection.
+    pub async fn get_or_create(connection_id: ReaderKey, brokers: String) -> Arc<Self> {
+        // fast path – already exists
+        if let Some(r) = Self::registry().read().await.get(&connection_id).cloned() {
+            return r;
         }
-        // 创建新的 Kafka Consumer
+
+        // build single group.id derived from connection id
+        let group_id = format!("conn-{connection_id}");
         let consumer: StreamConsumer = ClientConfig::new()
-            .set("bootstrap.servers", &config.brokers)
-            .set("group.id", &config.group_id)
+            .set("bootstrap.servers", &brokers)
+            .set("group.id", &group_id)
             .set("enable.auto.commit", "false")
             .create()
             .await
-            .expect("Kafka Consumer 创建失败");
-        let reader = Arc::new(KafkaMuxReader {
+            .expect("failed to create kafka consumer");
+
+        let reader = Arc::new(Self {
             consumer,
-            split_senders: RwLock::new(HashMap::new()),
+            senders: RwLock::new(HashMap::new()),
         });
-        // 写锁插入全局 map
-        {
-            let mut writers = map.write().await;
-            writers.insert(key.clone(), Arc::clone(&reader));
-        }
-        // 启动后台读取任务
-        let reader_clone = Arc::clone(&reader);
-        tokio::spawn(async move {
-            reader_clone.read_loop().await;
-        });
+        Self::registry()
+            .write()
+            .await
+            .insert(connection_id, Arc::clone(&reader));
+        tokio::spawn(Self::poll_loop(Arc::clone(&reader)));
         reader
     }
 
-    /// 移除指定 key 的 reader（如无需再使用）
-    pub async fn remove(key: &ReaderKey) {
-        let map = Self::global_map();
-        let mut writers = map.write().await;
-        if let Some(reader) = writers.remove(key) {
-            // 可在此执行额外 cleanup，如果需要的话。
-            drop(reader);
-        }
-    }
-
-    /// 注册一个分片 (topic, partition)，使用增量订阅
-    pub async fn register_split(
-        &self,
-        topic: String,
-        partition: i32,
-    ) -> mpsc::Receiver<ConsumerRecord> {
-        let (tx, rx) = mpsc::channel(100);
-        let mut senders = self.split_senders.write().await;
-        senders.insert((topic.clone(), partition), tx);
-        // 增量订阅新分区
-        let mut tpl = TopicPartitionList::new();
-        tpl.add_partition(&topic, partition);
-        self.consumer
-            .incremental_assign(&tpl)
-            .expect("增量订阅失败");
-        rx
-    }
-
-    /// 注销一个分片，并使用增量取消订阅
-    pub async fn unregister_split(&self, topic: &str, partition: i32) {
-        {
-            let mut senders = self.split_senders.write().await;
-            senders.remove(&(topic.to_string(), partition));
-        }
-        // 增量取消订阅
-        let mut tpl = TopicPartitionList::new();
-        tpl.add_partition(topic, partition);
-        self.consumer
-            .incremental_unassign(&tpl)
-            .expect("增量取消订阅失败");
-    }
-
-    async fn read_loop(self: Arc<Self>) {
-        let mut stream = self.consumer.stream();
-        while let Some(msg) = stream.next().await {
-            if let Ok(m) = msg {
-                let topic = m.topic().to_string();
-                let partition = m.partition();
-                let record = ConsumerRecord {
-                    topic: topic.clone(),
-                    partition,
-                    offset: m.offset(),
-                    key: m.key().map(|k| k.to_vec()),
-                    payload: m.payload().map(|p| p.to_vec()),
-                };
-                let senders = self.split_senders.read().await;
-                if let Some(sender) = senders.get(&(topic, partition)) {
-                    let _ = sender.send(record).await;
+    async fn poll_loop(this: Arc<Self>) {
+        let mut stream = this.consumer.stream();
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok(m) => {
+                    let owned = m.detach();
+                    let key = (owned.topic().to_owned(), owned.partition());
+                    if let Some(tx) = this.senders.read().await.get(&key) {
+                        let _ = tx.send(owned).await;
+                    }
                 }
+                Err(e) => eprintln!("Kafka error: {e}"),
             }
         }
     }
 
-    /// 获取 watermark
+    pub async fn register_splits(
+        &self,
+        splits: &[(String, i32)],
+    ) -> anyhow::Result<mpsc::Receiver<OwnedMessage>> {
+        if splits.is_empty() {
+            anyhow::bail!("splits list is empty");
+        }
+        {
+            let map = self.senders.read().await;
+            for (t, p) in splits {
+                if map.contains_key(&(t.clone(), *p)) {
+                    anyhow::bail!("split ({t},{p}) already registered");
+                }
+            }
+        }
+        // sender / receiver
+        let (tx, rx) = mpsc::channel(1024);
+        {
+            let mut map = self.senders.write().await;
+            for (t, p) in splits {
+                map.insert((t.clone(), *p), tx.clone());
+            }
+        }
+        // 增量 assign
+        let mut tpl = TopicPartitionList::new();
+        for (t, p) in splits {
+            tpl.add_partition(t, *p);
+        }
+        self.consumer
+            .incremental_assign(&tpl)
+            .map_err(|e| anyhow::anyhow!("assign failed: {e}"))?;
+        Ok(rx)
+    }
+
+    pub async fn unregister_splits(&self, splits: &[(String, i32)]) -> anyhow::Result<()> {
+        if splits.is_empty() {
+            return Ok(());
+        }
+        {
+            let map = self.senders.read().await;
+            for (t, p) in splits {
+                if !map.contains_key(&(t.clone(), *p)) {
+                    anyhow::bail!("split ({t},{p}) not registered");
+                }
+            }
+        }
+        {
+            let mut map = self.senders.write().await;
+            for (t, p) in splits {
+                map.remove(&(t.clone(), *p));
+            }
+        }
+
+        let mut tpl = TopicPartitionList::new();
+        for (t, p) in splits {
+            tpl.add_partition(t, *p);
+        }
+        self.consumer
+            .incremental_unassign(&tpl)
+            .map_err(|e| anyhow::anyhow!("unassign failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Allow `fetch_watermarks` for backfill / seek‑to‑latest use‑cases
     pub async fn fetch_watermarks(
         &self,
         topic: &str,
