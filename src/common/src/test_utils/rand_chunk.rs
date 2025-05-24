@@ -14,7 +14,7 @@
 
 use crate::array::{
     BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, Int256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, TimestamptzArray,
+    I64Array, Int256Array, UInt256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, TimestamptzArray,
     Utf8Array,
 };
 use crate::test_utils::rand_array::seed_rand_array_ref;
@@ -43,6 +43,7 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             }
             DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
             DataType::Int256 => seed_rand_array_ref::<Int256Array>(size, seed, null_ratio),
+            DataType::UInt256 => seed_rand_array_ref::<UInt256Array>(size, seed, null_ratio),
             DataType::Struct(_)
             | DataType::Bytea
             | DataType::Jsonb

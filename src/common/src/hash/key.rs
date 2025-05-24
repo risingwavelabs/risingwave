@@ -35,7 +35,7 @@ use static_assertions::const_assert_eq;
 
 use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
-    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
+    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, UInt256, UInt256Ref, JsonbVal, Scalar, ScalarRef,
     ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
@@ -473,6 +473,25 @@ impl<'a> HashKeySer<'a> for Int256Ref<'a> {
 }
 
 impl HashKeyDe for Int256 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let mut value = [0; 32];
+        buf.copy_to_slice(&mut value);
+        Self::from_ne_bytes(value)
+    }
+}
+
+impl<'a> HashKeySer<'a> for UInt256Ref<'a> {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.to_ne_bytes();
+        buf.put_slice(b.as_ref());
+    }
+
+    fn exact_size() -> Option<usize> {
+        Some(32)
+    }
+}
+
+impl HashKeyDe for UInt256 {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
         let mut value = [0; 32];
         buf.copy_to_slice(&mut value);
