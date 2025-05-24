@@ -86,7 +86,7 @@ fn postgres_cell_to_scalar_impl(
             // Decimal is more efficient than PgNumeric in ScalarAdapter
             handle_data_type!(row, i, name, Decimal)
         }
-        DataType::Varchar | DataType::Int256 => {
+        DataType::Varchar | DataType::Int256 | DataType::UInt256 => {
             let res = row.try_get::<_, Option<ScalarAdapter>>(i);
             match res {
                 Ok(val) => val.and_then(|v| v.into_scalar(data_type)),

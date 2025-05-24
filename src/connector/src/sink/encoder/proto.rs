@@ -444,7 +444,7 @@ fn on_field<D: MaybeData>(
             Kind::Int64 => maybe.on_base(|s| Ok(Value::I64(s.into_serial().as_row_id())))?,
             _ => return no_match_err(), // Group D: unsupported
         },
-        DataType::Int256 => {
+        DataType::Int256 | DataType::UInt256 => {
             return no_match_err();
         }
         DataType::Map(map_type) => {
