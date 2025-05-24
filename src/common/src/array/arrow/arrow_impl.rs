@@ -103,6 +103,7 @@ pub trait ToArrow {
             ArrayImpl::Int32(array) => self.int32_to_arrow(array),
             ArrayImpl::Int64(array) => self.int64_to_arrow(array),
             ArrayImpl::Int256(array) => self.int256_to_arrow(array),
+            ArrayImpl::UInt256(array) => self.uint256_to_arrow(array),
             ArrayImpl::Float32(array) => self.float32_to_arrow(array),
             ArrayImpl::Float64(array) => self.float64_to_arrow(array),
             ArrayImpl::Date(array) => self.date_to_arrow(array),
@@ -163,6 +164,11 @@ pub trait ToArrow {
 
     #[inline]
     fn int256_to_arrow(&self, array: &Int256Array) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::Decimal256Array::from(array)))
+    }
+
+    #[inline]
+    fn uint256_to_arrow(&self, array: &UInt256Array) -> Result<arrow_array::ArrayRef, ArrayError> {
         Ok(Arc::new(arrow_array::Decimal256Array::from(array)))
     }
 
@@ -315,6 +321,7 @@ pub trait ToArrow {
             DataType::Int32 => self.int32_type_to_arrow(),
             DataType::Int64 => self.int64_type_to_arrow(),
             DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::UInt256 => self.uint256_type_to_arrow(),
             DataType::Float32 => self.float32_type_to_arrow(),
             DataType::Float64 => self.float64_type_to_arrow(),
             DataType::Date => self.date_type_to_arrow(),
@@ -356,6 +363,11 @@ pub trait ToArrow {
 
     #[inline]
     fn int256_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0)
+    }
+
+    #[inline]
+    fn uint256_type_to_arrow(&self) -> arrow_schema::DataType {
         arrow_schema::DataType::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0)
     }
 
@@ -1425,6 +1437,15 @@ impl From<&Int256Array> for arrow_array::Decimal256Array {
         array
             .iter()
             .map(|o| o.map(arrow_buffer::i256::from))
+            .collect()
+    }
+}
+
+impl From<&UInt256Array> for arrow_array::Decimal256Array {
+    fn from(array: &UInt256Array) -> Self {
+        array
+            .iter()
+            .map(|o| o.map(|v| arrow_buffer::i256::from_le_bytes(v.to_le_bytes())))
             .collect()
     }
 }
