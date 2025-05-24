@@ -230,3 +230,287 @@ No new system libraries required.
 - Phase 3 aggregates depend on Phase 2 expression engine
 - Each phase includes regression testing of previous phases
 - Feature flag allows gradual rollout and quick rollback if needed
+
+---
+
+## 11  User Guide for `rw_uint256`
+
+### 11.1 SQL Usage
+
+#### Creating Tables
+
+```sql
+-- Basic table with uint256 column
+CREATE TABLE blockchain_data (
+    block_number BIGINT,
+    total_supply rw_uint256,
+    PRIMARY KEY (block_number)
+);
+
+-- Using uint256 as primary key
+CREATE TABLE token_balances (
+    token_id rw_uint256 PRIMARY KEY,
+    owner_address VARCHAR,
+    balance rw_uint256
+);
+```
+
+#### Inserting Data
+
+```sql
+-- Direct numeric literals
+INSERT INTO blockchain_data VALUES (1, 1000000000000000000);
+
+-- String parsing (recommended for large values)
+INSERT INTO token_balances VALUES 
+    ('115792089237316195423570985008687907853269984665640564039457584007913129639935'::rw_uint256,
+     '0x742d35Cc6634C0532925a3b844Bc9e7595f6978e',
+     '1000000000000000000000'::rw_uint256);
+
+-- Casting from other numeric types
+INSERT INTO blockchain_data VALUES (2, 12345::rw_uint256);
+```
+
+#### Arithmetic Operations
+
+```sql
+-- Basic arithmetic
+SELECT 
+    total_supply + 1000::rw_uint256 as new_supply,
+    total_supply * 2::rw_uint256 as doubled,
+    total_supply / 10::rw_uint256 as tenth
+FROM blockchain_data;
+
+-- Comparisons
+SELECT * FROM token_balances 
+WHERE balance > '1000000000000000000'::rw_uint256
+ORDER BY balance DESC;
+
+-- Aggregations
+SELECT 
+    COUNT(*) as token_count,
+    SUM(balance) as total_balance,
+    AVG(balance) as avg_balance,
+    MIN(balance) as min_balance,
+    MAX(balance) as max_balance
+FROM token_balances;
+```
+
+#### Type Casting
+
+```sql
+-- Safe casts to uint256
+SELECT 
+    123::BIGINT::rw_uint256,              -- From signed integers
+    '999'::rw_uint256,                     -- From string
+    1.0::DECIMAL::rw_uint256;              -- From decimal (truncates)
+
+-- Casts from uint256
+SELECT 
+    balance::DECIMAL as decimal_balance,   -- To decimal
+    balance::rw_int256 as signed_balance,  -- To int256 (fails if > int256::MAX)
+    balance::VARCHAR as string_balance     -- To string
+FROM token_balances;
+```
+
+### 11.2 Connector Integration
+
+#### PostgreSQL Source
+
+```sql
+-- PostgreSQL source table
+-- In PostgreSQL:
+CREATE TABLE ethereum_data (
+    id SERIAL PRIMARY KEY,
+    wei_amount NUMERIC(78, 0)  -- Up to 78 digits for uint256
+);
+
+-- In RisingWave:
+CREATE SOURCE pg_ethereum_source
+WITH (
+    connector = 'postgres-cdc',
+    hostname = 'postgres-host',
+    port = '5432',
+    username = 'user',
+    password = 'pass',
+    database.name = 'ethereum_db',
+    schema.name = 'public',
+    table.name = 'ethereum_data'
+);
+
+CREATE MATERIALIZED VIEW ethereum_balances AS
+SELECT 
+    id,
+    wei_amount::rw_uint256 as balance_uint256
+FROM pg_ethereum_source;
+```
+
+#### JSON Source (Kafka)
+
+```sql
+CREATE SOURCE json_events (
+    event_id VARCHAR,
+    token_amount VARCHAR  -- JSON sends uint256 as string
+) WITH (
+    connector = 'kafka',
+    topic = 'blockchain-events',
+    properties.bootstrap.server = 'kafka:9092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+CREATE MATERIALIZED VIEW parsed_events AS
+SELECT 
+    event_id,
+    token_amount::rw_uint256 as amount
+FROM json_events;
+```
+
+#### Avro Source
+
+```avro
+// Avro schema
+{
+  "type": "record",
+  "name": "TokenTransfer",
+  "fields": [
+    {"name": "from", "type": "string"},
+    {"name": "to", "type": "string"},
+    {"name": "amount", "type": "string"}  // uint256 as string
+  ]
+}
+```
+
+```sql
+CREATE SOURCE avro_transfers
+WITH (
+    connector = 'kafka',
+    topic = 'token-transfers',
+    properties.bootstrap.server = 'kafka:9092'
+) FORMAT AVRO USING CONFLUENT SCHEMA REGISTRY 'http://schema-registry:8081';
+```
+
+### 11.3 Sink Configuration
+
+#### PostgreSQL Sink
+
+```sql
+CREATE SINK pg_aggregates AS
+SELECT 
+    DATE_TRUNC('hour', created_at) as hour,
+    SUM(amount)::VARCHAR as total_amount  -- Convert to string for PostgreSQL NUMERIC
+FROM transactions
+GROUP BY 1
+WITH (
+    connector = 'jdbc',
+    url = 'jdbc:postgresql://postgres:5432/analytics',
+    table.name = 'hourly_totals',
+    type = 'upsert',
+    primary_key = 'hour'
+);
+```
+
+#### BigQuery Sink
+
+```sql
+CREATE SINK bigquery_balances AS
+SELECT 
+    wallet_address,
+    balance  -- uint256 automatically mapped to BIGNUMERIC
+FROM current_balances
+WITH (
+    connector = 'bigquery',
+    type = 'append-only',
+    bigquery.project = 'my-project',
+    bigquery.dataset = 'blockchain',
+    bigquery.table = 'wallet_balances'
+);
+```
+
+#### ClickHouse Sink
+
+```sql
+CREATE SINK clickhouse_events AS
+SELECT 
+    event_time,
+    token_id::VARCHAR as token_id_str,  -- ClickHouse receives as String
+    amount::VARCHAR as amount_str
+FROM token_events
+WITH (
+    connector = 'clickhouse',
+    url = 'http://clickhouse:8123',
+    database = 'blockchain',
+    table = 'events',
+    username = 'default',
+    password = ''
+);
+```
+
+### 11.4 Common Patterns and Best Practices
+
+#### Working with Wei Values
+
+```sql
+-- Convert Wei to Ether (divide by 10^18)
+CREATE FUNCTION wei_to_ether(wei rw_uint256) RETURNS DECIMAL AS $$
+    SELECT (wei::DECIMAL / 1000000000000000000)::DECIMAL(78, 18)
+$$ LANGUAGE SQL IMMUTABLE;
+
+-- Example usage
+SELECT 
+    wallet_address,
+    balance as wei_balance,
+    wei_to_ether(balance) as ether_balance
+FROM wallets;
+```
+
+#### Handling Overflow
+
+```sql
+-- Safe addition with overflow check
+CREATE MATERIALIZED VIEW safe_totals AS
+SELECT 
+    category,
+    CASE 
+        WHEN SUM(amount) IS NULL THEN 0::rw_uint256
+        ELSE SUM(amount)
+    END as total
+FROM transactions
+GROUP BY category;
+
+-- Note: Arithmetic operations will fail on overflow
+-- This query will error if result > uint256::MAX
+SELECT '115792089237316195423570985008687907853269984665640564039457584007913129639935'::rw_uint256 + 1::rw_uint256;
+```
+
+#### Integration with External Systems
+
+```sql
+-- Pattern for systems that don't support uint256
+CREATE MATERIALIZED VIEW export_view AS
+SELECT 
+    id,
+    -- Split uint256 into high and low 128-bit parts
+    (value / '340282366920938463463374607431768211456'::rw_uint256)::VARCHAR as value_high,
+    (value % '340282366920938463463374607431768211456'::rw_uint256)::VARCHAR as value_low,
+    -- Or use string representation
+    value::VARCHAR as value_string
+FROM large_numbers;
+```
+
+### 11.5 Limitations and Workarounds
+
+| Limitation | Workaround |
+|------------|------------|
+| No hex literal support (0x...) | Use decimal strings: `'115792...'::rw_uint256` |
+| No bitwise operations | Use arithmetic equivalents or process in application layer |
+| Overflow causes error (no wrapping) | Add application-level checks before operations |
+| Some sinks require string format | Cast to VARCHAR: `amount::VARCHAR` |
+| No unsigned display in psql | Values display as signed; use `::VARCHAR` for exact representation |
+
+### 11.6 Performance Considerations
+
+- **Indexing**: uint256 columns can be indexed like any other numeric type
+- **Joins**: Join performance on uint256 keys is comparable to BIGINT
+- **Aggregations**: SUM may be slower than native types due to overflow checking
+- **String parsing**: Parsing from strings has overhead; prefer numeric literals when possible
+- **Network transfer**: 32-byte values may increase network traffic vs smaller types
