@@ -266,6 +266,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Int256 => Err(SinkError::Starrocks(
                 "INT256 is not supported for Starrocks sink.".to_owned(),
             )),
+            risingwave_common::types::DataType::UInt256 => Err(SinkError::Starrocks(
+                "UINT256 is not supported for Starrocks sink.".to_owned(),
+            )),
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),

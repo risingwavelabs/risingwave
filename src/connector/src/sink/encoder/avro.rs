@@ -584,7 +584,7 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         // Group D: unsupported
-        DataType::Int256 => {
+        DataType::Int256 | DataType::UInt256 => {
             return no_match_err();
         }
     };

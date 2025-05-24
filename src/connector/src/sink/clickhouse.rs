@@ -509,8 +509,8 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
-            risingwave_common::types::DataType::Int256 => Err(SinkError::ClickHouse(
-                "clickhouse can not support Int256".to_owned(),
+            risingwave_common::types::DataType::Int256 | risingwave_common::types::DataType::UInt256 => Err(SinkError::ClickHouse(
+                "clickhouse can not support Int256 or UInt256".to_owned(),
             )),
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
                 "clickhouse can not support Map".to_owned(),
@@ -938,9 +938,9 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Int16(v) => ClickHouseField::Int16(v),
             ScalarRefImpl::Int32(v) => ClickHouseField::Int32(v),
             ScalarRefImpl::Int64(v) => ClickHouseField::Int64(v),
-            ScalarRefImpl::Int256(_) => {
+            ScalarRefImpl::Int256(_) | ScalarRefImpl::UInt256(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Int256".to_owned(),
+                    "clickhouse can not support Int256 or UInt256".to_owned(),
                 ));
             }
             ScalarRefImpl::Serial(v) => ClickHouseField::Serial(v),
