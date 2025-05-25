@@ -33,6 +33,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
+use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
@@ -57,8 +58,8 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -184,6 +185,44 @@ impl ActorInfo {
             .or_default()
             .push(actor.actor_id);
         self.models.insert(actor.actor_id, actor);
+    }
+
+    pub fn drop_actor(&mut self, actor_id: ActorId) {
+        debug_assert!(self.models.contains_key(&actor_id));
+        let actor = self.models.remove(&actor_id).expect("actor not found");
+        self.actors_by_fragment_id
+            .entry(actor.fragment_id)
+            .or_default()
+            .retain(|&id| id != actor.actor_id);
+        self.actors_by_worker_id
+            .entry(actor.worker_id)
+            .or_default()
+            .retain(|&id| id != actor.actor_id);
+    }
+
+    /// Mutate an existing actor, re-indexing if its `fragment_id` or `worker_id` changes.
+    pub fn mutate_actor<F>(&mut self, actor_id: ActorId, mutator: F)
+    where
+        F: FnOnce(&mut actor::Model),
+    {
+        let actor = self.models.get_mut(&actor_id).expect("actor not found");
+        let old_worker = actor.worker_id;
+        let old_fragment = actor.fragment_id;
+
+        mutator(actor);
+
+        debug_assert_eq!(actor.fragment_id, old_fragment);
+
+        if actor.worker_id != old_worker {
+            debug_assert!(self.actors_by_worker_id.contains_key(&old_fragment));
+            if let Some(vec) = self.actors_by_worker_id.get_mut(&old_worker) {
+                vec.retain(|&id| id != actor_id);
+            }
+            self.actors_by_worker_id
+                .entry(actor.worker_id)
+                .or_default()
+                .push(actor_id);
+        }
     }
 }
 
