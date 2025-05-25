@@ -28,6 +28,7 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
+use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
@@ -676,18 +677,22 @@ impl CatalogController {
         split_assignment: &SplitAssignment,
         is_mv: bool,
     ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // todo
         Actor::update_many()
             .col_expr(
                 actor::Column::Status,
                 SimpleExpr::from(ActorStatus::Running.into_value()),
             )
             .filter(
-                actor::Column::ActorId
-                    .is_in(actor_ids.into_iter().map(|id| id as ActorId).collect_vec()),
+                actor::Column::ActorId.is_in(
+                    actor_ids
+                        .iter()
+                        .copied()
+                        .map(|id| id as ActorId)
+                        .collect_vec(),
+                ),
             )
             .exec(&txn)
             .await?;
@@ -724,6 +729,23 @@ impl CatalogController {
         };
 
         txn.commit().await?;
+
+        for actor_id in &actor_ids {
+            inner.actors.mutate_actor(*actor_id as ActorId, |actor| {
+                actor.status = ActorStatus::Running;
+            });
+        }
+
+        for splits in split_assignment.values() {
+            for (&actor_id, splits) in splits {
+                inner.actors.mutate_actor(actor_id as ActorId, |actor| {
+                    let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+                    let connector_splits = &PbConnectorSplits { splits };
+                    actor.splits = Some(connector_splits.into());
+                })
+            }
+        }
+
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
 
@@ -1846,7 +1868,7 @@ impl CatalogController {
             })
             .collect();
 
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
 
         let txn = inner.db.begin().await?;
 
@@ -1861,7 +1883,7 @@ impl CatalogController {
                 newly_created_actors,
                 ..
             },
-        ) in reschedules
+        ) in &reschedules
         {
             // drop removed actors
             Actor::delete_many()
@@ -1885,18 +1907,18 @@ impl CatalogController {
                     _,
                 ),
                 worker_id,
-            ) in newly_created_actors.into_values()
+            ) in newly_created_actors.values()
             {
                 let splits = actor_splits
-                    .get(&actor_id)
+                    .get(actor_id)
                     .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
 
                 Actor::insert(actor::ActiveModel {
-                    actor_id: Set(actor_id as _),
-                    fragment_id: Set(fragment_id as _),
+                    actor_id: Set(*actor_id as _),
+                    fragment_id: Set(*fragment_id as _),
                     status: Set(ActorStatus::Running),
                     splits: Set(splits.map(|splits| (&PbConnectorSplits { splits }).into())),
-                    worker_id: Set(worker_id),
+                    worker_id: Set(*worker_id),
                     upstream_actor_ids: Set(Default::default()),
                     vnode_bitmap: Set(vnode_bitmap
                         .as_ref()
@@ -1909,7 +1931,7 @@ impl CatalogController {
 
             // actor update
             for (actor_id, bitmap) in vnode_bitmap_updates {
-                let actor = Actor::find_by_id(actor_id as ActorId)
+                let actor = Actor::find_by_id(*actor_id as ActorId)
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
@@ -1921,11 +1943,11 @@ impl CatalogController {
 
             // Update actor_splits for existing actors
             for (actor_id, splits) in actor_splits {
-                if new_created_actors.contains(&(actor_id as ActorId)) {
+                if new_created_actors.contains(&(*actor_id as ActorId)) {
                     continue;
                 }
 
-                let actor = Actor::find_by_id(actor_id as ActorId)
+                let actor = Actor::find_by_id(*actor_id as ActorId)
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
@@ -1936,29 +1958,94 @@ impl CatalogController {
                 actor.update(&txn).await?;
             }
 
-            // fragment update
-            let fragment = Fragment::find_by_id(fragment_id)
+            // Load distribution type once for cache lookup
+            let fragment = Fragment::find_by_id(*fragment_id)
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+            let distribution_type = fragment.distribution_type;
 
-            let job_actors = fragment
-                .find_related(Actor)
-                .all(&txn)
-                .await?
+            // Build actor list entirely from in-memory cache
+            let job_actors_from_cache: Vec<(
+                FragmentId,
+                DistributionType,
+                ActorId,
+                Option<VnodeBitmap>,
+                WorkerId,
+                ActorStatus,
+            )> = inner
+                .actors
+                .actors_by_fragment_id
+                .get(fragment_id)
                 .into_iter()
-                .map(|actor| {
+                .flat_map(|ids| ids.iter().copied())
+                .map(|actor_id| {
+                    let model = &inner.actors.models[&actor_id];
                     (
-                        fragment_id,
-                        fragment.distribution_type,
-                        actor.actor_id,
-                        actor.vnode_bitmap,
-                        actor.worker_id,
-                        actor.status,
+                        *fragment_id,
+                        distribution_type,
+                        model.actor_id,
+                        model.vnode_bitmap.clone(),
+                        model.worker_id,
+                        model.status.clone(),
                     )
                 })
-                .collect_vec();
+                .collect();
 
+            #[cfg(debug_assertions)]
+            {
+                // Execute original DB query for comparison
+                let fragment = Fragment::find_by_id(*fragment_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
+                let job_actors_from_db: Vec<(
+                    FragmentId,
+                    DistributionType,
+                    ActorId,
+                    Option<VnodeBitmap>,
+                    WorkerId,
+                    ActorStatus,
+                )> = fragment
+                    .find_related(Actor)
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .map(|actor| {
+                        (
+                            *fragment_id,
+                            fragment.distribution_type,
+                            actor.actor_id,
+                            actor.vnode_bitmap,
+                            actor.worker_id,
+                            actor.status,
+                        )
+                    })
+                    .collect_vec();
+
+                // Index by ActorId to avoid hashing VnodeBitmap directly
+                let map_db: HashMap<ActorId, _> = job_actors_from_db
+                    .into_iter()
+                    .map(|(fid, dist, aid, vnode, wid, status)| {
+                        (aid, (fid, dist, vnode, wid, status))
+                    })
+                    .collect();
+                let map_cache: HashMap<ActorId, _> = job_actors_from_cache
+                    .iter()
+                    .cloned()
+                    .map(|(fid, dist, aid, vnode, wid, status)| {
+                        (aid, (fid, dist, vnode, wid, status))
+                    })
+                    .collect();
+
+                debug_assert_eq!(
+                    map_db, map_cache,
+                    "Job actors mismatch between DB and cache"
+                );
+            }
+
+            // Use the cache-based result going forward
+            let job_actors = job_actors_from_cache;
             fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
         }
 
@@ -1992,6 +2079,71 @@ impl CatalogController {
         txn.commit().await?;
         self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
             .await;
+
+        for Reschedule {
+            removed_actors,
+            vnode_bitmap_updates,
+            actor_splits,
+            newly_created_actors,
+            ..
+        } in reschedules.into_values()
+        {
+            for actor in removed_actors {
+                inner.actors.drop_actor(actor as _);
+            }
+
+            for (
+                (
+                    StreamActor {
+                        actor_id,
+                        fragment_id,
+                        vnode_bitmap,
+                        expr_context,
+                        ..
+                    },
+                    _,
+                ),
+                worker_id,
+            ) in newly_created_actors.values()
+            {
+                let splits = actor_splits
+                    .get(actor_id)
+                    .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
+
+                inner.actors.add_actor(actor::Model {
+                    actor_id: *actor_id as _,
+                    fragment_id: *fragment_id as _,
+                    status: ActorStatus::Running,
+                    splits: splits.map(|splits| (&PbConnectorSplits { splits }).into()),
+                    worker_id: *worker_id,
+                    #[allow(deprecated)]
+                    upstream_actor_ids: Default::default(),
+                    vnode_bitmap: vnode_bitmap
+                        .as_ref()
+                        .map(|bitmap| (&bitmap.to_protobuf()).into()),
+                    expr_context: expr_context.as_ref().unwrap().into(),
+                });
+            }
+
+            // actor update
+            for (actor_id, bitmap) in vnode_bitmap_updates {
+                inner.actors.mutate_actor(actor_id as ActorId, |actor| {
+                    actor.vnode_bitmap = Some((&bitmap.to_protobuf()).into());
+                });
+            }
+
+            // Update actor_splits for existing actors
+            for (actor_id, splits) in actor_splits {
+                if new_created_actors.contains(&(actor_id as ActorId)) {
+                    continue;
+                }
+
+                inner.actors.mutate_actor(actor_id as ActorId, |actor| {
+                    let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+                    actor.splits = Some((&PbConnectorSplits { splits }).into());
+                });
+            }
+        }
 
         Ok(())
     }
