@@ -286,7 +286,7 @@ pub struct PartialActorLocation {
     pub status: ActorStatus,
 }
 
-#[derive(FromQueryResult)]
+#[derive(FromQueryResult, Debug, Eq, PartialEq)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
     pub job_id: ObjectId,
