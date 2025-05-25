@@ -379,19 +379,15 @@ impl TableFunction {
         {
             let schema = tokio::task::block_in_place(|| {
                 FRONTEND_RUNTIME.block_on(async {
-                    let (client, connection) = tokio_postgres::connect(
-                        format!(
-                            "host={} port={} user={} password={} dbname={}",
-                            evaled_args[0],
-                            evaled_args[1],
-                            evaled_args[2],
-                            evaled_args[3],
-                            evaled_args[4]
-                        )
-                        .as_str(),
-                        tokio_postgres::NoTls,
-                    )
-                    .await?;
+                    let mut conf = tokio_postgres::Config::new();
+                    let (client, connection) = conf
+                        .host(&evaled_args[0])
+                        .port(evaled_args[1].parse().unwrap())
+                        .user(&evaled_args[2])
+                        .password(evaled_args[3].clone())
+                        .dbname(&evaled_args[4])
+                        .connect(tokio_postgres::NoTls)
+                        .await?;
 
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
