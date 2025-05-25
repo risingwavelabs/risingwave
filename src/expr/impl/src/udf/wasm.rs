@@ -326,6 +326,7 @@ fn wasm_identifier_v1(
             DataType::Jsonb => "json".to_owned(),
             DataType::Serial => "serial".to_owned(),
             DataType::Int256 => "int256".to_owned(),
+            DataType::UInt256 => "uint256".to_owned(),
             DataType::Bytea => "binary".to_owned(),
             DataType::Varchar => "string".to_owned(),
             DataType::List(inner) => format!("{}[]", datatype_name(inner)),
