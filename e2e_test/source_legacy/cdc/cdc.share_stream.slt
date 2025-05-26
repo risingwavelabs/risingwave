@@ -548,6 +548,13 @@ CREATE TABLE numeric_to_numeric_shared (
 ) FROM pg_source TABLE 'public.numeric_table';
 
 statement ok
+CREATE TABLE numeric_to_rw_uint256_shared (
+    id int,
+    num rw_uint256,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.numeric_table';
+
+statement ok
 CREATE TABLE numeric_list_to_rw_int256_list_shared (
     id int,
     num rw_int256[],
@@ -646,6 +653,24 @@ select * from numeric_to_rw_int256_shared order by id;
 7   NULL
 102 57896044618658097711785492504343953926634992332820282019728792003956564819967
 103 NULL
+104 NULL
+105 NULL
+106 NULL
+107 NULL
+
+# The invalid data for rw_uint256 is converted to NULL (only non-negative values within range work)
+query II
+select * from numeric_to_rw_uint256_shared order by id;
+----
+1   NULL
+2   57896044618658097711785492504343953926634992332820282019728792003956564819967
+3   57896044618658097711785492504343953926634992332820282019728792003956564819968
+4   NULL
+5   NULL
+6   NULL
+7   NULL
+102 57896044618658097711785492504343953926634992332820282019728792003956564819967
+103 57896044618658097711785492504343953926634992332820282019728792003956564819968
 104 NULL
 105 NULL
 106 NULL

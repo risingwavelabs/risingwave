@@ -30,6 +30,7 @@ SELECT oid, typname, typelem, typnotnull, typtype, typinput FROM pg_catalog.pg_t
 1187 _interval 1186 f b array_in
 1231 _numeric 1700 f b array_in
 1301 rw_int256 0 f b rw_int256_in
+1305 rw_uint256 0 f b rw_uint256_in
 1700 numeric 0 f b numeric_in
 3802 jsonb 0 f b jsonb_in
 3807 _jsonb 3802 f b array_in
