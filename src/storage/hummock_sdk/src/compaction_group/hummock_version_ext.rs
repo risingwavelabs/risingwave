@@ -1010,6 +1010,7 @@ where
         match HummockObjectId::Sstable(0.into()) {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
         };
         self.get_sst_infos(exclude_change_log)
             .map(|s| HummockObjectId::Sstable(s.object_id()))
@@ -1493,6 +1494,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
     match HummockObjectId::Sstable(0.into()) {
         HummockObjectId::Sstable(_) => {}
         HummockObjectId::VectorFile(_) => {}
+        HummockObjectId::HnswGraphFile(_) => {}
     };
     version
         .levels
