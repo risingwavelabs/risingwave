@@ -12,25 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod hnsw;
+
 use std::mem::take;
 
 use bytes::Bytes;
 use futures::FutureExt;
 use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_hummock_sdk::vector_index::{
-    FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl, VectorStoreDelta,
+    FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
+    VectorStoreDelta,
 };
 
 use crate::hummock::vector::file::VectorFileBuilder;
+use crate::hummock::vector::writer::hnsw::HnswFlatIndexWriter;
 use crate::hummock::{HummockResult, ObjectIdManagerRef, SstableStoreRef};
 use crate::opts::StorageOpts;
-use crate::vector::Vector;
-
-pub(crate) struct VectorWriterImpl {
-    flushed_vector_files: Vec<VectorFileInfo>,
-    sstable_store: SstableStoreRef,
-    vector_file_builder: VectorFileBuilder,
-}
+use crate::vector::{DistanceMeasurement, Vector};
 
 pub(crate) fn new_vector_file_builder(
     dimension: usize,
@@ -58,20 +56,89 @@ pub(crate) fn new_vector_file_builder(
     )
 }
 
+pub(crate) enum VectorWriterImpl {
+    Flat(FlatIndexWriter),
+    HnswFlat(HnswFlatIndexWriter),
+}
+
 impl VectorWriterImpl {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
         object_id_manager: ObjectIdManagerRef,
         storage_opts: &StorageOpts,
+    ) -> HummockResult<Self> {
+        Ok(match &index.inner {
+            VectorIndexImpl::Flat(flat) => VectorWriterImpl::Flat(FlatIndexWriter::new(
+                flat,
+                index.dimension,
+                sstable_store.clone(),
+                object_id_manager.clone(),
+                storage_opts,
+            )),
+            VectorIndexImpl::HnswFlat(hnsw_flat) => VectorWriterImpl::HnswFlat(
+                HnswFlatIndexWriter::new(
+                    hnsw_flat,
+                    index.dimension,
+                    DistanceMeasurement::from(index.distance_type),
+                    sstable_store.clone(),
+                    object_id_manager.clone(),
+                    storage_opts,
+                )
+                .await?,
+            ),
+        })
+    }
+
+    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.insert(vec, info),
+            VectorWriterImpl::HnswFlat(writer) => writer.insert(vec, info),
+        }
+    }
+
+    pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.seal_current_epoch(),
+            VectorWriterImpl::HnswFlat(writer) => writer.seal_current_epoch(),
+        }
+    }
+
+    pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.flush().await,
+            VectorWriterImpl::HnswFlat(writer) => writer.flush().await,
+        }
+    }
+
+    pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.try_flush().await,
+            VectorWriterImpl::HnswFlat(writer) => writer.try_flush().await,
+        }
+    }
+}
+
+pub(crate) struct FlatIndexWriter {
+    flushed_vector_files: Vec<VectorFileInfo>,
+    sstable_store: SstableStoreRef,
+    vector_file_builder: VectorFileBuilder,
+}
+
+impl FlatIndexWriter {
+    pub(crate) fn new(
+        index: &FlatIndex,
+        dimension: usize,
+        sstable_store: SstableStoreRef,
+        object_id_manager: ObjectIdManagerRef,
+        storage_opts: &StorageOpts,
     ) -> Self {
-        let VectorIndexImpl::Flat(flat_index) = &index.inner;
         Self {
             flushed_vector_files: vec![],
             sstable_store: sstable_store.clone(),
             vector_file_builder: new_vector_file_builder(
-                index.dimension,
-                flat_index.vector_store.next_vector_id,
+                dimension,
+                index.vector_store.next_vector_id,
                 sstable_store,
                 object_id_manager,
                 storage_opts,
