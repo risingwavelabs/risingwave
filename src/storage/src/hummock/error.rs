@@ -69,7 +69,7 @@ pub enum HummockErrorInner {
     #[error("Read backup error: {0}")]
     ReadBackupError(String),
     #[error("Foyer error: {0}")]
-    FoyerError(foyer::Error),
+    FoyerError(#[from] foyer::Error),
     #[error("Other error: {0}")]
     Other(String),
 }

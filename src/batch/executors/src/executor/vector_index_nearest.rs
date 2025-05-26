@@ -176,7 +176,14 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
                             vector.to_owned_scalar(),
-                            VectorNearestOptions { top_n, measure },
+                            VectorNearestOptions {
+                                top_n,
+                                measure,
+                                hnsw_ef_search: {
+                                    let todo = 0;
+                                    0
+                                },
+                            },
                             move |_vec, distance, value| {
                                 let mut values =
                                     Vec::with_capacity(deserializer.data_types().len() + 1);
