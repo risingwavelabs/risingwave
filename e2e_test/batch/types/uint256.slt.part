@@ -64,7 +64,7 @@ statement ok
 create table t_uint256 (v rw_uint256)
 
 statement ok
-insert into t_uint256 values (0), (1), (100), (10000), (100000000), (10000000000000000), ('100000000000000000000000000000000');
+insert into t_uint256 values (0::rw_uint256), (1::rw_uint256), (100::rw_uint256), (10000::rw_uint256), (100000000::rw_uint256), (10000000000000000::rw_uint256), ('100000000000000000000000000000000'::rw_uint256);
 
 query I rowsort
 select * from t_uint256;
@@ -149,7 +149,7 @@ select count(v) from t_uint256;
 10
 
 statement ok
-insert into t_uint256 values (1);
+insert into t_uint256 values (1::rw_uint256);
 
 query I
 select sum(v) from t_uint256 where v <= 100000000000000000000000000000000;
@@ -173,7 +173,7 @@ statement ok
 create table t_uint256 (v rw_uint256)
 
 statement ok
-insert into t_uint256 values (1), (1), (2), (2), (3), (3), (4), (5);
+insert into t_uint256 values (1::rw_uint256), (1::rw_uint256), (2::rw_uint256), (2::rw_uint256), (3::rw_uint256), (3::rw_uint256), (4::rw_uint256), (5::rw_uint256);
 
 query RR
 select avg(v), avg(distinct v) from t_uint256;
