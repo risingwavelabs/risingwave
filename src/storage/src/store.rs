@@ -433,6 +433,7 @@ pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
 pub struct VectorNearestOptions {
     pub top_n: usize,
     pub measure: DistanceMeasurement,
+    pub hnsw_ef_search: usize,
 }
 
 pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + Sync + 'static;

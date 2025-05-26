@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::HummockVectorFileId;
 use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 use risingwave_object_store::object::ObjectStreamingUploader;
 
+use crate::hummock::vector::{EnumVectorAccessor, search_vector};
 use crate::hummock::{HummockError, HummockResult, xxhash64_checksum, xxhash64_verify};
 use crate::vector::VectorRef;
 
@@ -83,6 +84,14 @@ impl VectorBlockBuilder {
             encoded_len: size_of::<u32>() // dimension
              + size_of::<u32>(), // vector count
         }
+    }
+
+    pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
+        self.inner.vec_ref(idx)
+    }
+
+    pub fn info(&self, idx: usize) -> &[u8] {
+        self.inner.info(idx)
     }
 
     pub fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
@@ -234,6 +243,7 @@ impl<'a> IntoIterator for &'a VectorBlock {
     }
 }
 
+#[derive(Debug)]
 pub struct VectorBlockMeta {
     pub offset: usize,
     pub block_size: usize,
@@ -394,6 +404,31 @@ impl VectorFileBuilder {
             uploader: None,
             next_vector_id,
             next_block_offset: 0,
+        }
+    }
+
+    pub fn get_vector(&self, idx: usize) -> HummockResult<EnumVectorAccessor<'_>> {
+        if idx >= self.next_vector_id {
+            return Err(HummockError::other(format!(
+                "vector index {} out of bounds {}",
+                idx, self.next_vector_id
+            )));
+        }
+        if let Some((builder, start_vector_id)) = &self.building_block
+            && idx >= *start_vector_id
+        {
+            Ok(EnumVectorAccessor::Builder(builder, idx - start_vector_id))
+        } else {
+            let (block_idx, offset) = search_vector(
+                &self.block_metas,
+                idx,
+                |meta| meta.start_vector_id,
+                |meta| meta.vector_count,
+            )?;
+            Ok(EnumVectorAccessor::BlockRef(
+                &self.blocks[block_idx],
+                offset,
+            ))
         }
     }
 

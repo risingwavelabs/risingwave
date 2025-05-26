@@ -158,6 +158,7 @@ pub type HummockRawObjectId = TypedPrimitive<0, u64>;
 pub type HummockSstableObjectId = TypedPrimitive<1, u64>;
 pub type HummockSstableId = TypedPrimitive<2, u64>;
 pub type HummockVectorFileId = TypedPrimitive<3, u64>;
+pub type HummockHnswGraphFileId = TypedPrimitive<4, u64>;
 
 macro_rules! impl_object_id {
     ($type_name:ty) => {
@@ -177,6 +178,7 @@ macro_rules! impl_object_id {
 
 impl_object_id!(HummockSstableObjectId);
 impl_object_id!(HummockVectorFileId);
+impl_object_id!(HummockHnswGraphFileId);
 
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;
@@ -260,7 +262,7 @@ macro_rules! for_all_object_suffix {
             )+
         }
 
-        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 2] = [$(
+        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 3] = [$(
                 $suffix
             ),+];
 
@@ -316,6 +318,7 @@ macro_rules! for_all_object_suffix {
         for_all_object_suffix! {
             {Sstable, HummockSstableObjectId, SST_OBJECT_SUFFIX},
             {VectorFile, HummockVectorFileId, VECTOR_FILE_OBJECT_SUFFIX},
+            {HnswGraphFile, HummockHnswGraphFileId, "hnsw_graph"},
         }
     };
 }
@@ -331,6 +334,7 @@ pub fn get_stale_object_ids(
     match HummockObjectId::Sstable(0.into()) {
         HummockObjectId::Sstable(_) => {}
         HummockObjectId::VectorFile(_) => {}
+        HummockObjectId::HnswGraphFile(_) => {}
     };
     stale_objects
         .id
@@ -343,6 +347,9 @@ pub fn get_stale_object_ids(
                 }
                 VectorIndexObjectType::VectorIndexObjectVector => {
                     HummockObjectId::VectorFile(file.id.into())
+                }
+                VectorIndexObjectType::VectorIndexObjectHnswGraph => {
+                    HummockObjectId::HnswGraphFile(file.id.into())
                 }
             },
         ))
