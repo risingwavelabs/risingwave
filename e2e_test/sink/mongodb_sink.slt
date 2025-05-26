@@ -7,6 +7,7 @@ create table t1(
     b int,
     c bigint,
     d rw_int256,
+    d2 rw_uint256,
     e real,
     f double precision,
     g varchar,
@@ -32,7 +33,7 @@ with (
 );
 
 statement ok
-insert into t1 values(1, 2, 3, 4, 5.0, 6.0, '7', '\xDe00BeEf', date '2022-04-08', time '18:20:49',
+insert into t1 values(1, 2, 3, 4, 5, 5.0, 6.0, '7', '\xDe00BeEf', date '2022-04-08', time '18:20:49',
                       '2022-03-13 01:00:00'::timestamp, '2022-03-13 01:00:00Z'::timestamptz, interval '4 hour',
                       ROW(ROW(8), 9), ARRAY['a', 'b', 'c'], '{"a": [{"b": 1}], "c": true}'::jsonb);
 

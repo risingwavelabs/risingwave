@@ -1,0 +1,339 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Basic arithmetic operations
+query I
+select '1'::rw_uint256 + '100000000000000000000000000000000'::rw_uint256;
+----
+100000000000000000000000000000001
+
+query I
+select '100000000000000000000000000000000'::rw_uint256 - '1'::rw_uint256;
+----
+99999999999999999999999999999999
+
+query I
+select '10000000000000000'::rw_uint256 * '10000000000000000'::rw_uint256;
+----
+100000000000000000000000000000000
+
+query I
+select '100000000000000000000000000000000'::rw_uint256 / '1'::rw_uint256;
+----
+100000000000000000000000000000000
+
+query I
+select '10000000000000000'::rw_uint256 % '2'::rw_uint256;
+----
+0
+
+# Division with floats
+query R
+select '1'::rw_uint256 / 2::float8;
+----
+0.5
+
+query R
+select '1'::rw_uint256 / 3::double precision;
+----
+0.3333333333333333
+
+query R
+select '10000000000000000'::rw_uint256 / 2::double precision;
+----
+5000000000000000
+
+# Test maximum values
+query I
+select '115792089237316195423570985008687907853269984665640564039457584007913129639935'::rw_uint256;
+----
+115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+query I
+select '340282366920938463463374607431768211455'::rw_uint256;  -- max uint128
+----
+340282366920938463463374607431768211455
+
+query I
+select '18446744073709551615'::rw_uint256;  -- max uint64
+----
+18446744073709551615
+
+# Table operations
+statement ok
+create table t_uint256 (v rw_uint256)
+
+statement ok
+insert into t_uint256 values (0), (1), (100), (10000), (100000000), (10000000000000000), ('100000000000000000000000000000000');
+
+query I rowsort
+select * from t_uint256;
+----
+0
+1
+100
+10000
+100000000
+10000000000000000
+100000000000000000000000000000000
+
+# Insert edge cases
+statement ok
+insert into t_uint256 values ('18446744073709551615'), ('340282366920938463463374607431768211455'), ('115792089237316195423570985008687907853269984665640564039457584007913129639935');
+
+query I
+select * from t_uint256 order by v asc;
+----
+0
+1
+100
+10000
+100000000
+10000000000000000
+100000000000000000000000000000000
+18446744073709551615
+340282366920938463463374607431768211455
+115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+query I
+select * from t_uint256 order by v desc;
+----
+115792089237316195423570985008687907853269984665640564039457584007913129639935
+340282366920938463463374607431768211455
+18446744073709551615
+100000000000000000000000000000000
+10000000000000000
+100000000
+10000
+100
+1
+0
+
+query I rowsort
+select * from t_uint256 where v > 0;
+----
+1
+100
+10000
+100000000
+10000000000000000
+100000000000000000000000000000000
+18446744073709551615
+340282366920938463463374607431768211455
+115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+query B
+select 1::rw_uint256 is null;
+----
+f
+
+query I
+select distinct v::rw_uint256 from generate_series(1, 1, 1) as t(v);
+----
+1
+
+# Aggregate functions
+query I
+select max(v) from t_uint256;
+----
+115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+query I
+select min(v) from t_uint256;
+----
+0
+
+query I
+select count(v) from t_uint256;
+----
+10
+
+statement ok
+insert into t_uint256 values (1);
+
+query I
+select sum(v) from t_uint256 where v <= 100000000000000000000000000000000;
+----
+100000010010110101101
+
+query I
+select count(v) from t_uint256;
+----
+11
+
+query I
+select count(distinct v) from t_uint256;
+----
+10
+
+statement ok
+drop table t_uint256;
+
+statement ok
+create table t_uint256 (v rw_uint256)
+
+statement ok
+insert into t_uint256 values (1), (1), (2), (2), (3), (3), (4), (5);
+
+query RR
+select avg(v), avg(distinct v) from t_uint256;
+----
+2.625 3
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t_uint256
+----
+1.3169567191065923 1.407885953173359 1.734375 1.9821428571428572
+
+statement ok
+drop table t_uint256;
+
+# Type promotion tests
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_uint256 + 1::int) as t(v);
+----
+2 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int + 1::rw_uint256) as t(v);
+----
+2 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 2::rw_uint256 - 1::int) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 2::int - 1::rw_uint256) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_uint256 * 1::int) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int * 1::rw_uint256) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_uint256 / 1::int) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int / 1::rw_uint256) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_uint256 % 1::int) as t(v);
+----
+0 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::int % 1::rw_uint256) as t(v);
+----
+0 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select sum(1::rw_uint256)) as t(v);
+----
+1 rw_uint256
+
+query TT
+select v::varchar, pg_typeof(v) from (select avg(1::rw_uint256)) as t(v);
+----
+1 double precision
+
+query TT
+select v::varchar, pg_typeof(v) from (select 1::rw_uint256 + 1::rw_uint256) as t(v);
+----
+2 rw_uint256
+
+# Edge case: subtraction that would go negative should fail
+statement error
+select '0'::rw_uint256 - '1'::rw_uint256;
+
+# Edge case: overflow should fail
+statement error
+select '115792089237316195423570985008687907853269984665640564039457584007913129639935'::rw_uint256 + '1'::rw_uint256;
+
+# Edge case: negative values should fail
+statement error
+select '-1'::rw_uint256;
+
+# Edge case: values exceeding max should fail
+statement error
+select '115792089237316195423570985008687907853269984665640564039457584007913129639936'::rw_uint256;
+
+# Test casting from other types
+query I
+select 42::bigint::rw_uint256;
+----
+42
+
+query I
+select 42::int::rw_uint256;
+----
+42
+
+query I
+select 42::smallint::rw_uint256;
+----
+42
+
+query I
+select '42'::varchar::rw_uint256;
+----
+42
+
+# Test casting to other types
+query T
+select '42'::rw_uint256::varchar;
+----
+42
+
+query I
+select '42'::rw_uint256::bigint;
+----
+42
+
+query I
+select '42'::rw_uint256::decimal;
+----
+42
+
+# Test comparisons
+query B
+select '100'::rw_uint256 > '99'::rw_uint256;
+----
+t
+
+query B
+select '100'::rw_uint256 < '99'::rw_uint256;
+----
+f
+
+query B
+select '100'::rw_uint256 = '100'::rw_uint256;
+----
+t
+
+query B
+select '100'::rw_uint256 != '99'::rw_uint256;
+----
+t
+
+query B
+select '100'::rw_uint256 >= '100'::rw_uint256;
+----
+t
+
+query B
+select '100'::rw_uint256 <= '100'::rw_uint256;
+----
+t
