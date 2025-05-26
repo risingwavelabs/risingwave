@@ -337,6 +337,7 @@ public class DbzConnectorConfig {
         try (var input = getClass().getClassLoader().getResourceAsStream(fileName)) {
             assert input != null;
             var inputStr = IOUtils.toString(input, StandardCharsets.UTF_8);
+            // load before substitution, so that we do not need to escape the substituted text
             dbProps.load(new StringReader(inputStr));
             dbProps.replaceAll((k, v) -> substitutor.replace(v));
         } catch (IOException e) {
