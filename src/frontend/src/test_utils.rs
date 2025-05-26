@@ -292,6 +292,7 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
         _specific_resource_group: Option<String>,
+        _if_not_exists: bool,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -316,13 +317,14 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         graph: StreamFragmentGraph,
         _job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph, HashSet::new(), None)
+        self.create_materialized_view(table, graph, HashSet::new(), None, if_not_exists)
             .await?;
         Ok(())
     }
@@ -355,6 +357,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         source: PbSource,
         _graph: Option<StreamFragmentGraph>,
+        _if_not_exists: bool,
     ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
@@ -365,6 +368,7 @@ impl CatalogWriter for MockCatalogWriter {
         graph: StreamFragmentGraph,
         _affected_table_change: Option<ReplaceJobPlan>,
         _dependencies: HashSet<ObjectId>,
+        _if_not_exists: bool,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }
@@ -378,6 +382,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();
         index_table.stream_job_status = PbStreamJobStatus::Created as _;

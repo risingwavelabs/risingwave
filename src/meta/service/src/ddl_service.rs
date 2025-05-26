@@ -278,6 +278,7 @@ impl DdlService for DdlServiceImpl {
                         None,
                         HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
                         None,
+                        req.if_not_exists,
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -346,6 +347,7 @@ impl DdlService for DdlServiceImpl {
             affected_table_change,
             dependencies,
             None,
+            req.if_not_exists,
         );
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -448,6 +450,7 @@ impl DdlService for DdlServiceImpl {
                 None,
                 dependencies,
                 specific_resource_group,
+                req.if_not_exists,
             ))
             .await?;
 
@@ -503,6 +506,7 @@ impl DdlService for DdlServiceImpl {
                 None,
                 HashSet::new(),
                 None,
+                req.if_not_exists,
             ))
             .await?;
 
@@ -591,6 +595,7 @@ impl DdlService for DdlServiceImpl {
                 None,
                 HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
                 None,
+                request.if_not_exists,
             ))
             .await?;
 
