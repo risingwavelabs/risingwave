@@ -93,6 +93,7 @@ impl FrontendHummockVersion {
                 })
                 .collect(),
             state_table_info: self.state_table_info.to_protobuf(),
+            vector_indexes: Default::default(),
         }
     }
 
@@ -226,6 +227,7 @@ impl FrontendHummockVersionDelta {
                 .iter()
                 .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
+            vector_index_delta: Default::default(),
         }
     }
 

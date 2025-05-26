@@ -962,19 +962,30 @@ impl SessionImpl {
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
             Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
-                let is_creating_str = if is_creating {
-                    " but still creating"
+                // If relation is created, return directly.
+                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't
+                // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
+                if !is_creating {
+                    Ok(Either::Right(
+                        PgResponse::builder(stmt_type)
+                            .notice(format!("relation \"{}\" already exists, skipping", name))
+                            .into(),
+                    ))
+                } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
+                    // For now, when a Subscription is creating, we return directly with an additional message.
+                    // TODO: Subscription should also be processed in the same way as StreamingJob.
+                    Ok(Either::Right(
+                        PgResponse::builder(stmt_type)
+                            .notice(format!(
+                                "relation \"{}\" already exists but still creating, skipping",
+                                name
+                            ))
+                            .into(),
+                    ))
                 } else {
-                    ""
-                };
-                Ok(Either::Right(
-                    PgResponse::builder(stmt_type)
-                        .notice(format!(
-                            "relation \"{}\" already exists{}, skipping",
-                            name, is_creating_str
-                        ))
-                        .into(),
-                ))
+                    Ok(Either::Left(()))
+                }
             }
             Err(e) => Err(e.into()),
             Ok(_) => Ok(Either::Left(())),
