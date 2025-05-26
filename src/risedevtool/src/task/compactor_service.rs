@@ -80,7 +80,7 @@ impl Task for CompactorService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        cmd.env("RW_COMPACTOR_MODE", self.config.compactor_mode.to_owned());
+        cmd.env("RW_COMPACTOR_MODE", &self.config.compactor_mode);
 
         Self::apply_command_args(&mut cmd, &self.config)?;
 
