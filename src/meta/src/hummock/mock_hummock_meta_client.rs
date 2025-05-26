@@ -215,6 +215,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sst_to_context,
                 new_table_fragment_infos,
                 change_log_delta: table_change_log,
+                vector_index_delta: Default::default(),
                 tables_to_commit: commit_table_ids
                     .iter()
                     .cloned()
