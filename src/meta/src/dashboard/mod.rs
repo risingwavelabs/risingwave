@@ -37,6 +37,7 @@ use crate::manager::diagnose::DiagnoseCommandRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
+    pub await_tree_reg: await_tree::Registry,
     pub dashboard_addr: SocketAddr,
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
@@ -359,11 +360,11 @@ pub(super) mod handlers {
         Ok(Json(object_dependencies))
     }
 
-    async fn dump_await_tree_inner(
+    async fn dump_compute_node_await_tree(
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
         params: AwaitTreeDumpParams,
-    ) -> Result<Json<StackTraceResponse>> {
+    ) -> Result<StackTraceResponse> {
         let mut all = StackTraceResponse::default();
 
         let req = StackTraceRequest {
@@ -386,7 +387,7 @@ pub(super) mod handlers {
             all.merge_other(result);
         }
 
-        Ok(all.into())
+        Ok(all)
     }
 
     #[derive(Debug, Deserialize)]
@@ -410,7 +411,22 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
 
-        dump_await_tree_inner(&worker_nodes, &srv.compute_clients, params).await
+        let compute_traces =
+            dump_compute_node_await_tree(&worker_nodes, &srv.compute_clients, params).await?;
+
+        let meta_trace = srv
+            .await_tree_reg
+            .collect_all()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        let all = StackTraceResponse {
+            meta_traces: meta_trace,
+            ..compute_traces
+        };
+
+        Ok(all.into())
     }
 
     pub async fn dump_await_tree(
@@ -426,7 +442,9 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients, params).await
+        dump_compute_node_await_tree(std::iter::once(&worker_node), &srv.compute_clients, params)
+            .await
+            .map(Into::into)
     }
 
     pub async fn heap_profile(
