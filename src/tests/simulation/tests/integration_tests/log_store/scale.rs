@@ -34,6 +34,8 @@ use crate::log_store::utils::*;
 //   risingwave_stream::common::log_store_impl::kv_log_store=trace\
 // ' ./risedev sit-test test_scale_in_synced_log_store >out.log 2>&1
 // ```
+// This test will take a long time to run locally,
+// so it is recommended to run it in a CI environment.
 #[tokio::test]
 async fn test_scale_in_synced_log_store() -> Result<()> {
     init_logger();
@@ -78,28 +80,33 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             tracing::info!("running delete amplification workload");
             delete_amplification_workload(&mut cluster).await?;
             tracing::info!("ran delete amplification workload");
+
             let node_name_a = format!("compute-{a}");
             let node_name_b = format!("compute-{b}");
             let nodes = vec![node_name_a.clone(), node_name_b.clone()];
-            // First check the number of work nodes should be 10.
+
             let mut session = cluster.start_session();
             assert_parallelism_eq(&mut session, 10).await;
             cluster.simple_kill_nodes(&nodes).await;
             tracing::info!("killed compute nodes: {node_name_a}, {node_name_b}");
+
             cluster.wait_for_recovery().await?;
             assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
             assert_parallelism_eq(&mut session, 6).await;
+            tracing::info!("cluster scaled to 6 parallelism and recovered");
+
             cluster.simple_restart_nodes(&nodes).await;
             tracing::info!("restarted compute nodes: {node_name_a}, {node_name_b}");
+
             assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
             cluster.wait_for_recovery().await?;
-            tracing::info!("recovered");
+            tracing::info!("cluster recovered");
 
             cluster.wait_for_scale(10).await?;
             assert_parallelism_eq(&mut session, 10).await;
             assert_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+            tracing::info!("cluster scaled back to 10 parallelism");
 
-            tracing::info!("running insert amplification workload");
             run_amplification_workload(&mut cluster, dimension_count).await?;
             tracing::info!("ran insert amplification workload");
         }
