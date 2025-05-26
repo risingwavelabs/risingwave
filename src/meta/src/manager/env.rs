@@ -77,6 +77,8 @@ pub struct MetaSrvEnv {
 
     pub hummock_seq: Arc<SequenceGenerator>,
 
+    await_tree_reg: await_tree::Registry,
+
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -441,6 +443,8 @@ impl MetaSrvEnv {
             cluster_id,
             hummock_seq: Arc::new(SequenceGenerator::new(meta_store_impl.conn.clone())),
             opts: opts.into(),
+            // Await trees on the meta node is lightweight, thus always enabled.
+            await_tree_reg: await_tree::Registry::new(Default::default()),
         })
     }
 
@@ -502,6 +506,10 @@ impl MetaSrvEnv {
 
     pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
+    }
+
+    pub fn await_tree_reg(&self) -> &await_tree::Registry {
+        &self.await_tree_reg
     }
 }
 

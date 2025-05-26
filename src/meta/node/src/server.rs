@@ -413,6 +413,7 @@ pub async fn start_service_as_election_leader(
     #[cfg(not(madsim))]
     let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
             dashboard_addr: *dashboard_addr,
             prometheus_client,
             prometheus_selector,
