@@ -39,6 +39,7 @@ use sea_orm::{
     ColumnTrait, Condition, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect, TransactionTrait,
 };
+use tracing::info;
 
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
@@ -117,7 +118,9 @@ impl HummockManager {
             (
                 latest_valid_version.id,
                 latest_valid_version.get_sst_ids(true),
-                latest_valid_version.get_object_ids(true),
+                latest_valid_version
+                    .get_object_ids(true)
+                    .collect::<HashSet<_>>(),
             )
         };
         let mut object_ids_to_delete: HashSet<_> = HashSet::default();
@@ -226,7 +229,7 @@ impl HummockManager {
                 )
                 .await?;
             }
-            let new_object_ids = prev_version.get_object_ids(true);
+            let new_object_ids: HashSet<_> = prev_version.get_object_ids(true).collect();
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             next_version_sst_ids = sst_ids;
         }
@@ -279,16 +282,16 @@ impl HummockManager {
             .env
             .opts
             .hummock_time_travel_filter_out_objects_batch_size;
+        info!("filter out objects by time travel v1, only sst will remain in the result set");
         // The input object count is much smaller than time travel pinned object count in meta store.
         // So search input object in meta store.
-        let mut result: HashSet<_> = objects.collect();
-        let mut remain_sst: VecDeque<_> = result
-            .iter()
-            .map(|object_id| {
-                let HummockObjectId::Sstable(sst_id) = object_id;
-                *sst_id
+        let mut result: HashSet<_> = objects
+            .filter(|object_id| match object_id {
+                HummockObjectId::Sstable(_) => true,
+                HummockObjectId::VectorFile(_) => false,
             })
             .collect();
+        let mut remain_sst: VecDeque<_> = result.iter().copied().collect();
         while !remain_sst.is_empty() {
             let batch = remain_sst
                 .drain(..std::cmp::min(remain_sst.len(), batch_size))
@@ -302,12 +305,6 @@ impl HummockManager {
                     .all(&self.env.meta_store_ref().conn)
                     .await?;
             for reject in reject_object_ids {
-                // DO NOT REMOVE THIS LINE
-                // This is to ensure that when adding new variant to `HummockObjectId`,
-                // the compiler will warn us if we forget to handle it here.
-                match HummockObjectId::Sstable(0.into()) {
-                    HummockObjectId::Sstable(_) => {}
-                };
                 let reject: u64 = reject.try_into().unwrap();
                 let object_id = HummockObjectId::Sstable(HummockSstableObjectId::from(reject));
                 result.remove(&object_id);

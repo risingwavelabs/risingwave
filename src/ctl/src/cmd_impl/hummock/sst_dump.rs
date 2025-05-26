@@ -142,7 +142,16 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
                 let obj_id = SstableStore::get_object_id_from_path(&obj.key);
-                let HummockObjectId::Sstable(obj_id) = obj_id;
+                let obj_id = match obj_id {
+                    HummockObjectId::Sstable(obj_id) => obj_id,
+                    HummockObjectId::VectorFile(_) => {
+                        println!(
+                            "object id {:?} not a sstable object id: {}. skip",
+                            obj_id, obj.key
+                        );
+                        continue;
+                    }
+                };
                 let meta_offset =
                     get_meta_offset_from_object(&obj, sstable_store.store().as_ref()).await?;
                 sst_dump_via_sstable_store(
