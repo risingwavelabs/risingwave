@@ -2388,7 +2388,7 @@ impl Statement {
                 Ok(())
             }
             Statement::Kill(worker_process_id) => {
-                write!(f, "KILL {}", worker_process_id)?;
+                write!(f, "KILL '{}'", worker_process_id)?;
                 Ok(())
             }
             Statement::Recover => {
