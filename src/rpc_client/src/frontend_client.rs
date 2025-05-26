@@ -21,8 +21,8 @@ use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceClient;
 use risingwave_pb::frontend_service::{
-    GetRunningSqlsRequest, GetRunningSqlsResponse, GetTableReplacePlanRequest,
-    GetTableReplacePlanResponse,
+    CancelRunningSqlRequest, CancelRunningSqlResponse, GetRunningSqlsRequest,
+    GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse,
 };
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Response;
@@ -124,5 +124,12 @@ impl FrontendRetryClient {
         request: GetRunningSqlsRequest,
     ) -> std::result::Result<Response<GetRunningSqlsResponse>, tonic::Status> {
         self.client.0.to_owned().get_running_sqls(request).await
+    }
+
+    pub async fn cancel_running_sql(
+        &self,
+        request: CancelRunningSqlRequest,
+    ) -> std::result::Result<Response<CancelRunningSqlResponse>, tonic::Status> {
+        self.client.0.to_owned().cancel_running_sql(request).await
     }
 }
