@@ -147,10 +147,6 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
     if pg_url:
         env["PSQL_URL"] = pg_url
 
-    # Add --show-output flag if dump_output is True
-    if dump_output:
-        env["HYPERFINE_SHOW_OUTPUT"] = "1"
-
     try:
         if not pg_url:
             # Start RisingWave
@@ -162,30 +158,32 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
             )
 
         # Run benchmark
+        print(f"\nRunning benchmark: {bench_name}")
+        print("=" * 50)
+        
         result = subprocess.run(
             str(script_file),
             shell=True,
             check=True,
             env=env,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            capture_output=True
         )
 
-        # Print output if requested
-        if dump_output:
-            print(result.stdout)
-            if result.stderr:
-                print("Errors:", file=sys.stderr)
-                print(result.stderr, file=sys.stderr)
+        # Always print the benchmark results
+        print(result.stdout)
+        
+        # Only print errors if dump_output is True
+        if dump_output and result.stderr:
+            print("Errors:", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
 
     except subprocess.CalledProcessError as e:
         print(f"Error: Benchmark '{bench_name}' failed")
-        if dump_output:
-            print("Output:", file=sys.stderr)
-            print(e.stdout, file=sys.stderr)
-            print("Errors:", file=sys.stderr)
-            print(e.stderr, file=sys.stderr)
+        print("Output:", file=sys.stderr)
+        print(e.stdout, file=sys.stderr)
+        print("Errors:", file=sys.stderr)
+        print(e.stderr, file=sys.stderr)
         sys.exit(1)
     finally:
         if not pg_url:
