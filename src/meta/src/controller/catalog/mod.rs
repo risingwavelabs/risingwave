@@ -33,7 +33,6 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
-use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
