@@ -472,8 +472,35 @@ impl stream_plan::Dispatcher {
         stream_plan::DispatchStrategy {
             r#type: self.r#type,
             dist_key_indices: self.dist_key_indices.clone(),
-            output_indices: self.output_indices.clone(),
+            output_mapping: self.output_mapping.clone(),
         }
+    }
+}
+
+impl stream_plan::DispatchOutputMapping {
+    /// Create a mapping that forwards all columns.
+    pub fn identical(len: usize) -> Self {
+        Self {
+            indices: (0..len as u32).collect(),
+            types: Vec::new(),
+        }
+    }
+
+    /// Create a mapping that forwards columns with given indices, without type conversion.
+    pub fn simple(indices: Vec<u32>) -> Self {
+        Self {
+            indices,
+            types: Vec::new(),
+        }
+    }
+
+    /// Assert that this mapping does not involve type conversion and return the indices.
+    pub fn into_simple_indices(self) -> Vec<u32> {
+        assert!(
+            self.types.is_empty(),
+            "types must be empty for simple mapping"
+        );
+        self.indices
     }
 }
 

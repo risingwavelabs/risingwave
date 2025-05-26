@@ -631,8 +631,8 @@ pub enum DispatcherImpl {
 
 impl DispatcherImpl {
     pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
-        let output_indices = dispatcher
-            .output_indices
+        let output_indices = (dispatcher.output_mapping.clone().unwrap())
+            .into_simple_indices()
             .iter()
             .map(|&i| i as usize)
             .collect_vec();
@@ -1270,7 +1270,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
-    use risingwave_pb::stream_plan::DispatcherType;
+    use risingwave_pb::stream_plan::{DispatcherType, PbDispatchOutputMapping};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -1374,6 +1374,7 @@ mod tests {
             r#type: DispatcherType::Broadcast as _,
             dispatcher_id: broadcast_dispatcher_id,
             downstream_actor_id: vec![untouched, old],
+            output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             ..Default::default()
         };
 
@@ -1382,6 +1383,7 @@ mod tests {
             r#type: DispatcherType::Simple as _,
             dispatcher_id: simple_dispatcher_id,
             downstream_actor_id: vec![old_simple],
+            output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             ..Default::default()
         };
 

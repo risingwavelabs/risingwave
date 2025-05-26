@@ -31,7 +31,8 @@ use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
-    StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanType,
+    PbDispatchOutputMapping, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamNode, StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
@@ -477,8 +478,10 @@ fn build_fragment(
                             let no_shuffle_strategy = DispatchStrategy {
                                 r#type: DispatcherType::NoShuffle as i32,
                                 dist_key_indices: vec![],
-                                output_indices: (0..ref_fragment_node.fields.len() as u32)
-                                    .collect(),
+                                output_mapping: PbDispatchOutputMapping::identical(
+                                    ref_fragment_node.fields.len(),
+                                )
+                                .into(),
                             };
 
                             let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
