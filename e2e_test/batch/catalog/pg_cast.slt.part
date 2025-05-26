@@ -86,6 +86,12 @@ SELECT * FROM pg_catalog.pg_cast;
 82 20 20 e
 83 1301 701 e
 84 1301 1043 a
+85 1305 701 e
+86 1305 1043 a
+87 21 1305 i
+88 23 1305 i
+89 20 1305 i
+90 1043 1305 e
 
 query TT rowsort
 SELECT s.typname, t.typname
@@ -103,15 +109,18 @@ int2	int4
 int2	int8
 int2	numeric
 int2	rw_int256
+int2	rw_uint256
 int4	float4
 int4	float8
 int4	int8
 int4	numeric
 int4	rw_int256
+int4	rw_uint256
 int8	float4
 int8	float8
 int8	numeric
 int8	rw_int256
+int8	rw_uint256
 numeric	float4
 numeric	float8
 time	interval
