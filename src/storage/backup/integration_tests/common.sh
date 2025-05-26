@@ -94,7 +94,8 @@ function restore() {
   --sql-endpoint "sqlite://${RW_SQLITE_DB}?mode=rwc" \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-  --validate-integrity
+  --validate-integrity \
+  1>/dev/null 2>&1
 }
 
 function create_minio_bucket() {
