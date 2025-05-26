@@ -1615,7 +1615,10 @@ impl MetaClient {
         Ok(resp.iceberg_tables)
     }
 
-    pub async fn get_cluster_stack_trace(&self, actor_traces_format: ActorTracesFormat) -> Result<StackTraceResponse> {
+    pub async fn get_cluster_stack_trace(
+        &self,
+        actor_traces_format: ActorTracesFormat,
+    ) -> Result<StackTraceResponse> {
         let request = StackTraceRequest {
             actor_traces_format: actor_traces_format as i32,
         };
