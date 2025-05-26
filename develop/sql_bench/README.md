@@ -1,4 +1,13 @@
-# Local SQL Benchmarks
+# SQL Benchmarks
+
+## Background
+
+There are a lot of features and optimizations which require benchmarking to measure their performance change. Currently there's high overhead to add performance benchmarks to our nexmark suite. However, we want a fast feedback loop to iterate on these features. The result is that we write adhoc benchmarks. These are often discarded after the feature/optimization is merged, and they may not measure the performance accurately. Further, we have to write our own benchmark scripts from scratch each time.
+
+To solve this, we've created a simple benchmark runner which allows us to write benchmarks in YAML files.
+These sql benchmarks should be lightweight, and enable us to rapidly iterate on features and optimizations.
+
+## Overview
 
 This folder contains SQL benchmarks which are run using [`hyperfine`](https://github.com/sharkdp/hyperfine).
 Benchmarks are defined using YAML configurations and executed through a Python runner.
