@@ -112,7 +112,7 @@ pub enum CatalogError {
     Duplicated(
         &'static str,
         String,
-        // whether the object is under creation (only used for StreamingJob type for now)
+        // whether the object is under creation (only used for StreamingJob type and Subscription for now)
         bool,
     ),
 }
