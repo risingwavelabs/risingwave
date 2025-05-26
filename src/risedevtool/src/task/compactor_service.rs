@@ -41,7 +41,9 @@ impl CompactorService {
                 config.listen_address, config.exporter_port
             ))
             .arg("--advertise-addr")
-            .arg(format!("{}:{}", config.address, config.port));
+            .arg(format!("{}:{}", config.address, config.port))
+            .arg("--compactor-mode")
+            .arg(config.compactor_mode.to_owned());
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {
@@ -79,8 +81,6 @@ impl Task for CompactorService {
             cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
-
-        cmd.env("RW_COMPACTOR_MODE", &self.config.compactor_mode);
 
         Self::apply_command_args(&mut cmd, &self.config)?;
 
