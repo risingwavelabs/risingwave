@@ -28,7 +28,6 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
-use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
@@ -1958,94 +1957,29 @@ impl CatalogController {
                 actor.update(&txn).await?;
             }
 
-            // Load distribution type once for cache lookup
+            // fragment update
             let fragment = Fragment::find_by_id(*fragment_id)
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-            let distribution_type = fragment.distribution_type;
 
-            // Build actor list entirely from in-memory cache
-            let job_actors_from_cache: Vec<(
-                FragmentId,
-                DistributionType,
-                ActorId,
-                Option<VnodeBitmap>,
-                WorkerId,
-                ActorStatus,
-            )> = inner
-                .actors
-                .actors_by_fragment_id
-                .get(fragment_id)
+            let job_actors = fragment
+                .find_related(Actor)
+                .all(&txn)
+                .await?
                 .into_iter()
-                .flat_map(|ids| ids.iter().copied())
-                .map(|actor_id| {
-                    let model = &inner.actors.models[&actor_id];
+                .map(|actor| {
                     (
                         *fragment_id,
-                        distribution_type,
-                        model.actor_id,
-                        model.vnode_bitmap.clone(),
-                        model.worker_id,
-                        model.status.clone(),
+                        fragment.distribution_type,
+                        actor.actor_id,
+                        actor.vnode_bitmap,
+                        actor.worker_id,
+                        actor.status,
                     )
                 })
-                .collect();
+                .collect_vec();
 
-            #[cfg(debug_assertions)]
-            {
-                // Execute original DB query for comparison
-                let fragment = Fragment::find_by_id(*fragment_id)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-                let job_actors_from_db: Vec<(
-                    FragmentId,
-                    DistributionType,
-                    ActorId,
-                    Option<VnodeBitmap>,
-                    WorkerId,
-                    ActorStatus,
-                )> = fragment
-                    .find_related(Actor)
-                    .all(&txn)
-                    .await?
-                    .into_iter()
-                    .map(|actor| {
-                        (
-                            *fragment_id,
-                            fragment.distribution_type,
-                            actor.actor_id,
-                            actor.vnode_bitmap,
-                            actor.worker_id,
-                            actor.status,
-                        )
-                    })
-                    .collect_vec();
-
-                // Index by ActorId to avoid hashing VnodeBitmap directly
-                let map_db: HashMap<ActorId, _> = job_actors_from_db
-                    .into_iter()
-                    .map(|(fid, dist, aid, vnode, wid, status)| {
-                        (aid, (fid, dist, vnode, wid, status))
-                    })
-                    .collect();
-                let map_cache: HashMap<ActorId, _> = job_actors_from_cache
-                    .iter()
-                    .cloned()
-                    .map(|(fid, dist, aid, vnode, wid, status)| {
-                        (aid, (fid, dist, vnode, wid, status))
-                    })
-                    .collect();
-
-                debug_assert_eq!(
-                    map_db, map_cache,
-                    "Job actors mismatch between DB and cache"
-                );
-            }
-
-            // Use the cache-based result going forward
-            let job_actors = job_actors_from_cache;
             fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
         }
 
@@ -2110,13 +2044,13 @@ impl CatalogController {
                     .get(actor_id)
                     .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
 
+                #[allow(deprecated)]
                 inner.actors.add_actor(actor::Model {
                     actor_id: *actor_id as _,
                     fragment_id: *fragment_id as _,
                     status: ActorStatus::Running,
                     splits: splits.map(|splits| (&PbConnectorSplits { splits }).into()),
                     worker_id: *worker_id,
-                    #[allow(deprecated)]
                     upstream_actor_ids: Default::default(),
                     vnode_bitmap: vnode_bitmap
                         .as_ref()
