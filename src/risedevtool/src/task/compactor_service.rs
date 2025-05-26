@@ -43,7 +43,7 @@ impl CompactorService {
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--compactor-mode")
-            .arg(config.compactor_mode.to_owned());
+            .arg(&config.compactor_mode);
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {
