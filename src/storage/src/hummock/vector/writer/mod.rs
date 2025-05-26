@@ -12,18 +12,82 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod hnsw;
+
 use std::mem::take;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::vector_index::{
-    FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl, VectorStoreDelta,
+    FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
+    VectorStoreDelta,
 };
 
 use crate::hummock::vector::block::VectorBlockBuilder;
+use crate::hummock::vector::writer::hnsw::HnswFlatIndexWriter;
 use crate::hummock::{HummockResult, ObjectIdManagerRef, SstableStoreRef};
-use crate::vector::Vector;
+use crate::vector::{DistanceMeasurement, Vector};
 
-pub(crate) struct VectorWriterImpl {
+pub enum VectorWriterImpl {
+    Flat(FlatIndexWriter),
+    HnswFlat(HnswFlatIndexWriter),
+}
+
+impl VectorWriterImpl {
+    pub(crate) async fn new(
+        index: &VectorIndex,
+        sstable_store: SstableStoreRef,
+        object_id_manager: ObjectIdManagerRef,
+    ) -> HummockResult<Self> {
+        Ok(match &index.inner {
+            VectorIndexImpl::Flat(flat) => VectorWriterImpl::Flat(FlatIndexWriter::new(
+                flat,
+                index.dimension,
+                sstable_store.clone(),
+                object_id_manager.clone(),
+            )),
+            VectorIndexImpl::HnswFlat(hnsw_flat) => VectorWriterImpl::HnswFlat(
+                HnswFlatIndexWriter::new(
+                    hnsw_flat,
+                    index.dimension,
+                    DistanceMeasurement::from(index.distance_type),
+                    sstable_store.clone(),
+                    object_id_manager.clone(),
+                )
+                .await?,
+            ),
+        })
+    }
+
+    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.insert(vec, info),
+            VectorWriterImpl::HnswFlat(writer) => writer.insert(vec, info),
+        }
+    }
+
+    pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.seal_current_epoch(),
+            VectorWriterImpl::HnswFlat(writer) => writer.seal_current_epoch(),
+        }
+    }
+
+    pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.flush().await,
+            VectorWriterImpl::HnswFlat(writer) => writer.flush().await,
+        }
+    }
+
+    pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
+        match self {
+            VectorWriterImpl::Flat(writer) => writer.try_flush().await,
+            VectorWriterImpl::HnswFlat(writer) => writer.try_flush().await,
+        }
+    }
+}
+
+pub(crate) struct FlatIndexWriter {
     sstable_store: SstableStoreRef,
     object_id_manager: ObjectIdManagerRef,
     dimension: usize,
@@ -33,18 +97,18 @@ pub(crate) struct VectorWriterImpl {
     block_builder: Option<VectorBlockBuilder>,
 }
 
-impl VectorWriterImpl {
+impl FlatIndexWriter {
     pub(crate) fn new(
-        index: &VectorIndex,
+        index: &FlatIndex,
+        dimension: usize,
         sstable_store: SstableStoreRef,
         object_id_manager: ObjectIdManagerRef,
     ) -> Self {
-        let VectorIndexImpl::Flat(flat_index) = &index.inner;
         Self {
             sstable_store,
             object_id_manager,
-            dimension: index.dimension,
-            next_vector_id: flat_index.vector_store.next_vector_id,
+            dimension,
+            next_vector_id: index.vector_store.next_vector_id,
             flushed_vector_files: vec![],
             block_builder: None,
         }

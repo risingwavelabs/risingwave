@@ -77,6 +77,18 @@ impl VectorBlockBuilder {
         }
     }
 
+    pub fn count(&self) -> usize {
+        self.inner.count()
+    }
+
+    pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
+        self.inner.vec_ref(idx)
+    }
+
+    pub fn info(&self, idx: usize) -> &[u8] {
+        self.inner.info(idx)
+    }
+
     pub fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
         let slice = vec.as_slice();
         assert_eq!(self.inner.dimension as usize, slice.len());
