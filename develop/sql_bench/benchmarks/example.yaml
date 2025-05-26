@@ -1,0 +1,28 @@
+# Benchmark configuration
+benchmark_name: example
+
+# SQL to set up the initial schema and data (run once)
+setup_sql: |
+  CREATE TABLE example (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+  );
+
+# SQL to prepare the data before each run
+prepare_sql: |
+  INSERT INTO example (id, name) VALUES (1, 'test'), (2, 'test2'), (3, 'test3');
+
+# SQL to clean up after each run
+conclude_sql: |
+  DELETE FROM example;
+
+# SQL to benchmark (baseline version)
+baseline_sql: |
+  SELECT * FROM example WHERE id > 0 ORDER BY id;
+
+# SQL to benchmark (optimized version)
+benchmark_sql: |
+  SELECT * FROM example WHERE id > 0 ORDER BY id DESC;
+
+# Number of times to run the benchmark
+runs: 3
