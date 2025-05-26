@@ -1,7 +1,7 @@
 ---
 services:
   clickhouse-server:
-    image: clickhouse/clickhouse-server:23.3.8.21-alpine
+    image: clickhouse/clickhouse-server:25.5
     container_name: clickhouse-server-1
     hostname: clickhouse-server-1
     ports:

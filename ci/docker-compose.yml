@@ -212,7 +212,7 @@ services:
       - 9200:9200
 
   clickhouse-server:
-    image: clickhouse/clickhouse-server:23.3.8.21-alpine
+    image: clickhouse/clickhouse-server:25.5
     ports:
       - "8123:8123"
       - "9000:9000"
