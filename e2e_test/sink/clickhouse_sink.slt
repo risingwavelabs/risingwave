@@ -2,7 +2,7 @@ statement ok
 set sink_decouple = false;
 
 statement ok
-CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar, v4 smallint, v5 decimal);
+CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar, v4 smallint, v5 decimal, v6 jsonb);
 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
@@ -20,7 +20,7 @@ CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3, mv6.v4 as v4,
 );
 
 statement ok
-INSERT INTO t6 VALUES (1, 50, '1-50', 1, 1.1), (2, 2, '2-2', 2, 2.2), (3, 2, '3-2', 1, 3.3), (5, 2, '5-2', 2, 4.4), (8, 2, '8-2', 1, 'inf'), (13, 2, '13-2', 2, '-inf'), (21, 2, '21-2', 1, 'nan');
+INSERT INTO t6 VALUES (1, 50, '1-50', 1, 1.1,'{"sd":123,"sda":23}'), (2, 2, '2-2', 2, 2.2,'{"sd":123,"sda":23}'), (3, 2, '3-2', 1, 3.3,'{"sd":123,"sda":23}'), (5, 2, '5-2', 2, 4.4,'{"sd":123,"sda":23}'), (8, 2, '8-2', 1, 'inf','{"sd":123,"sda":23}'), (13, 2, '13-2', 2, '-inf','{"sd":123,"sda":23}'), (21, 2, '21-2', 1, 'nan','{"sd":123,"sda":23}');
 
 statement ok
 FLUSH;
