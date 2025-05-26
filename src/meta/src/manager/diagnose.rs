@@ -28,8 +28,6 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
-use risingwave_rpc_client::ComputeClientPool;
 use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
 use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
@@ -39,11 +37,13 @@ use crate::MetaResult;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::event_log::EventLogManagerRef;
+use crate::rpc::await_tree::dump_cluster_await_tree;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 
 pub struct DiagnoseCommand {
     metadata_manager: MetadataManager,
+    await_tree_reg: await_tree::Registry,
     hummock_manger: HummockManagerRef,
     event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
@@ -53,6 +53,7 @@ pub struct DiagnoseCommand {
 impl DiagnoseCommand {
     pub fn new(
         metadata_manager: MetadataManager,
+        await_tree_reg: await_tree::Registry,
         hummock_manger: HummockManagerRef,
         event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
@@ -60,6 +61,7 @@ impl DiagnoseCommand {
     ) -> Self {
         Self {
             metadata_manager,
+            await_tree_reg,
             hummock_manger,
             event_log_manager,
             prometheus_client,
@@ -614,32 +616,18 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_await_tree(&self, s: &mut String, actor_traces_format: ActorTracesFormat) {
-        // Most lines of code are copied from dashboard::handlers::dump_await_tree_all, because the latter cannot be called directly from here.
-        let Ok(worker_nodes) = self
-            .metadata_manager
-            .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await
-        else {
-            tracing::warn!("failed to get worker nodes");
-            return;
-        };
+        let all = dump_cluster_await_tree(
+            &self.metadata_manager,
+            &self.await_tree_reg,
+            actor_traces_format,
+        )
+        .await;
 
-        let mut all = StackTraceResponse::default();
-
-        let compute_clients = ComputeClientPool::adhoc();
-        for worker_node in &worker_nodes {
-            if let Ok(client) = compute_clients.get(worker_node).await
-                && let Ok(result) = client
-                    .stack_trace(StackTraceRequest {
-                        actor_traces_format: actor_traces_format as i32,
-                    })
-                    .await
-            {
-                all.merge_other(result);
-            }
+        if let Ok(all) = all {
+            write!(s, "{}", all.output()).unwrap();
+        } else {
+            tracing::warn!("failed to dump await tree");
         }
-
-        write!(s, "{}", all.output()).unwrap();
     }
 
     async fn write_table_definition(&self, s: &mut String) -> MetaResult<()> {

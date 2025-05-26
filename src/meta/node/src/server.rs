@@ -48,6 +48,7 @@ use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
 use risingwave_meta_service::hosted_iceberg_catalog_service::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
+use risingwave_meta_service::monitor_service::MonitorServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
 use risingwave_meta_service::scale_service::ScaleServiceImpl;
 use risingwave_meta_service::serving_service::ServingServiceImpl;
@@ -77,6 +78,7 @@ use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
@@ -398,6 +400,7 @@ pub async fn start_service_as_election_leader(
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
     let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
         metadata_manager.clone(),
+        env.await_tree_reg().clone(),
         hummock_manager.clone(),
         env.event_log_manager_ref(),
         prometheus_client.clone(),
@@ -591,6 +594,10 @@ pub async fn start_service_as_election_leader(
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
     let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
+    let monitor_srv = MonitorServiceImpl {
+        metadata_manager: metadata_manager.clone(),
+        await_tree_reg: env.await_tree_reg().clone(),
+    };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -728,7 +735,8 @@ pub async fn start_service_as_election_leader(
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
-        ));
+        ))
+        .add_service(MonitorServiceServer::new(monitor_srv));
 
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
