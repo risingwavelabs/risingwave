@@ -48,3 +48,10 @@ CREATE TABLE pg_all_data_types (
   c_double_precision_array double precision[],
   c_varchar_array varchar[]
 );
+
+CREATE TABLE numeric256_types (
+    id BIGINT PRIMARY KEY,
+    int256_col NUMERIC(78, 0),
+    uint256_col NUMERIC(78, 0),
+    description VARCHAR
+);
