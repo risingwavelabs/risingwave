@@ -30,7 +30,8 @@ use risingwave_expr::window_function::{
 };
 
 use super::frame_finder::merge_rows_frames;
-use super::over_partition::{CacheKey, OverPartition, PartitionCache, PartitionDelta};
+use super::over_partition::{OverPartition, PartitionDelta};
+use super::range_cache::{CacheKey, PartitionCache};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
