@@ -1157,6 +1157,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
 
+    /// The maximum number of file descriptors that can be used by kafka source/sink.
+    #[serde(default = "default::developer::kafka_max_fd_count")]
+    pub kafka_max_fd_count: usize,
+
     /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_exchange_initial_permits")]
@@ -2167,6 +2171,10 @@ pub mod default {
 
         pub fn stream_chunk_size() -> usize {
             256
+        }
+
+        pub fn kafka_max_fd_count() -> usize {
+            40000
         }
 
         pub fn stream_exchange_initial_permits() -> usize {

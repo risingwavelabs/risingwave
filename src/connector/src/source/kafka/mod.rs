@@ -32,6 +32,7 @@ pub use client_context::*;
 pub use enumerator::*;
 pub use source::*;
 pub use split::*;
+pub mod fd_control;
 use with_options::WithOptions;
 
 use crate::connector_common::{KafkaCommon, RdKafkaPropertiesCommon};

@@ -30,6 +30,7 @@ use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
+use risingwave_connector::source::kafka::fd_control::init_kafka_fd_control;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -175,6 +176,8 @@ impl LocalStreamManager {
             // Since this is a special config, we have to check it here.
             risingwave_storage::hummock::utils::disable_sanity_check();
         }
+
+        init_kafka_fd_control(env.config().developer.kafka_max_fd_count);
 
         let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
 
