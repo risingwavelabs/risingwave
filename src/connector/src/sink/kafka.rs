@@ -249,6 +249,8 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+
+    pub enable_mux_reader: bool,
 }
 
 impl EnforceSecret for KafkaConfig {
@@ -289,6 +291,8 @@ impl From<KafkaConfig> for KafkaProperties {
             aws_auth_props: val.aws_auth_props,
             group_id_prefix: None,
             unknown_fields: Default::default(),
+            // todo
+            enable_mux_reader: true,
         }
     }
 }

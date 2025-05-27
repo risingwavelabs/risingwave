@@ -442,6 +442,8 @@ impl MetaClient {
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
     ) -> Result<WaitVersion> {
+        println!("sourcecs {:#?}", source);
+
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: graph,

@@ -132,6 +132,13 @@ pub struct KafkaProperties {
     )]
     pub time_offset: Option<String>,
 
+    #[serde(
+        rename = "enable.mux_reader",
+        alias = "kafka.enable.mux_reader",
+        default = "default_enable_mux_reader"
+    )]
+    pub enable_mux_reader: bool,
+
     /// Specify a custom consumer group id prefix for the source.
     /// Defaults to `rw-consumer`.
     ///
@@ -172,6 +179,10 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+const fn default_enable_mux_reader() -> bool {
+    false
 }
 
 impl EnforceSecret for KafkaProperties {
