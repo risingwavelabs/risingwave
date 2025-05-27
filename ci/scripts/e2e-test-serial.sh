@@ -32,6 +32,10 @@ if [[ $mode == "single-node" ]]; then
   source ci/scripts/single-node-utils.sh
 fi
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
     mkdir -p "$PREFIX_LOG"
