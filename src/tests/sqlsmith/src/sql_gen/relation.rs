@@ -63,7 +63,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
-        let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
+        let mut table = if self.should_generate(Feature::Eowc) {
+            self.get_append_only_tables().choose(&mut self.rng).unwrap().clone()
+        } else {
+            self.tables.choose(&mut self.rng).unwrap().clone()
+        };
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
             alias: Some(TableAlias {

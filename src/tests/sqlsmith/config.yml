@@ -7,4 +7,7 @@ config:
     enabled: true
   join:
     weight: 75
-    enabled: false
+    enabled: true
+  eowc:
+    weight: 50
+    enabled: true

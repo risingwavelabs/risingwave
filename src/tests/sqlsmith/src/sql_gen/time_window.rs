@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
     DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor,
 };
 
+use crate::config::Feature;
 use crate::sql_gen::utils::{create_args, create_table_alias};
 use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
@@ -34,7 +35,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates `TUMBLE`.
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
     fn gen_tumble(&mut self) -> (TableFactor, Table) {
-        let tables: Vec<_> = find_tables_with_timestamp_cols(self.tables.clone());
+        let source_tables = if self.should_generate(Feature::Eowc) {
+            self.get_append_only_tables()
+        } else {
+            self.tables.clone()
+        };
+        let tables: Vec<_> = find_tables_with_timestamp_cols(source_tables);
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
@@ -56,7 +62,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates `HOP`.
     /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
     fn gen_hop(&mut self) -> (TableFactor, Table) {
-        let tables = find_tables_with_timestamp_cols(self.tables.clone());
+        let source_tables = if self.should_generate(Feature::Eowc) {
+            self.get_append_only_tables()
+        } else {
+            self.tables.clone()
+        };
+        let tables: Vec<_> = find_tables_with_timestamp_cols(source_tables);        
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");

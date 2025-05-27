@@ -331,6 +331,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         can_recurse
     }
 
+    pub(crate) fn get_append_only_tables(&mut self) -> Vec<Table> {
+        self.tables
+            .iter()
+            .filter(|t| t.is_append_only)
+            .cloned()
+            .collect()
+    }
+
     /// Decide whether to generate on config.
     pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
         self.config.should_generate(feature, self.rng)
