@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bergloom_core::CompactionConfig;
 use bergloom_core::compaction::{Compaction, CompactionType};
+use bergloom_core::executor::ExecutorType;
 use iceberg::{Catalog, TableIdent};
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
@@ -96,7 +97,8 @@ impl IcebergCompactorRunner {
                 target_partitions: Some(parallelism),
                 data_file_prefix: None,
             });
-            let compaction = Compaction::new(compaction_config, self.catalog);
+            let compaction =
+                Compaction::new(compaction_config, self.catalog, ExecutorType::DataFusion);
             compaction
                 .compact(CompactionType::Full(self.table_ident))
                 .await

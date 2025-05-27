@@ -1714,6 +1714,10 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
 
+    sink_with.insert("enable_compaction".to_owned(), "true".to_owned());
+
+    sink_with.insert("compaction_interval_sec".to_owned(), "30".to_owned());
+
     let partition_by = handler_args
         .with_options
         .get("partition_by")
