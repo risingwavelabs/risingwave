@@ -488,6 +488,16 @@ impl<T> SourceChunkStream for T where
 
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
+pub trait CleanupHandle: Drop + Send {}
+
+impl<T: Drop + Send> CleanupHandle for T {} // blanket impl
+
+pub struct NoopCleanup;
+impl Drop for NoopCleanup {
+    fn drop(&mut self) { /* no-op */
+    }
+}
+
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
@@ -512,6 +522,10 @@ pub trait SplitReader: Sized + Send {
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
         Err(anyhow!("seek_to_latest is not supported for this connector").into())
+    }
+
+    fn build_drop_handle(&self) -> Box<dyn CleanupHandle> {
+        Box::new(NoopCleanup)
     }
 }
 
