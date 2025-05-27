@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema, StreamJobStatus, internal_table_name_to_parts};
+use risingwave_common::catalog::{Field, Schema, internal_table_name_to_parts};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
@@ -26,7 +26,6 @@ pub use risingwave_pb::plan_common::JoinType;
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::table_catalog::TableType;
 use crate::expr::{
     AggCall, ExprImpl, ExprType, FunctionCall, InputRef, Literal, OrderBy, TableFunctionType,
 };
@@ -76,9 +75,12 @@ impl FallibleRule for TableFunctionToBackfillProgressRule {
             Field::new("row_count", DataType::Int64),
         ];
 
-        let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
-        // TODO(kwannoel): Make sure it reads from source tables as well.
-        let backfilling_tables = get_backfilling_tables(reader);
+        let backfilling_tables = {
+            let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
+            let db_name = plan.ctx().session_ctx().database();
+            // TODO(kwannoel): Make sure it reads from source backfilling tables as well.
+            get_backfilling_tables(reader, &db_name, &schema_name, &table_name)?
+        };
 
         // No backfill in progress, just return empty values.
         if backfilling_tables.is_empty() {
@@ -251,28 +253,28 @@ impl FallibleRule for TableFunctionToBackfillProgressRule {
     }
 }
 
-fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<Arc<TableCatalog>> {
-    reader
-        .iter_tables()
+/// Gets the internal backfill state tables from the catalog
+fn get_backfilling_tables(
+    reader: CatalogReadGuard,
+    db_name: &str,
+    schema_name: &str,
+    table_name: &str,
+) -> Result<Vec<Arc<TableCatalog>>> {
+    let schema = reader.get_schema_by_name(db_name, schema_name)?;
+    Ok(schema
+        .iter_internal_table()
+        .filter(|table| table.is_internal_table())
         .filter(|table| {
             let name = &table.name;
-            println!("table_name: {:?}", name);
-            println!("vnode count: {:?}", table.vnode_count);
             match internal_table_name_to_parts(name) {
                 None => false,
-                Some((_job_name, _fragment_id, executor_type, _table_id)) => {
-                    let is_backfill = executor_type == "streamscan";
-                    println!("is_backfill: {:?}", is_backfill);
-                    let is_creating = table.stream_job_status == StreamJobStatus::Creating;
-                    println!("is_creating: {:?}", is_creating);
-                    let is_internal = table.table_type == TableType::Internal;
-                    println!("is_internal: {:?}", is_internal);
-                    is_backfill && is_creating && is_internal
+                Some((job_name, _fragment_id, executor_type, _table_id)) => {
+                    executor_type == "streamscan" && job_name == table_name
                 }
             }
         })
         .cloned()
-        .collect_vec()
+        .collect_vec())
 }
 
 impl TableFunctionToBackfillProgressRule {
