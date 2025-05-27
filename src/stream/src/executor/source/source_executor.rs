@@ -28,8 +28,8 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitId, SplitImpl,
+    SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -196,6 +196,8 @@ impl<S: StateStore> SourceExecutor<S> {
             },
             source_desc.source.config.clone(),
             schema_change_tx,
+            SourceMuxMode::Direct,
+            None,
         );
 
         (column_ids, source_ctx)

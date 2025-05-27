@@ -279,6 +279,13 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
+#[derive(Clone, Debug)]
+pub enum SourceMuxMode {
+    Direct,
+    ConnectionMux(u32),
+    SourceBackfill(u32),
+}
+
 #[derive(Debug, Clone)]
 pub struct SourceContext {
     pub actor_id: u32,
@@ -291,6 +298,10 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+
+    pub source_mux_mode: SourceMuxMode,
+
+    pub connection_id: Option<u32>,
 }
 
 impl SourceContext {
@@ -305,6 +316,8 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        source_mux_mode: SourceMuxMode,
+        connection_id: Option<u32>,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +328,8 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            source_mux_mode,
+            connection_id,
         }
     }
 
@@ -332,6 +347,8 @@ impl SourceContext {
                 split_txn: false,
             },
             ConnectorProperties::default(),
+            None,
+            SourceMuxMode::Direct,
             None,
         )
     }

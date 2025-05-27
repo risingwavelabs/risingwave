@@ -11697,6 +11697,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
+ "once_cell",
  "opendal 0.49.2",
  "opensearch",
  "openssl",

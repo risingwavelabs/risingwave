@@ -24,9 +24,7 @@ use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::reader::reader::SourceReader;
-use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
-};
+use risingwave_connector::source::{ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitImpl, SplitMetaData};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
@@ -153,6 +151,8 @@ impl SourceExecutor {
                 split_txn: false,
             },
             ConnectorProperties::default(),
+            None,
+            SourceMuxMode::Direct,
             None,
         ));
         let (stream, _) = self

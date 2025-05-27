@@ -15,32 +15,80 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::mem::swap;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+
+use itertools::Itertools;
+use rdkafka::config::RDKafkaLogLevel;
+
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
+use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use tokio::sync::mpsc::Receiver;
+use tokio_stream::Stream;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::kafka::source::mux_reader::KafkaMuxReader;
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
-    SplitMetaData, SplitReader, into_chunk_stream,
+    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SourceMuxMode, SplitId,
+    SplitImpl, SplitMetaData, SplitReader, into_chunk_stream,
 };
 
+enum MessageReader {
+    Consumer(StreamConsumer<RwConsumerContext>),
+    MuxReader {
+        reader: Arc<KafkaMuxReader>,
+        receiver: Receiver<OwnedMessage>,
+    },
+}
+
+impl MessageReader {
+    fn into_owned_stream(
+        self,
+    ) -> Pin<Box<dyn Stream<Item = Result<OwnedMessage, KafkaError>> + Send>> {
+        inner_owned_stream(self)
+    }
+}
+
+#[try_stream(boxed, ok = OwnedMessage, error = KafkaError)]
+async fn inner_owned_stream(reader: MessageReader) {
+    match reader {
+        MessageReader::Consumer(consumer) => {
+            let mut s = consumer.stream();
+            while let Some(msg_res) = s.next().await {
+                let msg = msg_res?;
+                yield msg.detach();
+            }
+        }
+        MessageReader::MuxReader { receiver, .. } => {
+            let mut s = ReceiverStream::new(receiver);
+            while let Some(msg) = s.next().await {
+                yield msg;
+            }
+        }
+    }
+}
+
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<RwConsumerContext>,
+    // consumer: StreamConsumer<RwConsumerContext>,
+    message_reader: MessageReader,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
     splits: Vec<KafkaSplit>,
@@ -63,6 +111,10 @@ impl SplitReader for KafkaSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        println!("prop {:#?}", properties);
+        println!("source ctx {:#?}", source_ctx);
+        println!("splits {:#?}", splits);
+
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.connection.brokers;
@@ -153,6 +205,23 @@ impl SplitReader for KafkaSplitReader {
 
         consumer.assign(&tpl)?;
 
+        let message_reader = if let Some(connection_id) = source_ctx.connection_id {
+            let reader =
+                KafkaMuxReader::get_or_create(connection_id.to_string(), bootstrap_servers.clone())
+                    .await;
+
+            let splits2 = splits
+                .iter()
+                .map(|split| (split.topic.clone(), split.partition))
+                .collect_vec();
+
+            let receiver: Receiver<OwnedMessage> = reader.register_splits(&splits2).await?;
+
+            MessageReader::MuxReader { reader, receiver }
+        } else {
+            MessageReader::Consumer(consumer)
+        };
+
         // The two parameters below are only used by developers for performance testing purposes,
         // so we panic here on purpose if the input is not correctly recognized.
         let bytes_per_second = match properties.bytes_per_second {
@@ -169,7 +238,7 @@ impl SplitReader for KafkaSplitReader {
         };
 
         Ok(Self {
-            consumer,
+            message_reader,
             offsets,
             splits,
             backfill_info,
@@ -192,25 +261,35 @@ impl SplitReader for KafkaSplitReader {
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
-        let mut latest_splits: Vec<SplitImpl> = Vec::new();
-        let mut tpl = TopicPartitionList::with_capacity(self.splits.len());
-        for mut split in self.splits.clone() {
-            // we can't get latest offset if we use Offset::End, so we just fetch watermark here.
-            let (_low, high) = self
-                .consumer
-                .fetch_watermarks(
-                    split.topic.as_str(),
-                    split.partition,
-                    self.sync_call_timeout,
-                )
-                .await?;
-            tpl.add_partition_offset(split.topic.as_str(), split.partition, Offset::Offset(high))?;
-            split.start_offset = Some(high - 1);
-            latest_splits.push(split.into());
+        match &mut self.message_reader {
+            MessageReader::Consumer(consumer) => {
+                let mut latest_splits: Vec<SplitImpl> = Vec::new();
+                let mut tpl = TopicPartitionList::with_capacity(self.splits.len());
+                for mut split in self.splits.clone() {
+                    // we can't get latest offset if we use Offset::End, so we just fetch watermark here.
+                    let (_low, high) = consumer
+                        .fetch_watermarks(
+                            split.topic.as_str(),
+                            split.partition,
+                            self.sync_call_timeout,
+                        )
+                        .await?;
+                    tpl.add_partition_offset(
+                        split.topic.as_str(),
+                        split.partition,
+                        Offset::Offset(high),
+                    )?;
+                    split.start_offset = Some(high - 1);
+                    latest_splits.push(split.into());
+                }
+                // replace the previous assignment
+                consumer.assign(&tpl)?;
+                Ok(latest_splits)
+            }
+            MessageReader::MuxReader { .. } => {
+                todo!()
+            }
         }
-        // replace the previous assignment
-        self.consumer.assign(&tpl)?;
-        Ok(latest_splits)
     }
 }
 
@@ -252,8 +331,10 @@ impl KafkaSplitReader {
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
+        let owned_stream = self.message_reader.into_owned_stream();
+
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
+        'for_outer_loop: for msgs in owned_stream.ready_chunks(max_chunk_size) {
             let msgs: Vec<_> = msgs
                 .into_iter()
                 .collect::<std::result::Result<_, KafkaError>>()?;
