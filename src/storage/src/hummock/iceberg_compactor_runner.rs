@@ -38,14 +38,14 @@ impl IcebergCompactorRunner {
     pub async fn new(iceberg_compaction_task: IcebergCompactionTask) -> HummockResult<Self> {
         let IcebergCompactionTask { task_id, props } = iceberg_compaction_task;
         let config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
         let catalog = config
             .create_catalog()
             .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
         let table_ident = config
             .full_table_name()
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
         Ok(Self {
             task_id,
             catalog,
@@ -58,21 +58,21 @@ impl IcebergCompactorRunner {
             .catalog
             .load_table(&self.table_ident)
             .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
         let manifest_list = table
             .metadata()
             .current_snapshot()
-            .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
+            .ok_or_else(|| HummockError::compaction_runtime("Don't find current_snapshot"))?
             .load_manifest_list(table.file_io(), table.metadata())
             .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
 
         let mut all_data_file_size: u32 = 0;
         for manifest_file in manifest_list.entries() {
             let manifest = manifest_file
                 .load_manifest(table.file_io())
                 .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
             let (entry, _) = manifest.into_parts();
             for i in entry {
                 match i.content_type() {
@@ -88,7 +88,8 @@ impl IcebergCompactorRunner {
         Ok(all_data_file_size.div_ceil(MAX_SIZE_PER_PARTITION))
     }
 
-    pub async fn compact_iceberg(self, shutdown_rx: Receiver<()>, parallelism: usize) {
+    pub async fn compact(self, shutdown_rx: Receiver<()>, parallelism: usize) {
+        let now = std::time::Instant::now();
         // Todo:  consider target_file_size
         let compact = async move {
             let compaction_config = Arc::new(CompactionConfig {
@@ -100,7 +101,7 @@ impl IcebergCompactorRunner {
             compaction
                 .compact(CompactionType::Full(self.table_ident))
                 .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_runtime(e.as_report()))?;
             Ok::<(), HummockError>(())
         };
         tokio::select! {
@@ -111,12 +112,17 @@ impl IcebergCompactorRunner {
                 if let Err(e) = result {
                     tracing::warn!(
                         error = %e.as_report(),
-                        "Compaction task {} failed with error",
+                        "Iceberg compaction task {} failed",
                         self.task_id,
                     );
                 }
             }
         }
-        tracing::info!("Iceberg compaction task {} finished", self.task_id);
+
+        tracing::info!(
+            "Iceberg compaction task {} finished cost {} ms",
+            self.task_id,
+            now.elapsed().as_millis()
+        );
     }
 }

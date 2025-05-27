@@ -56,8 +56,8 @@ pub enum HummockErrorInner {
         safe_epoch: u64,
         epoch: u64,
     },
-    #[error("CompactionExecutor error: {0}")]
-    CompactionExecutor(String),
+    #[error("CompactionRuntime error: {0}")]
+    CompactionRuntime(String),
     #[error("FileCache error: {0}")]
     FileCache(String),
     #[error("SstObjectIdTracker error: {0}")]
@@ -140,8 +140,8 @@ impl HummockError {
         matches!(self.inner(), HummockErrorInner::ObjectIoError { .. })
     }
 
-    pub fn compaction_executor(error: impl ToString) -> HummockError {
-        HummockErrorInner::CompactionExecutor(error.to_string()).into()
+    pub fn compaction_runtime(error: impl ToString) -> HummockError {
+        HummockErrorInner::CompactionRuntime(error.to_string()).into()
     }
 
     pub fn sst_object_id_tracker_error(error: impl ToString) -> HummockError {

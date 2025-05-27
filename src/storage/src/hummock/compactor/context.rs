@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use super::task_progress::TaskProgressManagerRef;
 use crate::hummock::MemoryLimiter;
-use crate::hummock::compactor::CompactionExecutor;
+use crate::hummock::compactor::CompactionRuntime;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
@@ -55,7 +55,7 @@ pub struct CompactorContext {
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
 
-    pub compaction_executor: Arc<CompactionExecutor>,
+    pub compaction_runtime: Arc<CompactionRuntime>,
 
     pub memory_limiter: Arc<MemoryLimiter>,
 
@@ -71,11 +71,11 @@ impl CompactorContext {
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_reg: Option<CompactionAwaitTreeRegRef>,
     ) -> Self {
-        let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
+        let compaction_runtime = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {
-            Arc::new(CompactionExecutor::new(None))
+            Arc::new(CompactionRuntime::new(None))
         } else {
-            Arc::new(CompactionExecutor::new(Some(
+            Arc::new(CompactionRuntime::new(Some(
                 storage_opts.share_buffer_compaction_worker_threads_number as usize,
             )))
         };
@@ -86,10 +86,25 @@ impl CompactorContext {
             sstable_store,
             compactor_metrics,
             is_share_buffer_compact: true,
-            compaction_executor,
+            compaction_runtime,
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg,
         }
     }
+}
+
+#[derive(Clone)]
+pub struct IcebergCompactorContext {
+    /// Storage options.
+    pub storage_opts: Arc<StorageOpts>,
+
+    /// Statistics.
+    pub compactor_metrics: Arc<CompactorMetrics>,
+
+    pub compaction_runtime: Arc<CompactionRuntime>,
+
+    pub memory_limiter: Arc<MemoryLimiter>,
+
+    pub await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 }

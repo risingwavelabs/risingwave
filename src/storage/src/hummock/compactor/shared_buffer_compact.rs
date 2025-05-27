@@ -201,9 +201,9 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         for imm in &payload {
             forward_iters.push(imm.clone().into_directed_iter::<Forward, IS_NEW_VALUE>());
         }
-        let compaction_executor = context.compaction_executor.clone();
+        let compaction_runtime = context.compaction_runtime.clone();
         let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
-        let handle = compaction_executor.spawn({
+        let handle = compaction_runtime.spawn({
             static NEXT_SHARED_BUFFER_COMPACT_ID: LazyLock<AtomicUsize> =
                 LazyLock::new(|| AtomicUsize::new(0));
             let tree_root = context.await_tree_reg.as_ref().map(|reg| {
@@ -251,7 +251,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
                     error = %e.as_report(),
                     "Shared Buffer Compaction failed with future error",
                 );
-                err = Some(HummockError::compaction_executor(
+                err = Some(HummockError::compaction_runtime(
                     "failed while execute in tokio",
                 ));
             }
@@ -276,7 +276,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             level0.extend(ssts);
         }
         if context.storage_opts.check_compaction_result {
-            let compaction_executor = context.compaction_executor.clone();
+            let compaction_runtime = context.compaction_runtime.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
             for imm in &payload {
                 if !existing_table_ids.contains(&imm.table_id.table_id) {
@@ -292,7 +292,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
                 0,
                 None,
             );
-            compaction_executor.spawn(async move {
+            compaction_runtime.spawn(async move {
                 match check_flush_result(
                     left_iter,
                     Vec::from_iter(existing_table_ids.iter().cloned()),

@@ -55,7 +55,7 @@ use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_storage::StateStoreImpl;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, CompactorContext, new_compaction_await_tree_reg_ref, start_compactor,
+    CompactionRuntime, CompactorContext, new_compaction_await_tree_reg_ref, start_compactor,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
@@ -245,13 +245,13 @@ pub async fn compute_node_serve(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
 
-            let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+            let compaction_runtime = Arc::new(CompactionRuntime::new(Some(1)));
             let compactor_context = CompactorContext {
                 storage_opts,
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
-                compaction_executor,
+                compaction_runtime,
                 memory_limiter,
 
                 task_progress_manager: Default::default(),

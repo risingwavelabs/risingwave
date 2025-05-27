@@ -179,7 +179,7 @@ fn generate_splits_fast(
     context: &CompactorContext,
     max_sub_compaction: u32,
 ) -> Vec<KeyRange> {
-    let worker_num = context.compaction_executor.worker_num();
+    let worker_num = context.compaction_runtime.worker_num();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
 
     let parallelism = calculate_task_parallelism_impl(
@@ -273,7 +273,7 @@ pub async fn generate_splits(
         splits.push(KeyRange::default());
 
         let parallelism = calculate_task_parallelism_impl(
-            context.compaction_executor.worker_num(),
+            context.compaction_runtime.worker_num(),
             parallel_compact_size,
             compaction_size,
             max_sub_compaction,
@@ -658,7 +658,7 @@ pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &Compacto
         .sum::<u64>();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     calculate_task_parallelism_impl(
-        context.compaction_executor.worker_num(),
+        context.compaction_runtime.worker_num(),
         parallel_compact_size,
         compaction_size,
         compact_task.max_sub_compaction,

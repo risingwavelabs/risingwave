@@ -17,8 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, RwConfig, extract_storage_memory_config,
-    load_config,
+    AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -41,7 +40,7 @@ use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, RemoteTableAccessor,
 };
 use risingwave_storage::hummock::compactor::{
-    CompactionAwaitTreeRegRef, CompactionExecutor, CompactorContext,
+    CompactionAwaitTreeRegRef, CompactionRuntime, CompactorContext, IcebergCompactorContext,
     new_compaction_await_tree_reg_ref,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -187,7 +186,6 @@ pub async fn compactor_serve(
     advertise_addr: HostAddr,
     opts: CompactorOpts,
     shutdown: CancellationToken,
-    compactor_mode: CompactorMode,
 ) {
     let config = load_config(&opts.config_path, &opts);
     info!("Starting compactor node",);
@@ -250,7 +248,7 @@ pub async fn compactor_serve(
         storage_opts.sstable_id_remote_fetch_number,
     ));
 
-    let compaction_executor = Arc::new(CompactionExecutor::new(
+    let compaction_runtime = Arc::new(CompactionRuntime::new(
         opts.compaction_worker_threads_number,
     ));
 
@@ -259,7 +257,7 @@ pub async fn compactor_serve(
         sstable_store: sstable_store.clone(),
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor,
+        compaction_runtime,
         memory_limiter,
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
@@ -271,22 +269,12 @@ pub async fn compactor_serve(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
-        match compactor_mode {
-            CompactorMode::Dedicated => risingwave_storage::hummock::compactor::start_compactor(
-                compactor_context.clone(),
-                hummock_meta_client.clone(),
-                object_id_manager.clone(),
-                compaction_catalog_manager_ref,
-            ),
-            CompactorMode::Shared => unreachable!(),
-            CompactorMode::DedicatedIceberg => {
-                risingwave_storage::hummock::compactor::start_compactor_iceberg(
-                    compactor_context.clone(),
-                    hummock_meta_client.clone(),
-                )
-            }
-            CompactorMode::SharedIceberg => unreachable!(),
-        },
+        risingwave_storage::hummock::compactor::start_compactor(
+            compactor_context.clone(),
+            hummock_meta_client.clone(),
+            object_id_manager.clone(),
+            compaction_catalog_manager_ref,
+        ),
     ];
 
     let telemetry_manager = TelemetryManager::new(
@@ -371,7 +359,7 @@ pub async fn shared_compactor_serve(
     // Run a background heap profiler
     heap_profiler.start();
 
-    let compaction_executor = Arc::new(CompactionExecutor::new(
+    let compaction_runtime = Arc::new(CompactionRuntime::new(
         opts.compaction_worker_threads_number,
     ));
     let compactor_context = CompactorContext {
@@ -379,7 +367,7 @@ pub async fn shared_compactor_serve(
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor,
+        compaction_runtime,
         memory_limiter,
         task_progress_manager: Default::default(),
         await_tree_reg,
@@ -417,4 +405,132 @@ pub async fn shared_compactor_serve(
     shutdown.cancelled().await;
 
     // TODO(shutdown): shall we notify the proxy that we are shutting down?
+}
+
+pub async fn iceberg_compactor_serve(
+    listen_addr: SocketAddr,
+    advertise_addr: HostAddr,
+    opts: CompactorOpts,
+    shutdown: CancellationToken,
+) {
+    let config = load_config(&opts.config_path, &opts);
+    info!("Starting iceberg-compactor node",);
+    info!("> config: {:?}", config);
+    info!(
+        "> debug assertions: {}",
+        if cfg!(debug_assertions) { "on" } else { "off" }
+    );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
+    // Register to the cluster.
+    let (meta_client, system_params_reader) = MetaClient::register_new(
+        opts.meta_address.clone(),
+        WorkerType::Compactor,
+        &advertise_addr,
+        Default::default(),
+        &config.meta,
+    )
+    .await;
+
+    info!("Assigned iceberg-compactor id {}", meta_client.worker_id());
+
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
+        meta_client.clone(),
+        hummock_metrics.clone(),
+    ));
+
+    let (
+        _sstable_store,
+        memory_limiter,
+        heap_profiler,
+        await_tree_reg,
+        storage_opts,
+        compactor_metrics,
+    ) = prepare_start_parameters(&opts, config.clone(), system_params_reader.clone()).await;
+
+    let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
+        RemoteTableAccessor::new(meta_client.clone()),
+    )));
+
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
+    let compactor_observer_node = CompactorObserverNode::new(
+        compaction_catalog_manager_ref.clone(),
+        system_params_manager.clone(),
+    );
+    let observer_manager =
+        ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
+
+    // Run a background heap profiler
+    heap_profiler.start();
+
+    // use half of limit because any memory which would hold in meta-cache will be allocate by
+    // limited at first.
+    let _observer_join_handle = observer_manager.start().await;
+
+    let compaction_runtime = Arc::new(CompactionRuntime::new(
+        opts.compaction_worker_threads_number,
+    ));
+
+    let iceberg_compactor_context = IcebergCompactorContext {
+        storage_opts,
+        compactor_metrics,
+        compaction_runtime,
+        memory_limiter,
+        await_tree_reg: await_tree_reg.clone(),
+    };
+
+    // TODO(shutdown): don't collect sub-tasks as there's no need to gracefully shutdown them.
+    let mut sub_tasks = vec![
+        MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        ),
+        risingwave_storage::hummock::compactor::start_iceberg_compactor(
+            iceberg_compactor_context.clone(),
+            hummock_meta_client.clone(),
+        ),
+    ];
+
+    let telemetry_manager = TelemetryManager::new(
+        Arc::new(meta_client.clone()),
+        Arc::new(CompactorTelemetryCreator::new()),
+    );
+    // if the toml config file or env variable disables telemetry, do not watch system params change
+    // because if any of configs disable telemetry, we should never start it
+    if config.server.telemetry_enabled && telemetry_env_enabled() {
+        sub_tasks.push(telemetry_manager.start().await);
+    } else {
+        tracing::info!("Telemetry didn't start due to config");
+    }
+
+    let compactor_srv = CompactorServiceImpl::default();
+    let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
+    let server = tonic::transport::Server::builder()
+        .add_service(CompactorServiceServer::new(compactor_srv))
+        .add_service(MonitorServiceServer::new(monitor_srv))
+        .monitored_serve_with_shutdown(
+            listen_addr,
+            "grpc-iceberg-compactor-node-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            shutdown.clone().cancelled_owned(),
+        );
+    let _server_handle = tokio::spawn(server);
+
+    // Boot metrics service.
+    if config.server.metrics_level > MetricLevel::Disabled {
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
+    }
+
+    // All set, let the meta service know we're ready.
+    meta_client.activate(&advertise_addr).await.unwrap();
+
+    // Wait for the shutdown signal.
+    shutdown.cancelled().await;
+    // Run shutdown logic.
+    meta_client.try_unregister().await;
 }

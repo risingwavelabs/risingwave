@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod compaction_executor;
 mod compaction_filter;
+mod compaction_runtime;
 pub mod compaction_utils;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
@@ -45,13 +45,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use await_tree::{InstrumentAwait, SpanExt};
-pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TtlCompactionFilter,
 };
+pub use compaction_runtime::CompactionRuntime;
 pub use context::{
-    CompactionAwaitTreeRegRef, CompactorContext, await_tree_key, new_compaction_await_tree_reg_ref,
+    CompactionAwaitTreeRegRef, CompactorContext, IcebergCompactorContext, await_tree_key,
+    new_compaction_await_tree_reg_ref,
 };
 use futures::{StreamExt, pin_mut};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -284,8 +285,8 @@ impl Compactor {
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
 #[must_use]
-pub fn start_compactor_iceberg(
-    compactor_context: CompactorContext,
+pub fn start_iceberg_compactor(
+    compactor_context: IcebergCompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
@@ -293,7 +294,7 @@ pub fn start_compactor_iceberg(
     let stream_retry_interval = Duration::from_secs(30);
     let periodic_event_update_interval = Duration::from_millis(1000);
 
-    let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
+    let max_task_parallelism: u32 = (compactor_context.compaction_runtime.worker_num() as f32
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
     let running_task_parallelism = Arc::new(AtomicU32::new(0));
@@ -321,7 +322,7 @@ pub fn start_compactor_iceberg(
                 _ = min_interval.tick() => {},
                 // Shutdown compactor.
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Compactor is shutting down");
+                    tracing::info!("Iceberg-Compactor is shutting down");
                     return;
                 }
             }
@@ -346,7 +347,7 @@ pub fn start_compactor_iceberg(
 
             pin_mut!(response_event_stream);
 
-            let executor = compactor_context.compaction_executor.clone();
+            let compaction_runtime = compactor_context.compaction_runtime.clone();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -423,13 +424,13 @@ pub fn start_compactor_iceberg(
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
-                                let(parallelism,iceberg_runner) = match async move {
+                                let (parallelism,iceberg_runner) = match async move {
                                     let iceberg_runner = IcebergCompactorRunner::new(
                                         iceberg_compaction_task,
                                     ).await?;
                                     let parallelism = iceberg_runner.calculate_task_parallelism().await?.min(max_task_parallelism);
                                     Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, iceberg_runner))
-                                }.await{
+                                }.await {
                                     Ok((parallelism, iceberg_runner)) => {
                                         (parallelism, iceberg_runner)
                                     }
@@ -444,7 +445,7 @@ pub fn start_compactor_iceberg(
                                     < parallelism
                                 {
                                     tracing::warn!(
-                                        "Not enough core parallelism to serve the iceberg compaction task{} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+                                        "Not enough core parallelism to serve the iceberg compaction task {} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
                                         task_id,
                                         parallelism,
                                         max_task_parallelism,
@@ -455,11 +456,11 @@ pub fn start_compactor_iceberg(
 
                                 running_task_parallelism
                                     .fetch_add(parallelism, Ordering::SeqCst);
-                                executor.spawn(async move {
+                                compaction_runtime.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    iceberg_runner.compact_iceberg(
+                                    iceberg_runner.compact(
                                         rx,
                                         parallelism as usize,
                                     )
@@ -507,7 +508,7 @@ pub fn start_compactor(
     let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
 
-    let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
+    let max_task_parallelism: u32 = (compactor_context.compaction_runtime.worker_num() as f32
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
     let running_task_parallelism = Arc::new(AtomicU32::new(0));
@@ -558,7 +559,7 @@ pub fn start_compactor(
 
             pin_mut!(response_event_stream);
 
-            let executor = compactor_context.compaction_executor.clone();
+            let compaction_runtime = compactor_context.compaction_runtime.clone();
             let object_id_manager = object_id_manager.clone();
 
             // This inner loop is to consume stream or report task progress.
@@ -732,7 +733,7 @@ pub fn start_compactor(
 
                                 running_task_parallelism
                                     .fetch_add(parallelism as u32, Ordering::SeqCst);
-                                executor.spawn(async move {
+                                compaction_runtime.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -790,7 +791,7 @@ pub fn start_compactor(
                             }
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
-                                executor.spawn(async move {
+                                compaction_runtime.spawn(async move {
                                     validate_ssts(validation_task, context.sstable_store.clone())
                                         .await;
                                 });
@@ -856,7 +857,7 @@ pub fn start_shared_compactor(
         let shutdown_map = CompactionShutdownMap::default();
 
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        let executor = context.compaction_executor.clone();
+        let compaction_runtime = context.compaction_runtime.clone();
         let report_heartbeat_client = grpc_proxy_client.clone();
         'consume_stream: loop {
             let request: Option<Request<DispatchCompactionTaskRequest>> = tokio::select! {
@@ -892,7 +893,7 @@ pub fn start_shared_compactor(
                     let shutdown = shutdown_map.clone();
 
                     let cloned_grpc_proxy_client = grpc_proxy_client.clone();
-                    executor.spawn(async move {
+                    compaction_runtime.spawn(async move {
                         let DispatchCompactionTaskRequest {
                             tables,
                             output_object_ids,

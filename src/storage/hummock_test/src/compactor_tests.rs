@@ -62,7 +62,7 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
-        CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
+        CompactionRuntime, CompactorContext, DummyCompactionFilter, TaskProgress,
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::{
@@ -207,7 +207,7 @@ pub(crate) mod tests {
             sstable_store,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
-            compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+            compaction_runtime: Arc::new(CompactionRuntime::new(Some(1))),
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,

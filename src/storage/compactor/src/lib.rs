@@ -24,6 +24,7 @@ use risingwave_common::config::{
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use server::iceberg_compactor_serve;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -147,14 +148,7 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(
-                listen_addr,
-                advertise_addr,
-                opts,
-                shutdown,
-                CompactorMode::Dedicated,
-            )
-            .await;
+            compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
         }),
 
         Some(CompactorMode::DedicatedIceberg) => Box::pin(async move {
@@ -174,14 +168,7 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(
-                listen_addr,
-                advertise_addr,
-                opts,
-                shutdown,
-                CompactorMode::DedicatedIceberg,
-            )
-            .await;
+            iceberg_compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
         }),
         Some(CompactorMode::SharedIceberg) => {
             unimplemented!("Shared iceberg compactor is not supported yet");
