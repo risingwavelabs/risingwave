@@ -174,21 +174,13 @@
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalAgg { aggs: [] }
-        │ └─LogicalAgg { group_key: [1:Int32], aggs: [] }
-        │   └─LogicalProject { exprs: [1:Int32] }
-        │     └─LogicalScan { table: t1, columns: [] }
+        ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalScan { table: t2, columns: [] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [count(1:Int32)] }
     └─BatchProject { exprs: [1:Int32] }
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-        ├─BatchSimpleAgg { aggs: [] }
-        │ └─BatchExchange { order: [], dist: Single }
-        │   └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
-        │     └─BatchExchange { order: [], dist: HashShard(1:Int32) }
-        │       └─BatchProject { exprs: [1:Int32] }
-        │         └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        ├─BatchValues { rows: [[]] }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
@@ -381,8 +373,7 @@
         ├─LogicalJoin { type: Inner, on: true, output: all }
         │ ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         │ │ └─LogicalScan { table: a, columns: [a.a1] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalScan { table: b, columns: [] }
+        │ └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           │ └─LogicalScan { table: a, columns: [a.a1] }
@@ -488,13 +479,10 @@
       │ └─LogicalProject { exprs: [a1] }
       │   └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
-        ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ ├─LogicalAgg { group_key: [a1], aggs: [] }
-        │ │ └─LogicalShare { id: 2 }
-        │ │   └─LogicalProject { exprs: [a1] }
-        │ │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalSource { source: b, columns: [b1, b2, _row_id] }
+        ├─LogicalAgg { group_key: [a1], aggs: [] }
+        │ └─LogicalShare { id: 2 }
+        │   └─LogicalProject { exprs: [a1] }
+        │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
         └─LogicalJoin { type: Inner, on: true, output: [a1] }
           ├─LogicalAgg { group_key: [a1], aggs: [] }
           │ └─LogicalShare { id: 2 }
