@@ -24,6 +24,7 @@ pub enum Feature {
     Where,
     Agg,
     Join,
+    Eowc,
 }
 
 impl fmt::Display for Feature {
@@ -32,6 +33,7 @@ impl fmt::Display for Feature {
             Feature::Where => "where",
             Feature::Agg => "agg",
             Feature::Join => "join",
+            Feature::Eowc => "eowc",
         };
         write!(f, "{}", s)
     }
