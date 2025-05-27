@@ -71,7 +71,7 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, StreamContext, StreamJobFragments,
+    DownstreamFragmentRelation, Fragment, FragmentId, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::{
@@ -1264,21 +1264,40 @@ impl DdlController {
                 )
                 .await? as u32;
 
-            let (ctx, stream_job_fragments) = self
-                .inject_replace_table_job_for_table_sink(
-                    tmp_id,
-                    &self.metadata_manager,
-                    stream_ctx,
-                    None,
-                    None,
-                    Some(sink_id),
-                    &streaming_job,
-                    fragment_graph,
-                )
+            let (ctx, _) = self.inject_replace_table_job_for_table_sink(
+                tmp_id,
+                &self.metadata_manager,
+                stream_ctx,
+                None,
+                None,
+                Some(sink_id),
+                &streaming_job,
+                fragment_graph,
+            );
+
+            let target_table_id = 123.into();
+
+            // self.metadata_manager.catalog_controller.get_sink_by_ids()
+            let stream_job_fragments = self
+                .metadata_manager
+                .get_job_fragments_by_id(&target_table_id)
                 .await?;
 
+            let sink_fragment = stream_job_fragments.sink_fragment().unwrap();
+
+            let downstreams = self
+                .metadata_manager
+                .catalog_controller
+                .get_fragment_downstream_relations(vec![sink_fragment.fragment_id as FragmentId])
+                .await?;
+
+            let stream_job_fragments = StreamJobFragmentsToCreate {
+                inner: stream_job_fragments,
+                downstreams,
+            };
+
             let result: MetaResult<_> = try {
-                let replace_upstream = ctx.replace_upstream.clone();
+                // let replace_upstream = ctx.replace_upstream.clone();
 
                 self.metadata_manager
                     .catalog_controller
@@ -1289,7 +1308,7 @@ impl DdlController {
                     .replace_stream_job(stream_job_fragments, ctx)
                     .await?;
 
-                replace_upstream
+                // replace_upstream
             };
 
             version = match result {
