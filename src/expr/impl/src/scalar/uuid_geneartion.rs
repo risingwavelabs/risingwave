@@ -20,13 +20,6 @@ pub fn gen_random_uuid() -> Uuid {
     Uuid::new_v4()
 }
 
-/// Generate a deterministic UUID from any string using the gen_uuid_from_string(varchar) function.
-/// This function expects that even if the input is a valid uuid format, it will generate a new one.
-#[function("gen_uuid_from_string(varchar) -> uuid")]
-pub fn gen_uuid_from_string(input: &str) -> Uuid {
-    Uuid::new_v5(input)
-}
-
 /// Generate a UUID from 16 bytes.
 #[function("gen_uuid_from_bytea(bytea) -> uuid")]
 pub fn gen_uuid_from_bytea(bytes: &[u8]) -> Uuid {
@@ -69,23 +62,6 @@ mod tests {
     }
 
     #[test]
-    fn test_gen_uuid_from_string_deterministic() {
-        // Test deterministic generation (same input = same UUID)
-        let uuid1a = gen_uuid_from_string("test_string");
-        let uuid1b = gen_uuid_from_string("test_string");
-        assert_eq!(uuid1a, uuid1b);
-
-        // Test different inputs produce different UUIDs
-        let uuid2 = gen_uuid_from_string("different_string");
-        assert_ne!(uuid1a, uuid2);
-
-        // Test with empty string
-        let empty1 = gen_uuid_from_string("");
-        let empty2 = gen_uuid_from_string("");
-        assert_eq!(empty1, empty2);
-    }
-
-    #[test]
     fn test_gen_uuid_from_bytea_valid() {
         // Test with exactly 16 bytes
         let bytes = [
@@ -109,18 +85,13 @@ mod tests {
     fn test_function_integration() {
         // Test that different functions produce different results
         let random_uuid = gen_random_uuid();
-        let string_uuid = gen_uuid_from_string("test");
         let bytes_uuid = gen_uuid_from_bytea(&[0x12u8; 16]);
 
         // They should all be different (extremely high probability)
-        assert_ne!(random_uuid, string_uuid);
         assert_ne!(random_uuid, bytes_uuid);
-        assert_ne!(string_uuid, bytes_uuid);
 
         // None should be nil (unless specifically created as such)
         assert_ne!(random_uuid, Uuid::nil());
-        assert_ne!(string_uuid, Uuid::nil());
-        assert_ne!(bytes_uuid, Uuid::nil());
     }
 
     #[test]
@@ -128,7 +99,6 @@ mod tests {
         // This test ensures functions don't panic and can handle rapid calls
         for _ in 0..100 {
             let _ = gen_random_uuid();
-            let _ = gen_uuid_from_string("test");
             let _ = gen_uuid_from_bytea(&[0x12u8; 16]);
         }
     }

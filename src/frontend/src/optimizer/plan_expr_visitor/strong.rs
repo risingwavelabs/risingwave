@@ -311,7 +311,6 @@ impl Strong {
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::GenRandomUuid
-            | ExprType::GenUuidFromString
             | ExprType::GenUuidFromBytea
             | ExprType::Vnode
             | ExprType::VnodeUser

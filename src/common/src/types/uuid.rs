@@ -112,21 +112,6 @@ impl Uuid {
         Self(uuid::Uuid::new_v4())
     }
 
-    /// Generate a UUID from any String (v5).
-    #[inline]
-    pub fn new_v5(input: &str) -> Self {
-        Self(uuid::Uuid::new_v5(
-            &uuid::Uuid::NAMESPACE_OID,
-            input.as_bytes(),
-        ))
-    }
-
-    /// Create a UUID using a name based on a namespace ID and name (v5).
-    /// #[inline]
-    /// pub fn new_v7(name: Timestamp) -> Self {
-    ///     Self(uuid::Uuid::new_v7(name))
-    /// }
-
     /// Returns the size in bytes of a UUID.
     #[inline]
     pub const fn size() -> usize {
@@ -138,12 +123,6 @@ impl Uuid {
     pub fn array_type() -> ArrayType {
         ArrayType::Uuid
     }
-
-    /// Creates a UUID from raw bytes of the specified endianness.
-    /// #[inline]
-    /// pub fn from_ne_bytes(bytes: [u8; 16]) -> Self {
-    ///    Self(uuid::Uuid::from_bytes_ne(bytes))
-    /// }
 
     /// Creates a UUID from raw little-endian bytes.
     #[inline]
@@ -157,6 +136,7 @@ impl Uuid {
         Self(uuid::Uuid::from_bytes(bytes))
     }
 
+    /// Creates a UUID from uuid string.
     #[inline]
     pub fn from_varchar(s: &str) -> Self {
         match uuid::Uuid::parse_str(s) {
@@ -180,6 +160,7 @@ impl Uuid {
     }
 
     /// Implementation manually, and is this effective or any other alternate ways to make it more better?
+    /// Will keep this implementation here incase of future needs
     #[inline]
     pub fn from_arbitrary_string_builder(s: &str) -> Self {
         // Hash the string to get reproducible bytes
@@ -239,11 +220,6 @@ impl UuidRef<'_> {
         self.0.as_bytes().clone()
     }
 
-    /// Convert to raw bytes in native-endian order.
-    /// #[inline]
-    /// pub fn to_ne_bytes(self) -> [u8; 16] {
-    ///   self.0.to_bytes_ne()
-    /// }
 
     /// Serialize to protocol buffer representation.
     pub fn to_protobuf<T: std::io::Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -285,7 +261,6 @@ impl EstimateSize for Uuid {
 }
 
 // PostgreSQL compatibility
-
 impl ToSql for Uuid {
     accepts!(UUID);
 
