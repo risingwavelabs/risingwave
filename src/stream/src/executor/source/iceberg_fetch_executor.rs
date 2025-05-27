@@ -383,6 +383,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             },
             source_desc.source.config.clone(),
             None,
+            None,
         )
     }
 

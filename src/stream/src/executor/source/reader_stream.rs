@@ -102,6 +102,7 @@ impl StreamReaderBuilder {
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,
+            Some(self.source_desc.info.clone()),
         );
 
         (column_ids, source_ctx)
