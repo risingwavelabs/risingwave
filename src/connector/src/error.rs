@@ -24,6 +24,7 @@ use crate::parser::AccessError;
 use crate::schema::InvalidOptionError;
 use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::sink::SinkError;
+use crate::source::kafka::fd_control::FdControlError;
 use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;
 
@@ -84,6 +85,7 @@ def_anyhow_newtype! {
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
     EnforceSecretError => transparent,
+    FdControlError => transparent,
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

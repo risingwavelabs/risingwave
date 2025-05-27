@@ -27,10 +27,12 @@ use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use tokio::sync::SemaphorePermit;
 
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::kafka::fd_control::try_reserve_fds_source;
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
@@ -49,6 +51,9 @@ pub struct KafkaSplitReader {
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+
+    // for holding the fd permit, will be released when the reader is dropped
+    _fd_permit: SemaphorePermit<'static>,
 }
 
 #[async_trait]
@@ -99,6 +104,16 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+
+        let broker_num = consumer
+            .fetch_metadata(
+                Some(properties.common.topic.as_str()),
+                properties.common.sync_call_timeout,
+            )
+            .await?
+            .brokers()
+            .len();
+        let fd_permit = try_reserve_fds_source(broker_num)?;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -175,6 +190,7 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             parser_config,
             source_ctx,
+            _fd_permit: fd_permit,
         })
     }
 
@@ -214,6 +230,9 @@ impl SplitReader for KafkaSplitReader {
 impl KafkaSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
+        // Keep the FD permit alive for the entire duration of the stream
+        let _fd_permit = self._fd_permit;
+        
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
                 (Some(start), Some(stop)) if (*start + 1) >= *stop => true,

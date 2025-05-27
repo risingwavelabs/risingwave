@@ -14,9 +14,17 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{OnceCell, Semaphore, SemaphorePermit};
+use tokio::sync::{OnceCell, Semaphore, SemaphorePermit, TryAcquireError};
 
 static KAFKA_FD_CONTROL: OnceCell<Arc<Semaphore>> = OnceCell::const_new();
+
+#[derive(thiserror::Error, Debug)]
+pub enum FdControlError {
+    #[error("allocation error: expect {0}, got {1} available.")]
+    AllocationError(usize, usize),
+    #[error("semaphore is not available")]
+    NotAvailable,
+}
 
 pub fn init_kafka_fd_control(initial_count: usize) {
     let semaphore = Arc::new(Semaphore::new(initial_count));
@@ -30,7 +38,30 @@ pub fn init_kafka_fd_control(initial_count: usize) {
     }
 }
 
-pub async fn try_reserve_fds(permits: u32) -> Option<SemaphorePermit<'static>> {
-    let x = KAFKA_FD_CONTROL.get().unwrap();
-    x.try_acquire_many(permits).ok()
+fn try_reserve_fds(permits: u32) -> Result<SemaphorePermit<'static>, FdControlError> {
+    if let Some(semaphore) = KAFKA_FD_CONTROL.get() {
+        match semaphore.try_acquire_many(permits) {
+            Ok(permit) => {
+                tracing::debug!(
+                    "successfully reserved {} fd permits, available {}",
+                    permits,
+                    semaphore.available_permits()
+                );
+                Ok(permit)
+            }
+            Err(TryAcquireError::NoPermits) => Err(FdControlError::AllocationError(
+                permits as usize,
+                semaphore.available_permits(),
+            )),
+            Err(TryAcquireError::Closed) => Err(FdControlError::NotAvailable),
+        }
+    } else {
+        Err(FdControlError::NotAvailable)
+    }
+}
+
+pub fn try_reserve_fds_source(
+    broker_num: usize,
+) -> Result<SemaphorePermit<'static>, FdControlError> {
+    try_reserve_fds((3 * broker_num + 2) as u32)
 }
