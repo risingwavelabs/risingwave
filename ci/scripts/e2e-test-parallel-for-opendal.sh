@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
@@ -29,10 +33,6 @@ echo "--- Install Python Dependencies"
 python3 -m pip install --break-system-packages psycopg2-binary
 
 host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
-
-if [[ -z "${RUST_MIN_STACK}" ]]; then
-  export RUST_MIN_STACK=4194304
-fi
 
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \

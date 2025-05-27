@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
@@ -35,10 +39,6 @@ download-and-decompress-artifact e2e_test_generated ./
 
 echo "--- Install Python Dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
-
-if [[ -z "${RUST_MIN_STACK}" ]]; then
-  export RUST_MIN_STACK=4194304
-fi
 
 mode=ci-3streaming-2serving-3fe
 start_cluster() {

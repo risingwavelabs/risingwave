@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
@@ -30,10 +34,6 @@ fi
 
 if [[ $mode == "single-node" ]]; then
   source ci/scripts/single-node-utils.sh
-fi
-
-if [[ -z "${RUST_MIN_STACK}" ]]; then
-  export RUST_MIN_STACK=4194304
 fi
 
 cluster_start() {
