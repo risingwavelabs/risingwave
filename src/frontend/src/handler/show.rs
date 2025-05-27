@@ -45,8 +45,8 @@ use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::create_connection::print_connection_params;
-use crate::session::SessionImpl;
 use crate::session::cursor_manager::SubscriptionCursor;
+use crate::session::{SessionImpl, WorkerProcessId};
 use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
@@ -895,7 +895,7 @@ async fn show_process_list_impl(
                     .into_iter()
                     .map(|sql| ShowProcessListRow {
                         worker_id: format!("{}", worker.id),
-                        id: format!("{}", sql.process_id),
+                        id: format!("{}", WorkerProcessId::new(worker.id, sql.process_id)),
                         user: sql.user_name,
                         host: sql.peer_addr,
                         database: sql.database,
