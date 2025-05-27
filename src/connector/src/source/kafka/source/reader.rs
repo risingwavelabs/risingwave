@@ -94,8 +94,11 @@ impl SplitReader for KafkaSplitReader {
         .await?;
 
         let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         let consumer: StreamConsumer<RwConsumerContext> = config
-            .set_log_level(read_kafka_log_level())
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;

@@ -477,9 +477,11 @@ impl KafkaSinkWriter {
             .await?;
             let producer_ctx = RwProducerContext::new(ctx_common);
             // Generate the producer
-            c.set_log_level(read_kafka_log_level())
-                .create_with_context(producer_ctx)
-                .await?
+
+            if let Some(log_level) = read_kafka_log_level() {
+                c.set_log_level(log_level);
+            }
+            c.create_with_context(producer_ctx).await?
         };
 
         Ok(KafkaSinkWriter {

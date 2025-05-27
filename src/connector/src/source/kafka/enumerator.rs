@@ -120,7 +120,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
-        config.set_log_level(read_kafka_log_level());
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
         let mut scan_start_offset = match properties

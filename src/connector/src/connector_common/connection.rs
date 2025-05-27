@@ -20,6 +20,7 @@ use opendal::Operator;
 use opendal::services::{Azblob, Gcs, S3};
 use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
+use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
@@ -98,26 +99,24 @@ impl Connection for KafkaConnection {
     }
 }
 
-use rdkafka::config::RDKafkaLogLevel;
-
-pub fn read_kafka_log_level() -> RDKafkaLogLevel {
+pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
     let log_level =
         std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").unwrap_or_else(|_| "INFO".to_owned());
     match log_level.to_uppercase().as_str() {
-        "DEBUG" => RDKafkaLogLevel::Debug,
-        "INFO" => RDKafkaLogLevel::Info,
-        "WARN" => RDKafkaLogLevel::Warning,
-        "ERROR" => RDKafkaLogLevel::Error,
-        "CRITICAL" => RDKafkaLogLevel::Critical,
-        "EMERG" => RDKafkaLogLevel::Emerg,
-        "ALERT" => RDKafkaLogLevel::Alert,
-        "NOTICE" => RDKafkaLogLevel::Notice,
+        "DEBUG" => Some(RDKafkaLogLevel::Debug),
+        "INFO" => Some(RDKafkaLogLevel::Info),
+        "WARN" => Some(RDKafkaLogLevel::Warning),
+        "ERROR" => Some(RDKafkaLogLevel::Error),
+        "CRITICAL" => Some(RDKafkaLogLevel::Critical),
+        "EMERG" => Some(RDKafkaLogLevel::Emerg),
+        "ALERT" => Some(RDKafkaLogLevel::Alert),
+        "NOTICE" => Some(RDKafkaLogLevel::Notice),
         _ => {
             tracing::info!(
                 "Invalid RISINGWAVE_KAFKA_LOG_LEVEL: {}, using INFO instead",
                 log_level
             );
-            RDKafkaLogLevel::Info
+            None
         }
     }
 }
@@ -140,10 +139,12 @@ impl KafkaConnection {
         )
         .await?;
         let client_ctx = RwConsumerContext::new(ctx_common);
-        let client: BaseConsumer<RwConsumerContext> = config
-            .set_log_level(read_kafka_log_level())
-            .create_with_context(client_ctx)
-            .await?;
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
+        let client: BaseConsumer<RwConsumerContext> =
+            config.create_with_context(client_ctx).await?;
         if self.inner.is_aws_msk_iam() {
             #[cfg(not(madsim))]
             client.poll(Duration::from_secs(10)); // note: this is a blocking call
