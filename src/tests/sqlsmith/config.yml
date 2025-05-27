@@ -9,5 +9,5 @@ config:
     weight: 75
     enabled: true
   eowc:
-    weight: 50
+    weight: 100
     enabled: true

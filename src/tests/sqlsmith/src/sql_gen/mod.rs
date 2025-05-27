@@ -22,7 +22,7 @@ use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    ColumnDef, EmitMode, Expr, Ident, ObjectName, SetExpr, SourceWatermark, Statement, TableFactor,
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SourceWatermark, Statement
 };
 
 mod agg;
