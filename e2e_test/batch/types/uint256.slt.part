@@ -64,7 +64,7 @@ statement ok
 create table t_uint256 (v rw_uint256)
 
 statement ok
-insert into t_uint256 values (0::rw_uint256), (1::rw_uint256), (100::rw_uint256), (10000::rw_uint256), (100000000::rw_uint256), (10000000000000000::rw_uint256), ('100000000000000000000000000000000'::rw_uint256);
+insert into t_uint256 values ('0'), ('1'), ('100'), ('10000'), ('100000000'), ('10000000000000000'), ('100000000000000000000000000000000');
 
 query I rowsort
 select * from t_uint256;
@@ -90,8 +90,8 @@ select * from t_uint256 order by v asc;
 10000
 100000000
 10000000000000000
-100000000000000000000000000000000
 18446744073709551615
+100000000000000000000000000000000
 340282366920938463463374607431768211455
 115792089237316195423570985008687907853269984665640564039457584007913129639935
 
@@ -100,8 +100,8 @@ select * from t_uint256 order by v desc;
 ----
 115792089237316195423570985008687907853269984665640564039457584007913129639935
 340282366920938463463374607431768211455
-18446744073709551615
 100000000000000000000000000000000
+18446744073709551615
 10000000000000000
 100000000
 10000
@@ -110,7 +110,7 @@ select * from t_uint256 order by v desc;
 0
 
 query I rowsort
-select * from t_uint256 where v > 0;
+select * from t_uint256 where v > '0'::rw_uint256;
 ----
 1
 100
@@ -123,7 +123,7 @@ select * from t_uint256 where v > 0;
 115792089237316195423570985008687907853269984665640564039457584007913129639935
 
 query B
-select 1::rw_uint256 is null;
+select '1'::rw_uint256 is null;
 ----
 f
 
@@ -149,10 +149,10 @@ select count(v) from t_uint256;
 10
 
 statement ok
-insert into t_uint256 values (1::rw_uint256);
+insert into t_uint256 values ('1');
 
 query I
-select sum(v) from t_uint256 where v <= 100000000000000000000000000000000;
+select sum(v) from t_uint256 where v <= '100000000000000000000000000000000'::rw_uint256;
 ----
 100000010010110101101
 
@@ -173,7 +173,7 @@ statement ok
 create table t_uint256 (v rw_uint256)
 
 statement ok
-insert into t_uint256 values (1::rw_uint256), (1::rw_uint256), (2::rw_uint256), (2::rw_uint256), (3::rw_uint256), (3::rw_uint256), (4::rw_uint256), (5::rw_uint256);
+insert into t_uint256 values ('1'), ('1'), ('2'), ('2'), ('3'), ('3'), ('4'), ('5');
 
 query RR
 select avg(v), avg(distinct v) from t_uint256;
@@ -190,67 +190,67 @@ drop table t_uint256;
 
 # Type promotion tests
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_uint256 + 1::int) as t(v);
+select v::varchar, pg_typeof(v) from (select '1'::rw_uint256 + 1::int) as t(v);
 ----
 2 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::int + 1::rw_uint256) as t(v);
+select v::varchar, pg_typeof(v) from (select 1::int + '1'::rw_uint256) as t(v);
 ----
 2 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 2::rw_uint256 - 1::int) as t(v);
+select v::varchar, pg_typeof(v) from (select '2'::rw_uint256 - 1::int) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 2::int - 1::rw_uint256) as t(v);
+select v::varchar, pg_typeof(v) from (select 2::int - '1'::rw_uint256) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_uint256 * 1::int) as t(v);
+select v::varchar, pg_typeof(v) from (select '1'::rw_uint256 * 1::int) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::int * 1::rw_uint256) as t(v);
+select v::varchar, pg_typeof(v) from (select 1::int * '1'::rw_uint256) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_uint256 / 1::int) as t(v);
+select v::varchar, pg_typeof(v) from (select '1'::rw_uint256 / 1::int) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::int / 1::rw_uint256) as t(v);
+select v::varchar, pg_typeof(v) from (select 1::int / '1'::rw_uint256) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_uint256 % 1::int) as t(v);
+select v::varchar, pg_typeof(v) from (select '1'::rw_uint256 % 1::int) as t(v);
 ----
 0 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::int % 1::rw_uint256) as t(v);
+select v::varchar, pg_typeof(v) from (select 1::int % '1'::rw_uint256) as t(v);
 ----
 0 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select sum(1::rw_uint256)) as t(v);
+select v::varchar, pg_typeof(v) from (select sum('1'::rw_uint256)) as t(v);
 ----
 1 rw_uint256
 
 query TT
-select v::varchar, pg_typeof(v) from (select avg(1::rw_uint256)) as t(v);
+select v::varchar, pg_typeof(v) from (select avg('1'::rw_uint256)) as t(v);
 ----
 1 double precision
 
 query TT
-select v::varchar, pg_typeof(v) from (select 1::rw_uint256 + 1::rw_uint256) as t(v);
+select v::varchar, pg_typeof(v) from (select '1'::rw_uint256 + '1'::rw_uint256) as t(v);
 ----
 2 rw_uint256
 
