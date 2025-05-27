@@ -95,7 +95,7 @@ impl PartitionCache {
     }
 
     /// Retain entries in the given range, removing others.
-    /// Returns (left_removed, right_removed) where sentinels are filtered out.
+    /// Returns `(left_removed, right_removed)` where sentinels are filtered out.
     /// Sentinels are preserved in the cache.
     fn retain_range(
         &mut self,
