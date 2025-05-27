@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::swap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -22,16 +23,18 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use prometheus::core::{AtomicI64, GenericGauge};
-use rdkafka::config::RDKafkaLogLevel;
+use rdkafka;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::kafka::client_context::spawn_consumer_poll_task;
 use crate::source::kafka::{
     KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
@@ -41,7 +44,7 @@ use crate::source::{
 };
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<RwConsumerContext>,
+    consumer: Arc<StreamConsumer<RwConsumerContext>>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
     splits: Vec<KafkaSplit>,
@@ -103,10 +106,12 @@ impl SplitReader for KafkaSplitReader {
 
         let client_ctx = RwConsumerContext::new(ctx_common);
         let consumer: StreamConsumer<RwConsumerContext> = config
-            .set_log_level(RDKafkaLogLevel::Info)
+            .set_log_level(read_kafka_log_level())
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+        let consumer = Arc::new(consumer);
+        spawn_consumer_poll_task(Arc::downgrade(&consumer));
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 

@@ -13,22 +13,24 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::thread;
+use std::sync::{Arc, LazyLock, Weak};
 
 use anyhow::anyhow;
 use aws_config::Region;
 use aws_sdk_s3::config::SharedCredentialsProvider;
 use rdkafka::client::{BrokerAddr, OAuthToken};
-use rdkafka::consumer::ConsumerContext;
+use rdkafka::consumer::{Consumer, ConsumerContext, StreamConsumer};
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::ProducerContext;
 use rdkafka::{ClientContext, Statistics};
+use tokio::runtime::Runtime;
+use tokio::time::interval;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
 use super::stats::RdKafkaStats;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
+use crate::Duration;
 
 struct IamAuthEnv {
     credentials_provider: SharedCredentialsProvider,
@@ -50,6 +52,23 @@ pub struct KafkaContextCommon {
 
     /// Credential and region for AWS MSK
     auth: Option<IamAuthEnv>,
+}
+
+pub fn spawn_consumer_poll_task(weak_consumer: Weak<StreamConsumer<RwConsumerContext>>) {
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(60));
+        loop {
+            if let Some(consumer) = weak_consumer.upgrade() {
+                let _ = tokio::task::spawn_blocking(move || unsafe {
+                    rdkafka::bindings::rd_kafka_poll(consumer.client().native_ptr(), 0)
+                })
+                .await;
+            } else {
+                break;
+            }
+            interval.tick().await;
+        }
+    });
 }
 
 impl KafkaContextCommon {
@@ -89,6 +108,14 @@ impl KafkaContextCommon {
     }
 }
 
+pub static KAFKA_SOURCE_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_name("rw-frontend")
+        .enable_all()
+        .build()
+        .expect("failed to build frontend runtime")
+});
+
 impl KafkaContextCommon {
     fn stats(&self, statistics: Statistics) {
         if let Some(metrics) = &self.metrics
@@ -114,15 +141,14 @@ impl KafkaContextCommon {
         if let Some(IamAuthEnv {
             credentials_provider,
             region,
-            rt,
+            ..
         }) = &self.auth
         {
             let region = region.clone();
             let credentials_provider = credentials_provider.clone();
-            let rt = rt.clone();
             let (token, expiration_time_ms) = {
-                let handle = thread::spawn(move || {
-                    rt.block_on(async {
+                tokio::task::block_in_place(move || {
+                    KAFKA_SOURCE_RUNTIME.block_on(async {
                         timeout(
                             Duration::from_secs(10),
                             generate_auth_token_from_credentials_provider(
@@ -132,9 +158,9 @@ impl KafkaContextCommon {
                         )
                         .await
                     })
-                });
-                handle.join().unwrap()??
+                })??
             };
+            tracing::debug!(?expiration_time_ms, "generated token");
             Ok(OAuthToken {
                 token,
                 principal_name: "".to_owned(),

@@ -27,6 +27,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedMetric;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
@@ -82,6 +83,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+        config.set_log_level(read_kafka_log_level());
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
         let mut scan_start_offset = match properties
@@ -194,6 +196,18 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
             })
             .collect();
+
+        let arc_client = self.client.clone();
+        {
+            #[cfg(not(madsim))]
+            tokio::task::spawn_blocking(move || {
+                arc_client.poll(Duration::from_secs(10));
+            });
+            #[cfg(madsim)]
+            tokio::spawn(async move {
+                arc_client.poll(Duration::from_secs(10)).await;
+            });
+        }
 
         Ok(ret)
     }
