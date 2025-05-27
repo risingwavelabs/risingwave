@@ -1149,6 +1149,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     ) -> RpcResult<Option<FragmentDistribution>> {
         unimplemented!()
     }
+
+    fn worker_id(&self) -> u32 {
+        0
+    }
 }
 
 #[cfg(test)]

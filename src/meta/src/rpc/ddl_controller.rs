@@ -51,7 +51,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, MergeNode, PbDispatcherType, PbStreamFragmentGraph,
+    FragmentTypeFlag, MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -137,16 +137,20 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(
-        StreamingJob,
-        StreamFragmentGraphProto,
-        CreateType,
-        Option<ReplaceStreamJobInfo>,
-        HashSet<ObjectId>,
-        Option<String>, // specific resource group
-        bool,           // if_not_exists
-    ),
-    DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceStreamJobInfo>),
+    CreateStreamingJob {
+        stream_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        create_type: CreateType,
+        affected_table_replace_info: Option<ReplaceStreamJobInfo>,
+        dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>, // specific resource group
+        if_not_exists: bool,
+    },
+    DropStreamingJob {
+        job_id: StreamingJobId,
+        drop_mode: DropMode,
+        target_replace_info: Option<ReplaceStreamJobInfo>,
+    },
     AlterName(alter_name_request::Object, String),
     AlterSwapRename(alter_swap_rename_request::Object),
     ReplaceStreamJob(ReplaceStreamJobInfo),
@@ -171,7 +175,7 @@ impl DdlCommand {
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
-            | DdlCommand::DropStreamingJob(_, _, _)
+            | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_)
             | DdlCommand::DropSecret(_)
             | DdlCommand::DropSubscription(_, _)
@@ -187,7 +191,7 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_) => true,
-            DdlCommand::CreateStreamingJob(_, _, _, _, _, _, _)
+            DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
@@ -317,15 +321,15 @@ impl DdlController {
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(
+                DdlCommand::CreateStreamingJob {
                     stream_job,
                     fragment_graph,
-                    _create_type,
+                    create_type: _,
                     affected_table_replace_info,
                     dependencies,
                     specific_resource_group,
                     if_not_exists,
-                ) => {
+                } => {
                     ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
@@ -336,7 +340,11 @@ impl DdlController {
                     )
                     .await
                 }
-                DdlCommand::DropStreamingJob(job_id, drop_mode, target_replace_info) => {
+                DdlCommand::DropStreamingJob {
+                    job_id,
+                    drop_mode,
+                    target_replace_info,
+                } => {
                     ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
                         .await
                 }
@@ -857,7 +865,7 @@ impl DdlController {
                 downstream_fragment_id: union_fragment.fragment_id,
                 dispatcher_type: DispatcherType::Hash,
                 dist_key_indices: dist_key_indices.clone(),
-                output_indices: output_indices.clone(),
+                output_mapping: PbDispatchOutputMapping::simple(output_indices),
             });
         }
 
