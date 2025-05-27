@@ -75,3 +75,5 @@ pg_catalog 3802 jsonb b f NULL
 pg_catalog 3807 _jsonb b f NULL
 pg_catalog 700 float4 b f NULL
 pg_catalog 701 float8 b f NULL
+pg_catalog 2951 uuid b f NULL
+pg_catalog 2950 _uuid b f NULL

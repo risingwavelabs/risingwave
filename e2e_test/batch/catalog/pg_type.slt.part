@@ -33,3 +33,5 @@ SELECT oid, typname, typelem, typnotnull, typtype, typinput FROM pg_catalog.pg_t
 1700 numeric 0 f b numeric_in
 3802 jsonb 0 f b jsonb_in
 3807 _jsonb 3802 f b array_in
+2951 uuid 0 f b uuid_in
+2950 _uuid 2951 f b array_in
