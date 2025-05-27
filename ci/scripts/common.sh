@@ -94,7 +94,7 @@ function download_and_prepare_rw() {
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"
 
   risedev pre-start-dev
-  risedev --allow-private link-all-in-one-binaries
+  risedev link-all-in-one-binaries
 }
 
 function filter_stack_trace() {
