@@ -380,7 +380,7 @@ pub struct SessionConfig {
     iceberg_engine_connection: String,
 
     /// Whether the streaming join should be unaligned or not.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_enable_unaligned_join: bool,
 
     /// The timeout for reading from the buffer of the sync log store on barrier.
