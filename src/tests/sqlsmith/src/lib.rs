@@ -75,12 +75,7 @@ pub fn mview_sql_gen<R: Rng>(
     config: &Configuration,
 ) -> (String, Table) {
     let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
-    let append_only_tables: Vec<_> = tables
-        .iter()
-        .filter(|table| table.is_append_only)
-        .cloned()
-        .collect();
-    let (mview, table) = r#gen.gen_mview_stmt(name, append_only_tables);
+    let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
 
@@ -91,12 +86,7 @@ pub fn differential_sql_gen<R: Rng>(
     config: &Configuration,
 ) -> Result<(String, String, Table)> {
     let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
-    let append_only_tables: Vec<_> = tables
-        .iter()
-        .filter(|table| table.is_append_only)
-        .cloned()
-        .collect();
-    let (stream, table) = r#gen.gen_mview_stmt(name, append_only_tables);
+    let (stream, table) = r#gen.gen_mview_stmt(name);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),
         _ => bail!("Differential pair should be mview statement!"),
