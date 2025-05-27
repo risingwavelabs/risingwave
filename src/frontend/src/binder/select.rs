@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value,
+    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value, WindowSpec,
 };
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -42,6 +42,7 @@ pub struct BoundSelect {
     pub where_clause: Option<ExprImpl>,
     pub group_by: GroupBy,
     pub having: Option<ExprImpl>,
+    pub window: HashMap<String, WindowSpec>,
     pub schema: Schema,
 }
 
@@ -193,6 +194,18 @@ impl Binder {
         // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
 
+        // Bind WINDOW clause early - store named window definitions for window function resolution
+        let mut window_definitions = HashMap::new();
+        for named_window in &select.window {
+            window_definitions.insert(
+                named_window.name.real_value(),
+                named_window.window_spec.clone(),
+            );
+        }
+
+        // Store window definitions in bind context for window function resolution
+        self.context.named_windows = window_definitions.clone();
+
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
         let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
@@ -302,6 +315,7 @@ impl Binder {
             where_clause: selection,
             group_by,
             having,
+            window: window_definitions,
             schema: Schema { fields },
         })
     }
