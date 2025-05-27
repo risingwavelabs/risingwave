@@ -220,7 +220,6 @@ impl UuidRef<'_> {
         self.0.as_bytes().clone()
     }
 
-
     /// Serialize to protocol buffer representation.
     pub fn to_protobuf<T: std::io::Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write(&self.to_be_bytes()).map_err(Into::into)
