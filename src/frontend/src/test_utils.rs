@@ -1070,6 +1070,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn list_rate_limits(&self) -> RpcResult<Vec<RateLimitInfo>> {
         Ok(vec![])
     }
+
+    fn worker_id(&self) -> u32 {
+        0
+    }
 }
 
 #[cfg(test)]

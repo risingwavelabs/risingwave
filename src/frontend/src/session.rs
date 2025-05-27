@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -624,27 +625,13 @@ impl FrontendEnv {
     /// Cancel queries (i.e. batch queries) in session.
     /// If the session exists return true, otherwise, return false.
     pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
-        let guard = self.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_query();
-            true
-        } else {
-            info!("Current session finished, ignoring cancel query request");
-            false
-        }
+        cancel_queries_in_session(session_id, self.sessions_map.clone())
     }
 
     /// Cancel creating jobs (i.e. streaming queries) in session.
     /// If the session exists return true, otherwise, return false.
     pub fn cancel_creating_jobs_in_session(&self, session_id: SessionId) -> bool {
-        let guard = self.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_creating_job();
-            true
-        } else {
-            info!("Current session finished, ignoring cancel creating request");
-            false
-        }
+        cancel_creating_jobs_in_session(session_id, self.sessions_map.clone())
     }
 
     pub fn mem_context(&self) -> MemoryContext {
@@ -1688,5 +1675,66 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             DataType::Varchar.type_len(),
         )]),
         _ => Ok(vec![]),
+    }
+}
+
+pub struct WorkerProcessId {
+    pub worker_id: u32,
+    pub process_id: i32,
+}
+
+impl WorkerProcessId {
+    pub fn new(worker_id: u32, process_id: i32) -> Self {
+        Self {
+            worker_id,
+            process_id,
+        }
+    }
+}
+
+impl Display for WorkerProcessId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.worker_id, self.process_id)
+    }
+}
+
+impl TryFrom<String> for WorkerProcessId {
+    type Error = String;
+
+    fn try_from(worker_process_id: String) -> std::result::Result<Self, Self::Error> {
+        const INVALID: &str = "invalid WorkerProcessId";
+        let splits: Vec<&str> = worker_process_id.split(":").collect();
+        if splits.len() != 2 {
+            return Err(INVALID.to_owned());
+        }
+        let Ok(worker_id) = splits[0].parse::<u32>() else {
+            return Err(INVALID.to_owned());
+        };
+        let Ok(process_id) = splits[1].parse::<i32>() else {
+            return Err(INVALID.to_owned());
+        };
+        Ok(WorkerProcessId::new(worker_id, process_id))
+    }
+}
+
+pub fn cancel_queries_in_session(session_id: SessionId, sessions_map: SessionMapRef) -> bool {
+    let guard = sessions_map.read();
+    if let Some(session) = guard.get(&session_id) {
+        session.cancel_current_query();
+        true
+    } else {
+        info!("Current session finished, ignoring cancel query request");
+        false
+    }
+}
+
+pub fn cancel_creating_jobs_in_session(session_id: SessionId, sessions_map: SessionMapRef) -> bool {
+    let guard = sessions_map.read();
+    if let Some(session) = guard.get(&session_id) {
+        session.cancel_current_creating_job();
+        true
+    } else {
+        info!("Current session finished, ignoring cancel creating request");
+        false
     }
 }

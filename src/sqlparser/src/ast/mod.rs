@@ -1432,7 +1432,7 @@ pub enum Statement {
     CancelJobs(JobIdents),
     /// KILL COMMAND
     /// Kill process in the show processlist.
-    Kill(i32),
+    Kill(String),
     /// DROP
     Drop(DropStatement),
     /// DROP FUNCTION
@@ -2159,8 +2159,8 @@ impl fmt::Display for Statement {
                 write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
                 Ok(())
             }
-            Statement::Kill(process_id) => {
-                write!(f, "KILL {}", process_id)?;
+            Statement::Kill(worker_process_id) => {
+                write!(f, "KILL '{}'", worker_process_id)?;
                 Ok(())
             }
             Statement::Recover => {

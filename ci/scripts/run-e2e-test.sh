@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
