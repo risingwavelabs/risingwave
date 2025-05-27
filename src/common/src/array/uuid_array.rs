@@ -126,8 +126,7 @@ impl ArrayBuilder for UuidArrayBuilder {
             }
             None => {
                 self.bitmap.append_n(n, false);
-                self.data
-                    .extend(std::iter::repeat_n(uuid::Uuid::nil(), n));
+                self.data.extend(std::iter::repeat_n(uuid::Uuid::nil(), n));
             }
         }
     }
