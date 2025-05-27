@@ -117,12 +117,12 @@ def init_benchmark(bench_name: str):
     """Initialize a new benchmark with the YAML template."""
     benchmark_dir = Path("benchmarks")
     benchmark_dir.mkdir(exist_ok=True)
-    
+
     benchmark_file = benchmark_dir / f"{bench_name}.yaml"
     if benchmark_file.exists():
         print(f"Error: Benchmark '{bench_name}' already exists")
         sys.exit(1)
-    
+
     benchmark_file.write_text(BENCHMARK_TEMPLATE.lstrip())
     print(f"Created benchmark configuration: {benchmark_file}")
 
@@ -160,7 +160,7 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
         # Run benchmark
         print(f"\nRunning benchmark: {bench_name}")
         print("=" * 50)
-        
+
         result = subprocess.run(
             str(script_file),
             shell=True,
@@ -172,7 +172,7 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
 
         # Always print the benchmark results
         print(result.stdout)
-        
+
         # Only print errors if dump_output is True
         if dump_output and result.stderr:
             print("Errors:", file=sys.stderr)
