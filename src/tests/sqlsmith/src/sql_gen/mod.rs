@@ -16,7 +16,7 @@
 //! and the interface for generating
 //! stream (MATERIALIZED VIEW) and batch query statements.
 
-use std::vec;
+use std::{collections::HashSet, vec};
 
 use rand::Rng;
 use risingwave_common::types::DataType;
@@ -331,6 +331,21 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         can_recurse
     }
 
+
+    pub(crate) fn get_columns_with_watermark(&mut self, columns: &[Column]) -> Vec<Column> {
+        let watermark_names: HashSet<_> = self
+            .get_append_only_tables()
+            .iter()
+            .flat_map(|t| t.source_watermarks.iter().map(|wm| wm.column.real_value()))
+            .collect();
+
+        columns
+            .iter()
+            .filter(|c| watermark_names.contains(&c.name))
+            .cloned()
+            .collect()
+    }
+    
     pub(crate) fn get_append_only_tables(&mut self) -> Vec<Table> {
         self.tables
             .iter()
