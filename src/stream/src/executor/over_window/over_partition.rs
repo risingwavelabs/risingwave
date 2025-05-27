@@ -27,6 +27,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{Datum, Sentinelled};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_expr::window_function::{StateKey, WindowStates, create_window_state};
 use risingwave_storage::StateStore;
@@ -52,190 +53,337 @@ pub(super) type CacheKey = Sentinelled<StateKey>;
 /// This means it's impossible to only have one sentinel in the cache without any normal entry,
 /// and, each of the two types of sentinel can only appear once. Also, since sentinels are either
 /// smallest or largest, they always appear at the beginning or the end of the cache.
-pub(super) type PartitionCache = EstimatedBTreeMap<CacheKey, OwnedRow>;
-
-/// Changes happened in one over window partition.
-pub(super) type PartitionDelta = BTreeMap<CacheKey, Change<OwnedRow>>;
-
-pub(super) fn new_empty_partition_cache() -> PartitionCache {
-    let mut cache = PartitionCache::new();
-    cache.insert(CacheKey::Smallest, OwnedRow::empty());
-    cache.insert(CacheKey::Largest, OwnedRow::empty());
-    cache
+#[derive(Clone, Debug, Default)]
+pub(super) struct PartitionCache {
+    inner: EstimatedBTreeMap<CacheKey, OwnedRow>,
 }
 
-const MAGIC_CACHE_SIZE: usize = 1024;
-const MAGIC_JITTER_PREVENTION: usize = MAGIC_CACHE_SIZE / 8;
-
-pub(super) fn shrink_partition_cache(
-    deduped_part_key: &OwnedRow,
-    range_cache: &mut PartitionCache,
-    cache_policy: CachePolicy,
-    recently_accessed_range: RangeInclusive<StateKey>,
-) {
-    tracing::trace!(
-        partition=?deduped_part_key,
-        cache_policy=?cache_policy,
-        recently_accessed_range=?recently_accessed_range,
-        "find the range to retain in the range cache"
-    );
-
-    let (start, end) = match cache_policy {
-        CachePolicy::Full => {
-            // evict nothing if the policy is to cache full partition
-            return;
+impl PartitionCache {
+    /// Create a new empty partition cache without sentinel values.
+    fn new_without_sentinels() -> Self {
+        Self {
+            inner: EstimatedBTreeMap::new(),
         }
-        CachePolicy::Recent => {
-            let (sk_start, sk_end) = recently_accessed_range.into_inner();
-            let (ck_start, ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
+    }
 
-            // find the cursor just before `ck_start`
-            let mut cursor = range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
-            for _ in 0..MAGIC_JITTER_PREVENTION {
-                if cursor.prev().is_none() {
-                    // already at the beginning
-                    break;
-                }
-            }
-            let start = cursor
-                .peek_prev()
-                .map(|(k, _)| k)
-                .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
-                .clone();
+    /// Create a new empty partition cache with sentinel values.
+    pub fn new() -> Self {
+        let mut cache = Self::new_without_sentinels();
+        cache.insert(CacheKey::Smallest, OwnedRow::empty());
+        cache.insert(CacheKey::Largest, OwnedRow::empty());
+        cache
+    }
 
-            // find the cursor just after `ck_end`
-            let mut cursor = range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
-            for _ in 0..MAGIC_JITTER_PREVENTION {
-                if cursor.next().is_none() {
-                    // already at the end
-                    break;
-                }
-            }
-            let end = cursor
-                .peek_next()
-                .map(|(k, _)| k)
-                .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
-                .clone();
+    /// Get access to the inner `BTreeMap` for cursor operations.
+    pub fn inner(&self) -> &BTreeMap<CacheKey, OwnedRow> {
+        self.inner.inner()
+    }
 
-            (start, end)
+    /// Insert a key-value pair into the cache.
+    pub fn insert(&mut self, key: CacheKey, value: OwnedRow) -> Option<OwnedRow> {
+        self.inner.insert(key, value)
+    }
+
+    /// Remove a key from the cache.
+    pub fn remove(&mut self, key: &CacheKey) -> Option<OwnedRow> {
+        self.inner.remove(key)
+    }
+
+    /// Get the number of entries in the cache.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Check if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Get the first key-value pair in the cache.
+    pub fn first_key_value(&self) -> Option<(&CacheKey, &OwnedRow)> {
+        self.inner.first_key_value()
+    }
+
+    /// Get the last key-value pair in the cache.
+    pub fn last_key_value(&self) -> Option<(&CacheKey, &OwnedRow)> {
+        self.inner.last_key_value()
+    }
+
+    /// Retain entries in the given range, removing others.
+    /// Returns (left_removed, right_removed) where sentinels are filtered out.
+    /// Sentinels are preserved in the cache.
+    fn retain_range(
+        &mut self,
+        range: RangeInclusive<&CacheKey>,
+    ) -> (BTreeMap<CacheKey, OwnedRow>, BTreeMap<CacheKey, OwnedRow>) {
+        // Check if we had sentinels before the operation
+        let had_smallest = self.inner.inner().contains_key(&CacheKey::Smallest);
+        let had_largest = self.inner.inner().contains_key(&CacheKey::Largest);
+
+        let (left_removed, right_removed) = self.inner.retain_range(range);
+
+        // Restore sentinels if they were present before
+        if had_smallest {
+            self.inner.insert(CacheKey::Smallest, OwnedRow::empty());
         }
-        CachePolicy::RecentFirstN => {
-            if range_cache.len() <= MAGIC_CACHE_SIZE {
-                // no need to evict if cache len <= N
+        if had_largest {
+            self.inner.insert(CacheKey::Largest, OwnedRow::empty());
+        }
+
+        // Filter out sentinels from the returned maps
+        let left_removed = left_removed
+            .into_iter()
+            .filter(|(k, _)| k.is_normal())
+            .collect();
+        let right_removed = right_removed
+            .into_iter()
+            .filter(|(k, _)| k.is_normal())
+            .collect();
+
+        (left_removed, right_removed)
+    }
+
+    /// Get an iterator over the cache entries.
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (&CacheKey, &OwnedRow)> {
+        self.inner.iter()
+    }
+
+    /// Get the number of cached `Sentinel::Normal` entries.
+    pub fn normal_len(&self) -> usize {
+        let len = self.inner().len();
+        if len <= 1 {
+            debug_assert!(
+                self.inner()
+                    .first_key_value()
+                    .map(|(k, _)| k.is_normal())
+                    .unwrap_or(true)
+            );
+            return len;
+        }
+        // len >= 2
+        let cache_inner = self.inner();
+        let sentinels = [
+            // sentinels only appear at the beginning and/or the end
+            cache_inner.first_key_value().unwrap().0.is_sentinel(),
+            cache_inner.last_key_value().unwrap().0.is_sentinel(),
+        ];
+        len - sentinels.into_iter().filter(|x| *x).count()
+    }
+
+    /// Get the first normal key in the cache, if any.
+    pub fn first_normal_key(&self) -> Option<&StateKey> {
+        self.inner()
+            .iter()
+            .find(|(k, _)| k.is_normal())
+            .map(|(k, _)| k.as_normal_expect())
+    }
+
+    /// Get the last normal key in the cache, if any.
+    pub fn last_normal_key(&self) -> Option<&StateKey> {
+        self.inner()
+            .iter()
+            .rev()
+            .find(|(k, _)| k.is_normal())
+            .map(|(k, _)| k.as_normal_expect())
+    }
+
+    /// Whether the leftmost entry is a sentinel.
+    pub fn left_is_sentinel(&self) -> bool {
+        self.first_key_value()
+            .map(|(k, _)| k.is_sentinel())
+            .unwrap_or(false)
+    }
+
+    /// Whether the rightmost entry is a sentinel.
+    pub fn right_is_sentinel(&self) -> bool {
+        self.last_key_value()
+            .map(|(k, _)| k.is_sentinel())
+            .unwrap_or(false)
+    }
+
+    /// Shrink the partition cache based on the given policy and recently accessed range.
+    pub fn shrink(
+        &mut self,
+        deduped_part_key: &OwnedRow,
+        cache_policy: CachePolicy,
+        recently_accessed_range: RangeInclusive<StateKey>,
+    ) {
+        const MAGIC_CACHE_SIZE: usize = 1024;
+        const MAGIC_JITTER_PREVENTION: usize = MAGIC_CACHE_SIZE / 8;
+
+        tracing::trace!(
+            partition=?deduped_part_key,
+            cache_policy=?cache_policy,
+            recently_accessed_range=?recently_accessed_range,
+            "find the range to retain in the range cache"
+        );
+
+        let (start, end) = match cache_policy {
+            CachePolicy::Full => {
+                // evict nothing if the policy is to cache full partition
                 return;
-            } else {
-                let (sk_start, _sk_end) = recently_accessed_range.into_inner();
-                let ck_start = CacheKey::from(sk_start);
-
-                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is the first
-                const_assert!(MAGIC_JITTER_PREVENTION < MAGIC_CACHE_SIZE);
+            }
+            CachePolicy::Recent => {
+                let (sk_start, sk_end) = recently_accessed_range.into_inner();
+                let (ck_start, ck_end) = (CacheKey::from(sk_start), CacheKey::from(sk_end));
 
                 // find the cursor just before `ck_start`
-                let cursor_just_before_ck_start =
-                    range_cache.inner().upper_bound(Bound::Excluded(&ck_start));
-
-                let mut cursor = cursor_just_before_ck_start.clone();
-                // go back for at most `MAGIC_JITTER_PREVENTION` entries
+                let mut cursor = self.inner().upper_bound(Bound::Excluded(&ck_start));
                 for _ in 0..MAGIC_JITTER_PREVENTION {
                     if cursor.prev().is_none() {
                         // already at the beginning
                         break;
                     }
-                    capacity_remain -= 1;
                 }
                 let start = cursor
                     .peek_prev()
                     .map(|(k, _)| k)
-                    .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
+                    .unwrap_or_else(|| self.first_key_value().unwrap().0)
                     .clone();
-
-                let mut cursor = cursor_just_before_ck_start;
-                // go forward for at most `capacity_remain` entries
-                for _ in 0..capacity_remain {
-                    if cursor.next().is_none() {
-                        // already at the end
-                        break;
-                    }
-                }
-                let end = cursor
-                    .peek_next()
-                    .map(|(k, _)| k)
-                    .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
-                    .clone();
-
-                (start, end)
-            }
-        }
-        CachePolicy::RecentLastN => {
-            if range_cache.len() <= MAGIC_CACHE_SIZE {
-                // no need to evict if cache len <= N
-                return;
-            } else {
-                let (_sk_start, sk_end) = recently_accessed_range.into_inner();
-                let ck_end = CacheKey::from(sk_end);
-
-                let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is the first
-                const_assert!(MAGIC_JITTER_PREVENTION < MAGIC_CACHE_SIZE);
 
                 // find the cursor just after `ck_end`
-                let cursor_just_after_ck_end =
-                    range_cache.inner().lower_bound(Bound::Excluded(&ck_end));
-
-                let mut cursor = cursor_just_after_ck_end.clone();
-                // go forward for at most `MAGIC_JITTER_PREVENTION` entries
+                let mut cursor = self.inner().lower_bound(Bound::Excluded(&ck_end));
                 for _ in 0..MAGIC_JITTER_PREVENTION {
                     if cursor.next().is_none() {
                         // already at the end
                         break;
                     }
-                    capacity_remain -= 1;
                 }
                 let end = cursor
                     .peek_next()
                     .map(|(k, _)| k)
-                    .unwrap_or_else(|| range_cache.last_key_value().unwrap().0)
-                    .clone();
-
-                let mut cursor = cursor_just_after_ck_end;
-                // go back for at most `capacity_remain` entries
-                for _ in 0..capacity_remain {
-                    if cursor.prev().is_none() {
-                        // already at the beginning
-                        break;
-                    }
-                }
-                let start = cursor
-                    .peek_prev()
-                    .map(|(k, _)| k)
-                    .unwrap_or_else(|| range_cache.first_key_value().unwrap().0)
+                    .unwrap_or_else(|| self.last_key_value().unwrap().0)
                     .clone();
 
                 (start, end)
             }
-        }
-    };
+            CachePolicy::RecentFirstN => {
+                if self.len() <= MAGIC_CACHE_SIZE {
+                    // no need to evict if cache len <= N
+                    return;
+                } else {
+                    let (sk_start, _sk_end) = recently_accessed_range.into_inner();
+                    let ck_start = CacheKey::from(sk_start);
 
-    tracing::trace!(
-        partition=?deduped_part_key,
-        retain_range=?(&start..=&end),
-        "retain range in the range cache"
-    );
+                    let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is the first
+                    const_assert!(MAGIC_JITTER_PREVENTION < MAGIC_CACHE_SIZE);
 
-    let (left_removed, right_removed) = range_cache.retain_range(&start..=&end);
-    if range_cache.is_empty() {
-        if !left_removed.is_empty() || !right_removed.is_empty() {
-            range_cache.insert(CacheKey::Smallest, OwnedRow::empty());
-            range_cache.insert(CacheKey::Largest, OwnedRow::empty());
-        }
-    } else {
-        if !left_removed.is_empty() {
-            range_cache.insert(CacheKey::Smallest, OwnedRow::empty());
-        }
-        if !right_removed.is_empty() {
-            range_cache.insert(CacheKey::Largest, OwnedRow::empty());
+                    // find the cursor just before `ck_start`
+                    let cursor_just_before_ck_start =
+                        self.inner().upper_bound(Bound::Excluded(&ck_start));
+
+                    let mut cursor = cursor_just_before_ck_start.clone();
+                    // go back for at most `MAGIC_JITTER_PREVENTION` entries
+                    for _ in 0..MAGIC_JITTER_PREVENTION {
+                        if cursor.prev().is_none() {
+                            // already at the beginning
+                            break;
+                        }
+                        capacity_remain -= 1;
+                    }
+                    let start = cursor
+                        .peek_prev()
+                        .map(|(k, _)| k)
+                        .unwrap_or_else(|| self.first_key_value().unwrap().0)
+                        .clone();
+
+                    let mut cursor = cursor_just_before_ck_start;
+                    // go forward for at most `capacity_remain` entries
+                    for _ in 0..capacity_remain {
+                        if cursor.next().is_none() {
+                            // already at the end
+                            break;
+                        }
+                    }
+                    let end = cursor
+                        .peek_next()
+                        .map(|(k, _)| k)
+                        .unwrap_or_else(|| self.last_key_value().unwrap().0)
+                        .clone();
+
+                    (start, end)
+                }
+            }
+            CachePolicy::RecentLastN => {
+                if self.len() <= MAGIC_CACHE_SIZE {
+                    // no need to evict if cache len <= N
+                    return;
+                } else {
+                    let (_sk_start, sk_end) = recently_accessed_range.into_inner();
+                    let ck_end = CacheKey::from(sk_end);
+
+                    let mut capacity_remain = MAGIC_CACHE_SIZE; // precision is not important here, code simplicity is the first
+                    const_assert!(MAGIC_JITTER_PREVENTION < MAGIC_CACHE_SIZE);
+
+                    // find the cursor just after `ck_end`
+                    let cursor_just_after_ck_end =
+                        self.inner().lower_bound(Bound::Excluded(&ck_end));
+
+                    let mut cursor = cursor_just_after_ck_end.clone();
+                    // go forward for at most `MAGIC_JITTER_PREVENTION` entries
+                    for _ in 0..MAGIC_JITTER_PREVENTION {
+                        if cursor.next().is_none() {
+                            // already at the end
+                            break;
+                        }
+                        capacity_remain -= 1;
+                    }
+                    let end = cursor
+                        .peek_next()
+                        .map(|(k, _)| k)
+                        .unwrap_or_else(|| self.last_key_value().unwrap().0)
+                        .clone();
+
+                    let mut cursor = cursor_just_after_ck_end;
+                    // go back for at most `capacity_remain` entries
+                    for _ in 0..capacity_remain {
+                        if cursor.prev().is_none() {
+                            // already at the beginning
+                            break;
+                        }
+                    }
+                    let start = cursor
+                        .peek_prev()
+                        .map(|(k, _)| k)
+                        .unwrap_or_else(|| self.first_key_value().unwrap().0)
+                        .clone();
+
+                    (start, end)
+                }
+            }
+        };
+
+        tracing::trace!(
+            partition=?deduped_part_key,
+            retain_range=?(&start..=&end),
+            "retain range in the range cache"
+        );
+
+        let (left_removed, right_removed) = self.retain_range(&start..=&end);
+        if self.is_empty() {
+            if !left_removed.is_empty() || !right_removed.is_empty() {
+                self.insert(CacheKey::Smallest, OwnedRow::empty());
+                self.insert(CacheKey::Largest, OwnedRow::empty());
+            }
+        } else {
+            if !left_removed.is_empty() {
+                self.insert(CacheKey::Smallest, OwnedRow::empty());
+            }
+            if !right_removed.is_empty() {
+                self.insert(CacheKey::Largest, OwnedRow::empty());
+            }
         }
     }
 }
+
+impl EstimateSize for PartitionCache {
+    fn estimated_heap_size(&self) -> usize {
+        self.inner.estimated_heap_size()
+    }
+}
+
+/// Changes happened in one over window partition.
+pub(super) type PartitionDelta = BTreeMap<CacheKey, Change<OwnedRow>>;
 
 #[derive(Default, Debug)]
 pub(super) struct OverPartitionStats {
@@ -334,56 +482,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
     /// Get the number of cached entries ignoring sentinels.
     pub fn cache_real_len(&self) -> usize {
-        let len = self.range_cache.inner().len();
-        if len <= 1 {
-            debug_assert!(
-                self.range_cache
-                    .inner()
-                    .first_key_value()
-                    .map(|(k, _)| k.is_normal())
-                    .unwrap_or(true)
-            );
-            return len;
-        }
-        // len >= 2
-        let cache_inner = self.range_cache.inner();
-        let sentinels = [
-            // sentinels only appear at the beginning and/or the end
-            cache_inner.first_key_value().unwrap().0.is_sentinel(),
-            cache_inner.last_key_value().unwrap().0.is_sentinel(),
-        ];
-        len - sentinels.into_iter().filter(|x| *x).count()
-    }
-
-    fn cache_real_first_key(&self) -> Option<&StateKey> {
-        self.range_cache
-            .inner()
-            .iter()
-            .find(|(k, _)| k.is_normal())
-            .map(|(k, _)| k.as_normal_expect())
-    }
-
-    fn cache_real_last_key(&self) -> Option<&StateKey> {
-        self.range_cache
-            .inner()
-            .iter()
-            .rev()
-            .find(|(k, _)| k.is_normal())
-            .map(|(k, _)| k.as_normal_expect())
-    }
-
-    fn cache_left_is_sentinel(&self) -> bool {
-        self.range_cache
-            .first_key_value()
-            .map(|(k, _)| k.is_sentinel())
-            .unwrap_or(false)
-    }
-
-    fn cache_right_is_sentinel(&self) -> bool {
-        self.range_cache
-            .last_key_value()
-            .map(|(k, _)| k.is_sentinel())
-            .unwrap_or(false)
+        self.range_cache.normal_len()
     }
 
     /// Build changes for the partition, with the given `delta`. Necessary maintenance of the range
@@ -585,7 +684,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             Record::Delete { .. } => {
                 self.range_cache.remove(&CacheKey::from(key));
 
-                if self.cache_real_len() == 0 && self.range_cache.len() == 1 {
+                if self.range_cache.normal_len() == 0 && self.range_cache.len() == 1 {
                     // only one sentinel remains, should insert the other
                     self.range_cache
                         .insert(CacheKey::Smallest, OwnedRow::empty());
@@ -648,13 +747,21 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             if need_extend_leftward {
                 self.stats.left_miss_count += 1;
                 tracing::trace!(partition=?self.deduped_part_key, "partition cache left extension triggered");
-                let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
+                let left_most = self
+                    .range_cache
+                    .first_normal_key()
+                    .unwrap_or(delta_first)
+                    .clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if need_extend_rightward {
                 self.stats.right_miss_count += 1;
                 tracing::trace!(partition=?self.deduped_part_key, "partition cache right extension triggered");
-                let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
+                let right_most = self
+                    .range_cache
+                    .last_normal_key()
+                    .unwrap_or(delta_last)
+                    .clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
             tracing::trace!(partition=?self.deduped_part_key, "partition cache extended");
@@ -909,14 +1016,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         &mut self,
         table: &StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        if self.cache_real_len() == self.range_cache.len() {
+        if self.range_cache.normal_len() == self.range_cache.len() {
             // no sentinel in the cache, meaning we already cached all entries of this partition
             return Ok(());
         }
 
         tracing::trace!(partition=?self.deduped_part_key, "loading the whole partition into cache");
 
-        let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
+        let mut new_cache = PartitionCache::new_without_sentinels(); // shouldn't use `new` here because we are extending to boundary
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
             .iter_with_prefix(self.deduped_part_key, sub_range, PrefetchOptions::default())
@@ -940,27 +1047,27 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         table: &StateTable<S>,
         range: RangeInclusive<&StateKey>,
     ) -> StreamExecutorResult<()> {
-        if self.cache_real_len() == self.range_cache.len() {
+        if self.range_cache.normal_len() == self.range_cache.len() {
             // no sentinel in the cache, meaning we already cached all entries of this partition
             return Ok(());
         }
         assert!(self.range_cache.len() >= 2);
 
-        let cache_real_first_key = self.cache_real_first_key();
-        let cache_real_last_key = self.cache_real_last_key();
+        let cache_first_normal_key = self.range_cache.first_normal_key();
+        let cache_last_normal_key = self.range_cache.last_normal_key();
 
-        if cache_real_first_key.is_some() && *range.end() < cache_real_first_key.unwrap()
-            || cache_real_last_key.is_some() && *range.start() > cache_real_last_key.unwrap()
+        if cache_first_normal_key.is_some() && *range.end() < cache_first_normal_key.unwrap()
+            || cache_last_normal_key.is_some() && *range.start() > cache_last_normal_key.unwrap()
         {
             // completely not overlapping, for the sake of simplicity, we re-init the cache
             tracing::debug!(
                 partition=?self.deduped_part_key,
-                cache_first=?cache_real_first_key,
-                cache_last=?cache_real_last_key,
+                cache_first=?cache_first_normal_key,
+                cache_last=?cache_last_normal_key,
                 range=?range,
                 "modified range is completely non-overlapping with the cached range, re-initializing the cache"
             );
-            *self.range_cache = new_empty_partition_cache();
+            *self.range_cache = PartitionCache::new();
         }
 
         if self.cache_real_len() == 0 {
@@ -980,9 +1087,10 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         let cache_real_first_key = self
-            .cache_real_first_key()
+            .range_cache
+            .first_normal_key()
             .expect("cache real len is not 0");
-        if self.cache_left_is_sentinel() && *range.start() < cache_real_first_key {
+        if self.range_cache.left_is_sentinel() && *range.start() < cache_real_first_key {
             // extend leftward only if there's smallest sentinel
             let table_sub_range = (
                 Bound::Included(self.row_conv.state_key_to_table_sub_pk(range.start())?),
@@ -1000,8 +1108,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .await?;
         }
 
-        let cache_real_last_key = self.cache_real_last_key().expect("cache real len is not 0");
-        if self.cache_right_is_sentinel() && *range.end() > cache_real_last_key {
+        let cache_real_last_key = self
+            .range_cache
+            .last_normal_key()
+            .expect("cache real len is not 0");
+        if self.range_cache.right_is_sentinel() && *range.end() > cache_real_last_key {
             // extend rightward only if there's largest sentinel
             let table_sub_range = (
                 Bound::Excluded(
@@ -1032,7 +1143,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         table: &StateTable<S>,
         hint_key: &StateKey,
     ) -> StreamExecutorResult<()> {
-        if self.cache_real_len() == self.range_cache.len() {
+        if self.range_cache.normal_len() == self.range_cache.len() {
             // no sentinel in the cache, meaning we already cached all entries of this partition
             return Ok(());
         }
@@ -1077,7 +1188,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         table: &StateTable<S>,
         hint_key: &StateKey,
     ) -> StreamExecutorResult<()> {
-        if self.cache_real_len() == self.range_cache.len() {
+        if self.range_cache.normal_len() == self.range_cache.len() {
             // no sentinel in the cache, meaning we already cached all entries of this partition
             return Ok(());
         }
@@ -1226,5 +1337,255 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
+    use risingwave_common::types::{DefaultOrdered, ScalarImpl};
+    use risingwave_common::util::memcmp_encoding::encode_value;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::window_function::StateKey;
+
+    use super::*;
+
+    fn create_test_state_key(value: i32) -> StateKey {
+        let row = OwnedRow::new(vec![Some(ScalarImpl::Int32(value))]);
+        StateKey {
+            order_key: encode_value(Some(ScalarImpl::Int32(value)), OrderType::ascending())
+                .unwrap(),
+            pk: DefaultOrdered::new(row),
+        }
+    }
+
+    fn create_test_cache_key(value: i32) -> CacheKey {
+        CacheKey::from(create_test_state_key(value))
+    }
+
+    fn create_test_row(value: i32) -> OwnedRow {
+        OwnedRow::new(vec![Some(ScalarImpl::Int32(value))])
+    }
+
+    #[test]
+    fn test_partition_cache_new() {
+        let cache = PartitionCache::new_without_sentinels();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_partition_cache_new_with_sentinels() {
+        let cache = PartitionCache::new();
+        assert!(!cache.is_empty());
+        assert_eq!(cache.len(), 2);
+
+        // Should have smallest and largest sentinels
+        let first = cache.first_key_value().unwrap();
+        let last = cache.last_key_value().unwrap();
+
+        assert_eq!(*first.0, CacheKey::Smallest);
+        assert_eq!(*last.0, CacheKey::Largest);
+    }
+
+    #[test]
+    fn test_partition_cache_insert_and_remove() {
+        let mut cache = PartitionCache::new_without_sentinels();
+        let key = create_test_cache_key(1);
+        let value = create_test_row(100);
+
+        // Insert
+        assert!(cache.insert(key.clone(), value.clone()).is_none());
+        assert_eq!(cache.len(), 1);
+        assert!(!cache.is_empty());
+
+        // Remove
+        let removed = cache.remove(&key);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap(), value);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_partition_cache_first_last_key_value() {
+        let mut cache = PartitionCache::new_without_sentinels();
+
+        // Empty cache
+        assert!(cache.first_key_value().is_none());
+        assert!(cache.last_key_value().is_none());
+
+        // Add some entries
+        cache.insert(create_test_cache_key(2), create_test_row(200));
+        cache.insert(create_test_cache_key(1), create_test_row(100));
+        cache.insert(create_test_cache_key(3), create_test_row(300));
+
+        let first = cache.first_key_value().unwrap();
+        let last = cache.last_key_value().unwrap();
+
+        // BTreeMap should order by key
+        assert_eq!(*first.0, create_test_cache_key(1));
+        assert_eq!(*first.1, create_test_row(100));
+
+        assert_eq!(*last.0, create_test_cache_key(3));
+        assert_eq!(*last.1, create_test_row(300));
+    }
+
+    #[test]
+    fn test_partition_cache_retain_range() {
+        let mut cache = PartitionCache::new();
+
+        // Add some entries
+        for i in 1..=5 {
+            cache.insert(create_test_cache_key(i), create_test_row(i * 100));
+        }
+
+        assert_eq!(cache.len(), 7); // 5 normal entries + 2 sentinels
+
+        // Retain range [2, 4]
+        let start = create_test_cache_key(2);
+        let end = create_test_cache_key(4);
+        let (left_removed, right_removed) = cache.retain_range(&start..=&end);
+
+        // Should have removed key 1 on the left and key 5 on the right
+        assert_eq!(left_removed.len(), 1);
+        assert_eq!(right_removed.len(), 1);
+        assert!(left_removed.contains_key(&create_test_cache_key(1)));
+        assert!(right_removed.contains_key(&create_test_cache_key(5)));
+
+        // Cache should now contain keys 2, 3, 4 plus sentinels
+        assert_eq!(cache.len(), 5);
+        for i in 2..=4 {
+            let key = create_test_cache_key(i);
+            assert!(cache.iter().any(|(k, _)| *k == key));
+        }
+    }
+
+    #[test]
+    fn test_partition_cache_iter() {
+        let mut cache = PartitionCache::new();
+
+        // Add entries in non-sorted order
+        cache.insert(create_test_cache_key(3), create_test_row(300));
+        cache.insert(create_test_cache_key(1), create_test_row(100));
+        cache.insert(create_test_cache_key(2), create_test_row(200));
+
+        // Iterator should return entries in sorted order
+        let entries: Vec<_> = cache.iter().collect();
+        assert_eq!(entries.len(), 5); // 3 normal entries + 2 sentinels
+        assert_eq!(entries[0].0, &CacheKey::Smallest);
+        assert_eq!(entries[1].0, &create_test_cache_key(1));
+        assert_eq!(entries[2].0, &create_test_cache_key(2));
+        assert_eq!(entries[3].0, &create_test_cache_key(3));
+        assert_eq!(entries[4].0, &CacheKey::Largest);
+    }
+
+    #[test]
+    fn test_partition_cache_shrink_full_policy() {
+        let mut cache = PartitionCache::new();
+
+        // Add many entries
+        for i in 1..=10 {
+            cache.insert(create_test_cache_key(i), create_test_row(i * 100));
+        }
+
+        let initial_len = cache.len();
+        let deduped_part_key = OwnedRow::empty();
+        let recently_accessed_range = create_test_state_key(3)..=create_test_state_key(7);
+
+        // Full policy should not shrink anything
+        cache.shrink(
+            &deduped_part_key,
+            CachePolicy::Full,
+            recently_accessed_range,
+        );
+
+        assert_eq!(cache.len(), initial_len);
+    }
+
+    #[test]
+    fn test_partition_cache_shrink_recent_policy() {
+        let mut cache = PartitionCache::new();
+
+        // Add entries
+        for i in 1..=10 {
+            cache.insert(create_test_cache_key(i), create_test_row(i * 100));
+        }
+
+        let deduped_part_key = OwnedRow::empty();
+        let recently_accessed_range = create_test_state_key(4)..=create_test_state_key(6);
+
+        // Recent policy should keep entries around the accessed range
+        cache.shrink(
+            &deduped_part_key,
+            CachePolicy::Recent,
+            recently_accessed_range,
+        );
+
+        // Cache should still contain the accessed range and some nearby entries
+        let remaining_keys: Vec<_> = cache
+            .iter()
+            .filter_map(|(k, _)| match k {
+                CacheKey::Normal(state_key) => Some(state_key),
+                _ => None,
+            })
+            .collect();
+
+        // Should contain at least the accessed range
+        for i in 4..=6 {
+            let target_key = create_test_state_key(i);
+            assert!(
+                remaining_keys
+                    .iter()
+                    .any(|k| k.order_key == target_key.order_key)
+            );
+        }
+    }
+
+    #[test]
+    fn test_partition_cache_shrink_with_small_cache() {
+        let mut cache = PartitionCache::new();
+
+        // Add only a few entries (less than MAGIC_CACHE_SIZE)
+        for i in 1..=5 {
+            cache.insert(create_test_cache_key(i), create_test_row(i * 100));
+        }
+
+        let initial_len = cache.len();
+        let deduped_part_key = OwnedRow::empty();
+        let recently_accessed_range = create_test_state_key(2)..=create_test_state_key(4);
+
+        // RecentFirstN and RecentLastN should not shrink small caches
+        cache.shrink(
+            &deduped_part_key,
+            CachePolicy::RecentFirstN,
+            recently_accessed_range.clone(),
+        );
+        assert_eq!(cache.len(), initial_len);
+
+        cache.shrink(
+            &deduped_part_key,
+            CachePolicy::RecentLastN,
+            recently_accessed_range,
+        );
+        assert_eq!(cache.len(), initial_len);
+    }
+
+    #[test]
+    fn test_partition_cache_estimate_size() {
+        let cache = PartitionCache::new_without_sentinels();
+        let size_without_sentinels = cache.estimated_heap_size();
+
+        let mut cache = PartitionCache::new();
+        let size_with_sentinels = cache.estimated_heap_size();
+
+        // Size should increase when adding entries
+        assert!(size_with_sentinels >= size_without_sentinels);
+
+        cache.insert(create_test_cache_key(1), create_test_row(100));
+        let size_with_entry = cache.estimated_heap_size();
+
+        assert!(size_with_entry > size_with_sentinels);
     }
 }

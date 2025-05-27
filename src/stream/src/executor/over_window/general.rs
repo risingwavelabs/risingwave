@@ -30,10 +30,7 @@ use risingwave_expr::window_function::{
 };
 
 use super::frame_finder::merge_rows_frames;
-use super::over_partition::{
-    CacheKey, OverPartition, PartitionCache, PartitionDelta, new_empty_partition_cache,
-    shrink_partition_cache,
-};
+use super::over_partition::{CacheKey, OverPartition, PartitionCache, PartitionDelta};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
@@ -421,7 +418,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             if !vars.cached_partitions.contains(&part_key.0) {
                 vars.stats.cache_miss += 1;
                 vars.cached_partitions
-                    .put(part_key.0.clone(), new_empty_partition_cache());
+                    .put(part_key.0.clone(), PartitionCache::new());
             }
             let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
 
@@ -688,9 +685,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             if let Some(mut range_cache) =
                                 vars.cached_partitions.get_mut(&part_key.0)
                             {
-                                shrink_partition_cache(
+                                range_cache.shrink(
                                     &part_key.0,
-                                    &mut range_cache,
                                     this.cache_policy,
                                     recently_accessed_range,
                                 );
