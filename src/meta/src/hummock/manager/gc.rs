@@ -339,7 +339,7 @@ impl HummockManager {
         // filter by metadata backup
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !pinned_by_metadata_backup.contains(s))
+            .filter(|s| !pinned_by_metadata_backup.contains(&s.as_raw()))
             .collect_vec();
         let after_metadata_backup = object_ids.len();
         // filter by time travel archive
@@ -525,7 +525,7 @@ impl HummockManager {
         };
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(s));
+            .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(&s.as_raw()));
         let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in minor GC");

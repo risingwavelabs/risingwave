@@ -105,7 +105,7 @@ impl CreateSource for DefaultCreateSource {
                 if let Some(worker_node_manager) = context.worker_node_manager() {
                     if let Some(worker) =
                         worker_node_manager
-                            .list_worker_nodes()
+                            .list_compute_nodes()
                             .iter()
                             .find(|worker| {
                                 worker

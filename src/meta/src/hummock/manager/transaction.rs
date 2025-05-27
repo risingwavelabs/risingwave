@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, FrontendHummockVersionDelta, HummockVersionId};
 use risingwave_pb::hummock::{
@@ -121,10 +122,12 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
+        vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
+        new_version_delta.vector_index_delta = vector_index_delta;
 
         for compaction_group in &new_compaction_groups {
             let group_deltas = &mut new_version_delta

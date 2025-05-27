@@ -16,9 +16,9 @@ use std::future::Future;
 
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::error::StorageResult;
-use risingwave_storage::store::{InitOptions, LocalStateStore};
+use risingwave_storage::store::{InitOptions, StateStoreWriteEpochControl};
 
-pub trait LocalStateStoreTestExt: LocalStateStore {
+pub trait LocalStateStoreTestExt: StateStoreWriteEpochControl {
     fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.init(InitOptions::new(EpochPair::new_test_epoch(epoch)))
     }
@@ -31,4 +31,4 @@ pub trait LocalStateStoreTestExt: LocalStateStore {
         self.init(InitOptions::new(EpochPair::new(epoch, prev_epoch)))
     }
 }
-impl<T: LocalStateStore> LocalStateStoreTestExt for T {}
+impl<T: StateStoreWriteEpochControl> LocalStateStoreTestExt for T {}
