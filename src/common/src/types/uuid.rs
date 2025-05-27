@@ -25,7 +25,6 @@ use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
-/// use uuid::Timestamp;
 use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
 use crate::types::{Buf, DataType, Scalar, ScalarRef, to_text};
@@ -176,11 +175,11 @@ impl Uuid {
         // For d4, we'll generate a stable value based on the string length
         let len = s.len() as u64;
         let d4_high = ((len.wrapping_mul(0x9E3779B9) >> 48) & 0xFFFF) as u16;
-        let d4_low = ((hash.wrapping_add(len)) & 0xFFFFFFFFFFFF) as u64;
+        let d4_low = (hash.wrapping_add(len)) & 0xFFFFFFFFFFFF;
 
         // Use the builder method with version and variant bits set properly
         let d3_version = (d3 & 0x0FFF) | 0x4000; // Version 4
-        let d4_variant = ((d4_high & 0x3FFF) | 0x8000) as u16; // Variant 1
+        let d4_variant = (d4_high & 0x3FFF) | 0x8000; // Variant 1
         let d4_rest = d4_low & 0xFFFFFFFFFFFF;
 
         // Combine into a byte array
@@ -217,7 +216,7 @@ impl UuidRef<'_> {
     /// Convert to raw bytes in big-endian order.
     #[inline]
     pub fn to_be_bytes(self) -> [u8; 16] {
-        self.0.as_bytes().clone()
+        *self.0.as_bytes()
     }
 
     /// Serialize to protocol buffer representation.

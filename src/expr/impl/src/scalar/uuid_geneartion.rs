@@ -14,7 +14,7 @@
 use risingwave_common::types::Uuid;
 use risingwave_expr::function;
 
-/// Generate a random UUID using the gen_random_uuid() function
+/// Generate a random UUID using the `gen_random_uuid()` function
 #[function("gen_random_uuid() -> uuid")]
 pub fn gen_random_uuid() -> Uuid {
     Uuid::new_v4()

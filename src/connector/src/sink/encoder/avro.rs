@@ -846,7 +846,7 @@ mod tests {
                 Uuid::from_str("01234567-89ab-cdef-fedc-ba9876543210").unwrap(),
             )),
             r#"{"type": "string", "logicalType": "uuid"}"#,
-            Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_string()),
+            Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_owned()),
         );
         test_ok(
             &DataType::Uuid,
@@ -1373,14 +1373,14 @@ mod tests {
             Value::Record(vec![
                 (
                     "id".into(),
-                    Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_string())
+                    Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_owned())
                 ),
                 ("name".into(), Value::String("John Doe".into())),
                 (
                     "backup_id".into(),
                     Value::Union(
                         1,
-                        Value::String("550e8400-e29b-41d4-a716-446655440000".to_string()).into()
+                        Value::String("550e8400-e29b-41d4-a716-446655440000".to_owned()).into()
                     )
                 ),
             ])
@@ -1400,7 +1400,7 @@ mod tests {
             Value::Record(vec![
                 (
                     "id".into(),
-                    Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_string())
+                    Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_owned())
                 ),
                 ("name".into(), Value::String("Jane Doe".into())),
                 ("backup_id".into(), Value::Union(0, Value::Null.into())),

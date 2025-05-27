@@ -67,11 +67,9 @@ impl Array for UuidArray {
     fn to_protobuf(&self) -> PbArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * Uuid::size());
 
-        for v in self.iter() {
-            if let Some(uuid_ref) = v {
-                let bytes = uuid_ref.to_be_bytes();
-                output_buffer.extend_from_slice(&bytes);
-            }
+        for uuid_ref in self.iter().flatten() {
+            let bytes = uuid_ref.to_be_bytes();
+            output_buffer.extend_from_slice(&bytes);
         }
 
         let buffer = Buffer {
@@ -124,12 +122,12 @@ impl ArrayBuilder for UuidArrayBuilder {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
-                self.data.extend(std::iter::repeat(*x.0).take(n));
+                self.data.extend(std::iter::repeat_n(*x.0, n));
             }
             None => {
                 self.bitmap.append_n(n, false);
                 self.data
-                    .extend(std::iter::repeat(uuid::Uuid::nil()).take(n));
+                    .extend(std::iter::repeat_n(uuid::Uuid::nil(), n));
             }
         }
     }

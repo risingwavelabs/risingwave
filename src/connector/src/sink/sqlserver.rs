@@ -695,7 +695,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
-        DataType::Uuid => return Err(data_type_not_supported("Uuid")),
+        DataType::Uuid => Err(data_type_not_supported("Uuid")),
     }
 }
 
