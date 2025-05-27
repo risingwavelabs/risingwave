@@ -37,7 +37,7 @@ python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-inline-source-test
-
+export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 # check if run debug only test
 if [ "$profile" == "ci-dev" ]; then
     echo "--- Run debug mode only tests"
