@@ -19,10 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
-use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
-    SplitMetaData, StreamChunkWithState,
-};
+use risingwave_connector::source::{BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitMetaData, StreamChunkWithState};
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
@@ -102,6 +99,8 @@ impl StreamReaderBuilder {
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,
+            SourceMuxMode::Direct,
+            None,
         );
 
         (column_ids, source_ctx)
