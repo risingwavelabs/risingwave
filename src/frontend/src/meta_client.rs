@@ -155,6 +155,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
+
+    fn worker_id(&self) -> u32;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -383,5 +385,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
+    }
+
+    fn worker_id(&self) -> u32 {
+        self.0.worker_id()
     }
 }

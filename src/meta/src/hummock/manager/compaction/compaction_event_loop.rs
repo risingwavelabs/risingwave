@@ -62,6 +62,7 @@ use super::init_selectors;
 use crate::hummock::HummockManager;
 use crate::hummock::compaction::CompactionSelector;
 use crate::hummock::error::{Error, Result};
+use crate::hummock::sequence::next_compaction_task_id;
 use crate::manager::MetaOpts;
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::rpc::metrics::MetaMetrics;
@@ -637,8 +638,18 @@ impl IcebergCompactionEventHandler {
                 .get_top_n_iceberg_commit_sink_ids(pull_task_count);
 
             for handle in iceberg_compaction_handles {
+                let compactor = compactor.clone();
                 // send iceberg commit task to compactor
-                if let Err(e) = handle.send_compact_task(compactor.clone()).await {
+                if let Err(e) = async move {
+                    handle
+                        .send_compact_task(
+                            compactor,
+                            next_compaction_task_id(&self.compaction_manager.env).await?,
+                        )
+                        .await
+                }
+                .await
+                {
                     tracing::warn!(
                         error = %e.as_report(),
                         "Failed to send iceberg commit task to {}",
