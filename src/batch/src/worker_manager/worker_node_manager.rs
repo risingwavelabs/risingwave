@@ -35,7 +35,7 @@ pub struct WorkerNodeManager {
 }
 
 struct WorkerNodeManagerInner {
-    worker_nodes: Vec<WorkerNode>,
+    worker_nodes: HashMap<u32, WorkerNode>,
     /// fragment vnode mapping info for streaming
     streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
     /// fragment vnode mapping info for serving
@@ -64,6 +64,7 @@ impl WorkerNodeManager {
 
     /// Used in tests.
     pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
+        let worker_nodes = worker_nodes.into_iter().map(|w| (w.id, w)).collect();
         let inner = RwLock::new(WorkerNodeManagerInner {
             worker_nodes,
             streaming_fragment_vnode_mapping: HashMap::new(),
@@ -80,7 +81,7 @@ impl WorkerNodeManager {
             .read()
             .unwrap()
             .worker_nodes
-            .iter()
+            .values()
             .filter(|w| w.r#type() == WorkerType::ComputeNode)
             .cloned()
             .collect()
@@ -91,7 +92,7 @@ impl WorkerNodeManager {
             .read()
             .unwrap()
             .worker_nodes
-            .iter()
+            .values()
             .filter(|w| w.r#type() == WorkerType::Frontend)
             .cloned()
             .collect()
@@ -113,25 +114,12 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        match write_guard
-            .worker_nodes
-            .iter_mut()
-            .find(|w| w.id == node.id)
-        {
-            None => {
-                // insert
-                write_guard.worker_nodes.push(node);
-            }
-            Some(w) => {
-                // update
-                *w = node;
-            }
-        }
+        write_guard.worker_nodes.insert(node.id, node);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        write_guard.worker_nodes.retain(|x| x.id != node.id);
+        write_guard.worker_nodes.remove(&node.id);
     }
 
     pub fn refresh(
@@ -150,7 +138,7 @@ impl WorkerNodeManager {
             "Refresh serving vnode mapping for fragments {:?}.",
             serving_mapping.keys()
         );
-        write_guard.worker_nodes = nodes;
+        write_guard.worker_nodes = nodes.into_iter().map(|w| (w.id, w)).collect();
         write_guard.streaming_fragment_vnode_mapping = streaming_mapping;
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
@@ -165,15 +153,10 @@ impl WorkerNodeManager {
         if worker_slot_ids.is_empty() {
             return Err(BatchError::EmptyWorkerNodes);
         }
-
         let guard = self.inner.read().unwrap();
-
-        let worker_index: HashMap<_, _> = guard.worker_nodes.iter().map(|w| (w.id, w)).collect();
-
         let mut workers = Vec::with_capacity(worker_slot_ids.len());
-
         for worker_slot_id in worker_slot_ids {
-            match worker_index.get(&worker_slot_id.worker_id()) {
+            match guard.worker_nodes.get(&worker_slot_id.worker_id()) {
                 Some(worker) => workers.push((*worker).clone()),
                 None => bail!(
                     "No worker node found for worker slot id: {}",
@@ -307,6 +290,10 @@ impl WorkerNodeManager {
                 .remove(&worker_node_id);
         });
     }
+
+    pub fn worker_node(&self, worker_id: u32) -> Option<WorkerNode> {
+        self.inner.read().unwrap().worker_node(worker_id)
+    }
 }
 
 impl WorkerNodeManagerInner {
@@ -314,6 +301,10 @@ impl WorkerNodeManagerInner {
         self.serving_fragment_vnode_mapping
             .get(&fragment_id)
             .cloned()
+    }
+
+    fn worker_node(&self, worker_id: u32) -> Option<WorkerNode> {
+        self.worker_nodes.get(&worker_id).cloned()
     }
 }
 
@@ -407,7 +398,7 @@ impl WorkerNodeSelector {
 
 #[cfg(test)]
 mod tests {
-
+    use itertools::Itertools;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node;
     use risingwave_pb::common::worker_node::Property;
@@ -456,13 +447,24 @@ mod tests {
             .for_each(|w| manager.add_worker_node(w.clone()));
         assert_eq!(manager.list_serving_worker_nodes().len(), 2);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 1);
-        assert_eq!(manager.list_compute_nodes(), worker_nodes);
+        assert_eq!(
+            manager
+                .list_compute_nodes()
+                .into_iter()
+                .sorted_by_key(|w| w.id)
+                .collect_vec(),
+            worker_nodes
+        );
 
         manager.remove_worker_node(worker_nodes[0].clone());
         assert_eq!(manager.list_serving_worker_nodes().len(), 1);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
         assert_eq!(
-            manager.list_compute_nodes(),
+            manager
+                .list_compute_nodes()
+                .into_iter()
+                .sorted_by_key(|w| w.id)
+                .collect_vec(),
             worker_nodes.as_slice()[1..].to_vec()
         );
     }

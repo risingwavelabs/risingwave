@@ -130,6 +130,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
+
+    fn worker_id(&self) -> u32;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -312,5 +314,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_meta_store_endpoint(&self) -> Result<String> {
         self.0.get_meta_store_endpoint().await
+    }
+
+    fn worker_id(&self) -> u32 {
+        self.0.worker_id()
     }
 }

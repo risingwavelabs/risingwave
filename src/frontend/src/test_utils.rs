@@ -1100,6 +1100,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
         unimplemented!()
     }
+
+    fn worker_id(&self) -> u32 {
+        0
+    }
 }
 
 #[cfg(test)]
