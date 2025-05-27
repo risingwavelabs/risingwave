@@ -34,6 +34,7 @@ use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use scopeguard::defer;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -47,8 +48,8 @@ use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SourceMuxMode, SplitId,
-    SplitImpl, SplitMetaData, SplitReader, into_chunk_stream,
+    BackfillInfo, BoxSourceChunkStream, CleanupHandle, Column, SourceContextRef, SourceMuxMode,
+    SplitId, SplitImpl, SplitMetaData, SplitReader, into_chunk_stream,
 };
 
 enum MessageReader {
@@ -291,9 +292,30 @@ impl SplitReader for KafkaSplitReader {
             }
         }
     }
+
+    fn build_drop_handle(&self) -> Box<dyn CleanupHandle> {
+        todo!()
+    }
 }
 
 impl KafkaSplitReader {
+    pub fn build_drop_handle(&self) -> DropHandle {
+        // capture (topic, partition) pairs
+        let splits = self
+            .splits
+            .iter()
+            .map(|s| (s.topic.clone(), s.partition))
+            .collect();
+
+        DropHandle {
+            splits,
+            reader: match &self.message_reader {
+                MessageReader::Consumer(_) => None,
+                MessageReader::MuxReader { reader, .. } => Some(reader.clone()),
+            },
+        }
+    }
+
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
@@ -419,5 +441,38 @@ impl KafkaSplitReader {
             // every `MAX_CHUNK_SIZE`.
         }
         tracing::info!("kafka reader finished");
+    }
+}
+
+/// A handle that can be used to unregister splits when you want to clean up early.
+/// Calling `close()` will perform the unregistration. If dropped without calling
+/// `close()`, it will automatically unregister in a background task.
+pub struct DropHandle {
+    splits: Vec<(String, i32)>,
+    reader: Option<Arc<KafkaMuxReader>>,
+}
+
+impl DropHandle {
+    /// Explicitly unregister and close. Consumes the handle.
+    pub async fn close(self) -> anyhow::Result<()> {
+        if let Some(reader) = &self.reader {
+            reader.unregister_splits(&self.splits).await
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for DropHandle {
+    fn drop(&mut self) {
+        // // Fire-and-forget cleanup if not closed explicitly.
+        // let splits = self.splits.clone();
+        // let reader = Arc::clone(&self.reader);
+        // tokio::spawn(async move {
+        //     if let Err(e) = reader.unregister_splits(&splits).await {
+        //         tracing::warn!("failed automatic unregister_splits: {}", e);
+        //     }
+        // });
+        todo!()
     }
 }
