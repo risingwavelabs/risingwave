@@ -166,6 +166,7 @@ stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
 stream_chunk_size = 256
+stream_kafka_max_fd_count = 40000
 stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
 stream_exchange_concurrent_barriers = 1
