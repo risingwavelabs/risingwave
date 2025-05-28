@@ -34,6 +34,7 @@ use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
+use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -45,7 +46,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{FragmentTypeFlag, PbFragmentTypeFlag, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
-use risingwave_sqlparser::ast::{SqlOption, Statement};
+use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
@@ -1612,6 +1613,7 @@ impl CatalogController {
         &self,
         sink_id: SinkId,
         props: BTreeMap<String, String>,
+        object_type: risingwave_pb::meta::alter_connector_props_request::ObjectType,
     ) -> MetaResult<HashMap<String, String>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1658,10 +1660,8 @@ impl CatalogController {
             .map_err(|e| SinkError::Config(anyhow!(e)))?
             .try_into()
             .unwrap();
-        if let Statement::CreateSink { stmt } = &mut stmt {
-            let mut new_sql_options = stmt
-                .with_properties
-                .0
+        let update_stmt = |with_properties: &mut Vec<SqlOption>| -> MetaResult<()> {
+            let mut new_sql_options = with_properties
                 .iter()
                 .map(|sql_option| (&sql_option.name, sql_option))
                 .collect::<IndexMap<_, _>>();
@@ -1675,20 +1675,67 @@ impl CatalogController {
                     .iter()
                     .map(|sql_option| (&sql_option.name, sql_option)),
             );
-            stmt.with_properties.0 = new_sql_options.into_values().cloned().collect();
-        } else {
-            panic!("sink definition is not a create sink statement")
+            *with_properties = new_sql_options.into_values().cloned().collect();
+            Ok(())
+        };
+        match &mut stmt {
+            Statement::CreateSink { stmt } => {
+                update_stmt(&mut stmt.with_properties.0)?;
+            }
+            Statement::CreateTable {
+                with_options,
+                engine,
+                ..
+            } => {
+                if !matches!(engine, Engine::Iceberg) {
+                    return Err(SinkError::Config(anyhow!(
+                        "only iceberg table can be altered as sink"
+                    ))
+                    .into());
+                }
+                update_stmt(with_options)?;
+            }
+            _ => {
+                panic!("definition is not a create sink/iceberg table statement")
+            }
         }
         let mut new_config = sink.properties.clone().into_inner();
-        new_config.extend(props);
+        new_config.extend(props.clone());
 
-        let active_sink = sink::ActiveModel {
-            sink_id: Set(sink_id),
-            properties: Set(risingwave_meta_model::Property(new_config.clone())),
-            definition: Set(stmt.to_string()),
-            ..Default::default()
-        };
-        active_sink.update(&txn).await?;
+        let definition = stmt.to_string();
+        match object_type {
+            risingwave_pb::meta::alter_connector_props_request::ObjectType::AlterConnectorPropsObject(val ) if val == AlterConnectorPropsObject::Sink as i32  => {
+                let active_sink = sink::ActiveModel {
+                    sink_id: Set(sink_id),
+                    properties: Set(risingwave_meta_model::Property(new_config.clone())),
+                    definition: Set(definition),
+                    ..Default::default()
+                };
+                active_sink.update(&txn).await?;
+            },
+            risingwave_pb::meta::alter_connector_props_request::ObjectType::AlterIcebergTablePropsObject(alter_iceberg_table_props_object) => {
+                let active_sink = sink::ActiveModel {
+                    sink_id: Set(alter_iceberg_table_props_object.sink_id),
+                    properties: Set(risingwave_meta_model::Property(new_config.clone())),
+                    definition: Set(definition.clone()),
+                    ..Default::default()
+                };
+                let active_source = source::ActiveModel {
+                    source_id: Set(alter_iceberg_table_props_object.source_id),
+                    definition: Set(definition.clone()),
+                    ..Default::default()
+                };
+                let active_table = table::ActiveModel {
+                    table_id: Set(alter_iceberg_table_props_object.table_id),
+                    definition: Set(definition),
+                    ..Default::default()
+                };
+                active_sink.update(&txn).await?;
+                active_source.update(&txn).await?;
+                active_table.update(&txn).await?;
+            },
+            _ => unimplemented!("unsupported object type for alter connector props: {:?}", object_type),
+        }
 
         let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
             .select_only()
@@ -1714,7 +1761,7 @@ impl CatalogController {
                         && let Some(sink_desc) = &mut node.sink_desc
                         && sink_desc.id == sink_id as u32
                     {
-                        sink_desc.properties = new_config.clone();
+                        sink_desc.properties.extend(props.clone());
                         found = true;
                     }
                 });
@@ -1735,27 +1782,58 @@ impl CatalogController {
             .await?;
         }
 
-        let (sink, obj) = Sink::find_by_id(sink_id)
-            .find_also_related(Object)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let relation_infos = match object_type {
+            risingwave_pb::meta::alter_connector_props_request::ObjectType::AlterConnectorPropsObject(val ) if val == AlterConnectorPropsObject::Sink as i32  => {
+                let (sink, obj) = Sink::find_by_id(sink_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+                txn.commit().await?;
+                vec![
+                    PbObject {
+                        object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                        }
+                    ]
+            },
+            risingwave_pb::meta::alter_connector_props_request::ObjectType::AlterIcebergTablePropsObject(alter_iceberg_table_props_object) => {
+                let (sink, sink_obj) = Sink::find_by_id(alter_iceberg_table_props_object.sink_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), alter_iceberg_table_props_object.sink_id))?;
+                let (source, source_obj) = Source::find_by_id(alter_iceberg_table_props_object.source_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Source.as_str(), alter_iceberg_table_props_object.source_id))?;
+                let (table, table_obj) = Table::find_by_id(alter_iceberg_table_props_object.table_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), alter_iceberg_table_props_object.table_id))?;
+                txn.commit().await?;
+                vec![
+                    PbObject {
+                        object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, sink_obj.unwrap()).into()))},
+                    PbObject {
+                        object_info: Some(PbObjectInfo::Source(ObjectModel(source, source_obj.unwrap()).into()))},
+                    PbObject {
+                        object_info: Some(PbObjectInfo::Table(ObjectModel(table, table_obj.unwrap()).into()))}]
+            },
+            _ => unimplemented!("unsupported object type for alter connector props: {:?}", object_type),
+        };
 
-        txn.commit().await?;
-
-        let relation_info = PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into());
         let _version = self
             .notify_frontend(
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![PbObject {
-                        object_info: Some(relation_info),
-                    }],
+                    objects: relation_infos,
                 }),
             )
             .await;
 
-        Ok(new_config.into_iter().collect())
+        Ok(props.into_iter().collect())
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

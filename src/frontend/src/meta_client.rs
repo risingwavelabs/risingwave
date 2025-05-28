@@ -28,6 +28,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
+use risingwave_pb::meta::alter_connector_props_request::ObjectType;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -142,6 +143,7 @@ pub trait FrontendMetaClient: Send + Sync {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
+        object_type: ObjectType,
     ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
@@ -341,6 +343,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
+        object_type: ObjectType,
     ) -> Result<()> {
         self.0
             .alter_sink_props(
@@ -348,6 +351,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 changed_props,
                 changed_secret_refs,
                 connector_conn_ref,
+                object_type,
             )
             .await
     }
