@@ -73,7 +73,7 @@ impl ToJsonb for ScalarRefImpl<'_> {
             Struct(v) => v.add_to(ty, builder),
             List(v) => v.add_to(ty, builder),
             Map(v) => v.add_to(ty, builder),
-            Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            Vector(v) => v.add_to(ty, builder),
         }
     }
 }
