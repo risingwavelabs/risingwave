@@ -452,19 +452,4 @@ impl IcebergCompactionManager {
         }
         Ok(())
     }
-
-    /// Get statistics about GC operations (for monitoring/debugging)
-    pub fn get_gc_stats(&self) -> GcStats {
-        let guard = self.inner.read();
-        GcStats {
-            tracked_tables: guard.iceberg_commits.len(),
-            // Add more stats as needed
-        }
-    }
-}
-
-/// Statistics about GC operations
-#[derive(Debug, Clone)]
-pub struct GcStats {
-    pub tracked_tables: usize,
 }
