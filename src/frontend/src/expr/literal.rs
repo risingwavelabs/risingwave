@@ -55,13 +55,13 @@ impl std::fmt::Debug for Literal {
                     | DataType::Jsonb
                     | DataType::Int256
                     | DataType::Struct(_)
-                    | DataType::Map(_) => write!(
+                    | DataType::Map(_)
+                    | DataType::Vector(_) => write!(
                         f,
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)
                     ),
                     DataType::List { .. } => write!(f, "{}", v.as_list().display_for_explain()),
-                    DataType::Vector(_) => write!(f, "VECTOR_PLACEHOLDER"),
                 },
             }?;
             write!(f, ":{:?}", data_type)
