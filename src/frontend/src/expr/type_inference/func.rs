@@ -660,6 +660,40 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::L2Distance => {
+            ensure_arity!("l2_distance", | inputs | == 2);
+            let (known_idx, unknown_idx) = match (inputs[0].is_untyped(), inputs[1].is_untyped()) {
+                (true, true) => return Err(ErrorCode::BindError(
+                    "function l2_distance(unknown, unknown) is not unique; you might need to add explicit type casts".to_owned()
+                ).into()),
+                (false, false) => match (inputs[0].return_type(), inputs[1].return_type()) {
+                    (DataType::Vector(l), DataType::Vector(r)) => return match l == r {
+                        true => Ok(Some(DataType::Float64)),
+                        false => Err(ErrorCode::BindError(format!("different vector dimensions {l} and {r}")).into()),
+                    },
+                    _ => return Err(ErrorCode::BindError(format!(
+                        "function l2_distance({}, {}) does not exist",
+                        inputs[0].return_type(),
+                        inputs[1].return_type()
+                    ))
+                    .into()),
+                },
+                (true, false) => (1, 0),
+                (false, true) => (0, 1),
+            };
+            // infer the unknown side as same size of the known side
+            let t = inputs[known_idx].return_type();
+            if !matches!(t, DataType::Vector(_)) {
+                return Err(ErrorCode::BindError(format!(
+                    "function l2_distance({}, {}) does not exist",
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
+                ))
+                .into());
+            }
+            inputs[unknown_idx].cast_implicit_mut(t)?;
+            Ok(Some(DataType::Float64))
+        }
         // internal use only
         ExprType::Vnode => Ok(Some(VirtualNode::RW_TYPE)),
         // user-facing `rw_vnode`
