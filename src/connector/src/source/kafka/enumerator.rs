@@ -204,16 +204,19 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             })
             .collect();
 
-        let arc_client = self.client.clone();
-        {
-            #[cfg(not(madsim))]
-            tokio::task::spawn_blocking(move || {
-                arc_client.poll(Duration::from_secs(10));
-            });
-            #[cfg(madsim)]
-            tokio::spawn(async move {
-                arc_client.poll(Duration::from_secs(10)).await;
-            });
+        if self.properties.connection.is_aws_msk_iam() {
+            // only poll for iam auth to refresh the token
+            let arc_client = self.client.clone();
+            {
+                #[cfg(not(madsim))]
+                tokio::task::spawn_blocking(move || {
+                    arc_client.poll(Duration::from_secs(10));
+                });
+                #[cfg(madsim)]
+                tokio::spawn(async move {
+                    arc_client.poll(Duration::from_secs(10)).await;
+                });
+            }
         }
 
         Ok(ret)
