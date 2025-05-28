@@ -24,7 +24,7 @@ WITH
     url='tcp://mqtt-server',
     type = 'append-only',
     topic.field = 'topic',
-    retain = 'true',
+    retain = 'false',
     qos = 'at_least_once',
   ) FORMAT PLAIN ENCODE JSON (
       force_append_only='true',
@@ -41,7 +41,7 @@ WITH
     type = 'append-only',
     topic = '/nested/fallback',
     topic.field = 'info.topic',
-    retain = 'true',
+    retain = 'false',
     qos = 'at_least_once',
   ) FORMAT PLAIN ENCODE JSON (
       force_append_only='true',
@@ -113,7 +113,21 @@ FLUSH;
 
 statement ok
 INSERT INTO mqtt (device_id, temperature)
+VALUES ( '12',  60.0 );
+
+statement ok
+FLUSH;
+
+statement ok
+INSERT INTO mqtt (device_id, temperature)
 VALUES ( '13',  22.0 );
+
+statement ok
+FLUSH;
+
+statement ok
+INSERT INTO mqtt (device_id, temperature)
+VALUES ( '13',  24.0 );
 
 statement ok
 FLUSH;
@@ -125,6 +139,13 @@ VALUES( ROW('12', '/nested/12'), 56.0 );
 statement ok
 FLUSH;
 
+statement ok
+INSERT INTO mqtt_nested (info, temperature)
+VALUES( ROW('13', null), 24.0 );
+
+statement ok
+FLUSH;
+
 sleep 15s
 
 query IT rowsort
@@ -132,18 +153,20 @@ SELECT device_id, temperature FROM mqtt ORDER BY device_id, temperature;
 ----
 12 56
 12 59
+12 60
 13 20
 13 22
+13 24
 
 query ITT rowsort
 SELECT device_id, temperature, mqtt_topic FROM mqtt_source ORDER BY device_id, temperature;
 ----
-12 56 /device/12
 12 59 /device/12
-13 20 /device/13
+12 60 /device/12
 13 22 /device/13
+13 24 /device/13
 
 query IT rowsort
 SELECT (info).device_id device_id, temperature from mqtt_nested_source ORDER BY device_id, temperature ;
 ----
-13 22
+13 24
