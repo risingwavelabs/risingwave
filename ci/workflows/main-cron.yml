@@ -258,7 +258,7 @@ steps:
 
   - label: "integration test (madsim) - scale"
     key: "integration-test-deterministic-scale"
-    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh scale::"
+    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh -E test(/^scale::*/)"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
@@ -273,7 +273,7 @@ steps:
 
   - label: "integration test (madsim) - recovery"
     key: "integration-test-deterministic-recovery"
-    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh recovery::"
+    command: "TEST_NUM=60 ci/scripts/deterministic-it-test.sh -E test(/^recovery::*/)"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
@@ -287,7 +287,7 @@ steps:
 
   - label: "integration test (madsim) - backfill"
     key: "integration-test-deterministic-backfill"
-    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh backfill_tests::"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh -E test(/^backfill_tests::*/)"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
@@ -301,7 +301,7 @@ steps:
 
   - label: "integration test (madsim) - storage"
     key: "integration-test-deterministic-storage"
-    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh storage::"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh -E test(/^storage::*/)"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
@@ -315,7 +315,7 @@ steps:
 
   - label: "integration test (madsim) - sink"
     key: "integration-test-deterministic-sink"
-    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh sink::"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh -E test(/^sink::/)"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
