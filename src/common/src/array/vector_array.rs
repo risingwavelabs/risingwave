@@ -36,8 +36,8 @@ impl ArrayBuilder for VectorArrayBuilder {
     }
 
     #[cfg(test)]
-    fn new(_capacity: usize) -> Self {
-        todo!("VECTOR_PLACEHOLDER")
+    fn new(capacity: usize) -> Self {
+        Self::with_type(capacity, DataType::Vector(3))
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
