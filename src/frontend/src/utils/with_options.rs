@@ -211,6 +211,18 @@ impl WithOptions {
     pub fn backfill_order_strategy(&self) -> BackfillOrderStrategy {
         self.backfill_order_strategy.clone()
     }
+
+    /// Convert to a [`WithOptionsSecResolved`] with only plain properties (no secret or connection).
+    pub fn try_to_sec_resolved_only_plain_properties(
+        &self,
+    ) -> RwResult<WithOptionsSecResolved> {
+        if !self.secret_ref.is_empty() || !self.connection_ref.is_empty() {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "Cannot reference a secret or connection".to_owned(),
+            )));
+        }
+        Ok(WithOptionsSecResolved::without_secrets(self.inner.clone()))
+    }
 }
 
 pub(crate) fn resolve_connection_ref_and_secret_ref(

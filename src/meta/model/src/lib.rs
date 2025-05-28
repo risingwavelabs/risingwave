@@ -350,6 +350,7 @@ impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
 }
 
 derive_btreemap_from_blob!(SecretRef, String, PbSecretRef, PbSecretRefMap);
+derive_from_blob!(CdcEtlSourceInfo, risingwave_pb::catalog::PbCdcEtlSourceInfo);
 
 derive_from_blob!(StreamNode, PbStreamNode);
 derive_from_blob!(DataType, risingwave_pb::data::PbDataType);

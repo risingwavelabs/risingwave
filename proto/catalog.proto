@@ -67,7 +67,9 @@ message StreamSourceInfo {
   plan_common.EncodeType row_encode = 9;
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
-  plan_common.ExternalTableDesc external_table = 12;
+  // plan_common.ExternalTableDesc external_table = 12;
+  reserved 12; // deprecated
+  reserved "external_table"; // deprecated
   // **This field should now be called `is_shared`.** Not renamed for backwards
   // compatibility.
   //
@@ -147,10 +149,23 @@ message Source {
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
 
+  /// ELT source info
+  optional CdcEtlSourceInfo cdc_etl_info = 20;
+
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 
   optional uint32 rate_limit = 101;
+}
+
+message CdcEtlSourceInfo {
+  /// Shared cdc source
+  uint32 shared_source_id = 1;
+    
+  /// properties will be passed into the `StreamScanNode`
+  map<string, string> properties = 2;
+    /// Secret refs
+  map<string, secret.SecretRef> secret_refs = 3;
 }
 
 enum SinkType {

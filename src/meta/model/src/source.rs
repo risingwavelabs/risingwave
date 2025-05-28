@@ -19,8 +19,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, StreamSourceInfo,
-    TableId, WatermarkDescArray,
+    CdcEtlSourceInfo, ColumnCatalogArray, ConnectionId, I32Array, Property, SecretRef, SourceId, StreamSourceInfo, TableId, WatermarkDescArray
 };
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
@@ -42,6 +41,7 @@ pub struct Model {
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
     pub rate_limit: Option<i32>,
+    pub cdc_elt_info: Option<CdcEtlSourceInfo>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -106,6 +106,7 @@ impl From<PbSource> for ActiveModel {
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
             rate_limit: Set(source.rate_limit.map(|id| id as _)),
+            cdc_elt_info: Set(source.cdc_etl_info.as_ref().map(CdcEtlSourceInfo::from)),
         }
     }
 }

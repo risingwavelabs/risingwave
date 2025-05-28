@@ -482,15 +482,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
 
-    // TODO: omit this step if `sql_column_strategy` is `Follow`.
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
-        session,
-        &format_encode,
-        Either::Left(&with_properties),
-        CreateSourceType::Table,
-    )
-    .await?;
-
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
     let rate_limit = overwrite_options.source_rate_limit;
     let source_catalog = bind_create_source_or_table_with_connector(
@@ -502,8 +493,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
         constraints,
         wildcard_idx,
         source_watermarks,
-        columns_from_resolve_source,
-        source_info,
         include_column_options,
         &mut col_id_gen,
         CreateSourceType::Table,
@@ -791,7 +780,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source: Arc<SourceCatalog>,
     external_table_name: String,
     column_defs: Vec<ColumnDef>,
-    mut columns: Vec<ColumnCatalog>,
+    columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     cdc_with_options: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
@@ -806,73 +795,27 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     engine: Engine,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
-
-    // append additional columns to the end
-    handle_addition_columns(
-        None,
-        &cdc_with_options,
-        include_column_options,
-        &mut columns,
-        true,
-    )?;
-
-    for c in &mut columns {
-        col_id_gen.generate(c)?;
-    }
-
-    let (mut columns, pk_column_ids, _row_id_index) =
-        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
-
-    // NOTES: In auto schema change, default value is not provided in column definition.
-    bind_sql_column_constraints(
-        context.session_ctx(),
-        table_name.real_value(),
-        &mut columns,
-        column_defs,
-        &pk_column_ids,
-    )?;
-
     let definition = context.normalized_sql().to_owned();
 
-    let pk_column_indices = {
-        let mut id_to_idx = HashMap::new();
-        columns.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id(), idx);
-        });
-        // pk column id must exist in table columns.
-        pk_column_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied().unwrap())
-            .collect_vec()
-    };
-    let table_pk = pk_column_indices
-        .iter()
-        .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
-        .collect();
-
-    let (options, secret_refs) = cdc_with_options.into_parts();
-
-    let non_generated_column_descs = columns
-        .iter()
-        .filter(|&c| (!c.is_generated()))
-        .map(|c| c.column_desc.clone())
-        .collect_vec();
-    let non_generated_column_num = non_generated_column_descs.len();
-
-    let cdc_table_desc = CdcTableDesc {
+    let (cdc_table_desc, columns, pk_column_ids) = derive_cdc_table_desc(
+        &session,
+        source.clone(),
+        external_table_name.clone(),
+        column_defs,
+        columns,
+        pk_names,
+        cdc_with_options,
+        &mut col_id_gen,
+        include_column_options,
+        table_name,
         table_id,
-        source_id: source.id.into(), // id of cdc source streaming job
-        external_table_name: external_table_name.clone(),
-        pk: table_pk,
-        columns: non_generated_column_descs,
-        stream_key: pk_column_indices,
-        connect_properties: options,
-        secret_refs,
-    };
+    )?;
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
     let options = CdcScanOptions::from_with_options(context.with_options())?;
+
+    let non_generated_column_num = cdc_table_desc.columns.len();
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -921,6 +864,85 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     table.dependent_relations = vec![source.id];
 
     Ok((materialize.into(), table))
+}
+
+// Derive the (cdc table desc, column ids) from the source catalog and the cdc with options.
+pub fn derive_cdc_table_desc(
+    session: &SessionImpl,
+    source: Arc<SourceCatalog>,
+    external_table_name: String,
+    column_defs: Vec<ColumnDef>,
+    mut columns: Vec<ColumnCatalog>,
+    pk_names: Vec<String>,
+    cdc_with_options: WithOptionsSecResolved,
+    col_id_gen: &mut ColumnIdGenerator,
+    include_column_options: IncludeOption,
+    table_or_source_name: ObjectName,
+    table_or_source_id: TableId,
+) -> Result<(CdcTableDesc, Vec<ColumnCatalog>, Vec<ColumnId>)> {
+    // append additional columns to the end
+    handle_addition_columns(
+        None,
+        &cdc_with_options,
+        include_column_options,
+        &mut columns,
+        true,
+    )?;
+
+    for c in &mut columns {
+        col_id_gen.generate(c)?;
+    }
+
+    let (mut columns, pk_column_ids, _row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    // NOTES: In auto schema change, default value is not provided in column definition.
+    bind_sql_column_constraints(
+        session,
+        table_or_source_name.real_value(),
+        &mut columns,
+        column_defs,
+        &pk_column_ids,
+    )?;
+
+    let pk_column_indices = {
+        let mut id_to_idx = HashMap::new();
+        columns.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id(), idx);
+        });
+        // pk column id must exist in table columns.
+        pk_column_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied().unwrap())
+            .collect_vec()
+    };
+    let table_pk = pk_column_indices
+        .iter()
+        .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+        .collect();
+
+    let (options, secret_refs) = cdc_with_options.into_parts();
+
+    let non_generated_column_descs = columns
+        .iter()
+        .filter(|&c| (!c.is_generated()))
+        .map(|c| c.column_desc.clone())
+        .collect_vec();
+
+    Ok((
+        CdcTableDesc {
+            table_id: table_or_source_id,
+            source_id: source.id.into(), // id of cdc source streaming job
+            external_table_name: external_table_name.clone(),
+            pk: table_pk,
+            columns: non_generated_column_descs,
+            stream_key: pk_column_indices,
+            connect_properties: options,
+            secret_refs,
+        },
+        columns,
+        pk_column_ids,
+    ))
 }
 
 fn derive_with_options_for_cdc_table(
@@ -1164,7 +1186,7 @@ pub(super) async fn handle_create_table_plan(
 }
 
 // Get (shared source catalog, cdc WITH option) from the source in `cdc_table`
-fn get_shared_source_info(
+pub fn get_shared_source_info(
     session: &SessionImpl,
     cdc_table: &CdcTableInfo,
 ) -> Result<(Arc<SourceCatalog>, WithOptionsSecResolved)> {
@@ -1300,8 +1322,8 @@ fn sanity_check_for_table_on_cdc_source(
     Ok(())
 }
 
-/// Derive schema for cdc table when create a new Table or alter an existing Table
-async fn bind_cdc_table_schema_externally(
+/// Derive schema for cdc table/etl source when create a new Table/etl source or alter an existing Table/etl source
+pub async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
