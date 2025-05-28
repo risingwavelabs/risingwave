@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
-/// The states of a NATS split, which will be persisted to checkpoint.
+/// The states of a MQTT split, which will be persisted to checkpoint.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct MqttSplit {
     pub(crate) topic: String,
