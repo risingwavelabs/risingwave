@@ -16,7 +16,11 @@ tar -xvf simulation-it-test.tar.zst
 mkdir target/sim
 mv target/ci-sim target/sim
 
-TEST_PATTERN="$@"
+if [ -z "$1" ]; then
+  TEST_PATTERN=""
+else
+  TEST_PATTERN="-E test(/^$1\/)"
+fi
 
 # NOTE(kwannoel): for TEST_PATTERN, please consult: https://nexte.st/docs/filtersets/reference/.
 # Using substring matching may run unexpected tests.
