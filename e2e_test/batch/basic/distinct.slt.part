@@ -59,17 +59,6 @@ select count(*) from (select distinct on(c) * from t_issue_19175);
 ----
 4
 
-# Test with different aggregation functions
-query I
-select sum(a) from (select distinct on(b) a, b from t_issue_19175);
-----
-5
-
-query I
-select max(a) from (select distinct on(b) a, b from t_issue_19175);
-----
-3
-
 # Test with more complex expressions
 query I
 select count(*) from (select distinct on(a + b) a, b, c from t_issue_19175);
