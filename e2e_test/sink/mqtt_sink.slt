@@ -47,35 +47,6 @@ WITH
       force_append_only='true',
   );
 
-# First the (retained) topics are primed, so that they will be listened
-# to when the mqtt source initializes. Otherwise it would take 30 seconds
-# for the next enumerator tick
-
-statement ok
-INSERT INTO mqtt (device_id, temperature)
-VALUES ( '12',  56.0 );
-
-statement ok
-FLUSH;
-
-statement ok
-INSERT INTO mqtt (device_id, temperature)
-VALUES ( '13',  20.0 );
-
-statement ok
-FLUSH;
-
-statement ok
-INSERT INTO mqtt_nested (info, temperature)
-VALUES( ROW('12', '/nested/12'), 56.0 );
-
-statement ok
-FLUSH;
-
-statement ok
-INSERT INTO mqtt_nested (info, temperature)
-VALUES( ROW('13', null), 22.0 );
-
 statement ok
 CREATE TABLE mqtt_source
 (
@@ -86,7 +57,7 @@ INCLUDE partition AS mqtt_topic
 WITH (
     connector ='mqtt',
     url ='tcp://mqtt-server',
-    topic = '/device/+',
+    topic = '/device/fixed/12,/device/fixed/13,/device/wildcard/#',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
 
@@ -106,28 +77,35 @@ WITH (
 
 statement ok
 INSERT INTO mqtt (device_id, temperature)
-VALUES ( '12',  59.0 );
+VALUES ( 'fixed/12',  59.0 );
 
 statement ok
 FLUSH;
 
 statement ok
 INSERT INTO mqtt (device_id, temperature)
-VALUES ( '12',  60.0 );
+VALUES ( 'fixed/12',  60.0 );
 
 statement ok
 FLUSH;
 
 statement ok
 INSERT INTO mqtt (device_id, temperature)
-VALUES ( '13',  22.0 );
+VALUES ( 'fixed/13',  22.0 );
 
 statement ok
 FLUSH;
 
 statement ok
 INSERT INTO mqtt (device_id, temperature)
-VALUES ( '13',  24.0 );
+VALUES ( 'fixed/13',  24.0 );
+
+statement ok
+FLUSH;
+
+statement ok
+INSERT INTO mqtt (device_id, temperature)
+VALUES ( 'wildcard/14',  31.0 );
 
 statement ok
 FLUSH;
@@ -151,20 +129,20 @@ sleep 15s
 query IT rowsort
 SELECT device_id, temperature FROM mqtt ORDER BY device_id, temperature;
 ----
-12 56
-12 59
-12 60
-13 20
-13 22
-13 24
+fixed/12 59
+fixed/12 60
+fixed/13 22
+fixed/13 24
+wildcard/14 31
 
 query ITT rowsort
 SELECT device_id, temperature, mqtt_topic FROM mqtt_source ORDER BY device_id, temperature;
 ----
-12 59 /device/12
-12 60 /device/12
-13 22 /device/13
-13 24 /device/13
+fixed/12 59 /device/fixed/12
+fixed/12 60 /device/fixed/12
+fixed/13 22 /device/fixed/13
+fixed/13 24 /device/fixed/13
+wildcard/14 31 /device/wildcard/14
 
 query IT rowsort
 SELECT (info).device_id device_id, temperature from mqtt_nested_source ORDER BY device_id, temperature ;
