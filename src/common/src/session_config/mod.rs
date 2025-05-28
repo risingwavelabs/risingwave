@@ -386,11 +386,11 @@ pub struct SessionConfig {
     /// The timeout for reading from the buffer of the sync log store on barrier.
     /// Every epoch we will attempt to read the full buffer of the sync log store.
     /// If we hit the timeout, we will stop reading and continue.
-    #[parameter(default = 64_usize)]
+    #[parameter(default = 512_usize)]
     streaming_sync_log_store_pause_duration_ms: usize,
 
     /// The max buffer size for sync logstore, before we start flushing.
-    #[parameter(default = 2048_usize)]
+    #[parameter(default = 32768_usize)]
     streaming_sync_log_store_buffer_size: usize,
 
     /// Whether to disable purifying the definition of the table or source upon retrieval.
