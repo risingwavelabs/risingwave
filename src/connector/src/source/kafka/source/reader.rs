@@ -232,7 +232,7 @@ impl KafkaSplitReader {
     async fn into_data_stream(self) {
         // Keep the FD permit alive for the entire duration of the stream
         let _fd_permit = self._fd_permit;
-        
+
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
                 (Some(start), Some(stop)) if (*start + 1) >= *stop => true,
