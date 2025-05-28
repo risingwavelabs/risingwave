@@ -16,13 +16,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use iceberg::Catalog;
 use iceberg::table::Table;
+use iceberg::transaction::Transaction;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
-use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::sink::{SinkError, SinkParam};
 use risingwave_pb::catalog::PbSink;
 use risingwave_pb::iceberg_compaction::{
     IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
@@ -215,7 +217,7 @@ impl IcebergCompactionManager {
             loop {
                 tokio::select! {
                     Some(stat) = rx.recv() => {
-                        manager.update_iceberg_commit_info(stat);
+                        manager.record_iceberg_commit(stat.sink_id);
                     },
                     _ = &mut shutdown_rx => {
                         tracing::info!("Iceberg compaction manager is stopped");
@@ -228,65 +230,63 @@ impl IcebergCompactionManager {
         (join_handle, shutdown_tx)
     }
 
-    pub fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
+    pub fn record_iceberg_commit(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
-
-        let IcebergSinkCompactionUpdate {
-            sink_id,
-            compaction_interval,
-        } = msg;
-
-        // if the compaction interval is changed, we need to reset the commit info when the compaction task is sent of initialized
         let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
             count: 0,
-            next_compaction_time: Some(
-                Instant::now() + std::time::Duration::from_secs(compaction_interval),
-            ),
-            compaction_interval,
+            next_compaction_time: Some(Instant::now() + std::time::Duration::from_secs(3600)),
+            compaction_interval: 3600,
         });
-
         commit_info.increase_count();
-        if commit_info.compaction_interval != compaction_interval {
-            commit_info.update_compaction_interval(compaction_interval);
-        }
     }
 
-    /// Get the top N iceberg commit sink ids
-    /// Sorted by commit count and next compaction time
     pub fn get_top_n_iceberg_commit_sink_ids(&self, n: usize) -> Vec<IcebergCompactionHandle> {
-        let now = Instant::now();
-        let mut guard = self.inner.write();
-        guard
+        let guard = self.inner.read();
+        let mut sink_ids: Vec<_> = guard
             .iceberg_commits
-            .iter_mut()
+            .iter()
             .filter(|(_, commit_info)| {
-                commit_info.count > 0
-                    && if let Some(next_compaction_time) = commit_info.next_compaction_time {
-                        next_compaction_time <= now
-                    } else {
-                        false
-                    }
+                if let Some(next_time) = commit_info.next_compaction_time {
+                    Instant::now() >= next_time
+                } else {
+                    false // Skip if already processing
+                }
             })
-            .sorted_by(|a, b| {
-                b.1.count
-                    .cmp(&a.1.count)
-                    .then_with(|| b.1.next_compaction_time.cmp(&a.1.next_compaction_time))
-            })
+            .map(|(sink_id, commit_info)| (*sink_id, commit_info.clone()))
+            .collect();
+
+        sink_ids.sort_by(|a, b| {
+            let a_commit_count = a.1.count;
+            let b_commit_count = b.1.count;
+
+            if a_commit_count != b_commit_count {
+                return b_commit_count.cmp(&a_commit_count);
+            }
+
+            a.1.next_compaction_time.cmp(&b.1.next_compaction_time)
+        });
+
+        let compaction_handles: Vec<IcebergCompactionHandle> = sink_ids
+            .into_iter()
             .take(n)
             .map(|(sink_id, commit_info)| {
-                // reset the commit count and next compaction time and avoid double call
-                let handle = IcebergCompactionHandle::new(
-                    *sink_id,
+                // Mark as processing
+                let mut guard = self.inner.write();
+                if let Some(info) = guard.iceberg_commits.get_mut(&sink_id) {
+                    info.set_processing();
+                }
+                drop(guard);
+
+                IcebergCompactionHandle::new(
+                    sink_id,
                     self.inner.clone(),
                     self.metadata_manager.clone(),
-                    commit_info.clone(),
-                );
-
-                commit_info.set_processing();
-
-                handle
+                    commit_info,
+                )
             })
-            .collect::<Vec<_>>()
+            .collect();
+
+        compaction_handles
     }
 
     pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
@@ -312,6 +312,20 @@ impl IcebergCompactionManager {
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;
         let table = iceberg_config.load_table().await?;
         Ok(table)
+    }
+
+    pub async fn load_iceberg_catalog_and_table(
+        &self,
+        sink_id: &SinkId,
+    ) -> MetaResult<(Arc<dyn Catalog>, Table)> {
+        let sink_param = self.get_sink_param(sink_id).await?;
+        let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;
+        let catalog = iceberg_config.create_catalog().await?;
+        let table = catalog
+            .load_table(&iceberg_config.full_table_name()?)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        Ok((catalog, table))
     }
 
     pub fn add_compactor_stream(
@@ -350,4 +364,105 @@ impl IcebergCompactionManager {
 
         join_handle_vec
     }
+
+    /// GC loop for expired snapshots management
+    /// This is a separate loop that periodically checks all tracked Iceberg tables
+    /// and performs garbage collection operations like expiring old snapshots
+    pub fn gc_loop(manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            // Run GC every hour by default
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(e) = manager.perform_gc_operations().await {
+                            tracing::error!("GC operations failed: {}", e);
+                        }
+                    },
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Iceberg GC loop is stopped");
+                        return;
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
+    }
+
+    /// Perform GC operations on all tracked Iceberg tables
+    async fn perform_gc_operations(&self) -> MetaResult<()> {
+        // Get all sink IDs that are currently tracked
+        let sink_ids = {
+            let guard = self.inner.read();
+            guard.iceberg_commits.keys().cloned().collect::<Vec<_>>()
+        };
+
+        tracing::info!("Starting GC operations for {} tables", sink_ids.len());
+
+        for sink_id in sink_ids {
+            if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
+                tracing::warn!("Failed to perform GC for sink {}: {}", sink_id.sink_id, e);
+                // Continue with other tables even if one fails
+            }
+        }
+
+        tracing::info!("GC operations completed");
+        Ok(())
+    }
+
+    /// Check snapshot count for a specific table and trigger expiration if needed
+    async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
+        // Configurable thresholds - could be moved to config later
+        const MAX_SNAPSHOTS: usize = 100; // Trigger GC when exceeding this
+
+        tracing::debug!("Checking snapshots for sink {}", sink_id.sink_id);
+
+        let (catalog, table) = self.load_iceberg_catalog_and_table(sink_id).await?;
+        let metadata = table.metadata();
+        let snapshots = metadata.snapshots().collect_vec();
+
+        if snapshots.len() > MAX_SNAPSHOTS && snapshots.first().unwrap().timestamp_ms() > 0 {
+            tracing::info!(
+                "Sink {} has {} snapshots (threshold: {}), triggering expiration",
+                sink_id.sink_id,
+                snapshots.len(),
+                MAX_SNAPSHOTS
+            );
+
+            let tx = Transaction::new(&table);
+            let expired_snapshots = tx
+                .expire_snapshot()
+                .clear_expire_files(true)
+                .clear_expire_files(true);
+
+            let tx = expired_snapshots
+                .apply()
+                .await
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+            tx.commit(catalog.as_ref())
+                .await
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+            tracing::info!("Expired snapshots for iceberg {}", sink_id.sink_id);
+        }
+        Ok(())
+    }
+
+    /// Get statistics about GC operations (for monitoring/debugging)
+    pub fn get_gc_stats(&self) -> GcStats {
+        let guard = self.inner.read();
+        GcStats {
+            tracked_tables: guard.iceberg_commits.len(),
+            // Add more stats as needed
+        }
+    }
+}
+
+/// Statistics about GC operations
+#[derive(Debug, Clone)]
+pub struct GcStats {
+    pub tracked_tables: usize,
 }
