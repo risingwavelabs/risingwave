@@ -42,7 +42,7 @@ pub(crate) mod dummy {
     use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
 
-    use crate::connector_common::IcebergCompactionStat;
+    use crate::connector_common::IcebergSinkCompactionUpdate;
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
@@ -138,7 +138,7 @@ pub(crate) mod dummy {
         async fn new_coordinator(
             &self,
             _db: DatabaseConnection,
-            _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+            _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
         ) -> Result<Self::Coordinator> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }

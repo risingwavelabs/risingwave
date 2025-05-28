@@ -4352,6 +4352,7 @@ impl Parser<'_> {
         let mut analyze_duration = None;
 
         let explain_key_words = [
+            Keyword::BACKFILL,
             Keyword::VERBOSE,
             Keyword::TRACE,
             Keyword::TYPE,
@@ -4367,6 +4368,7 @@ impl Parser<'_> {
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
+                Keyword::BACKFILL => options.backfill = parser.parse_optional_boolean(true),
                 Keyword::TYPE => {
                     let explain_type = parser.expect_one_of_keywords(&[
                         Keyword::LOGICAL,
@@ -5009,8 +5011,8 @@ impl Parser<'_> {
     }
 
     pub fn parse_kill_process(&mut self) -> ModalResult<Statement> {
-        let process_id = self.parse_literal_uint()? as i32;
-        Ok(Statement::Kill(process_id))
+        let worker_process_id = self.parse_literal_string()?;
+        Ok(Statement::Kill(worker_process_id))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude

@@ -30,8 +30,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
-    SyncResult,
+    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, ObjectIdRange, SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
@@ -124,16 +123,16 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(self.hummock_manager.get_current_version().await)
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
+    async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
         fail_point!("get_new_sst_ids_err", |_| Err(anyhow!(
             "failpoint get_new_sst_ids_err"
         )
         .into()));
         self.hummock_manager
-            .get_new_sst_ids(number)
+            .get_new_object_ids(number)
             .await
             .map_err(mock_err)
-            .map(|range| SstObjectIdRange {
+            .map(|range| ObjectIdRange {
                 start_id: range.start_id + self.sst_offset,
                 end_id: range.end_id + self.sst_offset,
             })
@@ -216,6 +215,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sst_to_context,
                 new_table_fragment_infos,
                 change_log_delta: table_change_log,
+                vector_index_delta: Default::default(),
                 tables_to_commit: commit_table_ids
                     .iter()
                     .cloned()
@@ -360,7 +360,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                                     .map(SstableInfo::from)
                                     .collect_vec(),
                                 Some(table_stats_change),
-                                object_timestamps,
+                                object_timestamps
+                                    .into_iter()
+                                    .map(|(id, ts)| (id.into(), ts))
+                                    .collect(),
                             )
                             .await
                         {

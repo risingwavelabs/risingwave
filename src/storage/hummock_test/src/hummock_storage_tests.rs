@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -2280,7 +2280,7 @@ async fn test_table_watermark() {
             .get(&TEST_TABLE_ID)
             .unwrap()
             .committed_epoch;
-        let table_watermarks = TableWatermarksIndex::new_committed(
+        let table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
             version
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
@@ -2475,6 +2475,7 @@ async fn test_commit_multi_epoch() {
                         }],
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
@@ -2487,8 +2488,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 11,
-            object_id: 1,
+            sst_id: 11.into(),
+            object_id: 1.into(),
             table_ids: vec![existing_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2543,8 +2544,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 22,
-            object_id: 2,
+            sst_id: 22.into(),
+            object_id: 2.into(),
             table_ids: vec![existing_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2591,8 +2592,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 33,
-            object_id: 3,
+            sst_id: 33.into(),
+            object_id: 3.into(),
             table_ids: vec![new_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2644,8 +2645,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 44,
-            object_id: 4,
+            sst_id: 44.into(),
+            object_id: 4.into(),
             table_ids: vec![new_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2689,8 +2690,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 55,
-            object_id: 5,
+            sst_id: 55.into(),
+            object_id: 5.into(),
             table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2801,6 +2802,7 @@ async fn test_commit_with_large_size() {
                         sstables,
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
@@ -2810,8 +2812,8 @@ async fn test_commit_with_large_size() {
 
     let epoch1 = initial_epoch.next_epoch();
     let sst1_epoch1: SstableInfo = SstableInfoInner {
-        sst_id: 11,
-        object_id: 1,
+        sst_id: 11.into(),
+        object_id: 1.into(),
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
@@ -2820,8 +2822,8 @@ async fn test_commit_with_large_size() {
     .into();
 
     let sst1_epoch2: SstableInfo = SstableInfoInner {
-        sst_id: 12,
-        object_id: 2,
+        sst_id: 12.into(),
+        object_id: 2.into(),
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
@@ -2830,8 +2832,8 @@ async fn test_commit_with_large_size() {
     .into();
 
     let sst1_epoch3: SstableInfo = SstableInfoInner {
-        sst_id: 13,
-        object_id: 3,
+        sst_id: 13.into(),
+        object_id: 3.into(),
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,

@@ -41,7 +41,7 @@ pub struct ReadTableWatermark {
 }
 
 #[derive(Clone)]
-pub struct TableWatermarksIndex {
+pub struct PkPrefixTableWatermarksIndex {
     pub watermark_direction: WatermarkDirection,
     // later epoch at the back
     pub staging_watermarks: VecDeque<(HummockEpoch, Arc<[VnodeWatermark]>)>,
@@ -50,7 +50,7 @@ pub struct TableWatermarksIndex {
     committed_epoch: Option<HummockEpoch>,
 }
 
-impl TableWatermarksIndex {
+impl PkPrefixTableWatermarksIndex {
     pub fn new(
         watermark_direction: WatermarkDirection,
         first_epoch: HummockEpoch,
@@ -76,6 +76,10 @@ impl TableWatermarksIndex {
         committed_watermarks: Arc<TableWatermarks>,
         committed_epoch: HummockEpoch,
     ) -> Self {
+        assert_eq!(
+            committed_watermarks.watermark_type,
+            WatermarkSerdeType::PkPrefix
+        );
         Self {
             watermark_direction: committed_watermarks.direction,
             staging_watermarks: VecDeque::new(),
@@ -253,6 +257,10 @@ impl TableWatermarksIndex {
         committed_watermark: Arc<TableWatermarks>,
         committed_epoch: HummockEpoch,
     ) {
+        assert_eq!(
+            committed_watermark.watermark_type,
+            WatermarkSerdeType::PkPrefix
+        );
         assert_eq!(self.watermark_direction, committed_watermark.direction);
         if let Some(prev_committed_epoch) = self.committed_epoch {
             assert!(prev_committed_epoch <= committed_epoch);
@@ -811,7 +819,7 @@ mod tests {
     use crate::compaction_group::StaticCompactionGroupId;
     use crate::key::{TableKeyRange, is_empty_key_range, prefixed_range_with_vnode};
     use crate::table_watermark::{
-        TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+        PkPrefixTableWatermarksIndex, TableWatermarks, VnodeWatermark, WatermarkDirection,
         WatermarkSerdeType, merge_multiple_new_table_watermarks,
     };
     use crate::version::HummockVersion;
@@ -1153,8 +1161,8 @@ mod tests {
         watermark1: Bytes,
         watermark2: Bytes,
         watermark3: Bytes,
-    ) -> TableWatermarksIndex {
-        let mut index = TableWatermarksIndex::new(
+    ) -> PkPrefixTableWatermarksIndex {
+        let mut index = PkPrefixTableWatermarksIndex::new(
             direction,
             EPOCH1,
             vec![VnodeWatermark::new(build_bitmap(0..4), watermark1.clone())],

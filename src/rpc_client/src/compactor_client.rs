@@ -19,7 +19,7 @@ use risingwave_common::monitor::EndpointExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    GetNewSstIdsRequest, GetNewSstIdsResponse, ReportCompactionTaskRequest,
+    GetNewObjectIdsRequest, GetNewObjectIdsResponse, ReportCompactionTaskRequest,
     ReportCompactionTaskResponse,
 };
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
@@ -120,9 +120,9 @@ impl GrpcCompactorProxyClient {
 
     pub async fn get_new_sst_ids(
         &self,
-        request: GetNewSstIdsRequest,
-    ) -> std::result::Result<tonic::Response<GetNewSstIdsResponse>, tonic::Status> {
-        retry_rpc!(self, get_new_sst_ids, request, GetNewSstIdsResponse)
+        request: GetNewObjectIdsRequest,
+    ) -> std::result::Result<tonic::Response<GetNewObjectIdsResponse>, tonic::Status> {
+        retry_rpc!(self, get_new_object_ids, request, GetNewObjectIdsResponse)
     }
 
     pub async fn report_compaction_task(

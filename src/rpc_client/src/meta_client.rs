@@ -45,7 +45,7 @@ use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockVersionId, SstObjectIdRange, SyncResult,
+    CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -406,6 +406,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -413,6 +414,7 @@ impl MetaClient {
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
             specific_resource_group,
+            if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -441,10 +443,12 @@ impl MetaClient {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: graph,
+            if_not_exists,
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -459,12 +463,14 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             affected_table_change,
             dependencies: dependencies.into_iter().collect(),
+            if_not_exists,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -500,12 +506,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
             job_type: job_type as _,
+            if_not_exists,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -685,11 +693,13 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
             fragment_graph: Some(graph),
+            if_not_exists,
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
@@ -1626,12 +1636,12 @@ impl HummockMetaClient for MetaClient {
         ))
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
+    async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
         let resp = self
             .inner
-            .get_new_sst_ids(GetNewSstIdsRequest { number })
+            .get_new_object_ids(GetNewObjectIdsRequest { number })
             .await?;
-        Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
+        Ok(ObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn commit_epoch_with_change_log(
@@ -2237,7 +2247,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
-            ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
+            ,{ hummock_client, get_new_object_ids, GetNewObjectIdsRequest, GetNewObjectIdsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }

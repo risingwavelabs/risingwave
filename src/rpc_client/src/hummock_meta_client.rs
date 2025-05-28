@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, SstObjectIdRange, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{
     PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
@@ -36,7 +36,7 @@ pub type HummockMetaClientChangeLogInfo = Vec<u64>;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
+    async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch_with_change_log(
         &self,

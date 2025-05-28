@@ -1,0 +1,51 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int);
+
+statement ok
+insert into t select 1 from generate_series(1, 10000);
+
+statement ok
+SET BACKFILL_RATE_LIMIT=1000;
+
+statement ok
+SET BACKGROUND_DDL = true;
+
+statement ok
+CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+statement error materialized view with name m1 exists but under creation
+CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
+
+statement ok
+CREATE MATERIALIZED VIEW IF NOT EXISTS m1 as SELECT * FROM t;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+statement ok
+SET BACKGROUND_DDL = false;
+
+# wait for streaming job finished
+statement ok
+CREATE MATERIALIZED VIEW IF NOT EXISTS m1 as SELECT * FROM t;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+0
+
+statement ok
+DROP MATERIALIZED VIEW m1;
+
+statement ok
+DROP TABLE t;
