@@ -27,9 +27,9 @@ use crate::vector::{
 };
 
 pub struct HnswBuilderOptions {
-    m: usize,
-    ef_construction: usize,
-    max_level: usize,
+    pub m: usize,
+    pub ef_construction: usize,
+    pub max_level: usize,
 }
 
 impl HnswBuilderOptions {
@@ -44,7 +44,23 @@ impl HnswBuilderOptions {
     }
 }
 
-struct VectorHnswNode {
+fn gen_level(options: &HnswBuilderOptions, rng: &mut impl Rng) -> usize {
+    let level = (-UniformFloat::<f32>::sample_single(0.0, 1.0, rng)
+        .unwrap()
+        .ln()
+        * options.m_l())
+    .floor() as usize;
+    min(level, options.max_level)
+}
+
+pub(crate) fn new_node(options: &HnswBuilderOptions, rng: &mut impl Rng) -> VectorHnswNode {
+    let level = gen_level(options, rng);
+    let mut level_neighbours = Vec::with_capacity(level);
+    level_neighbours.extend((0..=level).map(|level| BoundedNearest::new(options.level_m(level))));
+    VectorHnswNode { level_neighbours }
+}
+
+pub(crate) struct VectorHnswNode {
     level_neighbours: Vec<BoundedNearest<usize>>,
 }
 
@@ -143,7 +159,7 @@ impl VectorStore for VectorStoreImpl {
 
 #[expect(clippy::len_without_is_empty)]
 pub trait HnswGraph {
-    fn entrypoint(&self) -> Option<usize>;
+    fn entrypoint(&self) -> usize;
     fn len(&self) -> usize;
     fn node_level(&self, idx: usize) -> usize;
     fn node_neighbours(
@@ -153,14 +169,23 @@ pub trait HnswGraph {
     ) -> impl Iterator<Item = (usize, VectorDistance)> + '_;
 }
 
-struct HnswGraphImpl {
+pub struct HnswGraphBuilder {
     /// entrypoint of the graph: Some(`entrypoint_vector_idx`)
-    entrypoint: Option<usize>,
+    entrypoint: usize,
     nodes: Vec<VectorHnswNode>,
 }
 
-impl HnswGraph for HnswGraphImpl {
-    fn entrypoint(&self) -> Option<usize> {
+impl HnswGraphBuilder {
+    pub(crate) fn first(node: VectorHnswNode) -> Self {
+        Self {
+            entrypoint: 0,
+            nodes: vec![node],
+        }
+    }
+}
+
+impl HnswGraph for HnswGraphBuilder {
+    fn entrypoint(&self) -> usize {
         self.entrypoint
     }
 
@@ -188,7 +213,7 @@ pub struct HnswBuilder<V: VectorStore, G: HnswGraph, M: MeasureDistanceBuilder, 
 
     // payload
     vector_store: V,
-    graph: G,
+    graph: Option<G>,
 
     // utils
     rng: R,
@@ -226,14 +251,11 @@ impl VecSet {
     }
 }
 
-impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphImpl, M, R> {
+impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphBuilder, M, R> {
     pub fn new(vector_len: usize, rng: R, options: HnswBuilderOptions) -> Self {
         Self {
             options,
-            graph: HnswGraphImpl {
-                entrypoint: None,
-                nodes: vec![],
-            },
+            graph: None,
             vector_store: VectorStoreImpl::new(vector_len),
             rng,
             _measure: Default::default(),
@@ -244,8 +266,12 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphIm
         assert_eq!(self.vector_store.len(), faiss_hnsw.levels_raw().len());
         let (entry_point, _max_level) = faiss_hnsw.entry_point().unwrap();
         let levels = faiss_hnsw.levels_raw();
-        assert_eq!(levels.len(), self.graph.nodes.len());
-        let mut nodes = Vec::with_capacity(self.graph.nodes.len());
+        let Some(graph) = &self.graph else {
+            assert_eq!(levels.len(), 0);
+            return Self::new(self.vector_store.vector_len, self.rng, self.options);
+        };
+        assert_eq!(levels.len(), graph.nodes.len());
+        let mut nodes = Vec::with_capacity(graph.nodes.len());
         for (node, level_count) in levels.iter().enumerate() {
             let level_count = *level_count as usize;
             let mut level_neighbors = Vec::with_capacity(level_count);
@@ -269,44 +295,27 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphIm
         }
         Self {
             options: self.options,
-            graph: HnswGraphImpl {
-                entrypoint: Some(entry_point),
+            graph: Some(HnswGraphBuilder {
+                entrypoint: entry_point,
                 nodes,
-            },
+            }),
             vector_store: self.vector_store,
             rng: self.rng,
             _measure: Default::default(),
         }
     }
 
-    fn gen_level(&mut self) -> usize {
-        let level = (-UniformFloat::<f32>::sample_single(0.0, 1.0, &mut self.rng)
-            .unwrap()
-            .ln()
-            * self.options.m_l())
-        .floor() as usize;
-        min(level, self.options.max_level)
-    }
-
-    fn new_node(&mut self) -> VectorHnswNode {
-        let level = self.gen_level();
-        let mut level_neighbours = Vec::with_capacity(level);
-        level_neighbours
-            .extend((0..=level).map(|level| BoundedNearest::new(self.options.level_m(level))));
-        VectorHnswNode { level_neighbours }
-    }
-
     pub fn print_graph(&self) {
-        let Some(entrypoint) = self.graph.entrypoint else {
+        let Some(graph) = &self.graph else {
             println!("empty graph");
             return;
         };
         println!(
             "entrypoint {} in level {}",
-            entrypoint,
-            self.graph.nodes[entrypoint].level()
+            graph.entrypoint,
+            graph.nodes[graph.entrypoint].level()
         );
-        for (i, node) in self.graph.nodes.iter().enumerate() {
+        for (i, node) in graph.nodes.iter().enumerate() {
             println!("node {} has {} levels", i, node.level());
             for level in 0..node.level() {
                 print!("level {}: ", level);
@@ -319,36 +328,35 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphIm
     }
 
     pub async fn insert(&mut self, vec: VectorRef<'_>, info: &[u8]) -> HummockResult<HnswStats> {
-        let node = self.new_node();
-        let stat = insert_graph::<M>(
-            &self.vector_store,
-            &mut self.graph,
-            node,
-            vec,
-            self.options.ef_construction,
-        )
-        .await?;
+        let node = new_node(&self.options, &mut self.rng);
+        let stat = if let Some(graph) = &mut self.graph {
+            insert_graph::<M>(
+                &self.vector_store,
+                graph,
+                node,
+                vec,
+                self.options.ef_construction,
+            )
+            .await?
+        } else {
+            self.graph = Some(HnswGraphBuilder::first(node));
+            HnswStats::default()
+        };
         self.vector_store.add(vec, info);
         Ok(stat)
     }
 }
 
-async fn insert_graph<M: MeasureDistanceBuilder>(
+pub(crate) async fn insert_graph<M: MeasureDistanceBuilder>(
     vector_store: &impl VectorStore,
-    graph: &mut HnswGraphImpl,
+    graph: &mut HnswGraphBuilder,
     mut node: VectorHnswNode,
     vec: VectorRef<'_>,
     ef_construction: usize,
 ) -> HummockResult<HnswStats> {
     {
-        let Some(entrypoint_index) = &graph.entrypoint else {
-            // first vector, no neighbour, just return
-            graph.entrypoint = Some(graph.nodes.len());
-            graph.nodes.push(node);
-            return Ok(HnswStats::default());
-        };
         let mut stats = HnswStats::default();
-        let entrypoint_index = *entrypoint_index;
+        let entrypoint_index = graph.entrypoint();
         let measure = M::new(vec);
         let mut entrypoints = BoundedNearest::new(1);
         entrypoints.insert(
@@ -403,7 +411,7 @@ async fn insert_graph<M: MeasureDistanceBuilder>(
             }
         }
         if graph.nodes[entrypoint_index].level() < node.level() {
-            graph.entrypoint = Some(vector_index);
+            graph.entrypoint = vector_index;
         }
         graph.nodes.push(node);
         Ok(stats)
@@ -419,10 +427,7 @@ pub async fn nearest<O, M: MeasureDistanceBuilder>(
     top_n: usize,
 ) -> HummockResult<(Vec<O>, HnswStats)> {
     {
-        let Some(entrypoint_index) = graph.entrypoint() else {
-            assert_eq!(graph.len(), 0);
-            return Ok((vec![], HnswStats::default()));
-        };
+        let entrypoint_index = graph.entrypoint();
         let measure = M::new(vec);
         let mut entrypoints = BoundedNearest::new(1);
         let mut stats = HnswStats::default();
@@ -666,7 +671,7 @@ mod tests {
                         let start_time = Instant::now();
                         let (actual, stats) = block_on(nearest::<_, InnerProductDistance>(
                             &hnsw_builder.vector_store,
-                            &hnsw_builder.graph,
+                            hnsw_builder.graph.as_ref().unwrap(),
                             query.to_ref(),
                             |_, _, info| Bytes::copy_from_slice(info),
                             ef_search,
