@@ -690,8 +690,7 @@ impl SstableStore {
         object_id: HummockVectorFileId,
         block: &VectorBlock,
     ) -> HummockResult<usize> {
-        // TODO: use with_capacity
-        let mut encoded_block = BytesMut::new();
+        let mut encoded_block = BytesMut::with_capacity(block.encoded_len());
         block.encode(&mut encoded_block);
         let encoded_block = encoded_block.freeze();
         let size = encoded_block.len();

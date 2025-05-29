@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::slice;
+
 use bytes::{Buf, BufMut};
 
 use crate::vector::VectorRef;
@@ -44,38 +46,60 @@ impl VectorBlockInner {
         let end = self.info_offset[idx] as usize;
         &self.info_payload[start..end]
     }
+
+    pub fn encoded_len(&self) -> usize {
+        size_of::<u32>() // dimension
+            + size_of::<u32>() // vector count
+            + self.info_offset.len() * size_of::<u32>() // info offsets
+            + self.info_payload.len() // info payload
+            + self.vector_payload.len() * size_of::<f32>() // vector payload
+    }
 }
 
-pub struct VectorBlockBuilder(VectorBlockInner);
+pub struct VectorBlockBuilder {
+    inner: VectorBlockInner,
+    encoded_len: usize,
+}
 
 impl VectorBlockBuilder {
     pub fn new(dimension: usize) -> Self {
-        Self(VectorBlockInner {
-            dimension: dimension
-                .try_into()
-                .unwrap_or_else(|_| panic!("dimension {} overflow", dimension)),
-            vector_payload: vec![],
-            info_payload: vec![],
-            info_offset: vec![],
-        })
+        Self {
+            inner: VectorBlockInner {
+                dimension: dimension
+                    .try_into()
+                    .unwrap_or_else(|_| panic!("dimension {} overflow", dimension)),
+                vector_payload: vec![],
+                info_payload: vec![],
+                info_offset: vec![],
+            },
+            encoded_len: size_of::<u32>() // dimension
+             + size_of::<u32>(), // vector count
+        }
     }
 
     pub fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
         let slice = vec.as_slice();
-        assert_eq!(self.0.dimension as usize, slice.len());
-        self.0.vector_payload.extend_from_slice(slice);
-        self.0.info_payload.extend_from_slice(info);
-        let offset = self.0.info_payload.len();
-        self.0.info_offset.push(
+        assert_eq!(self.inner.dimension as usize, slice.len());
+        self.inner.vector_payload.extend_from_slice(slice);
+        self.inner.info_payload.extend_from_slice(info);
+        let offset = self.inner.info_payload.len();
+        self.inner.info_offset.push(
             offset
                 .try_into()
                 .unwrap_or_else(|_| panic!("offset {} overflow", offset)),
         );
+        self.encoded_len += size_of::<u32>() + size_of_val(slice) + info.len()
+    }
+
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn encoded_len(&self) -> usize {
+        debug_assert_eq!(self.encoded_len, self.inner.encoded_len());
+        self.encoded_len
     }
 
     pub fn finish(self) -> Option<VectorBlock> {
-        if !self.0.info_offset.is_empty() {
-            Some(VectorBlock(self.0))
+        if !self.inner.info_offset.is_empty() {
+            Some(VectorBlock(self.inner))
         } else {
             None
         }
@@ -96,6 +120,10 @@ impl VectorBlock {
 
     pub fn info(&self, idx: usize) -> &[u8] {
         self.0.info(idx)
+    }
+
+    pub fn encoded_len(&self) -> usize {
+        self.0.encoded_len()
     }
 
     /// # Format:
@@ -125,10 +153,15 @@ impl VectorBlock {
             self.0.vector_payload.len(),
             (self.0.dimension as usize) * vector_count
         );
-        // TODO: put the whole f32 slice as a whole
-        for f in &self.0.vector_payload {
-            buf.put_f32(*f);
-        }
+        let vector_payload_ptr = self.0.vector_payload.as_slice().as_ptr() as *const u8;
+        // safety: correctly set the size of vector_payload
+        let vector_payload_slice = unsafe {
+            slice::from_raw_parts(
+                vector_payload_ptr,
+                self.0.vector_payload.len() * size_of::<f32>(),
+            )
+        };
+        buf.put_slice(vector_payload_slice);
     }
 
     pub fn decode(mut buf: impl Buf) -> Self {
@@ -144,9 +177,16 @@ impl VectorBlock {
         buf.copy_to_slice(&mut info_payload);
         let vector_item_count = (dimension as usize) * vector_count;
         let mut vector_payload = Vec::with_capacity(vector_item_count);
-        for _ in 0..vector_item_count {
-            let item = buf.get_f32();
-            vector_payload.push(item);
+
+        let vector_payload_ptr = vector_payload.spare_capacity_mut().as_mut_ptr() as *mut u8;
+        // safety: no data append to vector_payload, and correctly set the size of vector_payload
+        let vector_payload_slice = unsafe {
+            slice::from_raw_parts_mut(vector_payload_ptr, vector_item_count * size_of::<f32>())
+        };
+        buf.copy_to_slice(vector_payload_slice);
+        // safety: have written correct amount of data
+        unsafe {
+            vector_payload.set_len(vector_item_count);
         }
         Self(VectorBlockInner {
             dimension,
@@ -163,27 +203,14 @@ impl<'a> IntoIterator for &'a VectorBlock {
     type IntoIter = impl Iterator<Item = Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        (0..self.0.info_offset.len()).map(|i| {
-            let start = if i == 0 {
-                0
-            } else {
-                self.0.info_offset[i - 1] as usize
-            };
-            let end = self.0.info_offset[i] as usize;
-            let info = &self.0.info_payload[start..end];
-            let start = i * self.0.dimension as usize;
-            let end = start + self.0.dimension as usize;
-            (
-                VectorRef::from_slice(&self.0.vector_payload[start..end]),
-                info,
-            )
-        })
+        (0..self.0.info_offset.len()).map(|i| (self.vec_ref(i), self.info(i)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use crate::hummock::vector::block::{VectorBlock, VectorBlockBuilder};
     use crate::vector::test_utils::{gen_info, gen_vector};
@@ -199,11 +226,19 @@ mod tests {
         for (vec, info) in &input {
             builder.add(vec.to_ref(), info);
         }
+        let expected_encoded_len = builder.encoded_len();
         let block = builder.finish().unwrap();
         let mut encoded_block = Vec::new();
         block.encode(&mut encoded_block);
+        assert_eq!(expected_encoded_len, encoded_block.len());
         let decoded_block = VectorBlock::decode(encoded_block.as_slice());
         assert_eq!(block, decoded_block);
+        for ((expected_vec, expected_info), (actual_vec, actual_info)) in
+            input.iter().zip_eq_debug(&block)
+        {
+            assert_eq!(expected_vec.to_ref(), actual_vec);
+            assert_eq!(expected_info.iter().as_slice(), actual_info);
+        }
     }
 
     #[test]

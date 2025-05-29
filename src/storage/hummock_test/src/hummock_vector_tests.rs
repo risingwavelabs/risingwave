@@ -35,7 +35,7 @@ use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::prepare_hummock_test_env;
 
 #[tokio::test]
-async fn test_vector_basic() {
+async fn test_flat_vector() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     const VECTOR_DIM: usize = 128;
     let base_epoch = test_epoch(233);
@@ -126,11 +126,11 @@ async fn test_vector_basic() {
     fn on_nearest_item(_vec: VectorRef<'_>, distance: f32, info: &[u8]) -> (f32, Bytes) {
         (distance, Bytes::copy_from_slice(info))
     }
-    {
-        let read_snapshot_epoch1 = test_env
+    let check_query = async |epoch, vectors: &[&Vec<(Vector, Bytes)>]| {
+        let read_snapshot_epoch = test_env
             .storage
             .new_read_snapshot(
-                HummockReadEpoch::Committed(epoch1),
+                HummockReadEpoch::Committed(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
                 },
@@ -138,7 +138,7 @@ async fn test_vector_basic() {
             .await
             .unwrap();
 
-        let output = read_snapshot_epoch1
+        let output = read_snapshot_epoch
             .nearest(
                 query.clone(),
                 VectorNearestOptions {
@@ -152,47 +152,50 @@ async fn test_vector_basic() {
 
         let mut builder = NearestBuilder::<'_, _, InnerProductDistance>::new(query.to_ref(), top_n);
         builder.add(
-            epoch1_vectors
+            vectors
                 .iter()
+                .cloned()
+                .flatten()
                 .map(|(vec, info)| (vec.to_ref(), info.as_ref())),
             &on_nearest_item,
         );
         let expected = builder.finish();
         assert_eq!(output, expected);
-    }
-    {
-        let read_snapshot_epoch1 = test_env
-            .storage
-            .new_read_snapshot(
-                HummockReadEpoch::Committed(epoch2),
-                NewReadSnapshotOptions {
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+    };
+    check_query(epoch1, &[&epoch1_vectors]).await;
+    check_query(epoch2, &[&epoch1_vectors, &epoch2_vectors]).await;
 
-        let output = read_snapshot_epoch1
-            .nearest(
-                query.clone(),
-                VectorNearestOptions {
-                    top_n,
-                    measure: DistanceMeasurement::InnerProduct,
-                },
-                on_nearest_item,
-            )
-            .await
-            .unwrap();
+    drop(vector_writer);
+    let mut vector_writer = test_env
+        .storage
+        .new_vector_writer(NewVectorWriterOptions {
+            table_id: TEST_TABLE_ID,
+        })
+        .await;
 
-        let mut builder = NearestBuilder::<'_, _, InnerProductDistance>::new(query.to_ref(), top_n);
-        builder.add(
-            epoch1_vectors
-                .iter()
-                .chain(epoch2_vectors.iter())
-                .map(|(vec, info)| (vec.to_ref(), info.as_ref())),
-            &on_nearest_item,
-        );
-        let expected = builder.finish();
-        assert_eq!(output, expected);
+    vector_writer.init_for_test(epoch3).await.unwrap();
+    let epoch3_vectors = (0..100).map(|_| next_input()).collect_vec();
+    for (vec, info) in &epoch3_vectors {
+        vector_writer.insert(vec.clone(), info.clone()).unwrap();
     }
+
+    let epoch4 = epoch3.next_epoch();
+    vector_writer.flush().await.unwrap();
+    vector_writer.seal_current_epoch(epoch4, SealCurrentEpochOptions::for_test());
+
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch3, table_id_set.clone())
+        .await
+        .unwrap();
+    test_env
+        .meta_client
+        .commit_epoch(epoch3, res)
+        .await
+        .unwrap();
+    test_env.wait_sync_committed_version().await;
+
+    check_query(epoch1, &[&epoch1_vectors]).await;
+    check_query(epoch2, &[&epoch1_vectors, &epoch2_vectors]).await;
+    check_query(epoch3, &[&epoch1_vectors, &epoch2_vectors, &epoch3_vectors]).await;
 }
