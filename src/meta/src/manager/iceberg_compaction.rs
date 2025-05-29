@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use iceberg::Catalog;
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use itertools::Itertools;
@@ -316,18 +315,10 @@ impl IcebergCompactionManager {
         Ok(table)
     }
 
-    pub async fn load_iceberg_catalog_and_table(
-        &self,
-        sink_id: &SinkId,
-    ) -> MetaResult<(Arc<dyn Catalog>, Table)> {
+    pub async fn load_iceberg_config(&self, sink_id: &SinkId) -> MetaResult<IcebergConfig> {
         let sink_param = self.get_sink_param(sink_id).await?;
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;
-        let catalog = iceberg_config.create_catalog().await?;
-        let table = catalog
-            .load_table(&iceberg_config.full_table_name()?)
-            .await
-            .map_err(|e| SinkError::Iceberg(e.into()))?;
-        Ok((catalog, table))
+        Ok(iceberg_config)
     }
 
     pub fn add_compactor_stream(
@@ -418,38 +409,58 @@ impl IcebergCompactionManager {
     /// Check snapshot count for a specific table and trigger expiration if needed
     async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
         // Configurable thresholds - could be moved to config later
-        const MAX_SNAPSHOTS: usize = 100; // Trigger GC when exceeding this
+        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 5 day
+        let now = chrono::Utc::now().timestamp_millis();
+        let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
 
-        tracing::debug!("Checking snapshots for sink {}", sink_id.sink_id);
+        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        if !iceberg_config.enable_expired_snapshots {
+            return Ok(());
+        }
 
-        let (catalog, table) = self.load_iceberg_catalog_and_table(sink_id).await?;
+        let catalog = iceberg_config.create_catalog().await?;
+        let table = catalog
+            .load_table(&iceberg_config.full_table_name()?)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+
         let metadata = table.metadata();
         let snapshots = metadata.snapshots().collect_vec();
 
-        if snapshots.len() > MAX_SNAPSHOTS && snapshots.first().unwrap().timestamp_ms() > 0 {
-            tracing::info!(
-                "Sink {} has {} snapshots (threshold: {}), triggering expiration",
-                sink_id.sink_id,
-                snapshots.len(),
-                MAX_SNAPSHOTS
-            );
-
-            let tx = Transaction::new(&table);
-            let expired_snapshots = tx
-                .expire_snapshot()
-                .clear_expire_files(true)
-                .clear_expire_files(true);
-
-            let tx = expired_snapshots
-                .apply()
-                .await
-                .map_err(|e| SinkError::Iceberg(e.into()))?;
-            tx.commit(catalog.as_ref())
-                .await
-                .map_err(|e| SinkError::Iceberg(e.into()))?;
-
-            tracing::info!("Expired snapshots for iceberg {}", sink_id.sink_id);
+        if snapshots.is_empty() || snapshots.first().unwrap().timestamp_ms() > expired_older_than {
+            // avoid commit empty table updates
+            return Ok(());
         }
+
+        tracing::info!(
+            "Catalog {} table {} sink-id {} has {} snapshots try trigger expiration",
+            iceberg_config.catalog_name(),
+            iceberg_config.full_table_name()?,
+            sink_id.sink_id,
+            snapshots.len(),
+        );
+
+        let tx = Transaction::new(&table);
+        let expired_snapshots = tx
+            .expire_snapshot()
+            .clear_expire_files(true)
+            .clear_expire_files(true);
+
+        let tx = expired_snapshots
+            .apply()
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        tx.commit(catalog.as_ref())
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        tracing::info!(
+            "Expired snapshots for iceberg catalog {} table {} sink-id {}",
+            iceberg_config.catalog_name(),
+            iceberg_config.full_table_name()?,
+            sink_id.sink_id,
+        );
+
         Ok(())
     }
 }
