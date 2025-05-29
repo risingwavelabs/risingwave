@@ -97,6 +97,46 @@ where
     })
 }
 
+use risingwave_common::types::UInt256;
+
+#[function("divide(uint256, int2) -> uint256")]
+#[function("divide(uint256, int4) -> uint256")]  
+#[function("divide(uint256, int8) -> uint256")]
+pub fn uint256_div_int<L, T>(l: L, r: T) -> Result<UInt256>
+where
+    L: Into<UInt256>,
+    T: TryInto<UInt256> + Zero + Debug,
+    T::Error: Debug,
+{
+    if r.is_zero() {
+        return Err(ExprError::DivisionByZero);
+    }
+    let l_uint256 = l.into();
+    let r_uint256 = r.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256.checked_div(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("divide(int2, uint256) -> uint256")]
+#[function("divide(int4, uint256) -> uint256")]
+#[function("divide(int8, uint256) -> uint256")]
+pub fn int_div_uint256<T, R>(l: T, r: R) -> Result<UInt256>
+where
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+    R: Into<UInt256>,
+{
+    let r_uint256 = r.into();
+    if r_uint256.is_zero() {
+        return Err(ExprError::DivisionByZero);
+    }
+    let l_uint256 = l.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256.checked_div(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("modulus(*int, *int) -> auto")]
 #[function("modulus(decimal, decimal) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
