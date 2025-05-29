@@ -31,7 +31,7 @@ use crate::{HummockObjectId, HummockVectorFileId};
 pub struct VectorFileInfo {
     pub object_id: HummockVectorFileId,
     pub file_size: u64,
-    pub start_vector_id: u64,
+    pub start_vector_id: usize,
     pub vector_count: usize,
 }
 
@@ -40,7 +40,7 @@ impl From<PbVectorFileInfo> for VectorFileInfo {
         Self {
             object_id: pb.object_id.into(),
             file_size: pb.file_size,
-            start_vector_id: pb.start_vector_id,
+            start_vector_id: pb.start_vector_id.try_into().unwrap(),
             vector_count: pb.vector_count.try_into().unwrap(),
         }
     }
@@ -51,7 +51,7 @@ impl From<VectorFileInfo> for PbVectorFileInfo {
         Self {
             object_id: info.object_id.inner(),
             file_size: info.file_size,
-            start_vector_id: info.start_vector_id,
+            start_vector_id: info.start_vector_id.try_into().unwrap(),
             vector_count: info.vector_count.try_into().unwrap(),
         }
     }
@@ -59,13 +59,13 @@ impl From<VectorFileInfo> for PbVectorFileInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorStore {
-    pub next_vector_id: u64,
+    pub next_vector_id: usize,
     pub vector_files: Vec<VectorFileInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorStoreDelta {
-    pub next_vector_id: u64,
+    pub next_vector_id: usize,
     pub added_vector_files: Vec<VectorFileInfo>,
 }
 
@@ -82,8 +82,7 @@ impl VectorStore {
             if let Some(latest_vector_file) = self.vector_files.last() {
                 assert!(
                     new_vector_file.start_vector_id
-                        >= latest_vector_file.start_vector_id
-                            + latest_vector_file.vector_count as u64,
+                        >= latest_vector_file.start_vector_id + latest_vector_file.vector_count,
                     "new vector file's start vector id {} should be greater than the last vector file's start vector id {} + vector count {}",
                     new_vector_file.start_vector_id,
                     latest_vector_file.start_vector_id,
@@ -95,7 +94,7 @@ impl VectorStore {
         self.next_vector_id = delta.next_vector_id;
         if let Some(latest_vector_file) = self.vector_files.last() {
             assert!(
-                latest_vector_file.start_vector_id + latest_vector_file.vector_count as u64
+                latest_vector_file.start_vector_id + latest_vector_file.vector_count
                     <= self.next_vector_id,
                 "next_vector_id {} should be greater than the last vector file's start vector id {} + vector count {}",
                 self.next_vector_id,
@@ -131,7 +130,7 @@ impl From<PbFlatIndex> for FlatIndex {
         Self {
             config: pb.config.unwrap(),
             vector_store: VectorStore {
-                next_vector_id: pb.next_vector_id,
+                next_vector_id: pb.next_vector_id.try_into().unwrap(),
                 vector_files: pb
                     .vector_files
                     .into_iter()
@@ -145,7 +144,7 @@ impl From<FlatIndex> for PbFlatIndex {
     fn from(index: FlatIndex) -> Self {
         Self {
             config: Some(index.config),
-            next_vector_id: index.vector_store.next_vector_id,
+            next_vector_id: index.vector_store.next_vector_id.try_into().unwrap(),
             vector_files: index
                 .vector_store
                 .vector_files
@@ -222,7 +221,7 @@ impl From<PbFlatIndexAdd> for FlatIndexAdd {
     fn from(add: PbFlatIndexAdd) -> Self {
         Self {
             vector_store_delta: VectorStoreDelta {
-                next_vector_id: add.next_vector_id,
+                next_vector_id: add.next_vector_id.try_into().unwrap(),
                 added_vector_files: add
                     .added_vector_files
                     .into_iter()
@@ -236,7 +235,7 @@ impl From<PbFlatIndexAdd> for FlatIndexAdd {
 impl From<FlatIndexAdd> for PbFlatIndexAdd {
     fn from(add: FlatIndexAdd) -> Self {
         Self {
-            next_vector_id: add.vector_store_delta.next_vector_id,
+            next_vector_id: add.vector_store_delta.next_vector_id.try_into().unwrap(),
             added_vector_files: add
                 .vector_store_delta
                 .added_vector_files

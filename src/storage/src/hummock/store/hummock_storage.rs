@@ -693,14 +693,28 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> StorageResult<Vec<O>> {
-        let HummockReadEpoch::Committed(epoch) = self.epoch else {
-            return Err(HummockError::other(format!(
-                "nearest query only support committed epoch, got {:?}",
-                self.epoch
-            ))
-            .into());
+        let version = match self.epoch {
+            HummockReadEpoch::Committed(epoch)
+            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            | HummockReadEpoch::TimeTravel(epoch) => {
+                self.get_epoch_hummock_version(epoch, self.table_id).await?
+            }
+            HummockReadEpoch::Backup(epoch) => self
+                .backup_reader
+                .try_get_hummock_version(self.table_id, epoch)
+                .await?
+                .ok_or_else(|| {
+                    HummockError::read_backup_error(format!(
+                        "backup include epoch {} not found",
+                        epoch
+                    ))
+                })?,
+            HummockReadEpoch::NoWait(_) => {
+                return Err(
+                    HummockError::other("nearest query does not support NoWait epoch").into(),
+                );
+            }
         };
-        let version = self.get_epoch_hummock_version(epoch, self.table_id).await?;
         dispatch_measurement!(options.measure, MeasurementType, {
             Ok(self
                 .hummock_version_reader

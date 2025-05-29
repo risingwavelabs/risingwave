@@ -14,14 +14,13 @@
 
 use std::mem::take;
 
-use bytes::{Bytes, BytesMut};
-use risingwave_hummock_sdk::HummockObjectId;
+use bytes::Bytes;
 use risingwave_hummock_sdk::vector_index::{
     FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl, VectorStoreDelta,
 };
 
 use crate::hummock::vector::block::VectorBlockBuilder;
-use crate::hummock::{HummockError, HummockResult, ObjectIdManagerRef, SstableStoreRef};
+use crate::hummock::{HummockResult, ObjectIdManagerRef, SstableStoreRef};
 use crate::vector::Vector;
 
 pub(crate) struct VectorWriterImpl {
@@ -29,7 +28,7 @@ pub(crate) struct VectorWriterImpl {
     object_id_manager: ObjectIdManagerRef,
     dimension: usize,
 
-    next_vector_id: u64,
+    next_vector_id: usize,
     flushed_vector_files: Vec<VectorFileInfo>,
     block_builder: Option<VectorBlockBuilder>,
 }
@@ -77,21 +76,11 @@ impl VectorWriterImpl {
             && let Some(block) = builder.finish()
         {
             let vector_count = block.count();
-            // TODO: use with_capacity
-            let mut encoded_block = BytesMut::new();
-            block.encode(&mut encoded_block);
-            let encoded_block = encoded_block.freeze();
-            let size = encoded_block.len();
             let object_id = self.object_id_manager.get_new_object_id().await?;
-            // TODO: may not store with the sst. consider how to manage GC
-            let path = self
+            let size = self
                 .sstable_store
-                .get_object_data_path(HummockObjectId::VectorFile(object_id));
-            self.sstable_store
-                .store()
-                .upload(&path, encoded_block)
-                .await
-                .map_err(HummockError::from)?;
+                .put_vector_block(object_id, &block)
+                .await?;
 
             self.flushed_vector_files.push(VectorFileInfo {
                 object_id,
@@ -99,7 +88,7 @@ impl VectorWriterImpl {
                 file_size: size as _,
                 start_vector_id: self.next_vector_id,
             });
-            self.next_vector_id += vector_count as u64;
+            self.next_vector_id += vector_count;
             Ok(size)
         } else {
             Ok(0)

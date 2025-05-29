@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use await_tree::{InstrumentAwait, SpanExt};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use foyer::{
     Engine, EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
@@ -26,7 +26,10 @@ use foyer::{
 };
 use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId, SST_OBJECT_SUFFIX};
+use risingwave_hummock_sdk::vector_index::VectorFileInfo;
+use risingwave_hummock_sdk::{
+    HummockObjectId, HummockSstableObjectId, HummockVectorFileId, SST_OBJECT_SUFFIX,
+};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -42,6 +45,7 @@ use super::{
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
+use crate::hummock::vector::block::VectorBlock;
 use crate::hummock::{BlockHolder, HummockError, HummockResult};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
@@ -491,6 +495,16 @@ impl SstableStore {
         }
     }
 
+    pub async fn get_vector_block(
+        &self,
+        vector_file: &VectorFileInfo,
+    ) -> HummockResult<VectorBlock> {
+        let path = self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
+        let encoded = self.store.read(&path, ..).await?;
+        let block = VectorBlock::decode(encoded.as_ref());
+        Ok(block)
+    }
+
     pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
         self.get_object_data_path(HummockObjectId::Sstable(object_id.into()))
     }
@@ -669,6 +683,25 @@ impl SstableStore {
         path: &str,
     ) -> ObjectResult<ObjectStreamingUploader> {
         self.store.streaming_upload(path).await
+    }
+
+    pub async fn put_vector_block(
+        &self,
+        object_id: HummockVectorFileId,
+        block: &VectorBlock,
+    ) -> HummockResult<usize> {
+        // TODO: use with_capacity
+        let mut encoded_block = BytesMut::new();
+        block.encode(&mut encoded_block);
+        let encoded_block = encoded_block.freeze();
+        let size = encoded_block.len();
+
+        let path = self.get_object_data_path(HummockObjectId::VectorFile(object_id));
+        self.store()
+            .upload(&path, encoded_block)
+            .await
+            .map_err(HummockError::from)?;
+        Ok(size)
     }
 }
 

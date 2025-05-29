@@ -16,32 +16,57 @@ use bytes::{Buf, BufMut};
 
 use crate::vector::VectorRef;
 
-pub struct VectorBlockBuilder {
+#[cfg_attr(test, derive(PartialEq, Debug))]
+pub struct VectorBlockInner {
     dimension: u32,
     vector_payload: Vec<f32>,
     info_payload: Vec<u8>,
     info_offset: Vec<u32>,
 }
 
+impl VectorBlockInner {
+    pub fn count(&self) -> usize {
+        self.info_offset.len()
+    }
+
+    pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
+        let start = idx * self.dimension as usize;
+        let end = start + self.dimension as usize;
+        VectorRef::from_slice(&self.vector_payload[start..end])
+    }
+
+    pub fn info(&self, idx: usize) -> &[u8] {
+        let start = if idx == 0 {
+            0
+        } else {
+            self.info_offset[idx - 1] as usize
+        };
+        let end = self.info_offset[idx] as usize;
+        &self.info_payload[start..end]
+    }
+}
+
+pub struct VectorBlockBuilder(VectorBlockInner);
+
 impl VectorBlockBuilder {
     pub fn new(dimension: usize) -> Self {
-        Self {
+        Self(VectorBlockInner {
             dimension: dimension
                 .try_into()
                 .unwrap_or_else(|_| panic!("dimension {} overflow", dimension)),
             vector_payload: vec![],
             info_payload: vec![],
             info_offset: vec![],
-        }
+        })
     }
 
     pub fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
         let slice = vec.as_slice();
-        assert_eq!(self.dimension as usize, slice.len());
-        self.vector_payload.extend_from_slice(slice);
-        self.info_payload.extend_from_slice(info);
-        let offset = self.info_payload.len();
-        self.info_offset.push(
+        assert_eq!(self.0.dimension as usize, slice.len());
+        self.0.vector_payload.extend_from_slice(slice);
+        self.0.info_payload.extend_from_slice(info);
+        let offset = self.0.info_payload.len();
+        self.0.info_offset.push(
             offset
                 .try_into()
                 .unwrap_or_else(|_| panic!("offset {} overflow", offset)),
@@ -49,13 +74,8 @@ impl VectorBlockBuilder {
     }
 
     pub fn finish(self) -> Option<VectorBlock> {
-        if !self.info_offset.is_empty() {
-            Some(VectorBlock {
-                dimension: self.dimension,
-                vector_payload: self.vector_payload,
-                info_payload: self.info_payload,
-                info_offset: self.info_offset,
-            })
+        if !self.0.info_offset.is_empty() {
+            Some(VectorBlock(self.0))
         } else {
             None
         }
@@ -63,16 +83,19 @@ impl VectorBlockBuilder {
 }
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
-pub struct VectorBlock {
-    dimension: u32,
-    vector_payload: Vec<f32>,
-    info_payload: Vec<u8>,
-    info_offset: Vec<u32>,
-}
+pub struct VectorBlock(VectorBlockInner);
 
 impl VectorBlock {
     pub fn count(&self) -> usize {
-        self.info_offset.len()
+        self.0.count()
+    }
+
+    pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
+        self.0.vec_ref(idx)
+    }
+
+    pub fn info(&self, idx: usize) -> &[u8] {
+        self.0.info(idx)
     }
 
     /// # Format:
@@ -84,26 +107,26 @@ impl VectorBlock {
     /// | vector_payload (f32) * (dimension * vector_count)  |
     /// ```
     pub fn encode(&self, mut buf: impl BufMut) {
-        buf.put_u32(self.dimension);
-        let vector_count = self.info_offset.len();
+        buf.put_u32(self.0.dimension);
+        let vector_count = self.0.info_offset.len();
         assert!(vector_count > 0);
         buf.put_u32(
             vector_count
                 .try_into()
                 .unwrap_or_else(|_| panic!("vector count {} overflow", vector_count)),
         );
-        for offset in &self.info_offset {
+        for offset in &self.0.info_offset {
             buf.put_u32(*offset);
         }
-        let last_offset = *self.info_offset.last().unwrap();
-        assert_eq!(last_offset as usize, self.info_payload.len());
-        buf.put_slice(&self.info_payload);
+        let last_offset = *self.0.info_offset.last().unwrap();
+        assert_eq!(last_offset as usize, self.0.info_payload.len());
+        buf.put_slice(&self.0.info_payload);
         assert_eq!(
-            self.vector_payload.len(),
-            (self.dimension as usize) * vector_count
+            self.0.vector_payload.len(),
+            (self.0.dimension as usize) * vector_count
         );
         // TODO: put the whole f32 slice as a whole
-        for f in &self.vector_payload {
+        for f in &self.0.vector_payload {
             buf.put_f32(*f);
         }
     }
@@ -125,12 +148,12 @@ impl VectorBlock {
             let item = buf.get_f32();
             vector_payload.push(item);
         }
-        Self {
+        Self(VectorBlockInner {
             dimension,
             vector_payload,
             info_payload,
             info_offset,
-        }
+        })
     }
 }
 
@@ -140,18 +163,18 @@ impl<'a> IntoIterator for &'a VectorBlock {
     type IntoIter = impl Iterator<Item = Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        (0..self.info_offset.len()).map(|i| {
+        (0..self.0.info_offset.len()).map(|i| {
             let start = if i == 0 {
                 0
             } else {
-                self.info_offset[i - 1] as usize
+                self.0.info_offset[i - 1] as usize
             };
-            let end = self.info_offset[i] as usize;
-            let info = &self.info_payload[start..end];
-            let start = i * self.dimension as usize;
-            let end = start + self.dimension as usize;
+            let end = self.0.info_offset[i] as usize;
+            let info = &self.0.info_payload[start..end];
+            let start = i * self.0.dimension as usize;
+            let end = start + self.0.dimension as usize;
             (
-                VectorRef::from_slice(&self.vector_payload[start..end]),
+                VectorRef::from_slice(&self.0.vector_payload[start..end]),
                 info,
             )
         })

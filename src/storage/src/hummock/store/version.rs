@@ -36,7 +36,7 @@ use risingwave_hummock_sdk::table_watermark::{
     PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::vector_index::VectorIndexImpl;
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockObjectId, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::warn;
@@ -54,7 +54,6 @@ use crate::hummock::utils::{
     filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
     search_sst_idx,
 };
-use crate::hummock::vector::block::VectorBlock;
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
@@ -1131,7 +1130,7 @@ impl HummockVersionReader {
         .await
     }
 
-    pub async fn nearest<M: MeasureDistanceBuilder, O>(
+    pub async fn nearest<M: MeasureDistanceBuilder, O: Send>(
         &self,
         version: PinnedVersion,
         table_id: TableId,
@@ -1149,19 +1148,15 @@ impl HummockVersionReader {
                 index.dimension
             )));
         }
-        let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
         match &index.inner {
             VectorIndexImpl::Flat(flat) => {
+                let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
                 for vector_file in &flat.vector_store.vector_files {
-                    let path = self
-                        .sstable_store
-                        .get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
-                    let encoded = self.sstable_store.store().read(&path, ..).await?;
-                    let block = VectorBlock::decode(encoded.as_ref());
+                    let block = self.sstable_store.get_vector_block(vector_file).await?;
                     builder.add(&block, &on_nearest_item_fn);
                 }
+                Ok(builder.finish())
             }
         }
-        Ok(builder.finish())
     }
 }
