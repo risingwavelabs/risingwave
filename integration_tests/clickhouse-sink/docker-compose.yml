@@ -12,6 +12,9 @@ services:
       - 9009
     volumes:
       - ./clickhouse_prepare.sql:/clickhouse_prepare.sql
+    environment:
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "default"
   risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml

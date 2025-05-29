@@ -31,12 +31,12 @@ sleep 1
 echo "--- create clickhouse table"
 curl https://clickhouse.com/ | sh
 sleep 2
-./clickhouse client --host=clickhouse-server --port=9000 --query="SET enable_json_type = 1;CREATE table demo_test(v1 Int32,v2 Int64,v3 String,v4 Enum16('A'=1,'B'=2), v5 decimal64(3),v6 json)ENGINE = ReplacingMergeTree PRIMARY KEY (v1);"
+./clickhouse client --host=clickhouse-server --port=9000 --password='default' --query="SET enable_json_type = 1;CREATE table demo_test(v1 Int32,v2 Int64,v3 String,v4 Enum16('A'=1,'B'=2), v5 decimal64(3),v6 json)ENGINE = ReplacingMergeTree PRIMARY KEY (v1);"
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
 sleep 5
-./clickhouse client --host=clickhouse-server --port=9000 --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
+./clickhouse client --host=clickhouse-server --port=9000 --password='default' --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
 
 
 # check sink destination using shell

@@ -219,6 +219,9 @@ services:
       - "9004:9004"
     expose:
       - 9009
+    environment:
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "default"
 
   redis-server:
     image: "redis:latest"
