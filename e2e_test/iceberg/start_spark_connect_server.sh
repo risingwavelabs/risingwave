@@ -9,9 +9,8 @@ PACKAGES="org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:$ICEBERG_VERSION,org
 PACKAGES="$PACKAGES,org.apache.spark:spark-connect_2.12:$SPARK_VERSION"
 
 SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
-
 if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ];then
-    wget --no-verbose https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
+    wget --no-verbose https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/$SPARK_FILE
     tar -xzf $SPARK_FILE --no-same-owner
 fi
 
