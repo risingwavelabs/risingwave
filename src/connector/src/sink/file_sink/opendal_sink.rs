@@ -124,7 +124,6 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
 
     async fn validate(&self) -> Result<()> {
         if matches!(self.engine_type, EngineType::Snowflake) {
-            println!("Validating Snowflake Sink");
             risingwave_common::license::Feature::SnowflakeSink
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
