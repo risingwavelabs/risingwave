@@ -286,29 +286,46 @@ pub fn cast_sigs() -> impl Iterator<Item = CastSig> {
 }
 
 pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
-    // cast rules:
-    // 1. implicit cast operations in PG are organized in 3 sequences,
-    //    with the reverse direction being assign cast operations.
-    //    https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
-    //    1. int2 -> int4 -> int8 -> numeric -> float4 -> float8
-    //    2. date -> timestamp -> timestamptz
-    //    3. time -> interval
-    // 2. any -> varchar is assign and varchar -> any is explicit
-    // 3. jsonb -> bool/number is explicit
-    // 4. int32 <-> bool is explicit
-    // 5. timestamp/timestamptz -> time is assign
-    // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
+    // ── CAST-TABLE CONVENTIONS ─────────────────────────────────────────────
+    // Legend: i = implicit cast      a = assign-time cast      e = explicit
+    //         . = self-cast (always allowed)                   ␠ = no cast
+    //
+    // 1.  We keep PostgreSQL’s three implicit ladders exactly as-is; the
+    //     opposite direction of every arrow is “assign”:
+    //        • int2 → int4 → int8 → numeric → float4 → float8
+    //        • date → timestamp → timestamptz
+    //        • time → interval
+    //     See https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
+    //
+    // 2.  RisingWave adds a widening target to the first ladder:
+    //        int2 / int4 / int8  →  int256        (implicit)
+    //     …but the chain STOPS there because our DECIMAL (numeric) is
+    //     limited to 28 digits.  Therefore:
+    //        int256 ↔ uint256         → explicit (sign change)
+    //        int256 → float8          → explicit (precision loss)
+    //
+    // 3.  Generic text casts follow PostgreSQL:
+    //        any → varchar            = assign
+    //        varchar → any            = explicit
+    //
+    // 4.  jsonb → {bool,int,float,numeric}          = explicit
+    //
+    // 5.  int32 ↔ boolean                            = explicit
+    //
+    // 6.  timestamp / timestamptz → time             = assign
+
     use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
+        //0123456789ABCDEFGH
         (". e             a ", Boolean),     // 0
-        (" .iiiiiia       a ", Int16),       // 1
-        ("ea.iiiii a      a ", Int32),       // 2
-        (" aa.iiii a     ae ", Int64),       // 3
-        (" aaa.ii a       a ", Decimal),     // 4
-        (" aaaa.i a       a ", Float32),     // 5
-        (" aaaaa. a       a ", Float64),     // 6
-        ("      e.a       a ", Int256),      // 7
-        (" aaaaae .       a ", UInt256),     // 8  ← new row
+        (" .iiiiiie       a ", Int16),       // 1
+        ("ea.iiiiie       a ", Int32),       // 2
+        (" aa.iiiie      ae ", Int64),       // 3
+        (" aaa.ii         a ", Decimal),     // 4
+        (" aaaa.i         a ", Float32),     // 5
+        (" aaaaa.         a ", Float64),     // 6
+        ("      e.e       a ", Int256),      // 7
+        ("      ee.       a ", UInt256),     // 8
         ("         .ii    a ", Date),        // 9
         ("         a.ia   a ", Timestamp),   // A
         ("         aa.a   a ", Timestamptz), // B

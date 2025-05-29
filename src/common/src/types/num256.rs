@@ -27,7 +27,7 @@ use num_traits::{
 };
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::ArrayType;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, ser::Serializer as _};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
@@ -264,8 +264,14 @@ impl UInt256Ref<'_> {
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
     ) -> memcomparable::Result<()> {
-        let (hi, lo) = self.0.into_words();
-        (hi, lo).serialize(serializer)
+        // Big-endian rendering of the full 256-bit value.
+        // We push the 32 bytes one-by-one with `serialize_u8`, which the
+        // docs guarantee writes a *single* raw byte – no length tags,
+        // no terminators. :contentReference[oaicite:0]{index=0}
+        for byte in self.0.to_be_bytes() {
+            serializer.serialize_u8(byte)?;
+        }
+        Ok(())
     }
 }
 
@@ -275,9 +281,11 @@ impl UInt256 {
     pub fn memcmp_deserialize(
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        let (hi, lo) = <(u128, u128)>::deserialize(deserializer)?;
-        let unsigned = u256::from_words(hi, lo);
-        Ok(UInt256::from(unsigned))
+        let mut buf = [0u8; Self::MEMCMP_ENCODED_SIZE];
+        for b in &mut buf {
+            *b = <u8 as serde::Deserialize>::deserialize(&mut *deserializer)?;
+        }
+        Ok(Self::from_be_bytes(buf))
     }
 }
 
