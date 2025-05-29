@@ -598,7 +598,7 @@ fn derive_sink_to_table_expr(
 ) -> Result<ExprImpl> {
     let input_type = &sink_schema.fields()[idx].data_type;
 
-    if target_type != input_type {
+    if !target_type.equals_datatype(input_type) {
         bail!(
             "column type mismatch: {:?} vs {:?}, column name: {:?}",
             target_type,
