@@ -17,12 +17,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iceberg::table::Table;
+use iceberg::transaction::Transaction;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
-use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::sink::{SinkError, SinkParam};
 use risingwave_pb::catalog::PbSink;
 use risingwave_pb::iceberg_compaction::{
     IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
@@ -314,6 +315,12 @@ impl IcebergCompactionManager {
         Ok(table)
     }
 
+    pub async fn load_iceberg_config(&self, sink_id: &SinkId) -> MetaResult<IcebergConfig> {
+        let sink_param = self.get_sink_param(sink_id).await?;
+        let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;
+        Ok(iceberg_config)
+    }
+
     pub fn add_compactor_stream(
         &self,
         context_id: u32,
@@ -349,5 +356,111 @@ impl IcebergCompactionManager {
         join_handle_vec.push((event_loop_join_handle, event_loop_shutdown_tx));
 
         join_handle_vec
+    }
+
+    /// GC loop for expired snapshots management
+    /// This is a separate loop that periodically checks all tracked Iceberg tables
+    /// and performs garbage collection operations like expiring old snapshots
+    pub fn gc_loop(manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            // Run GC every hour by default
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(e) = manager.perform_gc_operations().await {
+                            tracing::error!("GC operations failed: {}", e);
+                        }
+                    },
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Iceberg GC loop is stopped");
+                        return;
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
+    }
+
+    /// Perform GC operations on all tracked Iceberg tables
+    async fn perform_gc_operations(&self) -> MetaResult<()> {
+        // Get all sink IDs that are currently tracked
+        let sink_ids = {
+            let guard = self.inner.read();
+            guard.iceberg_commits.keys().cloned().collect::<Vec<_>>()
+        };
+
+        tracing::info!("Starting GC operations for {} tables", sink_ids.len());
+
+        for sink_id in sink_ids {
+            if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
+                tracing::warn!("Failed to perform GC for sink {}: {}", sink_id.sink_id, e);
+                // Continue with other tables even if one fails
+            }
+        }
+
+        tracing::info!("GC operations completed");
+        Ok(())
+    }
+
+    /// Check snapshot count for a specific table and trigger expiration if needed
+    async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
+        // Configurable thresholds - could be moved to config later
+        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 5 day
+        let now = chrono::Utc::now().timestamp_millis();
+        let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
+
+        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        if !iceberg_config.enable_expired_snapshots {
+            return Ok(());
+        }
+
+        let catalog = iceberg_config.create_catalog().await?;
+        let table = catalog
+            .load_table(&iceberg_config.full_table_name()?)
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        let metadata = table.metadata();
+        let snapshots = metadata.snapshots().collect_vec();
+
+        if snapshots.is_empty() || snapshots.first().unwrap().timestamp_ms() > expired_older_than {
+            // avoid commit empty table updates
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Catalog {} table {} sink-id {} has {} snapshots try trigger expiration",
+            iceberg_config.catalog_name(),
+            iceberg_config.full_table_name()?,
+            sink_id.sink_id,
+            snapshots.len(),
+        );
+
+        let tx = Transaction::new(&table);
+        let expired_snapshots = tx
+            .expire_snapshot()
+            .clear_expire_files(true)
+            .clear_expire_files(true);
+
+        let tx = expired_snapshots
+            .apply()
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+        tx.commit(catalog.as_ref())
+            .await
+            .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        tracing::info!(
+            "Expired snapshots for iceberg catalog {} table {} sink-id {}",
+            iceberg_config.catalog_name(),
+            iceberg_config.full_table_name()?,
+            sink_id.sink_id,
+        );
+
+        Ok(())
     }
 }
