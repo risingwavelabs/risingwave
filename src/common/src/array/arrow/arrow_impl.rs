@@ -169,7 +169,17 @@ pub trait ToArrow {
 
     #[inline]
     fn uint256_to_arrow(&self, array: &UInt256Array) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::Decimal256Array::from(array)))
+        // Convert to FixedSizeBinary(32) with big-endian bytes for correct ordering
+        let mut builder = arrow_array::builder::FixedSizeBinaryBuilder::with_capacity(array.len(), 32);
+        for value in array.iter() {
+            match value {
+                Some(uint256) => {
+                    builder.append_value(uint256.to_be_bytes()).map_err(ArrayError::to_arrow)?;
+                }
+                None => builder.append_null(),
+            }
+        }
+        Ok(Arc::new(builder.finish()))
     }
 
     #[inline]
@@ -368,7 +378,7 @@ pub trait ToArrow {
 
     #[inline]
     fn uint256_type_to_arrow(&self) -> arrow_schema::DataType {
-        arrow_schema::DataType::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0)
+        arrow_schema::DataType::FixedSizeBinary(32)
     }
 
     #[inline]
@@ -541,6 +551,7 @@ pub trait FromArrow {
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
             Binary => DataType::Bytea,
+            FixedSizeBinary(32) => DataType::UInt256,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
             List(field) => DataType::List(Box::new(self.from_field(field)?)),
@@ -645,6 +656,7 @@ pub trait FromArrow {
             }
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
+            FixedSizeBinary(32) => self.from_fixed_size_binary_array(array.as_any().downcast_ref().unwrap()),
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
             List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
@@ -851,6 +863,32 @@ pub trait FromArrow {
         array: &arrow_array::LargeBinaryArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Bytea(array.into()))
+    }
+
+    fn from_fixed_size_binary_array(
+        &self,
+        array: &arrow_array::FixedSizeBinaryArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        use arrow_array::Array;
+        // Convert FixedSizeBinary(32) back to UInt256Array
+        // The bytes are stored in big-endian format
+        let mut builder = UInt256ArrayBuilder::new(array.len());
+        for i in 0..array.len() {
+            if array.is_null(i) {
+                builder.append(None);
+            } else {
+                let bytes = array.value(i);
+                if bytes.len() != 32 {
+                    return Err(ArrayError::from_arrow(format!(
+                        "expected 32 bytes for UInt256, got {}", bytes.len()
+                    )));
+                }
+                let mut bytes_array = [0u8; 32];
+                bytes_array.copy_from_slice(bytes);
+                builder.append(Some(UInt256::from_be_bytes(bytes_array).as_scalar_ref()));
+            }
+        }
+        Ok(ArrayImpl::UInt256(builder.finish()))
     }
 
     fn from_list_array(&self, array: &arrow_array::ListArray) -> Result<ArrayImpl, ArrayError> {
