@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, ObjectId};
+use risingwave_common::catalog::{CatalogVersion, DatabaseParam, FunctionId, IndexId, ObjectId};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
@@ -70,6 +70,8 @@ pub trait CatalogWriter: Send + Sync {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()>;
 
     async fn create_schema(
@@ -239,6 +241,8 @@ pub trait CatalogWriter: Send + Sync {
     ) -> Result<()>;
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()>;
+
+    async fn alter_barrier(&self, database_id: DatabaseId, param: DatabaseParam) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -255,6 +259,8 @@ impl CatalogWriter for CatalogWriterImpl {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -263,6 +269,8 @@ impl CatalogWriter for CatalogWriterImpl {
                 id: 0,
                 owner,
                 resource_group: resource_group.to_owned(),
+                barrier_interval_ms,
+                checkpoint_frequency,
             })
             .await?;
         self.wait_version(version).await
@@ -636,6 +644,15 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_resource_group(table_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
+    }
+
+    async fn alter_barrier(&self, database_id: DatabaseId, param: DatabaseParam) -> Result<()> {
+        self.meta_client
+            .alter_barrier(database_id, param)
             .await
             .map_err(|e| anyhow!(e))?;
 

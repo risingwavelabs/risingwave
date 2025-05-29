@@ -40,6 +40,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_barrier;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
@@ -424,6 +425,8 @@ pub async fn handle(
             if_not_exists,
             owner,
             resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
         } => {
             create_database::handle_create_database(
                 handler_args,
@@ -431,6 +434,8 @@ pub async fn handle(
                 if_not_exists,
                 owner,
                 resource_group,
+                barrier_interval_ms,
+                checkpoint_frequency,
             )
             .await
         }
@@ -667,6 +672,22 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_DATABASE,
+                )
+                .await
+            }
+            AlterDatabaseOperation::SetBarrierIntervalMs {
+                barrier_interval_ms,
+            } => {
+                alter_barrier::handle_set_barrier_interval(handler_args, name, barrier_interval_ms)
+                    .await
+            }
+            AlterDatabaseOperation::SetCheckpointFrequency {
+                checkpoint_frequency,
+            } => {
+                alter_barrier::handle_set_checkpoint_frequency(
+                    handler_args,
+                    name,
+                    checkpoint_frequency,
                 )
                 .await
             }

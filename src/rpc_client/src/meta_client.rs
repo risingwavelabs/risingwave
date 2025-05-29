@@ -29,7 +29,7 @@ use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
 use risingwave_common::RW_VERSION;
-use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
+use risingwave_common::catalog::{DatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
@@ -556,6 +556,28 @@ impl MetaClient {
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_barrier(&self, database_id: DatabaseId, param: DatabaseParam) -> Result<()> {
+        let request = match param {
+            DatabaseParam::BarrierIntervalMs(barrier_interval_ms) => AlterDatabaseBarrierRequest {
+                database_id,
+                param_type: alter_database_barrier_request::BarrierParamType::BarrierInterval
+                    as i32,
+                value: barrier_interval_ms.map(|v| v as u64),
+            },
+            DatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
+                AlterDatabaseBarrierRequest {
+                    database_id,
+                    param_type:
+                        alter_database_barrier_request::BarrierParamType::CheckpointFrequency as i32,
+                    value: checkpoint_frequency,
+                }
+            }
+        };
+        self.inner.alter_database_barrier(request).await?;
+
+        Ok(())
     }
 
     pub async fn alter_set_schema(
@@ -2206,6 +2228,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_barrier, AlterDatabaseBarrierRequest, AlterDatabaseBarrierResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

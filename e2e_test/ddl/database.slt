@@ -77,6 +77,30 @@ statement ok
 drop database db_with_keyword_default_resource_group;
 
 statement ok
+create database db_barrier_custom with barrier_interval_ms = 1500 checkpoint_frequency = 2;
+
+statement ok
+alter database db_barrier_custom set barrier_interval_ms = default;
+
+statement ok
+alter database db_barrier_custom set checkpoint_frequency = default;
+
+statement ok
+create database db_barrier_default;
+
+statement ok
+alter database db_barrier_default set barrier_interval_ms = 2000;
+
+statement ok
+alter database db_barrier_default set checkpoint_frequency = 3;
+
+statement ok
+drop database db_barrier_default;
+
+statement ok
+drop database db_barrier_custom;
+
+statement ok
 alter system set license_key to '';
 
 statement error

@@ -33,8 +33,8 @@ use winnow::{ModalResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
-    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string,
-    token_number,
+    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_u32, literal_u64,
+    single_quoted_string, token_number,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
@@ -2104,10 +2104,15 @@ impl Parser<'_> {
 
         let mut owner = None;
         let mut resource_group = None;
+        let mut barrier_interval_ms = None;
+        let mut checkpoint_frequency = None;
 
-        while let Some(keyword) =
-            self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
-        {
+        while let Some(keyword) = self.parse_one_of_keywords(&[
+            Keyword::OWNER,
+            Keyword::RESOURCE_GROUP,
+            Keyword::BARRIER_INTERVAL_MS,
+            Keyword::CHECKPOINT_FREQUENCY,
+        ]) {
             match keyword {
                 Keyword::OWNER => {
                     if owner.is_some() {
@@ -2125,6 +2130,22 @@ impl Parser<'_> {
                     let _ = self.consume_token(&Token::Eq);
                     resource_group = Some(self.parse_set_variable()?);
                 }
+                Keyword::BARRIER_INTERVAL_MS => {
+                    if barrier_interval_ms.is_some() {
+                        parser_err!("duplicate BARRIER_INTERVAL_MS clause in CREATE DATABASE");
+                    }
+
+                    let _ = self.consume_token(&Token::Eq);
+                    barrier_interval_ms = Some(self.parse_literal_u32()?);
+                }
+                Keyword::CHECKPOINT_FREQUENCY => {
+                    if checkpoint_frequency.is_some() {
+                        parser_err!("duplicate CHECKPOINT_FREQUENCY clause in CREATE DATABASE");
+                    }
+
+                    let _ = self.consume_token(&Token::Eq);
+                    checkpoint_frequency = Some(self.parse_literal_u64()?);
+                }
                 _ => unreachable!(),
             }
         }
@@ -2134,6 +2155,8 @@ impl Parser<'_> {
             if_not_exists,
             owner,
             resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
         })
     }
 
@@ -3192,8 +3215,54 @@ impl Parser<'_> {
             } else {
                 return self.expected("TO after RENAME");
             }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::BARRIER_INTERVAL_MS) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER DATABASE SET BARRIER_INTERVAL_MS");
+                }
+
+                let barrier_interval_ms = if self.parse_keyword(Keyword::DEFAULT) {
+                    None
+                } else {
+                    let s = self.parse_number_value()?;
+                    if let Ok(n) = s.parse::<u32>() {
+                        Some(n)
+                    } else {
+                        return self.expected("number or DEFAULT");
+                    }
+                };
+
+                AlterDatabaseOperation::SetBarrierIntervalMs {
+                    barrier_interval_ms,
+                }
+            } else if self.parse_keyword(Keyword::CHECKPOINT_FREQUENCY) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER DATABASE SET CHECKPOINT_FREQUENCY");
+                }
+
+                let checkpoint_frequency = if self.parse_keyword(Keyword::DEFAULT) {
+                    None
+                } else {
+                    let s = self.parse_number_value()?;
+                    if let Ok(n) = s.parse::<u64>() {
+                        Some(n)
+                    } else {
+                        return self.expected("number or DEFAULT");
+                    }
+                };
+
+                AlterDatabaseOperation::SetCheckpointFrequency {
+                    checkpoint_frequency,
+                }
+            } else {
+                return self.expected("BARRIER_INTERVAL_MS or CHECKPOINT_FREQUENCY after SET");
+            }
         } else {
-            return self.expected("OWNER TO after ALTER DATABASE");
+            return self.expected("RENAME, OWNER TO, OR SET after ALTER DATABASE");
         };
 
         Ok(Statement::AlterDatabase {
@@ -3796,7 +3865,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
-        let fragment_id = self.parse_literal_uint()? as u32;
+        let fragment_id = self.parse_literal_u32()?;
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
@@ -4008,9 +4077,12 @@ impl Parser<'_> {
         }
     }
 
-    /// Parse an unsigned literal integer/long
-    pub fn parse_literal_uint(&mut self) -> ModalResult<u64> {
-        literal_uint(self)
+    pub fn parse_literal_u32(&mut self) -> ModalResult<u32> {
+        literal_u32(self)
+    }
+
+    pub fn parse_literal_u64(&mut self) -> ModalResult<u64> {
+        literal_u64(self)
     }
 
     pub fn parse_function_definition(&mut self) -> ModalResult<FunctionDefinition> {
@@ -4295,7 +4367,7 @@ impl Parser<'_> {
 
     pub fn parse_optional_precision(&mut self) -> ModalResult<Option<u64>> {
         if self.consume_token(&Token::LParen) {
-            let n = self.parse_literal_uint()?;
+            let n = self.parse_literal_u64()?;
             self.expect_token(&Token::RParen)?;
             Ok(Some(n))
         } else {
@@ -4305,9 +4377,9 @@ impl Parser<'_> {
 
     pub fn parse_optional_precision_scale(&mut self) -> ModalResult<(Option<u64>, Option<u64>)> {
         if self.consume_token(&Token::LParen) {
-            let n = self.parse_literal_uint()?;
+            let n = self.parse_literal_u64()?;
             let scale = if self.consume_token(&Token::Comma) {
-                Some(self.parse_literal_uint()?)
+                Some(self.parse_literal_u64()?)
             } else {
                 None
             };
@@ -4404,7 +4476,7 @@ impl Parser<'_> {
                     }
                 }
                 Keyword::DURATION_SECS => {
-                    analyze_duration = Some(parser.parse_literal_uint()?);
+                    analyze_duration = Some(parser.parse_literal_u64()?);
                 }
                 _ => unreachable!("{}", keyword),
             };
@@ -4446,7 +4518,7 @@ impl Parser<'_> {
                     let sink_name = parser.parse_object_name()?;
                     Ok(Some(AnalyzeTarget::Sink(sink_name)))
                 } else if parser.parse_word("ID") {
-                    let job_id = parser.parse_literal_uint()? as u32;
+                    let job_id = parser.parse_literal_u32()?;
                     Ok(Some(AnalyzeTarget::Id(job_id)))
                 } else {
                     Ok(None)
@@ -4484,7 +4556,7 @@ impl Parser<'_> {
     pub fn parse_describe(&mut self) -> ModalResult<Statement> {
         let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENT, Keyword::FRAGMENTS]) {
             Some(Keyword::FRAGMENT) => {
-                let fragment_id = self.parse_literal_uint()? as u32;
+                let fragment_id = self.parse_literal_u32()?;
                 return Ok(Statement::DescribeFragment { fragment_id });
             }
             Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
@@ -5002,7 +5074,7 @@ impl Parser<'_> {
 
         let mut job_ids = vec![];
         loop {
-            job_ids.push(self.parse_literal_uint()? as u32);
+            job_ids.push(self.parse_literal_u32()?);
             if !self.consume_token(&Token::Comma) {
                 break;
             }
