@@ -16,7 +16,7 @@ tar -xvf simulation-it-test.tar.zst
 mkdir target/sim
 mv target/ci-sim target/sim
 
-if [ -z "$1" ]; then
+if [[ -z "${1:-}" ]]; then
   TEST_PATTERN=""
 else
   TEST_PATTERN="-E 'test(/^$1/)'"
