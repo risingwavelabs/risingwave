@@ -258,22 +258,7 @@
   sql: |
     create table t(x int, y int);
     select x, y, sum(x) over w1 from t window w1 as (partition by y), w1 as (partition by y order by x);
-  logical_plan: |-
-    LogicalProject { exprs: [t.x, t.y, sum] }
-    └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
-          └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
-  stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), sum], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
-    └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  binder_error: 'Invalid input syntax: window "w1" is already defined'
 - id: mixed named and inline windows
   sql: |
     create table t(x int, y int, z int);

@@ -136,9 +136,7 @@
     create table t(x int, y int);
     select x, y, sum(x) over w1 from t window w1 as (partition by y), w1 as (partition by y order by x);
   expected_outputs:
-    - logical_plan
-    - stream_plan
-    - batch_plan
+    - binder_error
 
 # Mixed named and inline windows
 - id: mixed named and inline windows

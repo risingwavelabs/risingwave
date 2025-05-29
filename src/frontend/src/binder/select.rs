@@ -195,16 +195,21 @@ impl Binder {
         let from = self.bind_vec_table_with_joins(select.from)?;
 
         // Bind WINDOW clause early - store named window definitions for window function resolution
-        let mut window_definitions = HashMap::new();
+        let mut named_windows = HashMap::new();
         for named_window in &select.window {
-            window_definitions.insert(
-                named_window.name.real_value(),
-                named_window.window_spec.clone(),
-            );
+            let window_name = named_window.name.real_value();
+            if named_windows.contains_key(&window_name) {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window \"{}\" is already defined",
+                    window_name
+                ))
+                .into());
+            }
+            named_windows.insert(window_name, named_window.window_spec.clone());
         }
 
         // Store window definitions in bind context for window function resolution
-        self.context.named_windows = window_definitions.clone();
+        self.context.named_windows = named_windows.clone();
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
@@ -315,7 +320,7 @@ impl Binder {
             where_clause: selection,
             group_by,
             having,
-            window: window_definitions,
+            window: named_windows,
             schema: Schema { fields },
         })
     }
