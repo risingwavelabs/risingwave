@@ -45,7 +45,7 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialOrd, Ord)]
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
@@ -60,6 +60,18 @@ struct StructTypeInner {
 
     /// Whether the fields are unnamed.
     is_unnamed: bool,
+}
+
+impl PartialEq for StructTypeInner {
+    fn eq(&self, other: &Self) -> bool {
+        self.fields == other.fields
+    }
+}
+impl Eq for StructTypeInner {}
+impl std::hash::Hash for StructTypeInner {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.fields.hash(state);
+    }
 }
 
 impl StructType {
