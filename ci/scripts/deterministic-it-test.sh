@@ -5,6 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+export RUST_LOG="info,risingwave_simulation=debug"
 export LOGDIR=.risingwave/log
 mkdir -p $LOGDIR
 
@@ -25,4 +26,5 @@ seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFI
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- $TEST_PATTERN"
+ $TEST_PATTERN \
+ 2> $LOGDIR/it-test-{}.log && rm $LOGDIR/it-test-{}.log"
