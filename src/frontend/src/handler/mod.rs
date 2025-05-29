@@ -97,7 +97,7 @@ pub mod extended_handle;
 pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
-mod kill_process;
+pub mod kill_process;
 pub mod privilege;
 pub mod query;
 mod recover;
@@ -485,8 +485,7 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
-            let mut cascade = false;
-            if let AstOption::Some(DropMode::Cascade) = drop_mode {
+            let cascade = if let AstOption::Some(DropMode::Cascade) = drop_mode {
                 match object_type {
                     ObjectType::MaterializedView
                     | ObjectType::View
@@ -495,16 +494,16 @@ pub async fn handle(
                     | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table
-                    | ObjectType::Schema => {
-                        cascade = true;
-                    }
+                    | ObjectType::Schema => true,
                     ObjectType::Database
                     | ObjectType::User
                     | ObjectType::Connection
                     | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
-                };
+                }
+            } else {
+                false
             };
             match object_type {
                 ObjectType::Table => {
@@ -535,31 +534,14 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::Database => {
-                    drop_database::handle_drop_database(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_database::handle_drop_database(handler_args, object_name, if_exists).await
                 }
                 ObjectType::Schema => {
-                    drop_schema::handle_drop_schema(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::User => {
-                    drop_user::handle_drop_user(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_user::handle_drop_user(handler_args, object_name, if_exists).await
                 }
                 ObjectType::View => {
                     drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
@@ -1159,7 +1141,7 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
-        Statement::Kill(process_id) => handle_kill(handler_args, process_id).await,
+        Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
         Statement::Comment {
             object_type,
             object_name,
