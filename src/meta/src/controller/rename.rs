@@ -19,7 +19,7 @@ use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
     Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
     Distinct, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName,
-    Query, SelectItem, SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
+    Query, SelectItem, SetExpr, Statement, TableAlias, TableFactor, TableWithJoins, Window,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -239,6 +239,14 @@ impl QueryRewriter<'_> {
                 if let Some(having) = &mut select.having {
                     self.visit_expr(having);
                 }
+                for named_window in &mut select.window {
+                    for expr in &mut named_window.window_spec.partition_by {
+                        self.visit_expr(expr);
+                    }
+                    for expr in &mut named_window.window_spec.order_by {
+                        self.visit_expr(&mut expr.expr);
+                    }
+                }
             }
             SetExpr::Query(query) => self.visit_query(query),
             SetExpr::SetOperation { left, right, .. } => {
@@ -280,11 +288,18 @@ impl QueryRewriter<'_> {
     fn visit_function(&self, function: &mut Function) {
         self.visit_function_arg_list(&mut function.arg_list);
         if let Some(over) = &mut function.over {
-            for expr in &mut over.partition_by {
-                self.visit_expr(expr);
-            }
-            for expr in &mut over.order_by {
-                self.visit_expr(&mut expr.expr);
+            match over {
+                Window::Spec(window) => {
+                    for expr in &mut window.partition_by {
+                        self.visit_expr(expr);
+                    }
+                    for expr in &mut window.order_by {
+                        self.visit_expr(&mut expr.expr);
+                    }
+                }
+                Window::Name(_) => {
+                    // Named window references don't contain expressions to rewrite
+                }
             }
         }
     }
