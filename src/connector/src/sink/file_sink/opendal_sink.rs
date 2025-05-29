@@ -123,6 +123,12 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     const SINK_NAME: &'static str = S::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
+        if matches!(self.engine_type, EngineType::Snowflake) {
+            println!("Validating Snowflake Sink");
+            risingwave_common::license::Feature::SnowflakeSink
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         if !self.is_append_only {
             return Err(SinkError::Config(anyhow!(
                 "File sink only supports append-only mode at present. \
