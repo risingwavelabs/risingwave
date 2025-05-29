@@ -229,21 +229,36 @@ impl stream_plan::MaterializeNode {
             .collect()
     }
 
-    pub fn column_ids(&self) -> Vec<i32> {
+    pub fn column_descs(&self) -> Vec<plan_common::PbColumnDesc> {
         self.get_table()
             .unwrap()
             .columns
             .iter()
-            .map(|c| c.get_column_desc().unwrap().column_id)
+            .map(|c| c.get_column_desc().unwrap().clone())
+            .collect()
+    }
+}
+
+impl stream_plan::StreamScanNode {
+    /// See [`Self::upstream_column_ids`].
+    pub fn upstream_columns(&self) -> Vec<plan_common::PbColumnDesc> {
+        self.upstream_column_ids
+            .iter()
+            .map(|id| {
+                (self.table_desc.as_ref().unwrap().columns.iter())
+                    .find(|c| c.column_id == *id)
+                    .unwrap()
+                    .clone()
+            })
             .collect()
     }
 }
 
 impl stream_plan::SourceBackfillNode {
-    pub fn column_ids(&self) -> Vec<i32> {
+    pub fn column_descs(&self) -> Vec<plan_common::PbColumnDesc> {
         self.columns
             .iter()
-            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+            .map(|c| c.column_desc.as_ref().unwrap().clone())
             .collect()
     }
 }
@@ -274,13 +289,13 @@ impl common::WorkerNode {
 }
 
 impl stream_plan::SourceNode {
-    pub fn column_ids(&self) -> Option<Vec<i32>> {
+    pub fn column_descs(&self) -> Option<Vec<plan_common::PbColumnDesc>> {
         Some(
             self.source_inner
                 .as_ref()?
                 .columns
                 .iter()
-                .map(|c| c.get_column_desc().unwrap().column_id)
+                .map(|c| c.get_column_desc().unwrap().clone())
                 .collect(),
         )
     }

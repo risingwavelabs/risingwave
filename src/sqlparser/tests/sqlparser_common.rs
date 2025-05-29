@@ -1990,11 +1990,14 @@ fn parse_window_functions() {
             GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING\
         ), \
         AGGREGATE:my_func(abc) OVER (), \
-        rank(foo IGNORE NULLS) FILTER (WHERE bar > 0) OVER (ORDER BY a) \
-    FROM foo\
+        rank(foo IGNORE NULLS) FILTER (WHERE bar > 0) OVER (ORDER BY a), \
+        min(foo) OVER w1, \
+        min(foo) OVER w2 \
+    FROM foo \
+    WINDOW w1 AS (PARTITION BY a ORDER BY b), w2 AS (PARTITION BY c ORDER BY d)\
     ";
     let select = verified_only_select(sql);
-    assert_eq!(7, select.projection.len());
+    assert_eq!(9, select.projection.len());
     assert_eq!(
         &Expr::Function(Function {
             scalar_as_agg: false,
@@ -2002,7 +2005,7 @@ fn parse_window_functions() {
             arg_list: FunctionArgList::empty(),
             within_group: None,
             filter: None,
-            over: Some(WindowSpec {
+            over: Some(Window::Spec(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
                     expr: Expr::Identifier(Ident::new_unchecked("dt")),
@@ -2010,7 +2013,7 @@ fn parse_window_functions() {
                     nulls_first: None,
                 }],
                 window_frame: None,
-            }),
+            })),
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -2029,11 +2032,11 @@ fn parse_window_functions() {
             },
             within_group: None,
             filter: None,
-            over: Some(WindowSpec {
+            over: Some(Window::Spec(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![],
                 window_frame: None,
-            }),
+            })),
         }),
         expr_from_projection(&select.projection[5])
     );
@@ -2056,7 +2059,7 @@ fn parse_window_functions() {
                 op: BinaryOperator::Gt,
                 right: Box::new(Expr::Value(Value::Number("0".to_owned()))),
             })),
-            over: Some(WindowSpec {
+            over: Some(Window::Spec(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
                     expr: Expr::Identifier(Ident::new_unchecked("a")),
@@ -2064,9 +2067,22 @@ fn parse_window_functions() {
                     nulls_first: None,
                 }],
                 window_frame: None,
-            }),
+            })),
         }),
         expr_from_projection(&select.projection[6])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("min")]),
+            arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
+                FunctionArgExpr::Expr(Expr::Identifier(Ident::new_unchecked("foo")))
+            )]),
+            within_group: None,
+            filter: None,
+            over: Some(Window::Name(Ident::new_unchecked("w1"))),
+        }),
+        expr_from_projection(&select.projection[7])
     );
 }
 
@@ -4083,4 +4099,23 @@ fn all_keywords_sorted() {
     let mut copy = Vec::from(ALL_KEYWORDS);
     copy.sort_unstable();
     assert_eq!(copy, ALL_KEYWORDS)
+}
+
+#[test]
+fn parse_window_clause() {
+    // Test that WINDOW clause can be parsed
+    let sql = "SELECT sum(foo) OVER w FROM t WINDOW w AS (PARTITION BY col)";
+    let ast = parse_sql_statements(sql).unwrap();
+    // For now just verify it parses without errors
+    assert_eq!(ast.len(), 1);
+
+    // Test multiple named windows
+    let sql = "SELECT sum(foo) OVER w1, avg(bar) OVER w2 FROM t WINDOW w1 AS (PARTITION BY col1), w2 AS (ORDER BY col2)";
+    let ast = parse_sql_statements(sql).unwrap();
+    assert_eq!(ast.len(), 1);
+
+    // Test inline window specification (should still work)
+    let sql = "SELECT sum(foo) OVER (PARTITION BY col) FROM t";
+    let ast = parse_sql_statements(sql).unwrap();
+    assert_eq!(ast.len(), 1);
 }

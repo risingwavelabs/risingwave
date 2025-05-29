@@ -130,6 +130,8 @@ pub struct CompactorConfig {
 
     pub user_managed: bool,
     pub compaction_worker_threads_number: Option<usize>,
+
+    pub compactor_mode: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

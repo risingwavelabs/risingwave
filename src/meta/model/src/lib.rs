@@ -413,6 +413,12 @@ derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
 derive_array_from_blob!(
+    TypePairArray,
+    risingwave_pb::stream_plan::dispatch_output_mapping::TypePair,
+    PbTypePairArray
+);
+
+derive_array_from_blob!(
     HummockVersionDeltaArray,
     risingwave_pb::hummock::PbHummockVersionDelta,
     PbHummockVersionDeltaArray
