@@ -38,8 +38,6 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
 sleep 5
 ./clickhouse client --host=clickhouse-server --port=9000 --password='default' --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
 
-cat ./query_result.csv | sort | awk -F "," echo 
-
 # check sink destination using shell
 if cat ./query_result.csv | sort | awk -F "," '{
 if ($1 == 1 && $2 == 50 && $3 == "\"1-50\"" && $4 == "\"A\"" && $5 == 1.1 && $6 == "\"{\"\"sd\"\":\"\"123\"\"" && $7 == "\"\"sda\"\":\"\"23\"\"}\"") c1++;
