@@ -8,7 +8,7 @@ statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
-CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3, mv6.v4 as v4, mv6.v5 as v5 from mv6 WITH (
+CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3, mv6.v4 as v4, mv6.v5 as v5,mv6.v6 as v6 from mv6 WITH (
     connector = 'clickhouse',
     type = 'append-only',
     force_append_only='true',
