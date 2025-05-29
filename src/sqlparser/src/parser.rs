@@ -5011,8 +5011,8 @@ impl Parser<'_> {
     }
 
     pub fn parse_kill_process(&mut self) -> ModalResult<Statement> {
-        let process_id = self.parse_literal_uint()? as i32;
-        Ok(Statement::Kill(process_id))
+        let worker_process_id = self.parse_literal_string()?;
+        Ok(Statement::Kill(worker_process_id))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude

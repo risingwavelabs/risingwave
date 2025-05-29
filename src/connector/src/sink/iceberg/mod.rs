@@ -95,7 +95,6 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
-pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -494,7 +493,7 @@ impl Sink for IcebergSink {
         }
 
         if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
-            bail!("`compaction_interval` must be set when `enable_compaction` is true");
+            bail!("`compaction_interval_sec` must be set when `enable_compaction` is true");
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -508,11 +507,11 @@ impl Sink for IcebergSink {
             if iceberg_config.enable_compaction {
                 if compaction_interval == 0 {
                     bail!(
-                        "`compaction_interval` must be greater than 0 when `enable_compaction` is true"
+                        "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
                     );
                 }
             } else {
-                bail!("`compaction_interval` can only be set when `enable_compaction` is true");
+                bail!("`compaction_interval_sec` can only be set when `enable_compaction` is true");
             }
         }
 
@@ -2041,7 +2040,9 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::{DEFAULT_ICEBERG_COMPACTION_INTERVAL, IcebergConfig};
+    use crate::sink::iceberg::IcebergConfig;
+
+    pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
     #[test]
     fn test_compatible_arrow_schema() {
