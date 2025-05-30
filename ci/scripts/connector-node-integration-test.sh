@@ -44,7 +44,7 @@ echo "$java_version"
 # cd ${RISINGWAVE_ROOT}/java
 # mvn --batch-mode --update-snapshots clean package -DskipTests
 
-echo "--- install postgresql client"
+echo "--- install postgresql server"
 DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get -y install tzdata
 sudo apt install postgresql postgresql-contrib libpq-dev -y
 sudo service postgresql start || sudo pg_ctlcluster 14 main start

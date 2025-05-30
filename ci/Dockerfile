@@ -1,8 +1,7 @@
-#############################################################################################
-#                                     !!! IMPORTANT !!!                                     #
-# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in build-ci-image.sh #
-# and corresponding rw-build-env version in docker-compose.yml.                             #
-#############################################################################################
+################################################################################
+#                               !!! IMPORTANT !!!                              #
+# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in .env #
+################################################################################
 
 FROM ubuntu:24.04 AS risingwave-build-env
 
@@ -11,8 +10,8 @@ ENV LANG en_US.utf8
 # Use AWS ubuntu mirror
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
 RUN apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc \
-    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client \
+    DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
+    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client sqlite3 \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
     golang perl \
@@ -23,8 +22,8 @@ ENV PYO3_PYTHON=python3.12
 ENV NVM_DIR /root/.nvm
 ENV NODE_VERSION 20.11.1
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
-  && . $NVM_DIR/nvm.sh \
-  && nvm install $NODE_VERSION
+    && . $NVM_DIR/nvm.sh \
+    && nvm install $NODE_VERSION
 ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 RUN npm install -g zx
 
@@ -50,19 +49,19 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
-RUN pip3 install --break-system-packages pyarrow pytest
+RUN pip3 install --break-system-packages 'pyarrow==19.0.1' pytest
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
 # Install rpk
 RUN if [ "$(uname -m)" = "amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
-        curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip && \
-        unzip rpk-linux-amd64.zip -d ~/.local/bin/ && \
-        rm rpk-linux-amd64.zip; \
+    curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip && \
+    unzip rpk-linux-amd64.zip -d ~/.local/bin/ && \
+    rm rpk-linux-amd64.zip; \
     else \
-        curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-arm64.zip && \
-        unzip rpk-linux-arm64.zip -d ~/.local/bin/ && \
-        rm rpk-linux-arm64.zip; \
+    curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-arm64.zip && \
+    unzip rpk-linux-arm64.zip -d ~/.local/bin/ && \
+    rm rpk-linux-arm64.zip; \
     fi
 ENV PATH /root/.local/bin:$PATH
 
@@ -71,8 +70,8 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 # install build tools
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
-    cargo-make@0.37.9 \
-    sqllogictest-bin@0.28.0 \
+    cargo-make@0.37.24 \
+    sqllogictest-bin@0.28.2 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
