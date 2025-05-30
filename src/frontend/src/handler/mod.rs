@@ -30,6 +30,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
+use thiserror_ext::AsReport;
 use util::get_table_catalog_by_table_name;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
@@ -689,7 +690,7 @@ pub async fn handle(
                                 let num = num.parse::<u32>().map_err(|e| {
                                     ErrorCode::InvalidInputSyntax(format!(
                                         "barrier_interval_ms must be a u32 integer: {}",
-                                        e
+                                        e.as_report()
                                     ))
                                 })?;
                                 Some(num)
@@ -713,7 +714,7 @@ pub async fn handle(
                                 let num = num.parse::<u64>().map_err(|e| {
                                     ErrorCode::InvalidInputSyntax(format!(
                                         "checkpoint_frequency must be a u64 integer: {}",
-                                        e
+                                        e.as_report()
                                     ))
                                 })?;
                                 Some(num)
