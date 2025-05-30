@@ -25,7 +25,10 @@ use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_str
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::source::{ConnectorProperties, SourceProperties};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str, match_source_name_str,
+};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -40,6 +43,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -1608,6 +1612,160 @@ impl CatalogController {
             .await
     }
 
+    pub async fn update_source_props_by_source_id(
+        &self,
+        source_id: SourceId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<WithOptionsSecResolved> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (source, _obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        let connector = source.with_properties.0.get_connector().unwrap();
+
+        // todo: make this a config, instead of builtin
+        let check_alter_props_allowed: MetaResult<()> = match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            {
+                for k in alter_props.keys().chain(alter_secret_refs.keys()) {
+                    if !PropType::SOURCE_ALTER_CONFIG_LIST.contains(k) {
+                        return Err(MetaError::invalid_parameter(format!(
+                            "unsupported alter config: {k} for connector {connector}"
+                        )));
+                    }
+                }
+                Ok(())
+            },
+            |other| bail!("connector '{}' is not supported", other)
+        );
+        check_alter_props_allowed?;
+
+        let mut options_with_secret = WithOptionsSecResolved::new(
+            source.with_properties.0.clone(),
+            source
+                .secret_ref
+                .map(|x| x.to_protobuf())
+                .unwrap_or_default(),
+        );
+        options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+        // check if the alter-ed props are valid for each Connector
+        let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
+        // todo: validate via source manager
+
+        let rewrirte_sql = {
+            let definition = source.definition.clone();
+            let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?
+                .try_into()
+                .unwrap();
+
+            /// Formats SQL options with secret values properly resolved
+            ///
+            /// This function processes configuration options that may contain sensitive data:
+            /// - Plaintext options are directly converted to `SqlOption`
+            /// - Secret options are retrieved from the database and formatted as "SECRET {name}"
+            ///   without exposing the actual secret value
+            ///
+            /// # Arguments
+            /// * `txn` - Database transaction for retrieving secrets
+            /// * `options_with_secret` - Container of options with both plaintext and secret values
+            ///
+            /// # Returns
+            /// * `MetaResult<Vec<SqlOption>>` - List of formatted SQL options or error
+            async fn format_with_option_secret_resolved(
+                txn: &DatabaseTransaction,
+                options_with_secret: &WithOptionsSecResolved,
+            ) -> MetaResult<Vec<SqlOption>> {
+                let mut options = Vec::new();
+                for (k, v) in options_with_secret.as_plaintext() {
+                    let sql_option = SqlOption::try_from((k, v))
+                        .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
+                    options.push(sql_option);
+                }
+                for (k, v) in options_with_secret.as_secret() {
+                    if let Some(secret_model) =
+                        Secret::find_by_id(v.secret_id as i32).one(txn).await?
+                    {
+                        let sql_option =
+                            SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
+                                .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
+                        options.push(sql_option);
+                    } else {
+                        return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
+                    }
+                }
+                Ok(options)
+            }
+
+            if let Statement::CreateSource { stmt } = &mut stmt {
+                stmt.with_properties.0 =
+                    format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+            } else {
+                unreachable!()
+            }
+
+            stmt.to_string()
+        };
+
+        let active_source_model = source::ActiveModel {
+            source_id: Set(source_id),
+            definition: Set(rewrirte_sql),
+            with_properties: Set(options_with_secret.as_plaintext().clone().into()),
+            secret_ref: Set((!options_with_secret.as_secret().is_empty())
+                .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
+            ..Default::default()
+        };
+        active_source_model.update(&txn).await?;
+
+        // update fragments
+        update_connector_props_fragaments(
+            &txn,
+            source_id,
+            FragmentTypeFlag::Source,
+            |node, found| {
+                if let PbNodeBody::Source(node) = node
+                    && let Some(source_inner) = &mut node.source_inner
+                {
+                    source_inner.with_properties = options_with_secret.as_plaintext().clone();
+                    source_inner.secret_refs = options_with_secret.as_secret().clone();
+                    *found = true;
+                }
+            },
+        )
+        .await?;
+
+        let (source, obj) = Source::find_by_id(source_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+
+        txn.commit().await?;
+
+        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        self.notify_frontend(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(relation_info),
+                }],
+            }),
+        )
+        .await;
+
+        Ok(options_with_secret)
+    }
+
     pub async fn update_sink_props_by_sink_id(
         &self,
         sink_id: SinkId,
@@ -2085,4 +2243,56 @@ pub struct SinkIntoTableContext {
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,
+}
+
+async fn update_connector_props_fragaments<F>(
+    txn: &DatabaseTransaction,
+    job_id: i32,
+    expect_flag: FragmentTypeFlag,
+    mut alter_stream_node_fn: F,
+) -> MetaResult<()>
+where
+    F: FnMut(&mut PbNodeBody, &mut bool),
+{
+    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+            fragment::Column::StreamNode,
+        ])
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(txn)
+        .await?;
+    let fragments = fragments
+        .into_iter()
+        .filter(|(_, fragment_type_mask, _)| *fragment_type_mask & expect_flag as i32 != 0)
+        .filter_map(|(id, _, stream_node)| {
+            let mut stream_node = stream_node.to_protobuf();
+            let mut found = false;
+            visit_stream_node_mut(&mut stream_node, |node| {
+                alter_stream_node_fn(node, &mut found);
+            });
+            if found { Some((id, stream_node)) } else { None }
+        })
+        .collect_vec();
+    assert!(
+        !fragments.is_empty(),
+        "job {} (type: {:?}) should be used by at least one fragment",
+        job_id,
+        expect_flag
+    );
+
+    for (id, stream_node) in fragments {
+        fragment::ActiveModel {
+            fragment_id: Set(id),
+            stream_node: Set(StreamNode::from(&stream_node)),
+            ..Default::default()
+        }
+        .update(txn)
+        .await?;
+    }
+
+    Ok(())
 }

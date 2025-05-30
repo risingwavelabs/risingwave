@@ -20,11 +20,13 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
+use risingwave_pb::secret::SecretRef;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
@@ -701,6 +703,17 @@ impl MetadataManager {
             .into_iter()
             .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
             .collect())
+    }
+
+    pub async fn update_source_props_by_source_id(
+        &self,
+        source_id: SourceId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, SecretRef>,
+    ) -> MetaResult<WithOptionsSecResolved> {
+        self.catalog_controller
+            .update_source_props_by_source_id(source_id, alter_props, alter_secret_refs)
+            .await
     }
 
     pub async fn update_sink_props_by_sink_id(
