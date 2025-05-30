@@ -26,7 +26,7 @@ use winnow::error::{ContextError, ErrMode, FromExternalError, StrContext};
 use winnow::{ModalResult, Parser, Stateful};
 
 use super::{
-    TokenStream, identifier_non_reserved, keyword, literal_uint, object_name, precision_in_range,
+    TokenStream, identifier_non_reserved, keyword, literal_u64, object_name, precision_in_range,
     with_state,
 };
 use crate::ast::{DataType, StructField};
@@ -194,7 +194,7 @@ fn keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> ModalResul
     let precision_and_scale = || {
         opt(delimited(
             Token::LParen,
-            (literal_uint, opt(preceded(Token::Comma, literal_uint))),
+            (literal_u64, opt(preceded(Token::Comma, literal_u64))),
             Token::RParen,
         ))
         .map(|p| match p {
