@@ -333,6 +333,7 @@ impl PostgresSinkWriter {
         )
         .await?;
 
+        tracing::info!("pk_indices: {:?}", pk_indices);
         let pk_indices_lookup = pk_indices.iter().copied().collect::<HashSet<_>>();
 
         // Rewrite schema types for serialization
