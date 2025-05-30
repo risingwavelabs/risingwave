@@ -4,7 +4,9 @@ services:
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      # Test with a password containing special characters #21943, for example 0x5c.
+      # Note that 0x5c 0x74 are TWO characters. It is NOT 0x09.
+      - POSTGRES_PASSWORD=post\tgres
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
       - 5432
