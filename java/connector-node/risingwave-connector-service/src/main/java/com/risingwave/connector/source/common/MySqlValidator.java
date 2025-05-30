@@ -299,7 +299,12 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             case "double":
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
             case "decimal":
-                return val == Data.DataType.TypeName.DECIMAL_VALUE;
+                return val == Data.DataType.TypeName.DECIMAL_VALUE
+                        // We allow user to map decimal into rw_int256, rw_uint256, or varchar to avoid precision
+                        // loss in the conversion from mysql-decimal to rw-decimal
+                        || val == Data.DataType.TypeName.INT256_VALUE
+                        || val == Data.DataType.TypeName.UINT256_VALUE
+                        || val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "date":
