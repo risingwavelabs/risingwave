@@ -9,21 +9,13 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 
-# REMEMBER TO ALSO UPDATE ci/docker-compose.yml
-export BUILD_ENV_VERSION=v20250418
+# Import `BUILD_ENV_VERSION` from `.env`
+source .env
 
 export BUILD_TAG="public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION}"
 
 echo "+++ Arch"
 arch
-
-echo "--- Check docker-compose"
-set +e
-if ! grep "$BUILD_TAG" docker-compose.yml; then
-	echo "${BUILD_TAG} is not set up for docker-compose, please modify docker-compose.yml."
-	exit 1
-fi
-set -e
 
 echo "--- Docker login"
 aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/w1p7b4n3
