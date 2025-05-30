@@ -615,7 +615,7 @@ CREATE SINK numeric256_sink FROM rw_numeric256_types WITH (
     user='$PGUSER',
     password='$PGPASSWORD',
     database='$PGDATABASE',
-    table.name='pg_numeric256_types',
+    table='pg_numeric256_types',
     type='upsert',
     primary_key='id'
 );
