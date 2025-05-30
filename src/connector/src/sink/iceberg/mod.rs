@@ -242,6 +242,10 @@ impl IcebergConfig {
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
     }
+
+    pub fn catalog_name(&self) -> String {
+        self.common.catalog_name()
+    }
 }
 
 pub struct IcebergSink {
