@@ -20,7 +20,6 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
@@ -1618,7 +1617,7 @@ impl CatalogController {
         source_id: SourceId,
         alter_props: BTreeMap<String, String>,
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
-    ) -> MetaResult<HashMap<String, String>> {
+    ) -> MetaResult<WithOptionsSecResolved> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1671,7 +1670,7 @@ impl CatalogController {
             /// Formats SQL options with secret values properly resolved
             ///
             /// This function processes configuration options that may contain sensitive data:
-            /// - Plaintext options are directly converted to SqlOption
+            /// - Plaintext options are directly converted to `SqlOption`
             /// - Secret options are retrieved from the database and formatted as "SECRET {name}"
             ///   without exposing the actual secret value
             ///
@@ -1764,12 +1763,7 @@ impl CatalogController {
         )
         .await;
 
-        let (options, secret_refs) = options_with_secret.into_parts();
-        let new_options = LocalSecretManager::global()
-            .fill_secrets(options, secret_refs)?
-            .into_iter()
-            .collect();
-        Ok(new_options)
+        Ok(options_with_secret)
     }
 
     pub async fn update_sink_props_by_sink_id(

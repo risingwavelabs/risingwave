@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -709,7 +710,7 @@ impl MetadataManager {
         source_id: SourceId,
         alter_props: BTreeMap<String, String>,
         alter_secret_refs: BTreeMap<String, SecretRef>,
-    ) -> MetaResult<HashMap<String, String>> {
+    ) -> MetaResult<WithOptionsSecResolved> {
         self.catalog_controller
             .update_source_props_by_source_id(source_id, alter_props, alter_secret_refs)
             .await
