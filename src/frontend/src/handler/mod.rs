@@ -24,6 +24,7 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
+use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
@@ -40,7 +41,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
-mod alter_barrier;
+mod alter_database_param;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
@@ -675,19 +676,71 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterDatabaseOperation::SetBarrierIntervalMs {
-                barrier_interval_ms,
-            } => {
-                alter_barrier::handle_set_barrier_interval(handler_args, name, barrier_interval_ms)
-                    .await
-            }
-            AlterDatabaseOperation::SetCheckpointFrequency {
-                checkpoint_frequency,
-            } => {
-                alter_barrier::handle_set_checkpoint_frequency(
+            AlterDatabaseOperation::SetParam(config_param) => {
+                let ConfigParam { param, value } = config_param;
+
+                let database_param = match param.real_value().to_uppercase().as_str() {
+                    "BARRIER_INTERVAL_MS" => {
+                        let barrier_interval_ms = match value {
+                            SetVariableValue::Default => None,
+                            SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                Value::Number(num),
+                            )) => {
+                                let num = num.parse::<u32>().map_err(|e| {
+                                    ErrorCode::InvalidInputSyntax(format!(
+                                        "barrier_interval_ms must be a u32 integer: {}",
+                                        e
+                                    ))
+                                })?;
+                                Some(num)
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(
+                                    "barrier_interval_ms must be a u32 integer or DEFAULT"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
+                        AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms)
+                    }
+                    "CHECKPOINT_FREQUENCY" => {
+                        let checkpoint_frequency = match value {
+                            SetVariableValue::Default => None,
+                            SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                Value::Number(num),
+                            )) => {
+                                let num = num.parse::<u64>().map_err(|e| {
+                                    ErrorCode::InvalidInputSyntax(format!(
+                                        "checkpoint_frequency must be a u64 integer: {}",
+                                        e
+                                    ))
+                                })?;
+                                Some(num)
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(
+                                    "checkpoint_frequency must be a u64 integer or DEFAULT"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
+                        AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency)
+                    }
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "Unsupported database config parameter: {}",
+                            param.real_value()
+                        ))
+                        .into());
+                    }
+                };
+
+                alter_database_param::handle_alter_database_param(
                     handler_args,
                     name,
-                    checkpoint_frequency,
+                    database_param,
                 )
                 .await
             }

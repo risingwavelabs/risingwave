@@ -2104,15 +2104,10 @@ impl Parser<'_> {
 
         let mut owner = None;
         let mut resource_group = None;
-        let mut barrier_interval_ms = None;
-        let mut checkpoint_frequency = None;
 
-        while let Some(keyword) = self.parse_one_of_keywords(&[
-            Keyword::OWNER,
-            Keyword::RESOURCE_GROUP,
-            Keyword::BARRIER_INTERVAL_MS,
-            Keyword::CHECKPOINT_FREQUENCY,
-        ]) {
+        while let Some(keyword) =
+            self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
+        {
             match keyword {
                 Keyword::OWNER => {
                     if owner.is_some() {
@@ -2130,25 +2125,23 @@ impl Parser<'_> {
                     let _ = self.consume_token(&Token::Eq);
                     resource_group = Some(self.parse_set_variable()?);
                 }
-                Keyword::BARRIER_INTERVAL_MS => {
-                    if barrier_interval_ms.is_some() {
-                        parser_err!("duplicate BARRIER_INTERVAL_MS clause in CREATE DATABASE");
-                    }
-
-                    let _ = self.consume_token(&Token::Eq);
-                    barrier_interval_ms = Some(self.parse_literal_u32()?);
-                }
-                Keyword::CHECKPOINT_FREQUENCY => {
-                    if checkpoint_frequency.is_some() {
-                        parser_err!("duplicate CHECKPOINT_FREQUENCY clause in CREATE DATABASE");
-                    }
-
-                    let _ = self.consume_token(&Token::Eq);
-                    checkpoint_frequency = Some(self.parse_literal_u64()?);
-                }
                 _ => unreachable!(),
             }
         }
+
+        let barrier_interval_ms = if self.parse_word("BARRIER_INTERVAL_MS") {
+            let _ = self.consume_token(&Token::Eq);
+            Some(self.parse_literal_u32()?)
+        } else {
+            None
+        };
+
+        let checkpoint_frequency = if self.parse_word("CHECKPOINT_FREQUENCY") {
+            let _ = self.consume_token(&Token::Eq);
+            Some(self.parse_literal_u64()?)
+        } else {
+            None
+        };
 
         Ok(Statement::CreateDatabase {
             db_name,
@@ -3109,6 +3102,17 @@ impl Parser<'_> {
         Ok(SqlOption { name, value })
     }
 
+    // <config_param> { TO | = } { <value> | DEFAULT }
+    // <config_param> is not a keyword, but an identifier
+    pub fn parse_config_param(&mut self) -> ModalResult<ConfigParam> {
+        let param = self.parse_identifier()?;
+        if !self.consume_token(&Token::Eq) && !self.parse_keyword(Keyword::TO) {
+            return self.expected("'=' or 'TO' after config parameter");
+        }
+        let value = self.parse_set_variable()?;
+        Ok(ConfigParam { param, value })
+    }
+
     pub fn parse_since(&mut self) -> ModalResult<Since> {
         if self.parse_keyword(Keyword::SINCE) {
             let checkpoint = *self;
@@ -3216,51 +3220,8 @@ impl Parser<'_> {
                 return self.expected("TO after RENAME");
             }
         } else if self.parse_keyword(Keyword::SET) {
-            if self.parse_keyword(Keyword::BARRIER_INTERVAL_MS) {
-                if self.expect_keyword(Keyword::TO).is_err()
-                    && self.expect_token(&Token::Eq).is_err()
-                {
-                    return self.expected("TO or = after ALTER DATABASE SET BARRIER_INTERVAL_MS");
-                }
-
-                let barrier_interval_ms = if self.parse_keyword(Keyword::DEFAULT) {
-                    None
-                } else {
-                    let s = self.parse_number_value()?;
-                    if let Ok(n) = s.parse::<u32>() {
-                        Some(n)
-                    } else {
-                        return self.expected("number or DEFAULT");
-                    }
-                };
-
-                AlterDatabaseOperation::SetBarrierIntervalMs {
-                    barrier_interval_ms,
-                }
-            } else if self.parse_keyword(Keyword::CHECKPOINT_FREQUENCY) {
-                if self.expect_keyword(Keyword::TO).is_err()
-                    && self.expect_token(&Token::Eq).is_err()
-                {
-                    return self.expected("TO or = after ALTER DATABASE SET CHECKPOINT_FREQUENCY");
-                }
-
-                let checkpoint_frequency = if self.parse_keyword(Keyword::DEFAULT) {
-                    None
-                } else {
-                    let s = self.parse_number_value()?;
-                    if let Ok(n) = s.parse::<u64>() {
-                        Some(n)
-                    } else {
-                        return self.expected("number or DEFAULT");
-                    }
-                };
-
-                AlterDatabaseOperation::SetCheckpointFrequency {
-                    checkpoint_frequency,
-                }
-            } else {
-                return self.expected("BARRIER_INTERVAL_MS or CHECKPOINT_FREQUENCY after SET");
-            }
+            // check will be delayed to frontend
+            AlterDatabaseOperation::SetParam(self.parse_config_param()?)
         } else {
             return self.expected("RENAME, OWNER TO, OR SET after ALTER DATABASE");
         };
@@ -4876,18 +4837,12 @@ impl Parser<'_> {
                 session: false,
             })
         } else {
-            let variable = self.parse_identifier()?;
-
-            if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
-                let value = self.parse_set_variable()?;
-                Ok(Statement::SetVariable {
-                    local: modifier == Some(Keyword::LOCAL),
-                    variable,
-                    value,
-                })
-            } else {
-                self.expected("equals sign or TO")
-            }
+            let config_param = self.parse_config_param()?;
+            Ok(Statement::SetVariable {
+                local: modifier == Some(Keyword::LOCAL),
+                variable: config_param.param,
+                value: config_param.value,
+            })
         }
     }
 

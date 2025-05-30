@@ -548,19 +548,15 @@ message AutoSchemaChangeRequest {
 
 message AutoSchemaChangeResponse {}
 
-message AlterDatabaseBarrierRequest {
-  enum BarrierParamType {
-    UNSPECIFIED = 0;
-    BARRIER_INTERVAL = 1;
-    CHECKPOINT_FREQUENCY = 2;
-  }
-
+message AlterDatabaseParamRequest {
   uint32 database_id = 1;
-  BarrierParamType param_type = 2;
-  optional uint64 value = 3;
+  oneof param {
+    common.OptionalUint32 barrier_interval_ms = 2;
+    common.OptionalUint64 checkpoint_frequency = 3;
+  }
 }
 
-message AlterDatabaseBarrierResponse {}
+message AlterDatabaseParamResponse {}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
@@ -604,5 +600,5 @@ service DdlService {
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
-  rpc AlterDatabaseBarrier(AlterDatabaseBarrierRequest) returns (AlterDatabaseBarrierResponse);
+  rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
 }

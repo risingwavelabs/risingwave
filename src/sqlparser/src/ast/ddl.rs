@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{FormatEncodeOptions, SqlOption};
+use super::{ConfigParam, FormatEncodeOptions, SqlOption};
 use crate::ast::{
     DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
@@ -32,8 +32,7 @@ use crate::tokenizer::Token;
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
-    SetBarrierIntervalMs { barrier_interval_ms: Option<u32> },
-    SetCheckpointFrequency { checkpoint_frequency: Option<u64> },
+    SetParam(ConfigParam),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -276,23 +275,8 @@ impl fmt::Display for AlterDatabaseOperation {
             AlterDatabaseOperation::RenameDatabase { database_name } => {
                 write!(f, "RENAME TO {}", database_name)
             }
-            AlterDatabaseOperation::SetBarrierIntervalMs {
-                barrier_interval_ms,
-            } => {
-                write!(
-                    f,
-                    "SET BARRIER_INTERVAL_MS TO {}",
-                    barrier_interval_ms.map_or("DEFAULT".to_owned(), |v| v.to_string())
-                )
-            }
-            AlterDatabaseOperation::SetCheckpointFrequency {
-                checkpoint_frequency,
-            } => {
-                write!(
-                    f,
-                    "SET CHECKPOINT_FREQUENCY TO {}",
-                    checkpoint_frequency.map_or("DEFAULT".to_owned(), |v| v.to_string())
-                )
+            AlterDatabaseOperation::SetParam(ConfigParam { param, value }) => {
+                write!(f, "SET {} TO {}", param, value)
             }
         }
     }

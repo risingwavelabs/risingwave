@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
-use risingwave_common::catalog::{ColumnCatalog, DatabaseParam};
+use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
@@ -1173,30 +1173,29 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterResourceGroupResponse {}))
     }
 
-    async fn alter_database_barrier(
+    async fn alter_database_param(
         &self,
-        request: Request<AlterDatabaseBarrierRequest>,
-    ) -> Result<Response<AlterDatabaseBarrierResponse>, Status> {
+        request: Request<AlterDatabaseParamRequest>,
+    ) -> Result<Response<AlterDatabaseParamResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.database_id;
 
-        use alter_database_barrier_request::BarrierParamType;
-        let param = match BarrierParamType::try_from(req.param_type).unwrap() {
-            BarrierParamType::BarrierInterval => {
-                DatabaseParam::BarrierIntervalMs(req.value.map(|v| v as u32))
-            }
-            BarrierParamType::CheckpointFrequency => DatabaseParam::CheckpointFrequency(req.value),
-            BarrierParamType::Unspecified => {
-                // If the param type is unspecified, we do nothing.
-                return Ok(Response::new(AlterDatabaseBarrierResponse {}));
-            }
-        };
+        if let Some(config_param) = req.param {
+            let param = match config_param {
+                alter_database_param_request::Param::BarrierIntervalMs(value) => {
+                    AlterDatabaseParam::BarrierIntervalMs(value.value)
+                }
+                alter_database_param_request::Param::CheckpointFrequency(value) => {
+                    AlterDatabaseParam::CheckpointFrequency(value.value)
+                }
+            };
+            self.ddl_controller
+                .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+                .await?;
+        }
 
-        self.ddl_controller
-            .run_command(DdlCommand::AlterDatabaseBarrier(database_id as _, param))
-            .await?;
-
-        Ok(Response::new(AlterDatabaseBarrierResponse {}))
+        // If param is unspecified, we do nothing.
+        return Ok(Response::new(AlterDatabaseParamResponse {}));
     }
 }
 

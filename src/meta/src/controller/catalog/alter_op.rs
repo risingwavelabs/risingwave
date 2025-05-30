@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::DatabaseParam;
+use risingwave_common::catalog::AlterDatabaseParam;
 use sea_orm::DatabaseTransaction;
 
 use super::*;
@@ -848,10 +848,10 @@ impl CatalogController {
         Ok((user_infos, to_drop_objects))
     }
 
-    pub async fn alter_database_barrier(
+    pub async fn alter_database_param(
         &self,
         database_id: DatabaseId,
-        param: DatabaseParam,
+        param: AlterDatabaseParam,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -861,10 +861,10 @@ impl CatalogController {
             ..Default::default()
         };
         match param {
-            DatabaseParam::BarrierIntervalMs(interval) => {
+            AlterDatabaseParam::BarrierIntervalMs(interval) => {
                 database.barrier_interval_ms = Set(interval.map(|i| i as i32));
             }
-            DatabaseParam::CheckpointFrequency(frequency) => {
+            AlterDatabaseParam::CheckpointFrequency(frequency) => {
                 database.checkpoint_frequency = Set(frequency.map(|f| f as i64));
             }
         }

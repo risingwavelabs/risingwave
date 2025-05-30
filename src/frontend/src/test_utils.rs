@@ -25,9 +25,9 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
-    DatabaseParam, FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME, TableId,
+    AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_ID, FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId,
+    PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -704,17 +704,21 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
-    async fn alter_barrier(&self, database_id: u32, param: DatabaseParam) -> Result<()> {
+    async fn alter_database_param(
+        &self,
+        database_id: u32,
+        param: AlterDatabaseParam,
+    ) -> Result<()> {
         let mut pb_database = {
             let reader = self.catalog.read();
             let database = reader.get_database_by_id(&database_id)?.to_owned();
             database.to_prost()
         };
         match param {
-            DatabaseParam::BarrierIntervalMs(interval) => {
+            AlterDatabaseParam::BarrierIntervalMs(interval) => {
                 pb_database.barrier_interval_ms = interval;
             }
-            DatabaseParam::CheckpointFrequency(frequency) => {
+            AlterDatabaseParam::CheckpointFrequency(frequency) => {
                 pb_database.checkpoint_frequency = frequency;
             }
         }

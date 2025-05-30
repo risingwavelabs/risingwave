@@ -29,7 +29,9 @@ use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
 use risingwave_common::RW_VERSION;
-use risingwave_common::catalog::{DatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
+};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
@@ -56,7 +58,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
@@ -558,24 +560,36 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn alter_barrier(&self, database_id: DatabaseId, param: DatabaseParam) -> Result<()> {
+    pub async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<()> {
         let request = match param {
-            DatabaseParam::BarrierIntervalMs(barrier_interval_ms) => AlterDatabaseBarrierRequest {
-                database_id,
-                param_type: alter_database_barrier_request::BarrierParamType::BarrierInterval
-                    as i32,
-                value: barrier_interval_ms.map(|v| v as u64),
-            },
-            DatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
-                AlterDatabaseBarrierRequest {
+            AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms) => {
+                let barrier_interval_ms = OptionalUint32 {
+                    value: barrier_interval_ms,
+                };
+                AlterDatabaseParamRequest {
                     database_id,
-                    param_type:
-                        alter_database_barrier_request::BarrierParamType::CheckpointFrequency as i32,
+                    param: Some(alter_database_param_request::Param::BarrierIntervalMs(
+                        barrier_interval_ms,
+                    )),
+                }
+            }
+            AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
+                let checkpoint_frequency = OptionalUint64 {
                     value: checkpoint_frequency,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::CheckpointFrequency(
+                        checkpoint_frequency,
+                    )),
                 }
             }
         };
-        self.inner.alter_database_barrier(request).await?;
+        self.inner.alter_database_param(request).await?;
 
         Ok(())
     }
@@ -2228,7 +2242,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
-            ,{ ddl_client, alter_database_barrier, AlterDatabaseBarrierRequest, AlterDatabaseBarrierResponse }
+            ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

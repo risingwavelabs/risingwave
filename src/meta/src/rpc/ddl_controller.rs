@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
-use risingwave_common::catalog::DatabaseParam;
+use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -166,7 +166,7 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
-    AlterDatabaseBarrier(DatabaseId, DatabaseParam),
+    AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
 }
 
 impl DdlCommand {
@@ -193,7 +193,7 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
-            | DdlCommand::AlterDatabaseBarrier(_, _) => true,
+            | DdlCommand::AlterDatabaseParam(_, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -386,8 +386,8 @@ impl DdlController {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
-                DdlCommand::AlterDatabaseBarrier(database_id, param) => {
-                    ctrl.alter_database_barrier(database_id, param).await
+                DdlCommand::AlterDatabaseParam(database_id, param) => {
+                    ctrl.alter_database_param(database_id, param).await
                 }
             }
         }
@@ -545,14 +545,14 @@ impl DdlController {
         .await
     }
 
-    async fn alter_database_barrier(
+    async fn alter_database_param(
         &self,
         database_id: DatabaseId,
-        param: DatabaseParam,
+        param: AlterDatabaseParam,
     ) -> MetaResult<NotificationVersion> {
         self.metadata_manager
             .catalog_controller
-            .alter_database_barrier(database_id, param)
+            .alter_database_param(database_id, param)
             .await
     }
 

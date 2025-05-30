@@ -3585,6 +3585,19 @@ impl fmt::Display for CreateFunctionUsing {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ConfigParam {
+    pub param: Ident,
+    pub value: SetVariableValue,
+}
+
+impl fmt::Display for ConfigParam {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SET {} = {}", self.param, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
     Single(SetVariableValueSingle),
     List(Vec<SetVariableValueSingle>),
