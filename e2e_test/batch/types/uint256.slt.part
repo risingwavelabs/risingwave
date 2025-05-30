@@ -334,7 +334,7 @@ statement ok
 create table t_uint256_order (v rw_uint256);
 
 statement ok
-insert into t_uint256_order values 
+insert into t_uint256_order values
   (0::rw_uint256),
   (1::rw_uint256),
   (100::rw_uint256),
@@ -353,7 +353,7 @@ select v from t_uint256_order order by v;
 57896044618658097711785492504343953926634992332820282019728792003956564819968
 115792089237316195423570985008687907853269984665640564039457584007913129639935
 
-# Test descending order  
+# Test descending order
 query I
 select v from t_uint256_order order by v desc;
 ----

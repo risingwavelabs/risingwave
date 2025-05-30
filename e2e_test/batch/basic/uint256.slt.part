@@ -13,7 +13,7 @@ CREATE TABLE t_uint256 (id INT, value rw_uint256);
 
 # Insert some uint256 values
 statement ok
-INSERT INTO t_uint256 VALUES 
+INSERT INTO t_uint256 VALUES
   (1, '0'::rw_uint256),
   (2, '1'::rw_uint256),
   (3, '100'::rw_uint256),
@@ -92,8 +92,8 @@ SELECT COUNT(*) FROM t_uint256 WHERE value <= '100'::rw_uint256;
 
 # Test materialized view with uint256
 statement ok
-CREATE MATERIALIZED VIEW mv_uint256 AS 
-SELECT 
+CREATE MATERIALIZED VIEW mv_uint256 AS
+SELECT
   COUNT(*) as cnt,
   SUM(value) as sum_val,
   MIN(value) as min_val,
@@ -115,12 +115,12 @@ CREATE TABLE t_connector_uint256 (
 
 # Test string parsing that would come from JSON connectors
 statement ok
-INSERT INTO t_connector_uint256 VALUES 
+INSERT INTO t_connector_uint256 VALUES
     (1, cast('123456789012345678901234567890' as rw_uint256), cast('987654321098765432109876543210' as rw_uint256));
 
 # Test maximum value parsing
 statement ok
-INSERT INTO t_connector_uint256 VALUES 
+INSERT INTO t_connector_uint256 VALUES
     (2, cast('115792089237316195423570985008687907853269984665640564039457584007913129639935' as rw_uint256), cast('115792089237316195423570985008687907853269984665640564039457584007913129639935' as rw_uint256));
 
 query III

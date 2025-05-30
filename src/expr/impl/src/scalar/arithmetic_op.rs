@@ -199,7 +199,7 @@ where
 }
 
 #[function("divide(uint256, int2) -> uint256")]
-#[function("divide(uint256, int4) -> uint256")]  
+#[function("divide(uint256, int4) -> uint256")]
 #[function("divide(uint256, int8) -> uint256")]
 pub fn uint256_div_int<L, T>(l: L, r: T) -> Result<UInt256>
 where

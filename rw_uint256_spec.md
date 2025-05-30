@@ -262,7 +262,7 @@ CREATE TABLE token_balances (
 INSERT INTO blockchain_data VALUES (1, 1000000000000000000);
 
 -- String parsing (recommended for large values)
-INSERT INTO token_balances VALUES 
+INSERT INTO token_balances VALUES
     ('115792089237316195423570985008687907853269984665640564039457584007913129639935'::rw_uint256,
      '0x742d35Cc6634C0532925a3b844Bc9e7595f6978e',
      '1000000000000000000000'::rw_uint256);
@@ -275,19 +275,19 @@ INSERT INTO blockchain_data VALUES (2, 12345::rw_uint256);
 
 ```sql
 -- Basic arithmetic
-SELECT 
+SELECT
     total_supply + 1000::rw_uint256 as new_supply,
     total_supply * 2::rw_uint256 as doubled,
     total_supply / 10::rw_uint256 as tenth
 FROM blockchain_data;
 
 -- Comparisons
-SELECT * FROM token_balances 
+SELECT * FROM token_balances
 WHERE balance > '1000000000000000000'::rw_uint256
 ORDER BY balance DESC;
 
 -- Aggregations
-SELECT 
+SELECT
     COUNT(*) as token_count,
     SUM(balance) as total_balance,
     AVG(balance) as avg_balance,
@@ -300,13 +300,13 @@ FROM token_balances;
 
 ```sql
 -- Safe casts to uint256
-SELECT 
+SELECT
     123::BIGINT::rw_uint256,              -- From signed integers
     '999'::rw_uint256,                     -- From string
     1.0::DECIMAL::rw_uint256;              -- From decimal (truncates)
 
 -- Casts from uint256
-SELECT 
+SELECT
     balance::DECIMAL as decimal_balance,   -- To decimal
     balance::rw_int256 as signed_balance,  -- To int256 (fails if > int256::MAX)
     balance::VARCHAR as string_balance     -- To string
@@ -339,7 +339,7 @@ WITH (
 );
 
 CREATE MATERIALIZED VIEW ethereum_balances AS
-SELECT 
+SELECT
     id,
     wei_amount::rw_uint256 as balance_uint256
 FROM pg_ethereum_source;
@@ -359,7 +359,7 @@ CREATE SOURCE json_events (
 ) FORMAT PLAIN ENCODE JSON;
 
 CREATE MATERIALIZED VIEW parsed_events AS
-SELECT 
+SELECT
     event_id,
     token_amount::rw_uint256 as amount
 FROM json_events;
@@ -395,7 +395,7 @@ WITH (
 
 ```sql
 CREATE SINK pg_aggregates AS
-SELECT 
+SELECT
     DATE_TRUNC('hour', created_at) as hour,
     SUM(amount)::VARCHAR as total_amount  -- Convert to string for PostgreSQL NUMERIC
 FROM transactions
@@ -413,7 +413,7 @@ WITH (
 
 ```sql
 CREATE SINK bigquery_balances AS
-SELECT 
+SELECT
     wallet_address,
     balance  -- uint256 automatically mapped to BIGNUMERIC
 FROM current_balances
@@ -430,7 +430,7 @@ WITH (
 
 ```sql
 CREATE SINK clickhouse_events AS
-SELECT 
+SELECT
     event_time,
     token_id::VARCHAR as token_id_str,  -- ClickHouse receives as String
     amount::VARCHAR as amount_str
@@ -456,7 +456,7 @@ CREATE FUNCTION wei_to_ether(wei rw_uint256) RETURNS DECIMAL AS $$
 $$ LANGUAGE SQL IMMUTABLE;
 
 -- Example usage
-SELECT 
+SELECT
     wallet_address,
     balance as wei_balance,
     wei_to_ether(balance) as ether_balance
@@ -468,9 +468,9 @@ FROM wallets;
 ```sql
 -- Safe addition with overflow check
 CREATE MATERIALIZED VIEW safe_totals AS
-SELECT 
+SELECT
     category,
-    CASE 
+    CASE
         WHEN SUM(amount) IS NULL THEN 0::rw_uint256
         ELSE SUM(amount)
     END as total
@@ -487,7 +487,7 @@ SELECT '115792089237316195423570985008687907853269984665640564039457584007913129
 ```sql
 -- Pattern for systems that don't support uint256
 CREATE MATERIALIZED VIEW export_view AS
-SELECT 
+SELECT
     id,
     -- Split uint256 into high and low 128-bit parts
     (value / '340282366920938463463374607431768211456'::rw_uint256)::VARCHAR as value_high,
