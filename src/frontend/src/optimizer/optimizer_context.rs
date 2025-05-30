@@ -222,7 +222,7 @@ impl OptimizerContext {
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         let string = str.into();
-        tracing::warn!(target: "explain_trace", "\n{}", string);
+        tracing::info!(target: "explain_trace", "\n{}", string);
         optimizer_trace.push(string);
         optimizer_trace.push("\n".to_owned());
     }

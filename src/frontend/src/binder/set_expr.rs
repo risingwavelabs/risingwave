@@ -104,13 +104,25 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.is_correlated(depth),
-            BoundSetExpr::Values(v) => v.is_correlated(depth),
-            BoundSetExpr::Query(q) => q.is_correlated(depth),
+            BoundSetExpr::Select(s) => s.is_correlated_by_depth(depth),
+            BoundSetExpr::Values(v) => v.is_correlated_by_depth(depth),
+            BoundSetExpr::Query(q) => q.is_correlated_by_depth(depth),
             BoundSetExpr::SetOperation { left, right, .. } => {
-                left.is_correlated(depth) || right.is_correlated(depth)
+                left.is_correlated_by_depth(depth) || right.is_correlated_by_depth(depth)
+            }
+        }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        match self {
+            BoundSetExpr::Select(s) => s.is_correlated_by_correlated_id(correlated_id),
+            BoundSetExpr::Values(v) => v.is_correlated_by_correlated_id(correlated_id),
+            BoundSetExpr::Query(q) => q.is_correlated_by_correlated_id(correlated_id),
+            BoundSetExpr::SetOperation { left, right, .. } => {
+                left.is_correlated_by_correlated_id(correlated_id)
+                    || right.is_correlated_by_correlated_id(correlated_id)
             }
         }
     }
