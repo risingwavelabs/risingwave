@@ -340,7 +340,10 @@ pub enum ExternalTableImpl {
 }
 
 impl ExternalTableImpl {
-    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+    pub async fn connect(
+        config: ExternalTableConfig,
+        defined_column_descs: Option<Vec<ColumnDesc>>,
+    ) -> ConnectorResult<Self> {
         let cdc_source_type = CdcSourceType::from(config.connector.as_str());
         match cdc_source_type {
             CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
@@ -362,7 +365,7 @@ impl ExternalTableImpl {
                 .await?,
             )),
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
-                SqlServerExternalTable::connect(config).await?,
+                SqlServerExternalTable::connect(config, defined_column_descs).await?,
             )),
             _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
         }
