@@ -128,7 +128,7 @@ pub struct FrontendOpts {
         long,
         alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
-        default_value = "127.0.0.1:6786"
+        default_value = "0.0.0.0:6786"
     )]
     pub frontend_rpc_listener_addr: String,
 
