@@ -80,7 +80,7 @@ CREATE TABLE test_numeric256 (
 
 system ok
 PGDATABASE=source_test psql -c "
-INSERT INTO test_numeric256 VALUES 
+INSERT INTO test_numeric256 VALUES
     (1, 0, 0, 'zeros'),
     (2, 123456789012345678901234567890, 123456789012345678901234567890, 'normal'),
     (3, -123456789012345678901234567890, NULL, 'negative int256'),
@@ -88,7 +88,7 @@ INSERT INTO test_numeric256 VALUES
 "
 
 query ITTT
-select id, int256_val::rw_int256, uint256_val::rw_uint256, description 
+select id, int256_val::rw_int256, uint256_val::rw_uint256, description
 from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '$PGPASSWORD', 'source_test', 'select * from test_numeric256 order by id;');
 ----
 1 0 0 zeros
