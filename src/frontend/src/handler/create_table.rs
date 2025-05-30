@@ -1432,7 +1432,7 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, hummock_table, graph, job_type)
+                .create_table(source, hummock_table, graph, job_type, if_not_exists)
                 .await?;
         }
         Engine::Iceberg => {
@@ -1444,6 +1444,7 @@ pub async fn handle_create_table(
                 graph,
                 table_name,
                 job_type,
+                if_not_exists,
             )
             .await?;
         }
@@ -1469,6 +1470,7 @@ pub async fn create_iceberg_engine_table(
     graph: StreamFragmentGraph,
     table_name: ObjectName,
     job_type: PbTableJobType,
+    if_not_exists: bool,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
@@ -1712,6 +1714,56 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
 
+    if let Some(enable_compaction) = handler_args.with_options.get("enable_compaction") {
+        if enable_compaction.eq_ignore_ascii_case("true") {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+            sink_with.insert("enable_compaction".to_owned(), "true".to_owned());
+        } else if enable_compaction.eq_ignore_ascii_case("false") {
+            sink_with.insert("enable_compaction".to_owned(), "false".to_owned());
+        } else {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "enable_compaction must be true or false: {}",
+                enable_compaction
+            ))
+            .into());
+        }
+        // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("enable_compaction"));
+    } else {
+        sink_with.insert(
+            "enable_compaction".to_owned(),
+            Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
+
+    if let Some(compaction_interval_sec) = handler_args.with_options.get("compaction_interval_sec")
+    {
+        let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "compaction_interval_sec must be a positive integer: {}",
+                commit_checkpoint_interval
+            ))
+        })?;
+        if compaction_interval_sec == 0 {
+            bail!("compaction_interval_sec must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "compaction_interval_sec".to_owned(),
+            compaction_interval_sec.to_string(),
+        );
+        // remove compaction_interval_sec from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("compaction_interval_sec"));
+    }
+
     let partition_by = handler_args
         .with_options
         .get("partition_by")
@@ -1783,7 +1835,7 @@ pub async fn create_iceberg_engine_table(
     // TODO(iceberg): make iceberg engine table creation ddl atomic
     let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, job_type)
+        .create_table(source, table, graph, job_type, if_not_exists)
         .await?;
     let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
     if res.is_err() {

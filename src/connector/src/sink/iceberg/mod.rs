@@ -95,7 +95,6 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
-pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -242,6 +241,11 @@ impl IcebergConfig {
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
+    }
+
+    pub fn compaction_interval_sec(&self) -> u64 {
+        // default to 1 hour
+        self.compaction_interval_sec.unwrap_or(3600)
     }
 }
 
@@ -492,9 +496,10 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-
-        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
-            bail!("`compaction_interval` must be set when `enable_compaction` is true");
+        if self.config.enable_compaction {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -508,11 +513,11 @@ impl Sink for IcebergSink {
             if iceberg_config.enable_compaction {
                 if compaction_interval == 0 {
                     bail!(
-                        "`compaction_interval` must be greater than 0 when `enable_compaction` is true"
+                        "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
                     );
                 }
             } else {
-                bail!("`compaction_interval` can only be set when `enable_compaction` is true");
+                bail!("`compaction_interval_sec` can only be set when `enable_compaction` is true");
             }
         }
 
@@ -1834,7 +1839,7 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
-                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
+                    compaction_interval: self.config.compaction_interval_sec(),
                 })
                 .is_err()
         {
@@ -2041,7 +2046,9 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::{DEFAULT_ICEBERG_COMPACTION_INTERVAL, IcebergConfig};
+    use crate::sink::iceberg::IcebergConfig;
+
+    pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
     #[test]
     fn test_compatible_arrow_schema() {

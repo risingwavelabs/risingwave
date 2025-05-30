@@ -87,6 +87,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_table(
@@ -95,6 +96,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -118,12 +120,14 @@ pub trait CatalogWriter: Send + Sync {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_source(
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_sink(
@@ -132,6 +136,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         affected_table_change: Option<PbReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -288,11 +293,18 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies, specific_resource_group)
+            .create_materialized_view(
+                table,
+                graph,
+                dependencies,
+                specific_resource_group,
+                if_not_exists,
+            )
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -310,8 +322,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<()> {
-        let version = self.meta_client.create_index(index, table, graph).await?;
+        let version = self
+            .meta_client
+            .create_index(index, table, graph, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -321,10 +337,11 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_table(source, table, graph, job_type)
+            .create_table(source, table, graph, job_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -375,8 +392,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<()> {
-        let version = self.meta_client.create_source(source, graph).await?;
+        let version = self
+            .meta_client
+            .create_source(source, graph, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -386,10 +407,17 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, affected_table_change, dependencies)
+            .create_sink(
+                sink,
+                graph,
+                affected_table_change,
+                dependencies,
+                if_not_exists,
+            )
             .await?;
         self.wait_version(version).await
     }

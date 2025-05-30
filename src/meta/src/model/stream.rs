@@ -39,8 +39,8 @@ use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext,
-    StreamNode,
+    DispatchStrategy, Dispatcher, FragmentTypeFlag, PbDispatchOutputMapping, PbDispatcher,
+    PbStreamActor, PbStreamContext, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -131,7 +131,7 @@ pub struct DownstreamFragmentRelation {
     pub downstream_fragment_id: FragmentId,
     pub dispatcher_type: DispatcherType,
     pub dist_key_indices: Vec<u32>,
-    pub output_indices: Vec<u32>,
+    pub output_mapping: PbDispatchOutputMapping,
 }
 
 impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
@@ -140,7 +140,7 @@ impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
             downstream_fragment_id: fragment_id,
             dispatcher_type: dispatch.get_type().unwrap().into(),
             dist_key_indices: dispatch.dist_key_indices,
-            output_indices: dispatch.output_indices,
+            output_mapping: dispatch.output_mapping.unwrap(),
         }
     }
 }
