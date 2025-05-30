@@ -73,7 +73,7 @@ impl<S: StateStore> Execute for MaterializedExprsExecutor<S> {
 
 struct StateTableWrapper<S: StateStore> {
     inner: StateTable<S>,
-    cache: ManagedLruCache<OwnedRow, Option<OwnedRow>>,
+    cache: ManagedLruCache<OwnedRow, OwnedRow>,
 }
 
 impl<S: StateStore> StateTableWrapper<S> {
@@ -103,23 +103,16 @@ impl<S: StateStore> StateTableWrapper<S> {
 
         // Store the record and update the cache
         self.inner.insert(&owned_row);
-        self.cache.put(pk, Some(owned_row));
+        self.cache.put(pk, owned_row);
     }
 
     async fn remove_by_pk(&mut self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         // Try to get from cache first
         let pk_owned = pk.into_owned_row();
-        if let Some(row) = self.cache.get(&pk_owned) {
+        if let Some(row) = self.cache.remove(&pk_owned) {
             // Cache hit, delete from cache and state table
-            if let Some(row) = row {
-                let cloned_row = row.clone();
-                self.inner.delete(row);
-                // Mark as deleted in cache
-                self.cache.put(pk_owned, None);
-                Ok(Some(cloned_row))
-            } else {
-                Ok(None)
-            }
+            self.inner.delete(&row);
+            Ok(Some(row))
         } else {
             // Cache miss, get from state table
             let row = self.inner.get_row(pk_owned).await?;
