@@ -320,7 +320,7 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
         (". e             a ", Boolean),     // 0
         (" .iiiiiie       a ", Int16),       // 1
         ("ea.iiiiie       a ", Int32),       // 2
-        (" aa.iiiie      ae ", Int64),       // 3
+        (" aa.iiiie       ae", Int64),       // 3
         (" aaa.ii         a ", Decimal),     // 4
         (" aaaa.i         a ", Float32),     // 5
         (" aaaaa.         a ", Float64),     // 6
