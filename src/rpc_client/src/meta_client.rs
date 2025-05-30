@@ -36,7 +36,6 @@ use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -654,13 +653,11 @@ impl MetaClient {
     pub async fn replace_job(
         &self,
         graph: StreamFragmentGraph,
-        table_col_index_mapping: ColIndexMapping,
         replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
         let request = ReplaceJobPlanRequest {
             plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
-                table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
                 replace_job: Some(replace_job),
             }),
         };

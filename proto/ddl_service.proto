@@ -378,9 +378,6 @@ message DropIndexResponse {
 message ReplaceJobPlan {
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 1;
-  // The mapping from the old columns to the new columns of the table.
-  // If no column modifications occur (such as for sinking into table), this will be None.
-  catalog.ColIndexMapping table_col_index_mapping = 2;
 
   message ReplaceTable {
     // The new table catalog, with the correct (old) table ID and a new version.
