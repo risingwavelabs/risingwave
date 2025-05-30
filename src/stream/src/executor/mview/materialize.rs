@@ -570,7 +570,7 @@ struct MaterializeCache<SD> {
     _serde: PhantomData<SD>,
 }
 
-type CacheValue = Option<CompactedRow>;
+type CacheValue = CompactedRow;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     fn new(
@@ -619,10 +619,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         for (op, key, row) in row_ops {
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let Some(old_row) = self.get_expected(&key) else {
+                    let Some(old_row) = self.lru_cache.get(&key) else {
                         // not exists before, meaning no conflict, simply insert
                         change_buffer.insert(key.clone(), row.clone());
-                        self.lru_cache.put(key, Some(CompactedRow { row }));
+                        self.lru_cache.put(key, CompactedRow { row });
                         continue;
                     };
 
@@ -645,7 +645,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             };
                             if need_overwrite {
                                 change_buffer.update(key.clone(), old_row.row.clone(), row.clone());
-                                self.lru_cache.put(key.clone(), Some(CompactedRow { row }));
+                                self.lru_cache.put(key.clone(), CompactedRow { row });
                             };
                         }
                         ConflictBehavior::IgnoreConflict => {
@@ -686,9 +686,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 );
                                 self.lru_cache.put(
                                     key.clone(),
-                                    Some(CompactedRow {
+                                    CompactedRow {
                                         row: updated_row_bytes,
-                                    }),
+                                    },
                                 );
                             }
                         }
@@ -699,10 +699,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 Op::Delete | Op::UpdateDelete => {
                     match conflict_behavior {
                         checked_conflict_behaviors!() => {
-                            if let Some(old_row) = self.get_expected(&key) {
+                            if let Some(old_row) = self.lru_cache.get(&key) {
                                 change_buffer.delete(key.clone(), old_row.row.clone());
-                                // put a None into the cache to represent deletion
-                                self.lru_cache.put(key, None);
+                                self.lru_cache.remove(&key);
                             } else {
                                 // delete a non-existent value
                                 // this is allowed in the case of mview conflict, so ignore
@@ -741,23 +740,18 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, row) = result?;
-            // for keys that are not in the table, `value` is None
+            // for keys that are not in the table, don't put them in cache
             match conflict_behavior {
-                checked_conflict_behaviors!() => self.lru_cache.put(key, row),
+                checked_conflict_behaviors!() => {
+                    if let Some(row) = row {
+                        self.lru_cache.put(key, row);
+                    }
+                }
                 _ => unreachable!(),
             };
         }
 
         Ok(())
-    }
-
-    fn get_expected(&mut self, key: &[u8]) -> &CacheValue {
-        self.lru_cache.get(key).unwrap_or_else(|| {
-            panic!(
-                "the key {:?} has not been fetched in the materialize executor's cache ",
-                key
-            )
-        })
     }
 
     fn evict(&mut self) {
