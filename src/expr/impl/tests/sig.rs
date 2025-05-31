@@ -68,7 +68,7 @@ fn test_func_sig_map() {
             "cast(integer) -> rw_int256/rw_uint256/smallint/numeric/double precision/real/bigint/boolean/character varying",
             "cast(interval) -> time without time zone/character varying",
             "cast(jsonb) -> boolean/double precision/real/numeric/bigint/integer/smallint/character varying",
-            "cast(numeric) -> double precision/real/bigint/integer/smallint/character varying",
+            "cast(numeric) -> rw_uint256/rw_int256/double precision/real/bigint/integer/smallint/character varying",
             "cast(real) -> numeric/bigint/integer/smallint/double precision/character varying",
             "cast(rw_int256) -> double precision/character varying",
             "cast(rw_uint256) -> double precision/character varying",
