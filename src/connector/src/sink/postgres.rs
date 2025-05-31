@@ -822,14 +822,14 @@ mod tests {
     #[test]
     fn test_create_upsert_sql() {
         let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "a".to_owned(),
-            },
-            Field {
-                data_type: DataType::Int32,
-                name: "b".to_owned(),
-            },
+            Field::new(
+                "a".to_owned(),
+                DataType::Int32,
+            )
+            Field::new(
+                "b".to_owned(),
+                DataType::Int32,
+            ),
         ]);
         let schema_name = "test_schema";
         let table_name = "test_table";
