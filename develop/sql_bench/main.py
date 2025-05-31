@@ -27,6 +27,10 @@ prepare_sql: |
 conclude_sql: |
   DELETE FROM example;
 
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP TABLE IF EXISTS example;
+
 # SQL to benchmark (baseline version)
 baseline_sql: |
   SELECT * FROM example WHERE id > 0 ORDER BY id;
@@ -39,11 +43,20 @@ benchmark_sql: |
 runs: 3
 '''
 
-def create_benchmark_script(yaml_path: Path) -> Path:
+def create_benchmark_script(yaml_path: Path, dump_output: bool = False) -> Path:
     """Create a shell script from the YAML configuration."""
     with open(yaml_path) as f:
         config = yaml.safe_load(f)
 
+    # Get values from YAML, using empty strings as defaults
+    setup_sql = config.get('setup_sql', '')
+    prepare_sql = config.get('prepare_sql', '')
+    benchmark_sql = config.get('benchmark_sql', '')
+    conclude_sql = config.get('conclude_sql', '')
+    cleanup_sql = config.get('cleanup_sql', '')
+    runs = config.get('runs', 1)
+
+    # Base script content with hyperfine command
     script_content = dedent('''
         #!/usr/bin/env bash
 
@@ -68,44 +81,39 @@ def create_benchmark_script(yaml_path: Path) -> Path:
           run_psql -c "{conclude_sql}"
         }}
 
-        benchmark_baseline() {{
-          run_psql -c "{baseline_sql}"
+        cleanup() {{
+          run_psql -c "{cleanup_sql}"
         }}
 
-        benchmark_optimized() {{
+        benchmark() {{
           run_psql -c "{benchmark_sql}"
         }}
 
         export -f setup
         export -f prepare
         export -f conclude
-        export -f benchmark_baseline
-        export -f benchmark_optimized
+        export -f cleanup
+        export -f benchmark
 
         # Run setup once
         setup
 
-        # Run both benchmarks with hyperfine
-        hyperfine --shell=bash --runs {runs} --show-output \\
-          --prepare 'prepare' --conclude 'conclude' benchmark_baseline \\
-          --prepare 'prepare' --conclude 'conclude' benchmark_optimized
-    ''')
+        # Trap to ensure cleanup runs on script exit
+        trap cleanup EXIT
 
-    # Get values from YAML, using empty strings as defaults
-    setup_sql = config.get('setup_sql', '')
-    prepare_sql = config.get('prepare_sql', '')
-    baseline_sql = config.get('baseline_sql', '')
-    benchmark_sql = config.get('benchmark_sql', '')
-    conclude_sql = config.get('conclude_sql', '')
-    runs = config.get('runs', 1)
+        # Run benchmark with hyperfine
+        hyperfine --shell=bash --runs {runs}{show_output} \\
+          --prepare 'prepare' --conclude 'conclude' benchmark
+    ''')
 
     script_content = script_content.format(
         setup_sql=setup_sql,
         prepare_sql=prepare_sql,
-        baseline_sql=baseline_sql,
         benchmark_sql=benchmark_sql,
         conclude_sql=conclude_sql,
-        runs=runs
+        cleanup_sql=cleanup_sql,
+        runs=runs,
+        show_output=' --show-output' if dump_output else ''
     )
 
     script_path = yaml_path.with_suffix('.sh')
@@ -115,7 +123,7 @@ def create_benchmark_script(yaml_path: Path) -> Path:
 
 def init_benchmark(bench_name: str):
     """Initialize a new benchmark with the YAML template."""
-    benchmark_dir = Path("benchmarks")
+    benchmark_dir = Path("develop/sql_bench/benchmarks")
     benchmark_dir.mkdir(exist_ok=True)
 
     benchmark_file = benchmark_dir / f"{bench_name}.yaml"
@@ -127,20 +135,13 @@ def init_benchmark(bench_name: str):
     print(f"Created benchmark configuration: {benchmark_file}")
 
 def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = None, dump_output: bool = False):
-    """Run the specified benchmark."""
-    yaml_file = Path("develop/sql_bench/benchmarks") / f"{bench_name}.yaml"
+    """Run a benchmark."""
+    benchmark_dir = Path("develop/sql_bench/benchmarks")
+    yaml_file = benchmark_dir / f"{bench_name}.yaml"
+    
     if not yaml_file.exists():
         print(f"Error: Benchmark configuration '{bench_name}' not found at {yaml_file}")
         sys.exit(1)
-
-    # Create shell script from YAML
-    script_file = create_benchmark_script(yaml_file)
-
-    # Debug: Print script content
-    if dump_output:
-        print("Generated script content:")
-        print(script_file.read_text())
-        print()
 
     # Prepare environment
     env = os.environ.copy()
@@ -157,41 +158,45 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
                 env=env
             )
 
-        # Run benchmark
-        print(f"\nRunning benchmark: {bench_name}")
-        print("=" * 50)
+        # Create and run the benchmark script
+        script_file = create_benchmark_script(yaml_file, dump_output)
 
-        result = subprocess.run(
-            str(script_file),
-            shell=True,
-            check=True,
-            env=env,
-            text=True,
-            capture_output=True
-        )
+        try:
+            print(f"\nRunning benchmark: {bench_name}")
+            print("=" * 50)
 
-        # Always print the benchmark results
-        print(result.stdout)
+            result = subprocess.run(
+                str(script_file),
+                shell=True,
+                check=True,
+                env=env,
+                text=True,
+                capture_output=True
+            )
 
-        # Only print errors if dump_output is True
-        if dump_output and result.stderr:
+            # Always print the benchmark results
+            print(result.stdout)
+
+            # Only print errors if dump_output is True
+            if dump_output and result.stderr:
+                print("Errors:", file=sys.stderr)
+                print(result.stderr, file=sys.stderr)
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error: Benchmark '{bench_name}' failed")
+            print("Output:", file=sys.stderr)
+            print(e.stdout, file=sys.stderr)
             print("Errors:", file=sys.stderr)
-            print(result.stderr, file=sys.stderr)
+            print(e.stderr, file=sys.stderr)
+            sys.exit(1)
+        finally:
+            # Clean up the generated script
+            script_file.unlink()
 
-    except subprocess.CalledProcessError as e:
-        print(f"Error: Benchmark '{bench_name}' failed")
-        print("Output:", file=sys.stderr)
-        print(e.stdout, file=sys.stderr)
-        print("Errors:", file=sys.stderr)
-        print(e.stderr, file=sys.stderr)
-        sys.exit(1)
     finally:
         if not pg_url:
             # Clean up RisingWave cluster and data
             subprocess.run("risedev k && risedev clean-data", shell=True, check=False)
-
-        # Clean up the generated script
-        script_file.unlink()
 
 def main():
     parser = argparse.ArgumentParser(description="SQL Benchmark Runner")
@@ -209,7 +214,7 @@ def main():
     run_parser.add_argument("-u", "--pg-url",
                            help="PostgreSQL URL to benchmark against (bypasses RisingWave)")
     run_parser.add_argument("-d", "--dump-output", action="store_true",
-                           help="Show detailed output from the benchmark runs")
+                           help="Show detailed output from the benchmark run")
 
     args = parser.parse_args()
 
