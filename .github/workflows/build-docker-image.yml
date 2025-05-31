@@ -1,0 +1,57 @@
+# To test: gh workflow run 'Build Docker Image' --ref kwannoel/workflow-update-branch
+name: Build Docker Image
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 'Generate image tag + build Docker image: v<X.Y.Z>--<label>--<commit_sha>--<branch>'
+        required: true
+        type: string
+        default: 'unlabeled'
+
+jobs:
+  build_image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Generate image tag'
+        id: get_release_branch
+        run: |
+          # Get current branch name
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          echo "BRANCH_NAME=$BRANCH_NAME"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+          echo "Replace / with - in branch name, for docker manifest requirement"
+          NO_SLASH_BRANCH_NAME=${BRANCH_NAME//\//-}
+          echo "NO_SLASH_BRANCH_NAME=$NO_SLASH_BRANCH_NAME"
+          echo "NO_SLASH_BRANCH_NAME=$NO_SLASH_BRANCH_NAME" >> $GITHUB_ENV
+
+          # Get version from Cargo.toml, e.g. v2.3.0-alpha
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          echo "VERSION=$VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          # Get the commit SHA
+          COMMIT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "COMMIT_SHA=$COMMIT_SHA"
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
+
+          # Get the label from the input
+          LABEL=${{ github.event.inputs.label }}
+          echo "LABEL=$LABEL"
+          echo "LABEL=$LABEL" >> $GITHUB_ENV
+
+          # Build the image tag
+          IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$NO_SLASH_BRANCH_NAME"
+          echo "IMAGE_TAG=$IMAGE_TAG"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+      - name: 'Trigger Docker build Workflow via Buildkite'
+        uses: buildkite/trigger-pipeline-action@v2.0.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: 'risingwavelabs/docker'
+          branch: ${{ env.BRANCH_NAME }}
+          commit: HEAD
+          message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}" }'
