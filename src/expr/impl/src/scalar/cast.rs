@@ -109,6 +109,8 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
 #[function("cast(decimal) -> int8")]
 #[function("cast(decimal) -> float4")]
 #[function("cast(decimal) -> float8")]
+#[function("cast(decimal) -> int256")]
+#[function("cast(decimal) -> uint256")]
 #[function("cast(float4) -> decimal")]
 #[function("cast(float8) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>

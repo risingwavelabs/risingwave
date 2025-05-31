@@ -250,6 +250,55 @@ impl_convert_int!(u16);
 impl_convert_int!(u32);
 impl_convert_int!(u64);
 
+// Manual implementations for Int256/UInt256 since rust_decimal doesn't support them directly
+use crate::types::{Int256, UInt256};
+use ethnum::{i256, u256};
+
+impl TryFrom<Decimal> for Int256 {
+    type Error = Error;
+
+    fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+        match d.round_dp_ties_away(0) {
+            Decimal::Normalized(d) => {
+                // Try to convert to i128 first
+                let i128_value: i128 = d.try_into()
+                    .map_err(|_| Error::ConversionTo("Int256".into()))?;
+                // Convert i128 to i256 (this will sign-extend)
+                Ok(Int256::from(i256::new(i128_value)))
+            }
+            _ => Err(Error::ConversionTo("Int256".into())),
+        }
+    }
+}
+
+impl TryFrom<Decimal> for UInt256 {
+    type Error = Error;
+
+    fn try_from(d: Decimal) -> Result<Self, Self::Error> {
+        match d.round_dp_ties_away(0) {
+            Decimal::Normalized(d) => {
+                // Check if the decimal is negative
+                if d.is_sign_negative() && !d.is_zero() {
+                    return Err(Error::ConversionTo("UInt256".into()));
+                }
+                
+                // Try to convert to i128 first
+                let i128_value: i128 = d.try_into()
+                    .map_err(|_| Error::ConversionTo("UInt256".into()))?;
+                
+                // For UInt256, we need to ensure the value is non-negative
+                if i128_value < 0 {
+                    return Err(Error::ConversionTo("UInt256".into()));
+                }
+                
+                // Convert to u256
+                Ok(UInt256::from(u256::new(i128_value as u128)))
+            }
+            _ => Err(Error::ConversionTo("UInt256".into())),
+        }
+    }
+}
+
 checked_proxy!(CheckedRem, checked_rem, %);
 checked_proxy!(CheckedSub, checked_sub, -);
 checked_proxy!(CheckedAdd, checked_add, +);
