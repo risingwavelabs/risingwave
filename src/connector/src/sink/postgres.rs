@@ -692,18 +692,9 @@ fn create_delete_sql(
     };
     let parameters: String = (0..number_of_rows)
         .map(|i| {
-            let row_parameters: String = pk_indices
-                .iter()
-                .enumerate()
-                .map(|(j, pk_index)| {
-                    format!(
-                        "{} = ${}",
-                        schema.fields()[*pk_index].name,
-                        i * number_of_pk + j + 1
-                    )
-                })
-                .collect_vec()
-                .join(" AND ");
+            let row_parameters: String = (0..pk_indices.len())
+                .map(|j| format!("${}", i * number_of_pk + j + 1))
+                .join(", ");
             format!("({row_parameters})")
         })
         .collect_vec()
