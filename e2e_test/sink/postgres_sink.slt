@@ -591,7 +591,7 @@ DROP TABLE rw_types_subset_table;
 
 # Create a Postgres table for numeric256 types
 system ok
-PGPASSWORD=$PGPASSWORD PGOPTIONS="-c idle_in_transaction_session_timeout=0" psql -h $PGHOST -p $PGPORT -d $PGDATABASE -U $PGUSER -c "
+PGDATABASE=sink_test psql -c "
 CREATE TABLE pg_numeric256_types (
     id BIGINT PRIMARY KEY,
     int256_col NUMERIC(78, 0),
@@ -614,7 +614,7 @@ CREATE SINK numeric256_sink FROM rw_numeric256_types WITH (
     port='$PGPORT',
     user='$PGUSER',
     password='$PGPASSWORD',
-    database='$PGDATABASE',
+    database='sink_test',
     table='pg_numeric256_types',
     type='upsert',
     primary_key='id'
@@ -631,14 +631,14 @@ INSERT INTO rw_numeric256_types VALUES
 statement ok
 FLUSH;
 
-# Verify in Postgres
-query IT
-PGPASSWORD=$PGPASSWORD psql -h $PGHOST -p $PGPORT -d $PGDATABASE -U $PGUSER --tuples-only -A -c "SELECT id, description FROM pg_numeric256_types ORDER BY id" | tr '|' ' '
+# Verify in Postgres - check that data was successfully written
+system ok
+PGDATABASE=sink_test psql --tuples-only -c "SELECT id, description FROM pg_numeric256_types ORDER BY id"
 ----
-1 zeros
-2 normal values
-3 negative int256
-4 max values
+  1 | zeros
+  2 | normal values
+  3 | negative int256
+  4 | max values
 
 statement ok
 DROP SINK numeric256_sink;
@@ -647,7 +647,7 @@ statement ok
 DROP TABLE rw_numeric256_types;
 
 system ok
-PGPASSWORD=$PGPASSWORD psql -h $PGHOST -p $PGPORT -d $PGDATABASE -U $PGUSER -c "DROP TABLE pg_numeric256_types"
+PGDATABASE=sink_test psql -c "DROP TABLE pg_numeric256_types"
 
 ################### Drop DB
 
