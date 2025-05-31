@@ -241,4 +241,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
         self.config.should_generate(feature, self.rng)
     }
+
+    pub(crate) fn enable_generate(&mut self, feature: Feature) -> bool {
+        self.config.enable_generate(feature)
+    }
 }
