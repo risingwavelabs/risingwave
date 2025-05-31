@@ -315,8 +315,8 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     // 6.  timestamp / timestamptz → time             = assign
 
     use DataTypeName::*;
+    //    0123456789ABCDEFGH (this comment indicates the column index, it is on this line to satisfy rustfmt)
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
-        //0123456789ABCDEFGH
         (". e             a ", Boolean),     // 0
         (" .iiiiiie       a ", Int16),       // 1
         ("ea.iiiiie       a ", Int32),       // 2

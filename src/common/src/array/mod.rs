@@ -65,7 +65,9 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 pub use self::error::ArrayError;
-pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder, UInt256Array, UInt256ArrayBuilder};
+pub use crate::array::num256_array::{
+    Int256Array, Int256ArrayBuilder, UInt256Array, UInt256ArrayBuilder,
+};
 use crate::bitmap::Bitmap;
 use crate::types::*;
 use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_variants};

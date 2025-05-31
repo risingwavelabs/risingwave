@@ -17,7 +17,9 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
-use risingwave_common::types::{DataType, Decimal, Int256, UInt256, ListValue, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{
+    DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl, UInt256,
+};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 
@@ -256,7 +258,10 @@ impl ScalarAdapter {
                                 ScalarAdapter::Numeric(numeric).into_scalar(dtype)
                             }
                         }
-                        (Some(numeric), box DataType::Int256 | box DataType::UInt256 | box DataType::Decimal) => {
+                        (
+                            Some(numeric),
+                            box DataType::Int256 | box DataType::UInt256 | box DataType::Decimal,
+                        ) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
@@ -323,7 +328,10 @@ pub fn validate_pg_type_to_rw_type(pg_type: &DataType, rw_type: &DataType) -> bo
         return true;
     }
     match rw_type {
-        DataType::Varchar => matches!(pg_type, DataType::Decimal | DataType::Int256 | DataType::UInt256),
+        DataType::Varchar => matches!(
+            pg_type,
+            DataType::Decimal | DataType::Int256 | DataType::UInt256
+        ),
         DataType::List(box DataType::Varchar) => {
             matches!(
                 pg_type,

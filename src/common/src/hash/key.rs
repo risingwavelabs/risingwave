@@ -35,8 +35,8 @@ use static_assertions::const_assert_eq;
 
 use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
-    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, UInt256, UInt256Ref, JsonbVal, Scalar, ScalarRef,
-    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
+    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
+    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, UInt256, UInt256Ref,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;

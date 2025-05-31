@@ -26,8 +26,8 @@ use rand::{Rng, SeedableRng};
 
 use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
 use crate::types::{
-    DataType, Date, Decimal, Int256, UInt256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
-    Timestamp, Timestamptz,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
+    Timestamp, Timestamptz, UInt256,
 };
 
 pub trait RandValue {

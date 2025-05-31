@@ -509,7 +509,8 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
-            risingwave_common::types::DataType::Int256 | risingwave_common::types::DataType::UInt256 => Err(SinkError::ClickHouse(
+            risingwave_common::types::DataType::Int256
+            | risingwave_common::types::DataType::UInt256 => Err(SinkError::ClickHouse(
                 "clickhouse can not support Int256 or UInt256".to_owned(),
             )),
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
