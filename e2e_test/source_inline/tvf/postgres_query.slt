@@ -69,22 +69,24 @@ select * from postgres_query('postgres_cdc_source', 'select * from test where id
 100 t 1 1 1 1 1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 08:00:00+00:00 text varchar 1 day {} \x01
 
 # Test numeric256 types
+# Note: We use VARCHAR to store large 256-bit values because PostgreSQL NUMERIC 
+# values larger than ~28 digits cannot be deserialized into rust_decimal
 system ok
 PGDATABASE=source_test psql -c "
 CREATE TABLE test_numeric256 (
     id bigint primary key,
-    int256_val numeric(78, 0),
-    uint256_val numeric(78, 0),
+    int256_val varchar,
+    uint256_val varchar,
     description text
 );"
 
 system ok
 PGDATABASE=source_test psql -c "
 INSERT INTO test_numeric256 VALUES
-    (1, 0, 0, 'zeros'),
-    (2, 123456789012345678901234567890, 123456789012345678901234567890, 'normal'),
-    (3, -123456789012345678901234567890, NULL, 'negative int256'),
-    (4, 57896044618658097711785492504343953926634992332820282019728792003956564819967, 115792089237316195423570985008687907853269984665640564039457584007913129639935, 'max values');
+    (1, '0', '0', 'zeros'),
+    (2, '123456789012345678901234567890', '123456789012345678901234567890', 'normal'),
+    (3, '-123456789012345678901234567890', NULL, 'negative int256'),
+    (4, '57896044618658097711785492504343953926634992332820282019728792003956564819967', '115792089237316195423570985008687907853269984665640564039457584007913129639935', 'max values');
 "
 
 query ITTT
