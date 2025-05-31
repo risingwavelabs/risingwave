@@ -206,6 +206,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
         ScalarRefImpl::Int64(v) => buf.put_i64_le(v),
         ScalarRefImpl::Int256(v) => buf.put_slice(&v.to_le_bytes()),
+        ScalarRefImpl::UInt256(v) => buf.put_slice(&v.to_le_bytes()),
         ScalarRefImpl::Serial(v) => buf.put_i64_le(v.into_inner()),
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
@@ -237,6 +238,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Int32(_) => 4,
         ScalarRefImpl::Int64(_) => 8,
         ScalarRefImpl::Int256(_) => 32,
+        ScalarRefImpl::UInt256(_) => 32,
         ScalarRefImpl::Serial(_) => 8,
         ScalarRefImpl::Float32(_) => 4,
         ScalarRefImpl::Float64(_) => 8,
@@ -337,6 +339,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Int256 => ScalarImpl::Int256(deserialize_int256(data)),
+        DataType::UInt256 => ScalarImpl::UInt256(deserialize_uint256(data)),
         DataType::Serial => ScalarImpl::Serial(Serial::from(data.get_i64_le())),
         DataType::Float32 => ScalarImpl::Float32(F32::from(data.get_f32_le())),
         DataType::Float64 => ScalarImpl::Float64(F64::from(data.get_f64_le())),
@@ -403,6 +406,12 @@ fn deserialize_int256(data: &mut impl Buf) -> Int256 {
     let mut bytes = [0; Int256::size()];
     data.copy_to_slice(&mut bytes);
     Int256::from_le_bytes(bytes)
+}
+
+fn deserialize_uint256(data: &mut impl Buf) -> UInt256 {
+    let mut bytes = [0; UInt256::size()];
+    data.copy_to_slice(&mut bytes);
+    UInt256::from_le_bytes(bytes)
 }
 
 fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
