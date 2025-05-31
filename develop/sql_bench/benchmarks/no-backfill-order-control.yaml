@@ -1,0 +1,154 @@
+# Benchmark configuration
+benchmark_name: left-deep-backfill-order-control
+
+# SQL to set up the initial schema and data (run once)
+setup_sql: |
+  SET RW_IMPLICIT_FLUSH=true;
+  CREATE TABLE car_info (
+    id INTEGER,
+    name VARCHAR,
+    PRIMARY KEY (id)
+  );
+
+  CREATE TABLE car_regions (
+    id INTEGER,
+    region VARCHAR,
+    PRIMARY KEY (id)
+  );
+
+  CREATE TABLE car_colors (
+    id INTEGER,
+    color VARCHAR,
+    PRIMARY KEY (id)
+  );
+
+  CREATE TABLE car_types (
+    id INTEGER,
+    type VARCHAR,
+    PRIMARY KEY (id)
+  );
+
+  CREATE TABLE car_sales (
+    id INTEGER,
+    car_id INTEGER,
+    region_id INTEGER,
+    color_id INTEGER,
+    type_id INTEGER,
+    price INTEGER,
+    PRIMARY KEY (id)
+  ) WITH (
+    connector = 'datagen',
+    datagen.rows.per.second = 100000,
+
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '1000000',
+
+    fields.car_id.kind = 'random',
+    fields.car_id.min = '119901',
+    fields.car_id.max = '120000',
+    fields.car_id.seed = '1',
+
+    fields.region_id.kind = 'random',
+    fields.region_id.min = '109901',
+    fields.region_id.max = '110000',
+    fields.region_id.seed = '10',
+
+    fields.color_id.kind = 'random',
+    fields.color_id.min = '149900',
+    fields.color_id.max = '150000',
+    fields.color_id.seed = '15',
+
+    fields.type_id.kind = 'random',
+    fields.type_id.min = '114901',
+    fields.type_id.max = '115000',
+    fields.type_id.seed = '20',
+
+    fields.price.kind = 'random',
+    fields.price.min = '1000',
+    fields.price.max = '100000',
+    fields.price.seed = '25'
+  );
+
+  -- Insert static data for car_info
+  INSERT INTO car_info 
+  SELECT t.id as id, 'car_' || t.id::text
+  FROM generate_series(1, 120000) t(id);
+
+  -- Insert static data for car_regions
+  INSERT INTO car_regions 
+  SELECT t.id as id, 'region_' || t.id::text
+  FROM generate_series(1, 110000) t(id);
+
+  -- Insert static data for car_colors
+  INSERT INTO car_colors 
+  SELECT t.id as id, 'color_' || t.id::text
+  FROM generate_series(1, 150000) t(id);
+
+  -- Insert static data for car_types
+  INSERT INTO car_types
+  SELECT t.id as id, 'type_' || t.id::text
+  FROM generate_series(1, 115000) t(id);
+
+# SQL to prepare the data before each run
+prepare_sql: |
+  -- Wait for car_sales to generate some data
+  SELECT pg_sleep(10);
+
+  -- Create a snapshot of car_sales
+  CREATE TABLE car_sales_snapshot AS SELECT * FROM car_sales;
+  DROP TABLE car_sales;
+  ALTER TABLE car_sales_snapshot RENAME TO car_sales;
+
+# SQL to clean up after each run
+conclude_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS m1;
+
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP TABLE IF EXISTS car_sales;
+  DROP TABLE IF EXISTS car_info;
+  DROP TABLE IF EXISTS car_regions;
+  DROP TABLE IF EXISTS car_colors;
+  DROP TABLE IF EXISTS car_types;
+
+# SQL to benchmark
+benchmark_sql: |
+  CREATE MATERIALIZED VIEW m1
+    AS
+      WITH price_ranges AS (
+        SELECT
+          car_info.name AS name,
+          car_regions.region AS region,
+          car_colors.color AS color,
+          car_types.type AS type,
+          car_sales.price AS price,
+          round(ln(1 + car_sales.price)::numeric, 1) AS price_range
+        FROM car_sales
+          LEFT JOIN car_info ON car_sales.car_id = car_info.id
+          LEFT JOIN car_regions ON car_sales.region_id = car_regions.id
+          LEFT JOIN car_colors ON car_sales.color_id = car_colors.id
+          LEFT JOIN car_types ON car_sales.type_id = car_types.id
+      )
+      SELECT
+        name,
+        region,
+        color,
+        type,
+        price_range,
+        count(*) AS sales_count,
+        sum(price) AS sales_volume,
+        avg(price) AS sales_avg,
+        min(price) AS sales_min,
+        max(price) AS sales_max,
+        approx_percentile(0.01) WITHIN GROUP (ORDER BY price) AS sales_est_bottom_1_percent,
+        approx_percentile(0.1) WITHIN GROUP (ORDER BY price) AS sales_est_bottom_10_percent,
+        approx_percentile(0.5) WITHIN GROUP (ORDER BY price) AS sales_est_median,
+        approx_percentile(0.90) WITHIN GROUP (ORDER BY price) AS sales_est_top_10_percent,
+        approx_percentile(0.99) WITHIN GROUP (ORDER BY price) AS sales_est_top_1_percent
+      FROM
+        price_ranges
+      GROUP BY name, region, color, type, price_range;
+
+# Number of times to run the benchmark
+runs: 3
